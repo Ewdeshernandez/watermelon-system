@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.62"
+__version__ = "0.9.63"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2414,6 +2414,87 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_cmp.clicked.connect(_refresh_comparative); _refresh_comparative()
 
     # =====================================================================
+    # VALIDATION — matriz MAC (auto-MAC y cross-MAC entre métodos)
+    # =====================================================================
+    pg_mac = QtWidgets.QWidget(); mcl = QtWidgets.QVBoxLayout(pg_mac)
+    mrow = QtWidgets.QHBoxLayout()
+    mrow.addWidget(QtWidgets.QLabel("<b>MAC</b> — Modal Assurance Criterion:"))
+    cb_mac = QtWidgets.QComboBox()
+    cb_mac.addItems(["OMA (FDD) auto-MAC", "SSI auto-MAC", "OMA ↔ SSI cross-MAC"])
+    mrow.addWidget(cb_mac)
+    btn_mac = QtWidgets.QPushButton("↻ Compute MAC"); btn_mac.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    mrow.addWidget(btn_mac); mrow.addStretch(1); mcl.addLayout(mrow)
+    p_mac = pg.PlotWidget(); p_mac.setBackground("w"); p_mac.setTitle("MAC matrix", color=NAVY)
+    p_mac.setLabel("bottom", "Mode (Hz)"); p_mac.setLabel("left", "Mode (Hz)")
+    p_mac.getViewBox().invertY(True); p_mac.getViewBox().setAspectLocked(True)
+    mcl.addWidget(p_mac, 1)
+    lbl_mac = QtWidgets.QLabel("Corre OMA capture (y SSI para el cruce). La MAC valida que las "
+                              "FORMAS modales sean consistentes — como lo hace ARTeMIS.")
+    lbl_mac.setWordWrap(True); mcl.addWidget(lbl_mac)
+    tabs.addTab(pg_mac, "Validation (MAC)")
+
+    # LUT tipo MAC: 0 (azul claro) → 1 (rojo)
+    _mac_cmap = pg.ColorMap([0.0, 0.5, 0.8, 1.0],
+                            [(240, 247, 255, 255), (120, 170, 235, 255),
+                             (245, 158, 11, 255), (200, 30, 30, 255)])
+    _mac_lut = _mac_cmap.getLookupTable(0.0, 1.0, 256)
+
+    def _render_mac(M, row_lbl, col_lbl, note):
+        p_mac.clear()
+        M = np.asarray(M, float)
+        if M.size == 0 or M.shape[0] == 0 or M.shape[1] == 0:
+            lbl_mac.setText("No hay modos suficientes para calcular la MAC."); return
+        img = pg.ImageItem(M.T)                        # x = columna, y = fila
+        img.setLookupTable(_mac_lut); img.setLevels([0.0, 1.0])
+        p_mac.addItem(img)
+        nr, nc = M.shape
+        for i in range(nr):
+            for j in range(nc):
+                v = float(M[i, j])
+                col = "#ffffff" if v > 0.55 else "#0f172a"
+                t = pg.TextItem(f"{v:.2f}", color=col, anchor=(0.5, 0.5))
+                t.setPos(j + 0.5, i + 0.5); p_mac.addItem(t)
+        p_mac.getAxis("bottom").setTicks([[(j + 0.5, f"{col_lbl[j]:.1f}") for j in range(nc)]])
+        p_mac.getAxis("left").setTicks([[(i + 0.5, f"{row_lbl[i]:.1f}") for i in range(nr)]])
+        p_mac.setXRange(0, nc, padding=0.02); p_mac.setYRange(0, nr, padding=0.02)
+        lbl_mac.setText(note); lbl_mac.setStyleSheet(f"color:{NAVY};")
+
+    def _refresh_mac():
+        from core.modal.oma_engine import (compute_mac_matrix, compute_cross_mac,
+                                           detect_redundant_modes)
+        idx = cb_mac.currentIndex()
+        fdd = st.get("oma_fdd"); ssi = st.get("ssi")
+        if idx == 0:                                   # OMA auto-MAC
+            if not fdd or not getattr(fdd, "modes", None):
+                p_mac.clear(); lbl_mac.setText("Corre OMA capture primero."); return
+            f = [m.natural_frequency_hz for m in fdd.modes]
+            dup = detect_redundant_modes(fdd.modes, 0.7)
+            note = ("Auto-MAC OMA: diagonal = 1 (modo consigo mismo). Fuera de la diagonal, "
+                    "ROJO (>0.7) = dos modos redundantes/misma forma → revisar; AZUL (~0) = "
+                    "modos independientes (bien separados).")
+            if dup:
+                note += "  ⚠ Redundantes: " + ", ".join(
+                    f"{f[i]:.1f}↔{f[j]:.1f} ({v:.2f})" for i, j, v in dup)
+            _render_mac(compute_mac_matrix(fdd.modes), f, f, note)
+        elif idx == 1:                                 # SSI auto-MAC
+            if not ssi or not getattr(ssi, "modes", None):
+                p_mac.clear(); lbl_mac.setText("Corre SSI (subspace) primero."); return
+            f = [m.frequency_hz for m in ssi.modes]
+            _render_mac(compute_mac_matrix(ssi.modes), f, f,
+                        "Auto-MAC SSI: consistencia interna de los modos identificados por SSI.")
+        else:                                          # OMA ↔ SSI cross-MAC
+            if not fdd or not getattr(fdd, "modes", None) or not ssi or not getattr(ssi, "modes", None):
+                p_mac.clear(); lbl_mac.setText("Necesitas AMBOS: OMA capture y SSI (subspace)."); return
+            fr = [m.natural_frequency_hz for m in fdd.modes]
+            fc = [m.frequency_hz for m in ssi.modes]
+            _render_mac(compute_cross_mac(fdd.modes, ssi.modes), fr, fc,
+                        "Cross-MAC OMA (filas) ↔ SSI (columnas): un valor ROJO (~1) confirma que "
+                        "AMBOS métodos hallaron el MISMO modo físico (validación cruzada API 684). "
+                        "Los modos con confirmación cruzada son de máxima confianza.")
+    btn_mac.clicked.connect(_refresh_mac)
+    cb_mac.currentIndexChanged.connect(lambda *_: _refresh_mac())
+
+    # =====================================================================
     # CAMPBELL
     # =====================================================================
     pg_cam = QtWidgets.QWidget(); cml = QtWidgets.QVBoxLayout(pg_cam)
@@ -3458,8 +3539,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # Orden lógico de pestañas: EMA (impacto → modos) juntos, OMA (captura → SSI)
     # juntos, luego correlación / Campbell / formas / reporte.
     _desired_order = ["Configuration", "Sensor check", "Impact test (EMA)", "Modes (EMA)",
-                      "OMA capture", "SSI (subspace)", "Comparative", "Campbell",
-                      "Mode shapes", "Preliminary report", "Help", "Updates"]
+                      "OMA capture", "SSI (subspace)", "Comparative", "Validation (MAC)",
+                      "Campbell", "Mode shapes", "Preliminary report", "Help", "Updates"]
     _bar = tabs.tabBar()
     for _target, _title in enumerate(_desired_order):
         _cur = next((i for i in range(tabs.count()) if tabs.tabText(i) == _title), None)
