@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.65"
+__version__ = "0.9.66"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2717,8 +2717,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     pg_anim = QtWidgets.QWidget(); anl = QtWidgets.QVBoxLayout(pg_anim)
     arow = QtWidgets.QHBoxLayout()
     arow.addWidget(QtWidgets.QLabel("Source:"))
-    cb_asrc = QtWidgets.QComboBox(); cb_asrc.addItems(["OMA (FDD)", "SSI"]); arow.addWidget(cb_asrc)
-    arow.addWidget(QtWidgets.QLabel("Mode:"))
+    cb_asrc = QtWidgets.QComboBox(); cb_asrc.addItems(["OMA (FDD)", "SSI", "ODS (operating)"])
+    cb_asrc.setToolTip("OMA/SSI = formas MODALES identificadas. ODS = deflexión OPERACIONAL: "
+                       "cómo se mueve REALMENTE la máquina a una frecuencia (1×, paso de álabes…), "
+                       "con fase relativa al canal de mayor respuesta.")
+    arow.addWidget(cb_asrc)
+    arow.addWidget(QtWidgets.QLabel("Mode / ODS f:"))
     cb_amode = QtWidgets.QComboBox(); cb_amode.setMinimumWidth(160); arow.addWidget(cb_amode)
     arow.addWidget(QtWidgets.QLabel("Scale:"))
     sp_ascale = QtWidgets.QDoubleSpinBox(); sp_ascale.setRange(0.01, 0.5); sp_ascale.setValue(0.10); sp_ascale.setSingleStep(0.02)
@@ -2778,9 +2782,63 @@ def build_app(layout: OMALayout, simulated: bool = True):
     st["_anim_phase"] = 0.0
     anim_timer = QtCore.QTimer(win)
 
+    def _ods_freq_list():
+        """Frecuencias sugeridas para ODS: órdenes de giro (1×..8×) + picos FDD detectados,
+        dentro de la banda. Devuelve lista de (label, freq)."""
+        fdd = st.get("oma_fdd")
+        if fdd is None:
+            return []
+        fmax = float(np.max(fdd.frequencies_hz)) if len(fdd.frequencies_hz) else 500.0
+        rr = st["layout"].running_speed_rpm or 0.0
+        items = []
+        if rr:
+            f1 = rr / 60.0
+            for k in range(1, 9):
+                if f1 * k <= fmax:
+                    items.append((f"{f1*k:.1f} Hz ({k}×)", f1 * k))
+        for m in getattr(fdd, "modes", []):
+            items.append((f"{m.natural_frequency_hz:.1f} Hz (peak)", float(m.natural_frequency_hz)))
+        # dedup por frecuencia redondeada, ordenado
+        seen = {}; out = []
+        for lbl, f in sorted(items, key=lambda t: t[1]):
+            key = round(f, 1)
+            if key in seen:
+                continue
+            seen[key] = 1; out.append((lbl, f))
+        return out
+
+    def _ods_shape(freq_hz):
+        """Deflexión operacional (ODS) en `freq_hz`: reconstruye la CPSD en esa línea desde
+        el SVD del FDD (S = U·Σ·Uᴴ), toma la columna del canal de mayor respuesta y la
+        normaliza → magnitud + FASE relativa a la referencia. Complejo (n_ch,)."""
+        fdd = st.get("oma_fdd")
+        if fdd is None:
+            return None
+        fr = np.asarray(fdd.frequencies_hz, float)
+        if fr.size == 0:
+            return None
+        j = int(np.argmin(np.abs(fr - float(freq_hz))))
+        U = np.asarray(fdd.mode_shapes_at_freq)             # (nch, nch, nfreq)
+        sv = np.asarray(fdd.singular_values)                # (nch, nfreq)
+        if U.ndim != 3:
+            return None
+        Uj = U[:, :, j]
+        Sj = Uj @ np.diag(sv[:, j].astype(complex)) @ Uj.conj().T   # CPSD Hermitiana en j
+        diag = np.abs(np.diag(Sj).real)
+        ref = int(np.argmax(diag)) if diag.size else 0
+        denom = np.sqrt(max(float(Sj[ref, ref].real), 1e-30))
+        ods = Sj[:, ref] / denom
+        mx = np.max(np.abs(ods)) or 1.0
+        return ods / mx
+
     def _anim_reload_modes():
         cb_amode.blockSignals(True); cb_amode.clear()
         src = cb_asrc.currentText()
+        if src.startswith("ODS"):
+            st["_ods_freqs"] = _ods_freq_list()
+            cb_amode.addItems([lbl for lbl, _f in st["_ods_freqs"]])
+            cb_amode.blockSignals(False)
+            return
         modes = (st["oma_fdd"].modes if (src.startswith("OMA") and st.get("oma_fdd")) else
                  (st["ssi"].modes if (src == "SSI" and st.get("ssi")) else []))
         cb_amode.addItems([f"{m.natural_frequency_hz:.2f} Hz" if hasattr(m, "natural_frequency_hz")
@@ -2789,6 +2847,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _cur_shape():
         src = cb_asrc.currentText(); i = cb_amode.currentIndex()
+        if src.startswith("ODS"):
+            fl = st.get("_ods_freqs") or []
+            if not (0 <= i < len(fl)):
+                return None
+            return _ods_shape(fl[i][1])
         modes = (st["oma_fdd"].modes if (src.startswith("OMA") and st.get("oma_fdd")) else
                  (st["ssi"].modes if (src == "SSI" and st.get("ssi")) else []))
         if not (0 <= i < len(modes)):
@@ -2803,7 +2866,38 @@ def build_app(layout: OMALayout, simulated: bool = True):
                  (st["ssi"].modes if (src == "SSI" and st.get("ssi")) else []))
         return modes[i] if 0 <= i < len(modes) else None
 
+    def _update_ods_panel():
+        p_argand.clear()
+        i = cb_amode.currentIndex(); fl = st.get("_ods_freqs") or []
+        if not (0 <= i < len(fl)):
+            lbl_modal.setText("Corre OMA capture y elige una frecuencia (1×, pico…)."); return
+        _lbl, f = fl[i]; sh = _ods_shape(f)
+        rr = st["layout"].running_speed_rpm or 0.0
+        html = ("<b style='font-size:13px'>Operating Deflection Shape (ODS)</b>"
+                "<table cellspacing='5' style='margin-top:6px'>"
+                f"<tr><td style='color:#64748b'>Frequency&nbsp;&nbsp;</td><td><b>{f:.2f} Hz</b></td></tr>")
+        if rr:
+            html += (f"<tr><td style='color:#64748b'>Order (×run)&nbsp;&nbsp;</td>"
+                     f"<td><b>{f/(rr/60.0):.2f}×</b></td></tr>")
+        html += ("</table><div style='margin-top:10px;padding:8px;background:#f8fafc;border-radius:6px'>"
+                 "<b>ODS:</b> cómo se mueve la máquina REALMENTE a esta frecuencia (no un modo "
+                 "identificado). La fase es relativa al canal de mayor respuesta. Ideal para ver "
+                 "la deflexión a 1× (desbalance), paso de álabes, etc.</div>")
+        lbl_modal.setText(html)
+        if sh is not None and sh.size:
+            s = sh / (np.max(np.abs(sh)) or 1.0); th = np.linspace(0, 2 * np.pi, 72)
+            p_argand.plot(np.cos(th), np.sin(th), pen=pg.mkPen("#cbd5e1", width=1))
+            p_argand.plot([-1.05, 1.05], [0, 0], pen=pg.mkPen("#e2e8f0", width=1))
+            p_argand.plot([0, 0], [-1.05, 1.05], pen=pg.mkPen("#e2e8f0", width=1))
+            for c in s:
+                p_argand.plot([0, float(c.real)], [0, float(c.imag)], pen=pg.mkPen("#7c3aed", width=1.4))
+            p_argand.addItem(pg.ScatterPlotItem([float(c.real) for c in s], [float(c.imag) for c in s],
+                                                size=7, brush=pg.mkBrush("#7c3aed"), pen=None))
+            p_argand.setXRange(-1.1, 1.1); p_argand.setYRange(-1.1, 1.1)
+
     def _update_modal_panel():
+        if cb_asrc.currentText().startswith("ODS"):
+            _update_ods_panel(); return
         m = _cur_mode(); p_argand.clear()
         if m is None:
             lbl_modal.setText("Select a mode."); return
