@@ -730,6 +730,17 @@ def _mirror_active_draft(items: Any, meta: Any,
     name = st.session_state.get("report_active_draft")
     if not name:
         return
+    # GUARD ANTI-BORRADO: nunca espejar un estado VACÍO sobre el draft. En una
+    # reconexión (redeploy/caída) el autoguardado puede dispararse con
+    # report_items momentáneamente vacío antes de que se recargue de disco; sin
+    # este guard, ese vacío se propagaba y BORRABA el draft nombrado (bug
+    # "apareció borrado el contenido de SIGA-REP-TEC-553"). Vaciar un reporte de
+    # verdad se hace con "New report" (que desliga el draft activo primero).
+    try:
+        if not items:
+            return
+    except Exception:
+        return
     try:
         save_named_report_draft(draft_name=name, items=items, meta=meta, email=email)
     except Exception:

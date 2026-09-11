@@ -4583,6 +4583,13 @@ def _sync_cover_widget_keys(meta_dict):
 
 st.markdown('<div class="wm-section-title">Report drafts</div>', unsafe_allow_html=True)
 
+# Aplicar un nombre de draft PENDIENTE antes de instanciar el text_input. No se
+# puede escribir la widget-key report_draft_name_value después de que el widget
+# existe (StreamlitAPIException), así que los handlers dejan el valor aquí.
+_pending_draft_name = st.session_state.pop("_pending_draft_name", None)
+if _pending_draft_name is not None:
+    st.session_state["report_draft_name_value"] = _pending_draft_name
+
 d1, d2, d3, d4 = st.columns([1.9, 1.1, 1.1, 1.1])
 with d1:
     default_draft_name = (
@@ -4625,7 +4632,7 @@ with d3:
         )
         # el trabajo continúa sobre la copia: la marcamos como draft activo.
         st.session_state["report_active_draft"] = saved_name
-        st.session_state["report_draft_name_value"] = saved_name
+        st.session_state["_pending_draft_name"] = saved_name
         st.success(f"Draft duplicated: {saved_name}")
         st.rerun()
 with d4:
@@ -4669,7 +4676,7 @@ with d6:
         # (a) sincronizar las widget-keys de portada para que la UI muestre el
         # meta del draft (si no, prevalecen los valores viejos del render anterior).
         _sync_cover_widget_keys(merged_meta)
-        st.session_state["report_draft_name_value"] = selected_draft
+        st.session_state["_pending_draft_name"] = selected_draft
         # (b) marcar este draft como ACTIVO: los envíos/autoguardados posteriores
         # se espejarán a él, así "Enviar a Reporte" cae en el reporte que se edita.
         st.session_state["report_active_draft"] = selected_draft
