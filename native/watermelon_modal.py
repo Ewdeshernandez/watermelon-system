@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.59"
+__version__ = "0.9.60"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1801,7 +1801,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if sv.ndim == 1: sv = sv[None, :]
         band = freqs <= fmax
         p_svd.clear(); _svcol = ["#2563eb", "#dc2626", "#16a34a", "#f59e0b"]
-        p_svd.setTitle(f"Singular values — {sv.shape[0]} channels (SV1 dominant; SV2–4 reveal close modes)", color=NAVY)
+        p_svd.setTitle(f"Singular values (EFDD) — {sv.shape[0]} channels · SV1 dominant, SV2–4 reveal close modes", color=NAVY)
         for i in range(sv.shape[0]):
             col = _svcol[i] if i < 4 else "#94a3b8"; wdt = 1.8 if i == 0 else (1.1 if i < 4 else 0.6)
             p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)), pen=pg.mkPen(col, width=wdt), name=(f"SV{i+1}" if i < 4 else None))
@@ -2213,7 +2213,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 sv = sv[None, :]
             fmax = min(float(lay.fs_hz) / 2.56, float(lay.fmax_hz)); band = freqs <= fmax
             p_svd.clear(); _svcol = ["#2563eb", "#dc2626", "#16a34a", "#f59e0b"]
-            p_svd.setTitle(f"Singular values — {sv.shape[0]} channels (SV1 dominant; SV2–4 reveal close modes)", color=NAVY)
+            p_svd.setTitle(f"Singular values (EFDD) — {sv.shape[0]} channels · SV1 dominant, SV2–4 reveal close modes", color=NAVY)
             for i in range(sv.shape[0]):
                 col = _svcol[i] if i < 4 else "#94a3b8"; wdt = 1.8 if i == 0 else (1.1 if i < 4 else 0.6)
                 p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)),
