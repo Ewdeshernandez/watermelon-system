@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.57"
+__version__ = "0.9.58"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1604,24 +1604,39 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_testni = QtWidgets.QPushButton("🔌 Test acquisition")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
-    btn_saverun = QtWidgets.QPushButton("💾 Save run locally")
+    btn_saverun = QtWidgets.QPushButton("💾 Save locally")
     btn_saverun.setToolTip("Save this run (results + raw data) to a visible folder on this PC.")
-    btn_upload = QtWidgets.QPushButton("☁ Sync / Upload to Watermelon System")
-    btn_upsaved = QtWidgets.QPushButton("☁ Upload a SAVED run")
-    btn_upsaved.setToolTip("Pick a run saved earlier on this PC (offline) and upload it now "
-                           "that you have internet — results + raw data.")
-    btn_openrun = QtWidgets.QPushButton("📂 Open & analyze a SAVED run")
+    btn_upload = QtWidgets.QPushButton("☁ Upload to cloud")
+    btn_upload.setToolTip("Sube la corrida ACTUAL (en memoria) a Watermelon System (nube).")
+    btn_upsaved = QtWidgets.QPushButton("☁ Upload saved")
+    btn_upsaved.setToolTip("Elige una corrida guardada en este PC (offline) y súbela ahora "
+                           "que tienes internet — resultados + data cruda.")
+    btn_openrun = QtWidgets.QPushButton("📂 Open saved")
     btn_openrun.setToolTip("Reabre una corrida guardada en este PC y la muestra aquí "
                            "(modos, densidad espectral, formas modales, Campbell) para revisarla.")
-    btn_reana = QtWidgets.QPushButton("🔄 Re-analyze (EFDD + SSI)")
+    btn_reana = QtWidgets.QPushButton("🔄 Re-analyze (EFDD+SSI)")
     btn_reana.setToolTip("Vuelve a analizar la data cruda cargada con EFDD (formas modales/"
                          "complejidad refinadas) y recalcula el SSI. Útil para corridas viejas "
                          "capturadas antes de EFDD (histórico).")
-    btn_delmode = QtWidgets.QPushButton("✖ Remove selected mode")
-    btn_delmode.setToolTip("Remove the mode selected in the table (or click its marker on the plot).")
-    crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_saverun)
-    crow.addWidget(btn_upload); crow.addWidget(btn_upsaved); crow.addWidget(btn_openrun)
-    crow.addWidget(btn_reana); crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
+    btn_delmode = QtWidgets.QPushButton("✖ Remove mode")
+    btn_delmode.setToolTip("Quita el modo seleccionado en la tabla (o clic en su marcador en la gráfica).")
+
+    def _tbsep():
+        _s = QtWidgets.QFrame(); _s.setFrameShape(QtWidgets.QFrame.VLine)
+        _s.setStyleSheet("color:#dbe4f0;"); return _s
+
+    def _grp(text):
+        _l = QtWidgets.QLabel(text); _l.setStyleSheet("color:#64748b; font-weight:700; font-size:11px;")
+        return _l
+    # Fila 1 — ADQUIRIR & ANALIZAR (Source y Capture ya están en crow)
+    crow.addWidget(btn_testni); crow.addWidget(btn_ocap)
+    crow.addWidget(_tbsep()); crow.addWidget(btn_reana); crow.addWidget(btn_delmode)
+    crow.addStretch(1); cl2.addLayout(crow)
+    # Fila 2 — DATOS (local & nube)
+    crowB = QtWidgets.QHBoxLayout()
+    crowB.addWidget(_grp("Datos:")); crowB.addWidget(btn_saverun); crowB.addWidget(btn_openrun)
+    crowB.addWidget(_tbsep()); crowB.addWidget(btn_upload); crowB.addWidget(btn_upsaved)
+    crowB.addStretch(1); cl2.addLayout(crowB)
 
     def _test_ni():
         try:
