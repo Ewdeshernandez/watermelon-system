@@ -399,6 +399,19 @@ def detect_oma_modes(
         # Index en array completo
         idx_full = int(np.argmin(np.abs(freq - fn)))
         sv_peak = float(sv1[idx_full])
+        # --- Interpolación sub-bin (parábola por 3 puntos en dB) ---------------
+        # find_peaks devuelve el CENTRO del bin FFT → la frecuencia queda cuantizada
+        # a df (~0.39 Hz). Ajustando una parábola a σ1(dB) en [idx-1, idx, idx+1] se
+        # estima el vértice real del pico → frecuencia con resolución sub-bin (como
+        # ARTeMIS / cualquier estimador paramétrico), sin cambiar la forma modal ni
+        # el índice usado aguas abajo.
+        if 0 < idx_full < len(sv1_db) - 1:
+            _ym1, _y0, _yp1 = float(sv1_db[idx_full - 1]), float(sv1_db[idx_full]), float(sv1_db[idx_full + 1])
+            _den = _ym1 - 2.0 * _y0 + _yp1
+            if _den < 0.0:                      # pico cóncavo hacia abajo (máximo real)
+                _delta = 0.5 * (_ym1 - _yp1) / _den
+                if -1.0 < _delta < 1.0:
+                    fn = float(freq[idx_full] + _delta * df)
         sv_peak_db = float(sv1_db[idx_full])
 
         # Half-power bandwidth en SV1 (no en magnitud H, pero conceptualmente igual)

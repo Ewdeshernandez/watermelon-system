@@ -155,7 +155,8 @@ def _sensor_check_from_run(run: Dict[str, Any]):
 def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
                           shape_pngs=None, findings=None, recommendations=None,
                           meta_extra=None, config_png=None, sensor_png=None,
-                          sensor_rows=None, ssi_png=None, max_shape_modes: int = 3) -> bytes:
+                          sensor_rows=None, ssi_png=None, max_shape_modes: int = 3,
+                          filter_reliable: bool = True) -> bytes:
     """Genera el PDF OMA SIGA desde el payload de una corrida (`modal_runs`).
 
     `shape_pngs`: lista opcional de PNGs (vista 3D de geometría) por modo, en orden;
@@ -171,6 +172,27 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
 
     fdd = _fdd_from_run(run)
     rpm = float(run.get("running_rpm", 1185.0)) or 1185.0
+
+    # --- Confianza por modo + FILTRO de confiabilidad (por defecto) -----------
+    # EFDD ya viene en los modos capturados (default de captura desde v0.9.55). Aquí,
+    # como haría un analista antes de emitir, dejamos SÓLO los modos confiables:
+    # se descartan spurious/harmonic y los de confianza Baja (complejidad > 40%,
+    # damping no físico, armónico de giro, sin confirmación SSI). Guarda de seguridad:
+    # si TODOS resultaran Baja, no se vacía el reporte (se listan todos).
+    _run_modes = list(run.get("modes") or [])
+    _ssif = _ssi_freqs_of(run)
+    _conf_all = [mode_confidence(mm.get("fn", 0), mm.get("zeta", 0), mm.get("complexity", 0),
+                                 mm.get("class", "natural"), _ssif, rpm)
+                 for mm in _run_modes]
+    _conf = _conf_all
+    if filter_reliable and _run_modes and any(c != "Baja" for c in _conf_all):
+        _keep = [i for i, (mm, c) in enumerate(zip(_run_modes, _conf_all))
+                 if c != "Baja"
+                 and str(mm.get("class", "natural")).lower() not in ("spurious", "harmonic")]
+        if _keep:
+            fdd.modes = [fdd.modes[i] for i in _keep if i < len(fdd.modes)]
+            _conf = [_conf_all[i] for i in _keep]
+
     modes_hz = [m.natural_frequency_hz for m in fdd.modes]
 
     campbell = None
@@ -217,11 +239,7 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
         _sensor_kind = "mixed"
     else:
         _sensor_kind = "accel"
-    # Confianza por modo (FDD↔SSI + complejidad + damping + armónicos), alineada a fdd.modes
-    _ssif = _ssi_freqs_of(run)
-    _conf = [mode_confidence(mm.get("fn", 0), mm.get("zeta", 0), mm.get("complexity", 0),
-                             mm.get("class", "natural"), _ssif, rpm)
-             for mm in (run.get("modes") or [])]
+    # (_conf ya calculado y filtrado arriba, alineado a fdd.modes)
     return build_oma_siga_pdf(
         meta=meta,
         conditions=[{"label": run.get("name", "Condición operacional"), "fdd_result": fdd,
