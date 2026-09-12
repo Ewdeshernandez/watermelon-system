@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.67"
+__version__ = "0.9.68"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2137,47 +2137,45 @@ def build_app(layout: OMALayout, simulated: bool = True):
                        "ema_modes": ema, "ema": ema_block, "ssi": ssi_block, "sensor_check": sc_rec,
                        "client": lay.client, "asset": lay.machine_type,
                        "location": lay.location, "layout": lay.to_dict()}
-            # --- Data cruda OPCIONAL (pesada). Por defecto NO se sube: la web ya arma
-            #     las formas modales y la geometría con los resultados. Si se quiere
-            #     reprocesar en la web (SVD completo/SSI), se sube en un hilo (sin colgar). ---
+            # --- POLÍTICA: a la nube SIEMPRE va la DATA CRUDA (el peso no importa). La web
+            #     hace TODO el análisis desde la cruda (EFDD, SSI, armónicos, ODS, MAC…).
+            #     Los resultados van igual como respaldo, pero la web recomputa con la cruda. ---
             rid, ts = modal_cloud.new_run_id(lay.name)
             payload["raw_ref"] = None
             _data_fs = st.get("oma_data")
-            _want_raw = False
-            if _data_fs is not None:
-                _mbraw = _data_fs[0].shape[0] * _data_fs[0].shape[1] * 4 / 1e6
-                _want_raw = QtWidgets.QMessageBox.question(
-                    win, "Cloud",
-                    f"Upload the raw waveform too (~{_mbraw:.0f} MB)?\n\n"
-                    "No = fast (results + geometry, recommended for the demo).\n"
-                    "Yes = also lets the web recompute everything from raw (heavier).",
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes
-            if _want_raw:
-                import concurrent.futures as _cf2
-                import time as _t2
-                _dlg = QtWidgets.QProgressDialog("Uploading raw data to the cloud…", None, 0, 0, win)
-                _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
-                _dlg.show(); QtWidgets.QApplication.processEvents()
-                try:
-                    _d, _fs = _data_fs
-                    with _cf2.ThreadPoolExecutor(max_workers=1) as _ex2:
-                        _fu = _ex2.submit(modal_cloud.upload_raw, rid, _d, _fs, lay.channel_names())
-                        while not _fu.done():
-                            QtWidgets.QApplication.processEvents(); _t2.sleep(0.05)
-                        rr = _fu.result()
-                    if rr.get("ok"):
-                        payload["raw_ref"] = rr
-                except Exception:  # noqa: BLE001
-                    pass
-                finally:
-                    _dlg.close()
+            if _data_fs is None:
+                QtWidgets.QMessageBox.warning(win, "Cloud",
+                    "No hay data cruda en memoria para subir. Captura de nuevo o usa "
+                    "'Upload a SAVED run' (que trae la cruda del disco)."); return
+            import concurrent.futures as _cf2
+            import time as _t2
+            _d, _fs = _data_fs
+            _mbraw = _d.shape[0] * _d.shape[1] * 4 / 1e6
+            _dlg = QtWidgets.QProgressDialog(f"Uploading RAW data to the cloud (~{_mbraw:.0f} MB)…",
+                                             None, 0, 0, win)
+            _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
+            _dlg.show(); QtWidgets.QApplication.processEvents()
+            try:
+                with _cf2.ThreadPoolExecutor(max_workers=1) as _ex2:
+                    _fu = _ex2.submit(modal_cloud.upload_raw, rid, _d, _fs, lay.channel_names())
+                    while not _fu.done():
+                        QtWidgets.QApplication.processEvents(); _t2.sleep(0.05)
+                    rr = _fu.result()
+                if rr.get("ok"):
+                    payload["raw_ref"] = rr
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                _dlg.close()
+            if not payload.get("raw_ref"):
+                QtWidgets.QMessageBox.warning(win, "Cloud",
+                    "No se pudo subir la data cruda (revisa el internet). La corrida sigue "
+                    "guardada localmente; súbela luego con 'Upload a SAVED run'."); return
             r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
-                _rawmsg = ("with raw data" if payload.get("raw_ref") else "results only")
                 QtWidgets.QMessageBox.information(win, "Cloud",
-                    f"☁ Run uploaded ({len(fdd.modes)} modes, {_rawmsg}). "
-                    "Generate the report from the web.")
+                    f"☁ Corrida subida con DATA CRUDA (~{_mbraw:.0f} MB). La web hará el análisis "
+                    "completo (EFDD, SSI, armónicos, ODS, MAC) y el reporte.")
             else:
                 QtWidgets.QMessageBox.warning(win, "Cloud", f"Could not upload: {r.get('reason')}")
         except Exception as e:  # noqa: BLE001
@@ -2202,41 +2200,41 @@ def build_app(layout: OMALayout, simulated: bool = True):
             name = payload.get("name", "OMA")
             rid, ts = modal_cloud.new_run_id(name)
             payload["raw_ref"] = None
-            # data cruda guardada (data.npz) — subirla también si el usuario quiere
+            # POLÍTICA: SIEMPRE se sube la data cruda (data.npz) — la web analiza todo con ella.
             _npz = os.path.join(folder, "data.npz")
-            if os.path.exists(_npz):
-                _mb = os.path.getsize(_npz) / 1e6
-                if QtWidgets.QMessageBox.question(
-                        win, "Cloud",
-                        f"Upload the raw waveform too (~{_mb:.0f} MB)?\n\n"
-                        "Yes = todo (resultados + cruda). No = solo resultados.",
-                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                        QtWidgets.QMessageBox.Yes) == QtWidgets.QMessageBox.Yes:
-                    import concurrent.futures as _cf3, time as _t3
-                    _z = np.load(_npz, allow_pickle=True)
-                    _d = np.asarray(_z["data"], float); _fs = float(_z["fs"])
-                    _ch = [str(c) for c in list(_z["channels"])]
-                    _dlg = QtWidgets.QProgressDialog("Uploading raw data to the cloud…", None, 0, 0, win)
-                    _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
-                    _dlg.show(); QtWidgets.QApplication.processEvents()
-                    try:
-                        with _cf3.ThreadPoolExecutor(max_workers=1) as _ex3:
-                            _fu = _ex3.submit(modal_cloud.upload_raw, rid, _d, _fs, _ch)
-                            while not _fu.done():
-                                QtWidgets.QApplication.processEvents(); _t3.sleep(0.05)
-                            rr = _fu.result()
-                        if rr.get("ok"):
-                            payload["raw_ref"] = rr
-                    except Exception:  # noqa: BLE001
-                        pass
-                    finally:
-                        _dlg.close()
+            if not os.path.exists(_npz):
+                QtWidgets.QMessageBox.warning(win, "Cloud",
+                    "Esa corrida no tiene data.npz (data cruda). Solo se suben corridas con "
+                    "data cruda. Vuelve a capturar guardando la cruda."); return
+            _mb = os.path.getsize(_npz) / 1e6
+            import concurrent.futures as _cf3, time as _t3
+            _z = np.load(_npz, allow_pickle=True)
+            _d = np.asarray(_z["data"], float); _fs = float(_z["fs"])
+            _ch = [str(c) for c in list(_z["channels"])]
+            _dlg = QtWidgets.QProgressDialog(f"Uploading RAW data to the cloud (~{_mb:.0f} MB)…",
+                                             None, 0, 0, win)
+            _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
+            _dlg.show(); QtWidgets.QApplication.processEvents()
+            try:
+                with _cf3.ThreadPoolExecutor(max_workers=1) as _ex3:
+                    _fu = _ex3.submit(modal_cloud.upload_raw, rid, _d, _fs, _ch)
+                    while not _fu.done():
+                        QtWidgets.QApplication.processEvents(); _t3.sleep(0.05)
+                    rr = _fu.result()
+                if rr.get("ok"):
+                    payload["raw_ref"] = rr
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                _dlg.close()
+            if not payload.get("raw_ref"):
+                QtWidgets.QMessageBox.warning(win, "Cloud",
+                    "No se pudo subir la data cruda (revisa el internet). Intenta de nuevo."); return
             r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
-                _rawmsg = ("con data cruda" if payload.get("raw_ref") else "solo resultados")
                 QtWidgets.QMessageBox.information(win, "Cloud",
-                    f"☁ Corrida subida ({len(payload.get('modes', []))} modos, {_rawmsg}).\n"
-                    "Genera el reporte desde la web.")
+                    f"☁ Corrida subida con DATA CRUDA (~{_mb:.0f} MB). La web hará el análisis "
+                    "completo y el reporte.")
             else:
                 QtWidgets.QMessageBox.warning(win, "Cloud",
                     f"No se pudo subir: {r.get('reason', 'offline')}.\n"
