@@ -1141,9 +1141,10 @@ def _build_demo_D():
                           "complexity": m.complexity_pct, "class": m.classification,
                           "shape": {"re": [], "im": []}} for m in fdd.modes],
                "layout": lay.to_dict()}
+    _dshapes = [np.asarray(getattr(m, "mode_shape", []), complex).real for m in fdd.modes]
     return {"lay": lay, "oma_modes": oma_modes, "sv_traces": sv_traces,
             "ema_freqs": [fn for fn, _ in DEMO_MODES], "rpm": lay.running_speed_rpm,
-            "raw": (data, fs), "shapes": None, "source": "demo", "name": lay.name,
+            "raw": (data, fs), "shapes": _dshapes, "source": "demo", "name": lay.name, "fdd": fdd,
             "ema_curve": None, "ema_modes_full": None, "ssi_cloud": None, "payload": payload}
 
 
@@ -1231,41 +1232,99 @@ else:
 
 lay = D["lay"]; nch = lay.n_channels()
 
-# --- Data cruda en la nube: recalcular TODO en la web (SVD completo + SSI en vivo) ---
+# --- Data cruda en la nube: la web hace TODO el análisis con la cruda (EFDD + SVD
+#     completo + armónicos + SSI + ODS + MAC). Cacheado para no recomputar en cada clic. ---
 @st.cache_data(show_spinner=False)
 def _load_raw_cached(path, bucket, fs):
     from core.modal.modal_cloud import download_raw
     return download_raw({"path": path, "bucket": bucket, "fs": fs})
 
 
+@st.cache_data(show_spinner=False)
+def _analyze_from_raw(path, bucket, fs, detrend, band, decf, harm, run_hz, fmax_lay, channels):
+    """Descarga la cruda y hace el análisis FDD/EFDD completo (con preproceso y remoción
+    de armónicos opcional). Devuelve dict con el FDDResult (incluye SVD completo U) o None.
+    Cacheado por parámetros → no recomputa en cada interacción de Streamlit."""
+    from core.modal.modal_cloud import download_raw
+    from core.modal.oma_engine import preprocess_signals, run_oma
+    rr = download_raw({"path": path, "bucket": bucket, "fs": fs})
+    if rr is None:
+        return None
+    data, rfs = rr
+    adata, afs = preprocess_signals(data, rfs, detrend=detrend, band=band, decimate_factor=int(decf))
+    fmax = min(afs / 2.56, fmax_lay)
+    fdd = run_oma(time_data=adata, sample_rate_hz=afs, nperseg=4096,
+                  channel_names=list(channels), f_min_hz=5.0, f_max_hz=fmax, running_speed_hz=run_hz)
+    nharm = 0
+    if harm and fdd.modes:
+        from core.modal.oma_engine import (kurtosis_harmonic_indicator, reduce_harmonics_sv,
+                                           detect_oma_modes)
+        import dataclasses as _dc
+        cand = [m.natural_frequency_hz for m in fdd.modes]
+        if run_hz:
+            k = 1
+            while run_hz * k <= fmax:
+                cand.append(run_hz * k); k += 1
+        kf = kurtosis_harmonic_indicator(adata, afs, sorted({round(c, 2) for c in cand}))
+        hf = [d["freq"] for d in kf if d["is_harmonic"]]
+        if hf:
+            cl = reduce_harmonics_sv(fdd.frequencies_hz, fdd.singular_values, hf)
+            fdd = _dc.replace(fdd, singular_values=np.asarray(cl))
+            fdd.modes = detect_oma_modes(fdd, f_min_hz=5.0, f_max_hz=fmax, running_speed_hz=run_hz)
+            nharm = len(hf)
+    return {"fdd": fdd, "fs": float(afs), "fmax": float(fmax), "nharm": int(nharm)}
+
+
+D.setdefault("fdd", None)
 _rref = D.get("raw_ref")
-if _rref and D.get("source") == "cloud" and _rref.get("path"):
+_has_raw = bool(_rref and D.get("source") == "cloud" and _rref.get("path"))
+if _has_raw:
     _mb = (_rref.get("size_bytes", 0) or 0) / 1e6
-    _use_raw = st.checkbox(
-        f"⚡ Recompute from raw data ({_rref.get('n_ch','?')} ch · full SVD + live SSI · ~{_mb:.1f} MB)",
-        value=False, key="use_raw",
-        help="Downloads the full raw waveform this run uploaded and recomputes everything on the web.")
-    if _use_raw:
-        with st.spinner("Downloading raw waveform and recomputing FDD…"):
-            _rr = _load_raw_cached(_rref.get("path"), _rref.get("bucket", "modal-raw"), _rref.get("fs"))
-        if _rr is not None:
-            _rdata, _rfs = _rr
-            D["raw"] = (_rdata, _rfs)
-            try:
-                _fmax = min(_rfs / 2.56, lay.fmax_hz)
-                _fdd = run_oma(time_data=_rdata, sample_rate_hz=_rfs, nperseg=4096,
-                               channel_names=lay.channel_names(), f_min_hz=5.0, f_max_hz=_fmax)
-                _fr = np.asarray(_fdd.frequencies_hz); _sv = np.asarray(_fdd.singular_values)
-                if _sv.ndim == 1:
-                    _sv = _sv[None, :]
-                _bd = _fr <= _fmax
-                D["sv_traces"] = [(f"SV{r+1}", _fr[_bd], 10 * np.log10(np.maximum(_sv[r][_bd], 1e-30)))
-                                  for r in range(min(_sv.shape[0], 4))]
-                st.caption(f"⚡ Recomputed from raw — {min(_sv.shape[0],4)} singular-value curves · live SSI enabled.")
-            except Exception as _e:  # noqa: BLE001
-                st.warning(f"Raw recompute failed: {type(_e).__name__}")
-        else:
-            st.warning("Could not download the raw data for this run.")
+    with st.expander(f"⚙ Análisis desde data cruda — EFDD ({_rref.get('n_ch','?')} ch · ~{_mb:.1f} MB)", expanded=True):
+        _pc = st.columns([1, 1, 1.2, 1.2, 1.4])
+        _detr = _pc[0].checkbox("Detrend", value=True, help="Quita deriva lineal por canal (recomendado).")
+        _bp = _pc[1].checkbox("Band-pass", value=False, help="Filtro pasa-banda de fase cero.")
+        _blo = _pc[2].number_input("lo (Hz)", 0.5, 5000.0, 5.0, step=1.0, disabled=not _bp)
+        _bhi = _pc[3].number_input("hi (Hz)", 1.0, 25000.0, 500.0, step=10.0, disabled=not _bp)
+        _dec = _pc[4].selectbox("Decimate", ["×1", "×2", "×4"], index=0,
+                                help="Baja fs → más resolución en la banda baja.")
+        _harm = st.checkbox("Reduce harmonics (kurtosis)", value=False,
+                            help="Detecta armónicos de la máquina por kurtosis y los remueve del espectro.")
+    _band = (float(_blo), float(_bhi)) if _bp else None
+    _decf = {"×1": 1, "×2": 2, "×4": 4}[_dec]
+    _run_hz = (float(D.get("rpm") or 0.0) / 60.0) or None
+    with st.spinner("Descargando cruda y analizando (EFDD)…"):
+        try:
+            _res = _analyze_from_raw(_rref.get("path"), _rref.get("bucket", "modal-raw"),
+                                     _rref.get("fs"), bool(_detr), _band, _decf, bool(_harm),
+                                     _run_hz, float(lay.fmax_hz), tuple(lay.channel_names()))
+        except Exception as _e:  # noqa: BLE001
+            _res = None; st.warning(f"Fallo el análisis desde cruda: {type(_e).__name__}: {_e}")
+    if _res is not None:
+        _fdd = _res["fdd"]; D["fdd"] = _fdd
+        # reemplaza modos y formas con lo recomputado por EFDD desde la cruda
+        D["oma_modes"] = [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
+                           "complexity": m.complexity_pct, "cls": m.classification, "source": "auto"}
+                          for m in _fdd.modes]
+        D["shapes"] = [np.asarray(getattr(m, "mode_shape", []), complex).real for m in _fdd.modes]
+        _fr = np.asarray(_fdd.frequencies_hz); _sv = np.asarray(_fdd.singular_values)
+        if _sv.ndim == 1:
+            _sv = _sv[None, :]
+        _bd = _fr <= _res["fmax"]
+        D["sv_traces"] = [(f"SV{r+1} (EFDD)", _fr[_bd], 10 * np.log10(np.maximum(_sv[r][_bd], 1e-30)))
+                          for r in range(min(_sv.shape[0], 4))]
+        # data para SSI en vivo (descarga cacheada)
+        _rr0 = _load_raw_cached(_rref.get("path"), _rref.get("bucket", "modal-raw"), _rref.get("fs"))
+        if _rr0 is not None:
+            D["raw"] = _rr0
+        _hmsg = f" · {_res['nharm']} armónico(s) removido(s)" if _res["nharm"] else ""
+        st.caption(f"⚡ Análisis EFDD desde cruda — {len(_fdd.modes)} modos{_hmsg} · SVD completo · SSI en vivo · ODS y MAC disponibles.")
+    else:
+        st.warning("No se pudo descargar/analizar la data cruda de esta corrida.")
+elif D.get("source") == "cloud":
+    st.info("Esta corrida no trae data cruda (subida con una versión anterior del campo). "
+            "Se muestran los resultados guardados. Vuelve a capturar y subir con la versión "
+            "nueva para el análisis completo (EFDD, armónicos, ODS, MAC) en la web.")
 
 # --- Modos manuales (peak-picking en la web) — se fusionan con los automáticos.
 #     Los automáticos (FDD) quedan PROTEGIDOS: sólo se pueden quitar los manuales. ---
@@ -1347,14 +1406,16 @@ st.markdown(f"""
 
 T_OMA = "🟡  Spectral density (FDD)"
 T_SHAPES = "⚫  Mode shapes"
+T_ODS = "🌀  ODS (operating)"
 T_SSI = "🟠  SSI (subspace)"
+T_MAC = "🔷  MAC / validation"
 T_CAMP = "🟤  Campbell"
 T_EMA = "🟢  Impact test (EMA)"
 T_MODES = "🟣  Modes (EMA)"
 T_CMP = "🔴  Comparative"
 T_TREND = "🔵  Trend / Compare"
 T_REPORT = "📄  Report"
-_NAVOPTS = [T_OMA, T_SSI, T_CAMP, T_SHAPES, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
+_NAVOPTS = [T_OMA, T_SSI, T_MAC, T_CAMP, T_SHAPES, T_ODS, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
 
 # Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
 # conserva la sección activa tras cada rerun (arregla el "salto" al generar reporte).
@@ -1845,6 +1906,98 @@ if nav == T_SHAPES:
                 st.download_button("⬇ Download", data=st.session_state["_ms_gif"],
                                    file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
                                    mime="image/gif", use_container_width=True)
+
+# ---------------------------------------------------------------- MAC / validation
+if nav == T_MAC:
+    _sec("MAC / validation", "Modal Assurance Criterion — consistencia de las formas modales (auto-MAC)")
+    modes = D["oma_modes"]; shapes = D.get("shapes") or []
+    vs = []; fs_lbl = []
+    for i, mm in enumerate(modes):
+        s = shapes[i] if i < len(shapes) else None
+        if s is not None and len(s):
+            vs.append(np.asarray(s, float).ravel()); fs_lbl.append(float(mm["fn"]))
+    if len(vs) < 2:
+        st.info("Se necesitan ≥2 modos con forma modal para calcular la MAC.")
+    else:
+        n = len(vs); M = np.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                num = abs(np.vdot(vs[i], vs[j])) ** 2
+                den = (np.vdot(vs[i], vs[i]).real * np.vdot(vs[j], vs[j]).real) or 1e-30
+                M[i, j] = num / den
+        import plotly.graph_objects as _goM
+        lbl = [f"{f:.1f}" for f in fs_lbl]
+        _figM = _goM.Figure(_goM.Heatmap(
+            z=M, x=lbl, y=lbl, zmin=0, zmax=1,
+            colorscale=[[0, "#eef4ff"], [0.5, "#78aaeb"], [0.8, "#f59e0b"], [1, "#c81e1e"]],
+            text=[[f"{v:.2f}" for v in row] for row in M], texttemplate="%{text}",
+            textfont={"size": 10}, colorbar=dict(title="MAC")))
+        _figM.update_layout(height=520, yaxis_autorange="reversed",
+                            xaxis_title="Modo (Hz)", yaxis_title="Modo (Hz)",
+                            margin=dict(l=60, r=20, t=20, b=50))
+        _chart(_figM)
+        _dup = [(fs_lbl[i], fs_lbl[j], M[i, j]) for i in range(n) for j in range(i + 1, n) if M[i, j] > 0.7]
+        if _dup:
+            st.warning("Modos redundantes (MAC>0.7, misma forma → revisar/eliminar uno): "
+                       + ", ".join(f"{a:.1f}↔{b:.1f} ({v:.2f})" for a, b, v in _dup))
+        st.caption("Diagonal = 1 (modo consigo mismo). Fuera de la diagonal: ROJO (>0.7) = modos "
+                   "redundantes; AZUL (~0) = independientes (bien separados). Igual que ARTeMIS.")
+
+# ---------------------------------------------------------------- ODS (operating)
+if nav == T_ODS:
+    _sec("ODS — operating deflection", "Cómo se mueve la máquina a una frecuencia (1×, paso de álabes)")
+    _fddO = D.get("fdd")
+    if _fddO is None:
+        st.info("El ODS necesita el análisis desde DATA CRUDA (SVD completo). Elige una corrida que "
+                "haya subido la cruda — la web la analiza y habilita el ODS. Las corridas viejas "
+                "(solo resultados) no lo permiten.")
+    else:
+        _frO = np.asarray(_fddO.frequencies_hz, float)
+        _rpmO = float(D.get("rpm") or 0.0)
+        _sug = []
+        if _rpmO:
+            _f1 = _rpmO / 60.0; _k = 1
+            while _f1 * _k <= _frO.max() and _k <= 8:
+                _sug.append((f"{_f1*_k:.1f} Hz ({_k}×)", _f1 * _k)); _k += 1
+        for mm in D["oma_modes"]:
+            _sug.append((f"{mm['fn']:.1f} Hz (pico)", float(mm["fn"])))
+        _c1, _c2 = st.columns([2, 1])
+        _f_sel = 0.0
+        if _sug:
+            _lblopts = [s[0] for s in _sug]
+            _selO = _c1.selectbox("Frecuencia sugerida", _lblopts)
+            _f_sel = _sug[_lblopts.index(_selO)][1]
+        _fpO = _c2.number_input("o Hz exacto (0 = usar selección)", 0.0, float(_frO.max()),
+                                0.0, step=1.0)
+        _f0 = _fpO if _fpO > 0 else _f_sel
+        _UO = np.asarray(_fddO.mode_shapes_at_freq); _svO = np.asarray(_fddO.singular_values)
+        if _UO.ndim == 3 and _f0 > 0:
+            _j = int(np.argmin(np.abs(_frO - _f0))); _Uj = _UO[:, :, _j]
+            _Sj = _Uj @ np.diag(_svO[:, _j].astype(complex)) @ _Uj.conj().T
+            _dg2 = np.abs(np.diag(_Sj).real); _ref = int(np.argmax(_dg2)) if _dg2.size else 0
+            _ods = _Sj[:, _ref] / np.sqrt(max(float(_Sj[_ref, _ref].real), 1e-30))
+            _amp = np.asarray(_ods, complex).real
+            _amp = _amp / (np.max(np.abs(_amp)) or 1.0)
+            _ptsO = lay.active_points()
+            if len(_amp) != len(_ptsO):
+                st.warning("La ODS no coincide con el número de sensores activos.")
+            else:
+                from core.modal.oma_layout import default_geometry as _dgeoO
+                _plgO = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
+                _geomO = _plgO if (_plgO and _plgO.get("nodes")) else _dgeoO(lay)
+                _ordO = (_f0 / (_rpmO / 60.0)) if _rpmO else 0.0
+                st.markdown(f"<div style='text-align:center;color:#64748b;font-weight:600;font-size:13px'>"
+                            f"ODS @ {_f0:.2f} Hz" + (f" · {_ordO:.2f}×" if _rpmO else "") + "</div>",
+                            unsafe_allow_html=True)
+                if _rotor_is(lay):
+                    _chart(_mode_rotor_fig(lay, _amp, height=560, scale_mul=1.5))
+                else:
+                    _chart(_mode_geom_fig(lay, _geomO, _amp, height=560, scale_mul=1.5))
+                st.caption("Deflexión OPERACIONAL (no un modo identificado): cómo se mueve la máquina a "
+                           "esa frecuencia, con fase relativa al canal de mayor respuesta. Ideal para ver "
+                           "el 1× (desbalance), el paso de álabes, etc.")
+        else:
+            st.info("Elige una frecuencia para reconstruir la ODS.")
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
 if nav == T_TREND:
