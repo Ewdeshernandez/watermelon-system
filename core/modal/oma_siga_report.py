@@ -108,6 +108,8 @@ def build_oma_siga_pdf(
     sensor_png: Optional[bytes] = None,
     sensor_rows: Optional[Sequence[Sequence[Any]]] = None,
     ssi_png: Optional[bytes] = None,
+    mac_png: Optional[bytes] = None,
+    ods_pngs: Optional[Sequence[Any]] = None,   # [(etiqueta, png_bytes), ...]
 ) -> bytes:
     """Arma el PDF OMA SIGA. `conditions` = [{label, fdd_result, notes?}, ...].
 
@@ -352,6 +354,32 @@ def build_oma_siga_pdf(
         if img is not None:
             body.append(img)
             body.append(p("Figura. Diagrama de estabilización SSI-COV.", styles, "WMFigureCaption"))
+
+    # 6.M · Validación por MAC (Modal Assurance Criterion)
+    if mac_png:
+        body.append(subsection(f"{_res_no}.M Validación de formas modales (MAC)", styles))
+        body.append(p("Matriz MAC (Modal Assurance Criterion): la diagonal es 1 (cada modo consigo "
+                      "mismo). Valores fuera de la diagonal cercanos a 1 indican modos con la MISMA "
+                      "forma (redundantes); cercanos a 0, modos independientes bien separados. "
+                      "Confirma que cada modo identificado es distinto y físico.", styles))
+        img = safe_image(mac_png, 13.0, 13.0)
+        if img is not None:
+            body.append(img)
+            body.append(p("Figura. Matriz MAC de los modos identificados.", styles, "WMFigureCaption"))
+
+    # 6.O · Deflexión operacional (ODS)
+    if ods_pngs:
+        body.append(subsection(f"{_res_no}.O Deflexión operacional (ODS)", styles))
+        body.append(p("Formas de deflexión operacional (ODS): cómo se mueve REALMENTE la máquina a "
+                      "frecuencias de operación (p. ej. 1× por desbalance, paso de álabes), con fase "
+                      "relativa al canal de mayor respuesta. Complementa las formas modales.", styles))
+        for _olbl, _opng in ods_pngs:
+            if not _opng:
+                continue
+            img = safe_image(_opng, 17.0, 9.5)
+            if img is not None:
+                body.append(img)
+                body.append(p(f"Figura. ODS a {_olbl}.", styles, "WMFigureCaption"))
 
     # 7 · Correlación EMA–OMA
     if ema_oma:

@@ -1480,6 +1480,10 @@ if nav == T_MODES:
 # ---------------------------------------------------------------- 4 OMA (análisis)
 if nav == T_OMA:
     _sec("Spectral density (FDD)", "", "ISO 20816")
+    if D.get("fdd") is not None:
+        st.caption("✓ **EFDD activo** — los modos se identifican por Enhanced FDD: forma refinada "
+                   "por la campana SDOF (MAC≥0.80) y amortiguamiento por **decremento logarítmico** "
+                   "(no half-power). La curva mostrada es la densidad espectral (valores singulares).")
     from core.modal.mode_validation import validate_modes, summarize as mv_sum
     _ssi_freqs = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
     _verd = validate_modes(D["oma_modes"], ssi_freqs_hz=_ssi_freqs, running_speed_rpm=D["rpm"]) \
@@ -2142,7 +2146,8 @@ if nav == T_REPORT:
             _rec_txt = st.text_area("Recommendations (Recomendaciones)", key="rep_rec",
                                     value=st.session_state.get("rep_rec", "\n".join(_auto_recs(_es))), height=150)
         st.caption("Embedded in the PDF: machine 3D configuration · sensor-check status · spectral density "
-                   "(singular values) · mode shapes (3D) · Campbell (API 684) · EMA↔OMA correlation.")
+                   "(singular values) · mode shapes (3D) · **MAC matrix** · **ODS (1×/2×)** · SSI "
+                   "stabilization · Campbell (API 684) · EMA↔OMA correlation.")
 
         _hide_spur = st.checkbox(
             "Ocultar modos **spurious / harmonic** del reporte (recomendado — deja solo los modos estructurales)",
@@ -2213,6 +2218,59 @@ if nav == T_REPORT:
                             except Exception:  # noqa: BLE001
                                 sensor_png = None
                         sensor_rows = _scr.get("rows") or None
+                    # --- MAC (validación de formas) para el reporte ---
+                    mac_png = None
+                    _macpairs = [(mm["fn"], np.asarray(ss, float).ravel())
+                                 for mm, ss in zip(_modes_r, _shapes_r) if ss is not None and len(ss)]
+                    if len(_macpairs) >= 2:
+                        try:
+                            _macf = [a for a, _ in _macpairs]; _macvs = [b for _, b in _macpairs]
+                            _nM = len(_macvs); _MM = np.zeros((_nM, _nM))
+                            for _i in range(_nM):
+                                for _j in range(_nM):
+                                    _num = abs(np.vdot(_macvs[_i], _macvs[_j])) ** 2
+                                    _den = (np.vdot(_macvs[_i], _macvs[_i]).real *
+                                            np.vdot(_macvs[_j], _macvs[_j]).real) or 1e-30
+                                    _MM[_i, _j] = _num / _den
+                            _lblM = [f"{f:.1f}" for f in _macf]
+                            _figMac = go.Figure(go.Heatmap(
+                                z=_MM, x=_lblM, y=_lblM, zmin=0, zmax=1,
+                                colorscale=[[0, "#eef4ff"], [0.5, "#78aaeb"], [0.8, "#f59e0b"], [1, "#c81e1e"]],
+                                text=[[f"{v:.2f}" for v in row] for row in _MM], texttemplate="%{text}",
+                                textfont={"size": 11}, showscale=True))
+                            _figMac.update_layout(height=560, width=560, yaxis_autorange="reversed",
+                                                  xaxis_title="Modo (Hz)", yaxis_title="Modo (Hz)",
+                                                  margin=dict(l=60, r=20, t=20, b=50),
+                                                  paper_bgcolor="white", plot_bgcolor="white")
+                            mac_png = _figMac.to_image(format="png", width=760, height=760, scale=2)
+                        except Exception:  # noqa: BLE001
+                            mac_png = None
+                    # --- ODS a 1× y 2× para el reporte (si hay SVD completo desde la cruda) ---
+                    ods_pngs = []
+                    _fddR = D.get("fdd")
+                    if _fddR is not None and _rpm_r:
+                        try:
+                            _frR = np.asarray(_fddR.frequencies_hz, float)
+                            _UR = np.asarray(_fddR.mode_shapes_at_freq); _svR = np.asarray(_fddR.singular_values)
+                            _f1r = _rpm_r / 60.0
+                            for _ordk in (1, 2):
+                                _f0r = _f1r * _ordk
+                                if _UR.ndim != 3 or _f0r > _frR.max():
+                                    continue
+                                _jr = int(np.argmin(np.abs(_frR - _f0r))); _Ujr = _UR[:, :, _jr]
+                                _Sjr = _Ujr @ np.diag(_svR[:, _jr].astype(complex)) @ _Ujr.conj().T
+                                _dr = np.abs(np.diag(_Sjr).real); _refr = int(np.argmax(_dr)) if _dr.size else 0
+                                _odsr = _Sjr[:, _refr] / np.sqrt(max(float(_Sjr[_refr, _refr].real), 1e-30))
+                                _ar = np.asarray(_odsr, complex).real
+                                _ar = _ar / (np.max(np.abs(_ar)) or 1.0)
+                                if len(_ar) != len(pts):
+                                    continue
+                                _figO = (_mode_rotor_fig(lay, _ar, height=520, static=True) if _rotor_is(lay)
+                                         else _mode_geom_fig(lay, _geom_r, _ar, height=520, static=True))
+                                ods_pngs.append((f"{_f0r:.1f} Hz ({_ordk}×)",
+                                                 _figO.to_image(format="png", width=1100, height=640, scale=2)))
+                        except Exception:  # noqa: BLE001
+                            pass
                     _findings = [x.strip() for x in _find_txt.splitlines() if x.strip()]
                     _recs = [x.strip() for x in _rec_txt.splitlines() if x.strip()]
                     _meta_extra = {"consecutive": _consec, "report_date": _rdate, "asset": _asset,
@@ -2233,7 +2291,8 @@ if nav == T_REPORT:
                         _pay_r, bilingual_es=_es, shape_pngs=shape_pngs,
                         findings=_findings, recommendations=_recs, meta_extra=_meta_extra,
                         config_png=config_png, sensor_png=sensor_png, sensor_rows=sensor_rows,
-                        ssi_png=ssi_png, max_shape_modes=len(shape_pngs))
+                        ssi_png=ssi_png, mac_png=mac_png, ods_pngs=(ods_pngs or None),
+                        max_shape_modes=len(shape_pngs))
                 st.session_state["_modal_report_pdf"] = pdf
                 st.session_state["_modal_report_meta"] = {
                     "consecutive": _consec, "client": _client, "asset": _asset,
