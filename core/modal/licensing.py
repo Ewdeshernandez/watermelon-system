@@ -28,9 +28,11 @@ import time
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
-# Llave PÚBLICA del emisor de licencias (Ed25519, base64). La PRIVADA vive SOLO en
-# el servidor (Edge Function). Se reemplaza por la real al desplegar la Fase 2.
-LICENSE_PUBKEY_B64 = os.environ.get("WM_LICENSE_PUBKEY", "")
+# Llave PÚBLICA del emisor de licencias (Ed25519, base64url). Es PÚBLICA por diseño:
+# sólo VERIFICA; no puede firmar. La PRIVADA vive SOLO en el servidor (Edge Function).
+# Segura de embeber en el .exe. Override por env para pruebas.
+LICENSE_PUBKEY_B64 = os.environ.get("WM_LICENSE_PUBKEY", "") or \
+    "6yd-Rfp0GEdlFo_hLZ3O0oQD890vc_ylecJi4TyYWzA"
 
 _STATE_DIR = os.path.join(os.path.expanduser("~"), ".watermelon")
 _STATE_FILE = os.path.join(_STATE_DIR, "wm_license.json")
