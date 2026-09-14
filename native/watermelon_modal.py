@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.68"
+__version__ = "0.9.69"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -220,6 +220,19 @@ def _layout_is_rotor(layout):
     if not pts:
         return False
     return sum(1 for p in pts if getattr(p, "meas_type", "A") == "D") >= max(2, len(pts) // 2)
+
+
+def _static_rotor_anim(layout):
+    """Anim de rotor SIN deflexión (config/preview de proximidad): eje recto en reposo.
+    pts en las posiciones de los sensores, amplitudes/mags = 0 → rotor liso sin flexión."""
+    aps = [p for p in getattr(layout, "points", []) if getattr(p, "active", True)]
+    if len(aps) < 2:
+        return {"pts": np.zeros((0, 3)), "dirs": np.zeros((0, 3)),
+                "amps": np.zeros(0), "mags": np.zeros(0), "mmax": 1.0}
+    pts = np.array([[float(p.x_norm), 0.20, float(getattr(p, "y_norm", 0.0))] for p in aps], float)
+    n = len(pts)
+    return {"pts": pts, "dirs": np.zeros((n, 3)), "amps": np.zeros(n),
+            "mags": np.zeros(n), "mmax": 1.0}
 
 
 def _cyl_quads(x0, x1, r, na, nt):
@@ -440,11 +453,13 @@ class Machine3DItem(pg.GraphicsObject):
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
         anim = self.anim
-        # ROTOR (proximidad): eje + impulsores flexionados con Jet, en vez de cuboides
-        is_rotor = anim is not None and _layout_is_rotor(self.layout)
+        # ROTOR (proximidad): SIEMPRE eje + impulsores (no cuboides), aunque no haya animación
+        # (config/preview también). Si no hay anim, se usa un rotor estático sin deflexión.
+        is_rotor = _layout_is_rotor(self.layout)
         faces = []                                          # (dep, pw, base|None, shade, colmag)
         if is_rotor:
-            faces = _rotor_faces(self.layout, anim, self.az, self.el)
+            _ra = anim if anim is not None else _static_rotor_anim(self.layout)
+            faces = _rotor_faces(self.layout, _ra, self.az, self.el)
         else:
             for c in self.layout.machine_components:
                 base = QtGui.QColor(c.color) if getattr(c, "color", "") else QtGui.QColor(_comp_color(c.kind))
@@ -483,7 +498,7 @@ class Machine3DItem(pg.GraphicsObject):
             painter.setBrush(QtGui.QBrush(col))
             if mesh:                                         # MALLADO tipo ARTeMIS (líneas de la malla)
                 pen = QtGui.QPen(QtGui.QColor(15, 23, 42, 55)); pen.setCosmetic(True); pen.setWidthF(0.5)
-            elif anim is not None and is_rotor:              # rotor: superficie lisa (sin grilla)
+            elif is_rotor:                                   # rotor: superficie lisa (sin grilla)
                 pen = QtGui.QPen(col); pen.setCosmetic(True); pen.setWidthF(0.3)
             else:                                            # estático / fundación fija: aristas de las cajas
                 pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(0.8)
@@ -569,8 +584,8 @@ def _stylesheet() -> str:
     QWidget {{ font-family: 'Segoe UI', Arial; font-size: 12px; color: {NAVY}; }}
     QMainWindow, QTabWidget::pane {{ background: #f5f8fd; }}
     QTabWidget::pane {{ border: 1px solid #dbe4f0; border-radius: 10px; top: -1px; }}
-    QTabBar::tab {{ background: #e6ecf5; color: #334155; padding: 8px 16px; margin-right: 3px;
-        border-top-left-radius: 8px; border-top-right-radius: 8px; font-weight: 700; }}
+    QTabBar::tab {{ background: #e6ecf5; color: #334155; padding: 7px 11px; margin-right: 2px;
+        border-top-left-radius: 8px; border-top-right-radius: 8px; font-weight: 700; font-size: 12px; }}
     QTabBar::tab:hover {{ background: #d4deee; }}
     QTabBar::tab:selected {{ background: {NAVY}; color: white; }}
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background: white;
@@ -631,11 +646,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
           "az": 50.0, "el": 28.0, "grab": None, "rng": np.random.default_rng(), "_views": []}
 
     tb = win.addToolBar("main"); tb.setMovable(False)
-    tb.setStyleSheet(f"QToolBar {{ background: {NAVY}; padding: 6px 12px; }}")
-    brand = QtWidgets.QLabel("  🍉 Watermelon Modal")
-    brand.setStyleSheet("color:white; font-weight:800; font-size:15px;"); tb.addWidget(brand)
+    tb.setStyleSheet(f"QToolBar {{ background: {NAVY}; padding: 7px 14px; spacing:0px; }}")
+    brand = QtWidgets.QLabel()
+    brand.setText(
+        "<span style='color:#ffffff; font-weight:800; letter-spacing:2.5px; font-size:16px;'>WATERMELON</span>"
+        "<span style='color:#1AAEE5; font-weight:800; letter-spacing:2.5px; font-size:16px;'>&nbsp;MODAL</span>"
+        "<span style='color:#5b6b86; font-weight:600; letter-spacing:1px; font-size:9.5px;'>&nbsp;&nbsp;™</span>")
+    brand.setTextFormat(QtCore.Qt.RichText); tb.addWidget(brand)
     ver_lbl = QtWidgets.QLabel(f"v{__version__}")
-    ver_lbl.setStyleSheet("color:#94a3b8; font-weight:700; font-size:12px; padding-left:8px;")
+    ver_lbl.setStyleSheet("color:#cbd5e1; background:#1e3a5f; border-radius:9px; padding:2px 10px; "
+                          "font-weight:700; font-size:11px; margin-left:12px;")
     ver_lbl.setToolTip("Watermelon Modal software version"); tb.addWidget(ver_lbl)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
@@ -1615,10 +1635,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     if hw_present:
         cb_src.setCurrentIndex(1)                          # hay hardware → live por defecto
     chk_harm = QtWidgets.QCheckBox("Reduce harmonics (kurtosis)")
-    chk_harm.setToolTip("Detecta picos ARMÓNICOS de la máquina en giro por kurtosis (sinusoide "
-                        "= arcoseno, kurtosis<2.4) y los remueve de la densidad espectral, "
-                        "revelando el modo estructural debajo. Solo afecta el análisis, NO la "
-                        "data cruda. Recomendado en máquinas en operación.")
+    chk_harm.setToolTip("Detect and remove machine harmonics by kurtosis, revealing the structural "
+                        "mode underneath. Analysis only — raw data untouched. Recommended for running machines.")
     crow.addWidget(chk_harm)
     btn_testni = QtWidgets.QPushButton("🔌 Test acquisition")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
@@ -1626,15 +1644,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_saverun = QtWidgets.QPushButton("💾 Save locally")
     btn_saverun.setToolTip("Save this run (results + raw data) to a visible folder on this PC.")
     btn_upload = QtWidgets.QPushButton("☁ Upload to cloud")
-    btn_upload.setToolTip("Sube la corrida ACTUAL (en memoria) a Watermelon System (nube).")
+    btn_upload.setToolTip("Upload the CURRENT run (in memory) to Watermelon System (cloud).")
     btn_upsaved = QtWidgets.QPushButton("☁ Upload saved")
-    btn_upsaved.setToolTip("Elige una corrida guardada en este PC (offline) y súbela ahora "
-                           "que tienes internet — resultados + data cruda.")
+    btn_upsaved.setToolTip("Pick a run saved on this PC (offline) and upload it now that you are online.")
     btn_openrun = QtWidgets.QPushButton("📂 Open saved")
-    btn_openrun.setToolTip("Reabre una corrida guardada en este PC y la muestra aquí "
-                           "(modos, densidad espectral, formas modales, Campbell) para revisarla.")
+    btn_openrun.setToolTip("Reopen a run saved on this PC and review it here (modes, spectral density, mode shapes, Campbell).")
     btn_delmode = QtWidgets.QPushButton("✖ Remove mode")
-    btn_delmode.setToolTip("Quita el modo seleccionado en la tabla (o clic en su marcador en la gráfica).")
+    btn_delmode.setToolTip("Remove the selected mode from the table (or click its marker on the plot).")
 
     def _tbsep():
         _s = QtWidgets.QFrame(); _s.setFrameShape(QtWidgets.QFrame.VLine)
@@ -1649,26 +1665,24 @@ def build_app(layout: OMALayout, simulated: bool = True):
     crow.addStretch(1); cl2.addLayout(crow)
     # Fila 2 — DATOS (local & nube)
     crowB = QtWidgets.QHBoxLayout()
-    crowB.addWidget(_grp("Datos:")); crowB.addWidget(btn_saverun); crowB.addWidget(btn_openrun)
+    crowB.addWidget(_grp("Data:")); crowB.addWidget(btn_saverun); crowB.addWidget(btn_openrun)
     crowB.addWidget(_tbsep()); crowB.addWidget(btn_upload); crowB.addWidget(btn_upsaved)
     crowB.addStretch(1); cl2.addLayout(crowB)
     # Fila 3 — PREPROCESO de señal (solo análisis; la data cruda se guarda intacta)
     crowP = QtWidgets.QHBoxLayout()
-    crowP.addWidget(_grp("Preproceso:"))
+    crowP.addWidget(_grp("Preprocess:"))
     chk_detr = QtWidgets.QCheckBox("Detrend"); chk_detr.setChecked(True)
-    chk_detr.setToolTip("Quita deriva/rampa lineal de cada canal antes del análisis (recomendado).")
+    chk_detr.setToolTip("Remove linear drift/ramp from each channel before analysis (recommended).")
     crowP.addWidget(chk_detr)
     chk_band = QtWidgets.QCheckBox("Band-pass"); chk_band.setToolTip(
-        "Filtro pasa-banda de fase cero para enfocar una banda de frecuencia (aísla los modos de "
-        "interés del ruido). Solo afecta el análisis.")
+        "Zero-phase band-pass to focus on a frequency band (isolate the modes of interest). Analysis only.")
     sp_blo = QtWidgets.QDoubleSpinBox(); sp_blo.setRange(0.5, 5000); sp_blo.setValue(5.0); sp_blo.setSuffix(" Hz")
     sp_bhi = QtWidgets.QDoubleSpinBox(); sp_bhi.setRange(1.0, 25000); sp_bhi.setValue(500.0); sp_bhi.setSuffix(" Hz")
     crowP.addWidget(chk_band); crowP.addWidget(QtWidgets.QLabel("lo")); crowP.addWidget(sp_blo)
     crowP.addWidget(QtWidgets.QLabel("hi")); crowP.addWidget(sp_bhi)
     crowP.addWidget(_tbsep()); crowP.addWidget(QtWidgets.QLabel("Decimate"))
     cb_dec = QtWidgets.QComboBox(); cb_dec.addItems(["×1", "×2", "×4"])
-    cb_dec.setToolTip("Decimación con anti-alias: baja fs → MÁS resolución en frecuencia en la "
-                      "banda baja (como el 'decimation' de ARTeMIS). ×2 = mitad de fs, doble Δf.")
+    cb_dec.setToolTip("Anti-alias decimation: lower fs → finer frequency resolution in the low band. ×2 = half fs, double Δf.")
     crowP.addWidget(cb_dec)
     crowP.addStretch(1); cl2.addLayout(crowP)
 
@@ -2145,8 +2159,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
             _data_fs = st.get("oma_data")
             if _data_fs is None:
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "No hay data cruda en memoria para subir. Captura de nuevo o usa "
-                    "'Upload a SAVED run' (que trae la cruda del disco)."); return
+                    "No raw data in memory to upload. Capture again, or use 'Upload saved' "
+                    "(which brings the raw data from disk)."); return
             import concurrent.futures as _cf2
             import time as _t2
             _d, _fs = _data_fs
@@ -2169,13 +2183,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 _dlg.close()
             if not payload.get("raw_ref"):
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "No se pudo subir la data cruda (revisa el internet). La corrida sigue "
-                    "guardada localmente; súbela luego con 'Upload a SAVED run'."); return
+                    "Could not upload the raw data (check your internet). The run stays saved "
+                    "locally; upload it later with 'Upload saved'."); return
             r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
-                    f"☁ Corrida subida con DATA CRUDA (~{_mbraw:.0f} MB). La web hará el análisis "
-                    "completo (EFDD, SSI, armónicos, ODS, MAC) y el reporte.")
+                    f"☁ Run uploaded with RAW DATA (~{_mbraw:.0f} MB). The web will run the full "
+                    "analysis (EFDD, SSI, harmonics, ODS, MAC) and the report.")
             else:
                 QtWidgets.QMessageBox.warning(win, "Cloud", f"Could not upload: {r.get('reason')}")
         except Exception as e:  # noqa: BLE001
@@ -2204,8 +2218,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
             _npz = os.path.join(folder, "data.npz")
             if not os.path.exists(_npz):
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "Esa corrida no tiene data.npz (data cruda). Solo se suben corridas con "
-                    "data cruda. Vuelve a capturar guardando la cruda."); return
+                    "That run has no data.npz (raw data). Only runs with raw data can be uploaded. "
+                    "Capture again saving the raw data."); return
             _mb = os.path.getsize(_npz) / 1e6
             import concurrent.futures as _cf3, time as _t3
             _z = np.load(_npz, allow_pickle=True)
@@ -2229,16 +2243,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 _dlg.close()
             if not payload.get("raw_ref"):
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "No se pudo subir la data cruda (revisa el internet). Intenta de nuevo."); return
+                    "Could not upload the raw data (check your internet). Try again."); return
             r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
-                    f"☁ Corrida subida con DATA CRUDA (~{_mb:.0f} MB). La web hará el análisis "
-                    "completo y el reporte.")
+                    f"☁ Run uploaded with RAW DATA (~{_mb:.0f} MB). The web will run the full analysis and the report.")
             else:
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    f"No se pudo subir: {r.get('reason', 'offline')}.\n"
-                    "Verifica el internet e intenta de nuevo (la corrida sigue guardada).")
+                    f"Could not upload: {r.get('reason', 'offline')}.\n"
+                    "Check your internet and try again (the run stays saved).")
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Upload saved run", f"Error: {type(e).__name__}: {e}")
 
@@ -2295,10 +2308,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 p_svd.setXRange(0, float(freqs[band].max()), padding=0); p_svd.getViewBox().setLimits(xMin=0)
             _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative()
             _anim_reload_modes()
-            _raw = "con data cruda" if os.path.exists(_npz) else "solo resultados"
+            _raw = "with raw data" if os.path.exists(_npz) else "results only"
             QtWidgets.QMessageBox.information(win, "Open run",
-                f"✅ Corrida cargada ({len(fdd.modes)} modos, {_raw}).\n"
-                "Revisa las pestañas: OMA capture (espectro), Mode shapes, Campbell.")
+                f"✅ Run loaded ({len(fdd.modes)} modes, {_raw}).\n"
+                "Check the tabs: OMA capture (spectrum), Mode shapes, Campbell.")
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Open run", f"Error: {type(e).__name__}: {e}")
 
@@ -2488,8 +2501,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     p_mac.setLabel("bottom", "Mode (Hz)"); p_mac.setLabel("left", "Mode (Hz)")
     p_mac.getViewBox().invertY(True); p_mac.getViewBox().setAspectLocked(True)
     mcl.addWidget(p_mac, 1)
-    lbl_mac = QtWidgets.QLabel("Corre OMA capture (y SSI para el cruce). La MAC valida que las "
-                              "FORMAS modales sean consistentes — como lo hace ARTeMIS.")
+    lbl_mac = QtWidgets.QLabel("Run OMA capture (and SSI for the cross-check). MAC validates that the mode "
+                              "SHAPES are consistent.")
     lbl_mac.setWordWrap(True); mcl.addWidget(lbl_mac)
     tabs.addTab(pg_mac, "Validation (MAC)")
 
@@ -2503,7 +2516,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         p_mac.clear()
         M = np.asarray(M, float)
         if M.size == 0 or M.shape[0] == 0 or M.shape[1] == 0:
-            lbl_mac.setText("No hay modos suficientes para calcular la MAC."); return
+            lbl_mac.setText("Not enough modes to compute MAC."); return
         img = pg.ImageItem(M.T)                        # x = columna, y = fila
         img.setLookupTable(_mac_lut); img.setLevels([0.0, 1.0])
         p_mac.addItem(img)
@@ -2526,31 +2539,31 @@ def build_app(layout: OMALayout, simulated: bool = True):
         fdd = st.get("oma_fdd"); ssi = st.get("ssi")
         if idx == 0:                                   # OMA auto-MAC
             if not fdd or not getattr(fdd, "modes", None):
-                p_mac.clear(); lbl_mac.setText("Corre OMA capture primero."); return
+                p_mac.clear(); lbl_mac.setText("Run OMA capture first."); return
             f = [m.natural_frequency_hz for m in fdd.modes]
             dup = detect_redundant_modes(fdd.modes, 0.7)
-            note = ("Auto-MAC OMA: diagonal = 1 (modo consigo mismo). Fuera de la diagonal, "
-                    "ROJO (>0.7) = dos modos redundantes/misma forma → revisar; AZUL (~0) = "
-                    "modos independientes (bien separados).")
+            note = ("Auto-MAC OMA: diagonal = 1 (each mode with itself). Off-diagonal RED (>0.7) = "
+                    "two redundant modes / same shape → review; BLUE (~0) = independent modes "
+                    "(well separated).")
             if dup:
                 note += "  ⚠ Redundantes: " + ", ".join(
                     f"{f[i]:.1f}↔{f[j]:.1f} ({v:.2f})" for i, j, v in dup)
             _render_mac(compute_mac_matrix(fdd.modes), f, f, note)
         elif idx == 1:                                 # SSI auto-MAC
             if not ssi or not getattr(ssi, "modes", None):
-                p_mac.clear(); lbl_mac.setText("Corre SSI (subspace) primero."); return
+                p_mac.clear(); lbl_mac.setText("Run SSI (subspace) first."); return
             f = [m.frequency_hz for m in ssi.modes]
             _render_mac(compute_mac_matrix(ssi.modes), f, f,
-                        "Auto-MAC SSI: consistencia interna de los modos identificados por SSI.")
+                        "Auto-MAC SSI: internal consistency of the modes identified by SSI.")
         else:                                          # OMA ↔ SSI cross-MAC
             if not fdd or not getattr(fdd, "modes", None) or not ssi or not getattr(ssi, "modes", None):
-                p_mac.clear(); lbl_mac.setText("Necesitas AMBOS: OMA capture y SSI (subspace)."); return
+                p_mac.clear(); lbl_mac.setText("You need BOTH: OMA capture and SSI (subspace)."); return
             fr = [m.natural_frequency_hz for m in fdd.modes]
             fc = [m.frequency_hz for m in ssi.modes]
             _render_mac(compute_cross_mac(fdd.modes, ssi.modes), fr, fc,
-                        "Cross-MAC OMA (filas) ↔ SSI (columnas): un valor ROJO (~1) confirma que "
-                        "AMBOS métodos hallaron el MISMO modo físico (validación cruzada API 684). "
-                        "Los modos con confirmación cruzada son de máxima confianza.")
+                        "Cross-MAC OMA (rows) ↔ SSI (columns): a RED value (~1) confirms BOTH methods "
+                        "found the SAME physical mode (cross-validation, API 684). "
+                        "Modes with cross-confirmation carry the highest confidence.")
     btn_mac.clicked.connect(_refresh_mac)
     cb_mac.currentIndexChanged.connect(lambda *_: _refresh_mac())
 
@@ -2749,9 +2762,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     arow = QtWidgets.QHBoxLayout()
     arow.addWidget(QtWidgets.QLabel("Source:"))
     cb_asrc = QtWidgets.QComboBox(); cb_asrc.addItems(["OMA (FDD)", "SSI", "ODS (operating)"])
-    cb_asrc.setToolTip("OMA/SSI = formas MODALES identificadas. ODS = deflexión OPERACIONAL: "
-                       "cómo se mueve REALMENTE la máquina a una frecuencia (1×, paso de álabes…), "
-                       "con fase relativa al canal de mayor respuesta.")
+    cb_asrc.setToolTip("OMA/SSI = identified MODAL shapes. ODS = OPERATING deflection: how the machine "
+                       "actually moves at a frequency (1×, blade-pass), with phase relative to the highest-response channel.")
     arow.addWidget(cb_asrc)
     arow.addWidget(QtWidgets.QLabel("Mode / ODS f:"))
     cb_amode = QtWidgets.QComboBox(); cb_amode.setMinimumWidth(160); arow.addWidget(cb_amode)
@@ -2901,7 +2913,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         p_argand.clear()
         i = cb_amode.currentIndex(); fl = st.get("_ods_freqs") or []
         if not (0 <= i < len(fl)):
-            lbl_modal.setText("Corre OMA capture y elige una frecuencia (1×, pico…)."); return
+            lbl_modal.setText("Run OMA capture and pick a frequency (1×, peak…)."); return
         _lbl, f = fl[i]; sh = _ods_shape(f)
         rr = st["layout"].running_speed_rpm or 0.0
         html = ("<b style='font-size:13px'>Operating Deflection Shape (ODS)</b>"
@@ -2911,9 +2923,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             html += (f"<tr><td style='color:#64748b'>Order (×run)&nbsp;&nbsp;</td>"
                      f"<td><b>{f/(rr/60.0):.2f}×</b></td></tr>")
         html += ("</table><div style='margin-top:10px;padding:8px;background:#f8fafc;border-radius:6px'>"
-                 "<b>ODS:</b> cómo se mueve la máquina REALMENTE a esta frecuencia (no un modo "
-                 "identificado). La fase es relativa al canal de mayor respuesta. Ideal para ver "
-                 "la deflexión a 1× (desbalance), paso de álabes, etc.</div>")
+                 "<b>ODS:</b> how the machine ACTUALLY moves at this frequency (not an identified "
+                 "mode). Phase is relative to the highest-response channel. Ideal to see the "
+                 "deflection at 1× (unbalance), blade-pass, etc.</div>")
         lbl_modal.setText(html)
         if sh is not None and sh.size:
             s = sh / (np.max(np.abs(sh)) or 1.0); th = np.linspace(0, 2 * np.pi, 72)
@@ -3700,6 +3712,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _cur = next((i for i in range(tabs.count()) if tabs.tabText(i) == _title), None)
         if _cur is not None and _cur != _target:
             _bar.moveTab(_cur, _target)
+    # Etiquetas cortas para que TODAS las pestañas quepan sin flechas de scroll.
+    _short_tabs = {"Configuration": "Setup", "Impact test (EMA)": "Impact (EMA)",
+                   "SSI (subspace)": "SSI", "Validation (MAC)": "MAC",
+                   "Preliminary report": "Report"}
+    for _i in range(tabs.count()):
+        _st = _short_tabs.get(tabs.tabText(_i))
+        if _st:
+            tabs.setTabText(_i, _st)
+    tabs.setElideMode(QtCore.Qt.ElideNone)          # no recortar texto
+    tabs.tabBar().setExpanding(False)               # cada pestaña a su ancho natural
+    tabs.setUsesScrollButtons(False)                # sin flechas: todas visibles
 
     # Aviso: no cerrar con una corrida sin guardar localmente.
     def _close_event(ev):
@@ -3798,7 +3821,7 @@ def main(argv=None):
     # la carga (Load local) o —lo recomendado— usa un ⭐ Preset.
     lay = OMALayout(name=args.name, machine_components=[], points=[])
     try:
-        app, win = build_app(lay, simulated=True); win.show()
+        app, win = build_app(lay, simulated=True); win.showMaximized()
         # Auto-actualizador: al conectar a internet, avisa si hay versión nueva.
         try:
             _chk = _UpdateChecker(__version__, win)
