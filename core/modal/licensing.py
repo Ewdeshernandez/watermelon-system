@@ -244,6 +244,37 @@ def _supabase_url() -> str:
         return ""
 
 
+def activate_with_key(license_key: str, endpoint: Optional[str] = None) -> Dict[str, Any]:
+    """Activa esta máquina con una CLAVE DE LICENCIA (modelo comercial, sin login/OTP).
+    Llama a la Edge Function `activate` con {license_key, machine_fp}; guarda y verifica
+    el token firmado. Devuelve {ok, reason, account, exp}."""
+    url = endpoint or (_supabase_url() + "/functions/v1/activate")
+    if not url.startswith("http"):
+        return {"ok": False, "reason": "no_server_url"}
+    is_vm, _ = detect_vm()
+    body = json.dumps({"license_key": (license_key or "").strip(),
+                       "machine_fp": machine_fingerprint(), "is_vm": is_vm}).encode()
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, data=body, method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:  # noqa: BLE001
+        # urllib lanza HTTPError con cuerpo JSON en 4xx → intenta leer el motivo
+        try:
+            import json as _j
+            data = _j.loads(getattr(e, "read", lambda: b"{}")().decode())
+        except Exception:  # noqa: BLE001
+            return {"ok": False, "reason": f"activate_failed: {e}"}
+    token = data.get("token")
+    if not token:
+        return {"ok": False, "reason": data.get("error", "no_token")}
+    store_token(token)
+    ok, why, payload = verify_license_token(token)
+    return {"ok": ok, "reason": why, "account": payload.get("account"), "exp": payload.get("exp")}
+
+
 def activate_online(email: str, password: str, endpoint: Optional[str] = None
                     ) -> Dict[str, Any]:
     """Login (Supabase) + llama a la Edge Function `activate` con la huella de esta

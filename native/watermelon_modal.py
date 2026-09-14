@@ -3906,12 +3906,12 @@ def _activation_dialog(app, lic) -> bool:
         "<span style='color:#1AAEE5;font-weight:800;letter-spacing:2px;font-size:17px;'>&nbsp;MODAL</span>")
     head.setTextFormat(QtCore.Qt.RichText); v.addWidget(head)
     v.addWidget(QtWidgets.QLabel("<span style='color:#93c5fd;font-size:12px;'>"
-                + T("Sign in to activate this computer.", "Inicia sesión para activar este equipo.")
+                + T("Enter your license key to activate this computer.",
+                    "Ingresa tu clave de licencia para activar este equipo.")
                 + "</span>"))
-    _le = lambda ph: (lambda w: (w.setPlaceholderText(ph), w.setStyleSheet(
-        "background:white;border-radius:7px;padding:8px;"))[0] or w)(QtWidgets.QLineEdit())
-    e_mail = _le(T("Email", "Correo")); v.addWidget(e_mail)
-    e_pass = _le(T("Password", "Contraseña")); e_pass.setEchoMode(QtWidgets.QLineEdit.Password); v.addWidget(e_pass)
+    e_key = QtWidgets.QLineEdit(); e_key.setPlaceholderText(T("License key", "Clave de licencia"))
+    e_key.setStyleSheet("background:white;border-radius:7px;padding:10px;font-family:monospace;font-size:13px;")
+    v.addWidget(e_key)
     msg = QtWidgets.QLabel(""); msg.setWordWrap(True); msg.setStyleSheet("color:#fca5a5;font-size:12px;"); v.addWidget(msg)
     fp = lic.machine_fingerprint()
     v.addWidget(QtWidgets.QLabel(f"<span style='color:#5b6b86;font-size:10px;'>Machine ID: {fp[:16]}…</span>"))
@@ -3924,7 +3924,7 @@ def _activation_dialog(app, lic) -> bool:
 
     def _do_activate():
         b_act.setEnabled(False); b_act.setText(T("Activating…", "Activando…")); QtWidgets.QApplication.processEvents()
-        r = lic.activate_online(e_mail.text().strip(), e_pass.text())
+        r = lic.activate_with_key(e_key.text().strip())
         if r.get("ok"):
             state["ok"] = True; dlg.accept()
         else:
