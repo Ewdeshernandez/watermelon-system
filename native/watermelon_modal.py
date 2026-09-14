@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.71"
+__version__ = "0.9.72"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1167,7 +1167,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _sc_snapshot():
         sc = st["_sc"]
         if not sc.get("names"):
-            QtWidgets.QMessageBox.information(win, "Sensor check", "Start the live check first."); return
+            QtWidgets.QMessageBox.information(win, "Sensor check", T("Start the live check first.", "Inicia primero la verificación en vivo.")); return
         import datetime as _dt
         buf = QtCore.QBuffer(); buf.open(QtCore.QIODevice.WriteOnly)
         p_scope.grab().save(buf, "PNG"); png = bytes(buf.data())
@@ -1483,8 +1483,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _table_to_layout(); auto_place_by_norm(st["layout"])
         _fill_points(); _refresh_summary(); _draw_train(fit=True)
         QtWidgets.QMessageBox.information(win, "Standard placement",
-            f"✅ {st['layout'].n_channels()} sensors placed per API 670 / ISO 20816 "
-            "(NDE/DE bearings, X/Y/Z, driver→driven).")
+            T(f"✅ {st['layout'].n_channels()} sensors placed per API 670 / ISO 20816 "
+            "(NDE/DE bearings, X/Y/Z, driver→driven).", f"✅ {st['layout'].n_channels()} sensores ubicados por API 670 / ISO 20816 (cojinetes NDE/DE, X/Y/Z, conductor→conducido)."))
 
     def _clear_points():
         st["layout"].points = []; _fill_points(); _refresh_summary(); _draw_train(fit=True)
@@ -1524,14 +1524,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _table_to_layout()
         try:
             p = save_layout_local(st["layout"])
-            QtWidgets.QMessageBox.information(win, "Saved", f"Saved locally:\n{p}")
+            QtWidgets.QMessageBox.information(win, "Saved", T(f"Saved locally:\n{p}", f"Guardado localmente:\n{p}"))
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Save", f"Could not save: {e}")
+            QtWidgets.QMessageBox.warning(win, "Save", T(f"Could not save: {e}", f"No se pudo guardar: {e}"))
 
     def _load_local():
         names = list_layouts_local()
         if not names:
-            QtWidgets.QMessageBox.information(win, "Load", "No local configurations yet."); return
+            QtWidgets.QMessageBox.information(win, "Load", T("No local configurations yet.", "Aún no hay configuraciones locales.")); return
         name, ok = QtWidgets.QInputDialog.getItem(win, "Load local", "Configuration:", names, 0, False)
         if ok and name:
             st["layout"] = load_layout_local(name); _reload_from_layout()
@@ -1551,10 +1551,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
         except Exception as e:  # noqa: BLE001
             rc = {"ok": False, "reason": str(e)}
         if rc.get("ok"):
-            QtWidgets.QMessageBox.information(win, "Cloud", "☁ Saved to Watermelon System — available on the web.")
+            QtWidgets.QMessageBox.information(win, "Cloud", T("☁ Saved to Watermelon System — available on the web.", "☁ Guardado en Watermelon System — disponible en la web."))
         else:
             QtWidgets.QMessageBox.warning(win, "Cloud",
-                f"Could not upload ({rc.get('reason','offline')}). Saved locally is still available.")
+                T(f"Could not upload ({rc.get('reason','offline')}). Saved locally is still available.", f"No se pudo subir ({rc.get('reason','offline')}). El guardado local sigue disponible."))
 
     def _load_cloud():
         try:
@@ -1564,7 +1564,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             rows = []
         names = [r.get("name") or r.get("id") for r in rows if (r.get("name") or r.get("id"))]
         if not names:
-            QtWidgets.QMessageBox.information(win, "Cloud", "No cloud configurations (or offline)."); return
+            QtWidgets.QMessageBox.information(win, "Cloud", T("No cloud configurations (or offline).", "No hay configuraciones en la nube (o sin conexión).")); return
         name, ok = QtWidgets.QInputDialog.getItem(win, "Load from cloud", "Configuration:", names, 0, False)
         if ok and name:
             lay = load_layout_cloud(name)
@@ -1745,12 +1745,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
             cause = getattr(e, "__cause__", None)
             root = _wl(f"\n\nDetail: {type(cause).__name__}: {cause}") if cause else ""
             QtWidgets.QMessageBox.warning(win, "Watermelon acquisition",
-                f"❌ Could not start the acquisition module.\n\n{_wl(f'{type(e).__name__}: {e}')}{root}\n\n"
-                "Check the cable, unit power and try again.")
+                T(f"❌ Could not start the acquisition module.\n\n{_wl(f'{type(e).__name__}: {e}')}{root}\n\n"
+                "Check the cable, unit power and try again.", f"❌ No se pudo iniciar el módulo de adquisición.\n\n{_wl(f'{type(e).__name__}: {e}')}{root}\n\nRevisa el cable, la alimentación de la unidad e intenta de nuevo."))
             return
         if not devs:
             QtWidgets.QMessageBox.warning(win, "Watermelon acquisition",
-                "⚠ Acquisition unit not detected.\nCheck the USB cable and power.")
+                T("⚠ Acquisition unit not detected.\nCheck the USB cable and power.", "⚠ Unidad de adquisición no detectada.\nRevisa el cable USB y la alimentación."))
             return
         mods = [d for d in devs if "9234" in d["product_type"]]
         nch = len(mods) * 4
@@ -1806,7 +1806,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _table_to_layout(); lay = st["layout"]; lay.fix_proximity_axes()
         fs = lay.fs_hz; nch = lay.n_channels()
         if nch < 2:
-            QtWidgets.QMessageBox.information(win, "OMA", "Add ≥2 active sensors first (Sensors tab)."); return
+            QtWidgets.QMessageBox.information(win, "OMA", T("Add ≥2 active sensors first (Sensors tab).", "Agrega ≥2 sensores activos primero (pestaña Sensores).")); return
         secs = min(float(lay.duration_s), 300.0); N = int(secs * fs); rng = st["rng"]
         live = cb_src.currentIndex() == 1
         data = None
@@ -1845,12 +1845,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     pass
                 _cause = getattr(e, "__cause__", None)
                 _root = _wl(f"\n\nDetail: {type(_cause).__name__}: {_cause}") if _cause else ""
-                QtWidgets.QMessageBox.critical(win, "NO real acquisition — nothing recorded",
-                    f"❌ Could not capture from {DAQ_NAME}. NO data was recorded (nothing was simulated).\n\n"
-                    f"{_wl(f'{type(e).__name__}: {e}')}{_root}\n\n"
-                    "Most likely the acquisition driver is not installed on this PC, or the unit is "
-                    "not connected/powered. Press ‘Test acquisition’ to diagnose.\n\n"
-                    "To run a demo without hardware, switch Source to ‘Simulated’.")
+                QtWidgets.QMessageBox.critical(win, T("NO real acquisition — nothing recorded",
+                                                      "SIN adquisición real — no se grabó nada"),
+                    T(f"❌ Could not capture from {DAQ_NAME}. NO data was recorded (nothing was simulated).\n\n"
+                      f"{_wl(f'{type(e).__name__}: {e}')}{_root}\n\n"
+                      "Most likely the acquisition driver is not installed on this PC, or the unit is "
+                      "not connected/powered. Press ‘Test acquisition’ to diagnose.\n\n"
+                      "To run a demo without hardware, switch Source to ‘Simulated’.",
+                      f"❌ No se pudo capturar de {DAQ_NAME}. NO se grabó data (no se simuló nada).\n\n"
+                      f"{_wl(f'{type(e).__name__}: {e}')}{_root}\n\n"
+                      "Lo más probable: el driver de adquisición no está instalado en este PC, o la unidad "
+                      "no está conectada/energizada. Presiona ‘Probar adquisición’ para diagnosticar.\n\n"
+                      "Para una demo sin hardware, cambia la Fuente a ‘Simulado’."))
                 return
             # Guardia anti-simulación: una captura REAL de N segundos DEBE tardar ~N segundos.
             _el = _time.time() - _t0
@@ -1860,10 +1866,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 except Exception:  # noqa: BLE001
                     pass
                 QtWidgets.QMessageBox.critical(win, "Acquisition too fast — not real",
-                    f"❌ The capture finished in {_el:.1f} s but {secs:.0f} s were requested. "
+                    T(f"❌ The capture finished in {_el:.1f} s but {secs:.0f} s were requested. "
                     "A real acquisition cannot finish faster than its duration.\n\n"
                     "The unit did not stream real samples. NO run was created. Press ‘Test acquisition’ "
-                    "to check the connection, or switch Source to ‘Simulated’ for a demo.")
+                    "to check the connection, or switch Source to ‘Simulated’ for a demo.", f"❌ La captura terminó en {_el:.1f} s pero se pidieron {secs:.0f} s. Una adquisición real no puede terminar más rápido que su duración.\n\nLa unidad no entregó muestras reales. NO se creó corrida. Presiona 'Probar adquisición' para revisar la conexión, o cambia la Fuente a 'Simulado' para una demo."))
                 return
             msg = f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales · {_el:.0f} s"
             _trpm = st.get("_tach_rpm")
@@ -2103,7 +2109,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         """Guarda la corrida (resultados + data cruda) en una carpeta VISIBLE."""
         payload = _build_run_payload()
         if payload is None:
-            QtWidgets.QMessageBox.information(win, "Save run", "Run OMA capture first."); return
+            QtWidgets.QMessageBox.information(win, "Save run", T("Run OMA capture first.", "Corre Captura OMA primero.")); return
         try:
             import json as _json, datetime as _dt, shutil as _shutil, tempfile
             from core.modal.oma_layout import _slug
@@ -2127,14 +2133,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     pass
             st["_run_saved"] = True; st["_run_folder"] = folder
             QtWidgets.QMessageBox.information(win, "Save run",
-                f"✅ Run saved locally:\n{folder}\n\n(results run.json · raw data.npz · capture.tdms)")
+                T(f"✅ Run saved locally:\n{folder}\n\n(results run.json · raw data.npz · capture.tdms)", f"✅ Corrida guardada localmente:\n{folder}\n\n(resultados run.json · cruda data.npz · captura.tdms)"))
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Save run", f"Could not save: {type(e).__name__}: {e}")
+            QtWidgets.QMessageBox.warning(win, "Save run", T(f"Could not save: {type(e).__name__}: {e}", f"No se pudo guardar: {type(e).__name__}: {e}"))
 
     def _upload_run():
         fdd = st.get("oma_fdd")
         if fdd is None:
-            QtWidgets.QMessageBox.information(win, "Cloud", "Run OMA capture first."); return
+            QtWidgets.QMessageBox.information(win, "Cloud", T("Run OMA capture first.", "Corre Captura OMA primero.")); return
         try:
             from core.modal import modal_cloud
             lay = st["layout"]
@@ -2209,8 +2215,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
             _data_fs = st.get("oma_data")
             if _data_fs is None:
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "No raw data in memory to upload. Capture again, or use 'Upload saved' "
-                    "(which brings the raw data from disk)."); return
+                    T("No raw data in memory to upload. Capture again, or use 'Upload saved' "
+                    "(which brings the raw data from disk).", "No hay data cruda en memoria para subir. Captura de nuevo o usa 'Subir guardada' (que trae la cruda del disco).")); return
             import concurrent.futures as _cf2
             import time as _t2
             _d, _fs = _data_fs
@@ -2233,17 +2239,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 _dlg.close()
             if not payload.get("raw_ref"):
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "Could not upload the raw data (check your internet). The run stays saved "
-                    "locally; upload it later with 'Upload saved'."); return
+                    T("Could not upload the raw data (check your internet). The run stays saved "
+                    "locally; upload it later with 'Upload saved'.", "No se pudo subir la data cruda (revisa tu internet). La corrida queda guardada localmente; súbela luego con 'Subir guardada'.")); return
             r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
-                    f"☁ Run uploaded with RAW DATA (~{_mbraw:.0f} MB). The web will run the full "
-                    "analysis (EFDD, SSI, harmonics, ODS, MAC) and the report.")
+                    T(f"☁ Run uploaded with RAW DATA (~{_mbraw:.0f} MB). The web will run the full "
+                    "analysis (EFDD, SSI, harmonics, ODS, MAC) and the report.", f"☁ Corrida subida con DATA CRUDA (~{_mbraw:.0f} MB). La web hará el análisis completo (EFDD, SSI, armónicos, ODS, MAC) y el reporte."))
             else:
-                QtWidgets.QMessageBox.warning(win, "Cloud", f"Could not upload: {r.get('reason')}")
+                QtWidgets.QMessageBox.warning(win, "Cloud", T(f"Could not upload: {r.get('reason')}", f"No se pudo subir: {r.get('reason')}"))
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Cloud", f"Upload failed: {type(e).__name__}: {e}")
+            QtWidgets.QMessageBox.warning(win, "Cloud", T(f"Upload failed: {type(e).__name__}: {e}", f"Falló la subida: {type(e).__name__}: {e}"))
     def _upload_saved_run():
         """Recarga una corrida GUARDADA en disco (offline) y la sube a la nube ahora
         que hay internet — resultados + data cruda. Flujo campo: capturas sin internet
@@ -2256,7 +2262,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         rjson = os.path.join(folder, "run.json")
         if not os.path.exists(rjson):
             QtWidgets.QMessageBox.warning(win, "Upload saved run",
-                "That folder has no run.json.\nPick a folder created by 'Save run locally'."); return
+                T("That folder has no run.json.\nPick a folder created by 'Save run locally'.", "Esa carpeta no tiene run.json.\nElige una carpeta creada por 'Guardar local'.")); return
         try:
             with open(rjson, encoding="utf-8") as f:
                 payload = _json.load(f)
@@ -2268,8 +2274,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
             _npz = os.path.join(folder, "data.npz")
             if not os.path.exists(_npz):
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "That run has no data.npz (raw data). Only runs with raw data can be uploaded. "
-                    "Capture again saving the raw data."); return
+                    T("That run has no data.npz (raw data). Only runs with raw data can be uploaded. "
+                    "Capture again saving the raw data.", "Esa corrida no tiene data.npz (data cruda). Solo se suben corridas con data cruda. Captura de nuevo guardando la cruda.")); return
             _mb = os.path.getsize(_npz) / 1e6
             import concurrent.futures as _cf3, time as _t3
             _z = np.load(_npz, allow_pickle=True)
@@ -2293,15 +2299,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 _dlg.close()
             if not payload.get("raw_ref"):
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    "Could not upload the raw data (check your internet). Try again."); return
+                    T("Could not upload the raw data (check your internet). Try again.", "No se pudo subir la data cruda (revisa tu internet). Intenta de nuevo.")); return
             r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
-                    f"☁ Run uploaded with RAW DATA (~{_mb:.0f} MB). The web will run the full analysis and the report.")
+                    T(f"☁ Run uploaded with RAW DATA (~{_mb:.0f} MB). The web will run the full analysis and the report.", f"☁ Corrida subida con DATA CRUDA (~{_mb:.0f} MB). La web hará el análisis completo y el reporte."))
             else:
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    f"Could not upload: {r.get('reason', 'offline')}.\n"
-                    "Check your internet and try again (the run stays saved).")
+                    T(f"Could not upload: {r.get('reason', 'offline')}.\n"
+                    "Check your internet and try again (the run stays saved).", f"No se pudo subir: {r.get('reason', 'offline')}.\nRevisa tu internet e intenta de nuevo (la corrida queda guardada)."))
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Upload saved run", f"Error: {type(e).__name__}: {e}")
 
@@ -2315,7 +2321,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return
         rjson = os.path.join(folder, "run.json")
         if not os.path.exists(rjson):
-            QtWidgets.QMessageBox.warning(win, "Open run", "That folder has no run.json."); return
+            QtWidgets.QMessageBox.warning(win, "Open run", T("That folder has no run.json.", "Esa carpeta no tiene run.json.")); return
         try:
             with open(rjson, encoding="utf-8") as f:
                 run = _json.load(f)
@@ -2358,10 +2364,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 p_svd.setXRange(0, float(freqs[band].max()), padding=0); p_svd.getViewBox().setLimits(xMin=0)
             _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative()
             _anim_reload_modes()
-            _raw = "with raw data" if os.path.exists(_npz) else "results only"
+            _raw = T("with raw data", "con data cruda") if os.path.exists(_npz) else T("results only", "solo resultados")
             QtWidgets.QMessageBox.information(win, "Open run",
-                f"✅ Run loaded ({len(fdd.modes)} modes, {_raw}).\n"
-                "Check the tabs: OMA capture (spectrum), Mode shapes, Campbell.")
+                T(f"✅ Run loaded ({len(fdd.modes)} modes, {_raw}).\n"
+                "Check the tabs: OMA capture (spectrum), Mode shapes, Campbell.", f"✅ Corrida cargada ({len(fdd.modes)} modos, {_raw}).\nRevisa las pestañas: Captura OMA (espectro), Formas modales, Campbell."))
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Open run", f"Error: {type(e).__name__}: {e}")
 
@@ -2493,7 +2499,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _identify():
         res = st["acc"].result()
         if res is None:
-            QtWidgets.QMessageBox.information(win, "Modes", "Accept some hits in Impact test."); return
+            QtWidgets.QMessageBox.information(win, "Modes", T("Accept some hits in Impact test.", "Acepta algunos golpes en Prueba de impacto.")); return
         modes = modes_from_frf(res, fmin=5.0, fmax=st["layout"].fmax_hz, exp_tau=st["acc"].exp_tau()); tbl_modes.setRowCount(0)
         for mo in modes:
             r = tbl_modes.rowCount(); tbl_modes.insertRow(r)
@@ -2746,7 +2752,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _run_ssi():
         d = st.get("oma_data_an") or st.get("oma_data")   # usa la data de análisis (preproceso)
         if not d:
-            QtWidgets.QMessageBox.information(win, "SSI", "Run OMA capture first (it stores the time data)."); return
+            QtWidgets.QMessageBox.information(win, "SSI", T("Run OMA capture first (it stores the time data).", "Corre Captura OMA primero (guarda la data de tiempo).")); return
         from core.modal.ssi import run_ssi_cov
         data, fs = d; lay = st["layout"]; fmax = min(fs / 2.56, lay.fmax_hz)
         lbl_ssi.setText(T("Running SSI-COV (sweeping model orders)…", "Corriendo SSI-COV (barriendo órdenes)…")); QtWidgets.QApplication.processEvents()
@@ -3057,12 +3063,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _save_clip():
         sh = _cur_shape()
         if sh is None:
-            QtWidgets.QMessageBox.information(win, "Clip", "Select a mode first."); return
+            QtWidgets.QMessageBox.information(win, "Clip", T("Select a mode first.", "Elige un modo primero.")); return
         try:
             from PIL import Image
             from io import BytesIO
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Clip", f"Image library not available: {e}"); return
+            QtWidgets.QMessageBox.warning(win, "Clip", T(f"Image library not available: {e}", f"Librería de imagen no disponible: {e}")); return
         path, _f = QtWidgets.QFileDialog.getSaveFileName(win, "Save clip", "mode_shape.gif", "GIF (*.gif)")
         if not path:
             return
@@ -3086,7 +3092,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             frames.append(Image.open(BytesIO(bytes(buf.data()))).convert("RGB"))
         if frames:
             frames[0].save(path, save_all=True, append_images=frames[1:], duration=60, loop=0)
-            QtWidgets.QMessageBox.information(win, "Clip", f"✅ Saved: {path}")
+            QtWidgets.QMessageBox.information(win, "Clip", T(f"✅ Saved: {path}", f"✅ Guardado: {path}"))
         if was:
             anim_timer.start(45)
 
@@ -3498,7 +3504,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if path:
             with open(path, "wb") as fh:
                 fh.write(pdf)
-            QtWidgets.QMessageBox.information(win, "Preliminary", f"✅ Saved: {path}")
+            QtWidgets.QMessageBox.information(win, "Preliminary", T(f"✅ Saved: {path}", f"✅ Guardado: {path}"))
     btn_prel.clicked.connect(_gen_preliminary)
 
     # ---------------------------------------------------------------
@@ -3795,7 +3801,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if st.get("oma_fdd") is not None and not st.get("_run_saved", False):
             r = QtWidgets.QMessageBox.question(
                 win, "Save before closing?",
-                "You have an unsaved OMA run.\nSave it locally before closing?",
+                T("You have an unsaved OMA run.\nSave it locally before closing?", "Tienes una corrida OMA sin guardar.\n¿Guardarla localmente antes de cerrar?"),
                 QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel,
                 QtWidgets.QMessageBox.Save)
             if r == QtWidgets.QMessageBox.Save:
@@ -3859,7 +3865,7 @@ def _show_update_banner(win, info):
         path = updater.download_file(url, on_progress=_prog)
         dlg.close()
         if not path:
-            QtWidgets.QMessageBox.warning(win, "Update", "Could not download the update.")
+            QtWidgets.QMessageBox.warning(win, "Update", T("Could not download the update.", "No se pudo descargar la actualización."))
             return
         if path.lower().endswith("setup.exe"):
             updater.launch_installer(path)
