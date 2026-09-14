@@ -270,7 +270,11 @@ def activate_with_key(license_key: str, endpoint: Optional[str] = None) -> Dict[
     token = data.get("token")
     if not token:
         return {"ok": False, "reason": data.get("error", "no_token")}
-    store_token(token)
+    st = _load_state()
+    st["token"] = token
+    st["license_key"] = (license_key or "").strip()        # para re-chequeo silencioso
+    st["last_online"] = time.time()                         # última verificación con el servidor
+    _save_state(st)
     ok, why, payload = verify_license_token(token)
     return {"ok": ok, "reason": why, "account": payload.get("account"), "exp": payload.get("exp")}
 
@@ -308,20 +312,39 @@ def activate_online(email: str, password: str, endpoint: Optional[str] = None
     return {"ok": ok, "reason": why, "account": payload.get("account"), "exp": payload.get("exp")}
 
 
-def gate_check(grace_recheck_days: int = 3) -> Dict[str, Any]:
-    """Decisión de arranque. Devuelve {allowed, reason, needs_activation, account, exp,
-    recheck_soon}. La app corre si hay token válido (funciona OFFLINE hasta que expire);
-    si no, exige activación. `recheck_soon` sugiere refrescar el token online."""
+def gate_check(grace_recheck_days: int = 3, hard_offline_days: int = 30) -> Dict[str, Any]:
+    """Decisión de arranque. Corre si hay token válido; funciona OFFLINE, PERO obliga a
+    reconectar al servidor cada `hard_offline_days` (si no, bloquea → cierra el hueco de
+    atrasar reloj + editar archivo). Cuando el token está por vencer o el último contacto
+    online es viejo, intenta un **re-chequeo silencioso** con la clave guardada (best-effort).
+    Devuelve {allowed, reason, needs_activation, account, exp, recheck_soon}."""
     st = _load_state()
     token = st.get("token", "")
     if not token:
         return {"allowed": False, "reason": "no_license", "needs_activation": True}
     ok, why, payload = verify_license_token(token)
+    now = time.time()
+    last_online = float(st.get("last_online", now))         # default now → no bloquea corridas viejas
+    key = st.get("license_key", "")
+    exp = float(payload.get("exp", 0)) if payload else 0.0
+    # ¿toca re-chequear online? (token por vencer, o mucho sin contacto, o token inválido)
+    due = (not ok) or ((exp - now) < grace_recheck_days * 86400) \
+        or ((now - last_online) > (hard_offline_days - 5) * 86400)
+    if due and key:
+        rr = activate_with_key(key)                         # re-activa/refresca (best-effort)
+        if rr.get("ok"):
+            st = _load_state(); token = st.get("token", "")
+            ok, why, payload = verify_license_token(token)
+            now = time.time(); last_online = float(st.get("last_online", now))
+            exp = float(payload.get("exp", 0)) if payload else 0.0
+        # si no hay red, seguimos con lo que había (gracia offline hasta el límite duro)
     if ok:
-        exp = float(payload.get("exp", 0))
-        recheck = (exp - time.time()) < (grace_recheck_days * 86400)
+        if (now - last_online) > hard_offline_days * 86400:
+            return {"allowed": False, "reason": "offline_too_long", "needs_activation": True,
+                    "account": payload.get("account"), "exp": exp}
         return {"allowed": True, "reason": why, "needs_activation": False,
-                "account": payload.get("account"), "exp": exp, "recheck_soon": recheck}
+                "account": payload.get("account"), "exp": exp,
+                "recheck_soon": (exp - now) < grace_recheck_days * 86400}
     # inválido: expirado / otra máquina / firma mala → exige (re)activación
     return {"allowed": False, "reason": why, "needs_activation": True,
             "account": payload.get("account")}
