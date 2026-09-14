@@ -302,6 +302,54 @@ def activate_with_key(license_key: str, endpoint: Optional[str] = None,
     return {"ok": ok, "reason": why, "account": payload.get("account"), "exp": payload.get("exp")}
 
 
+def clear_local_license() -> None:
+    """Borra el token/clave locales → el próximo arranque exigirá activación."""
+    try:
+        for k in ("token", "license_key", "last_online"):
+            _st = _load_state(); _st.pop(k, None); _save_state(_st)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def deactivate_machine(license_key: Optional[str] = None, endpoint: Optional[str] = None,
+                       timeout: float = 20.0) -> Dict[str, Any]:
+    """Desactiva ESTA máquina: libera el cupo en el servidor (borra su activación) y limpia
+    el token local. Permite mover la licencia a otra PC sin tocar Supabase. Devuelve {ok, reason}."""
+    key = (license_key or _load_state().get("license_key", "")).strip()
+    url = endpoint or (_supabase_url() + "/functions/v1/deactivate")
+    if not url.startswith("http"):
+        return {"ok": False, "reason": "no_server_url"}
+    if not key:
+        # sin clave no podemos avisar al servidor; al menos limpiamos local
+        clear_local_license()
+        return {"ok": False, "reason": "no_license_key_local"}
+    body = json.dumps({"license_key": key, "machine_fp": machine_fingerprint()}).encode()
+    import urllib.request
+    import urllib.error
+    import ssl
+    try:
+        import certifi
+        _ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001
+        _ctx = ssl.create_default_context()
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ctx) as resp:
+            data = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            data = json.loads(e.read().decode())
+        except Exception:  # noqa: BLE001
+            data = {"error": f"http_{e.code}"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"deactivate_failed: {type(e).__name__}: {e}"}
+    if data.get("ok") or data.get("deactivated"):
+        clear_local_license()
+        return {"ok": True, "reason": "deactivated"}
+    return {"ok": False, "reason": data.get("error") or data.get("message") or "deactivate_failed"}
+
+
 def activate_online(email: str, password: str, endpoint: Optional[str] = None
                     ) -> Dict[str, Any]:
     """Login (Supabase) + llama a la Edge Function `activate` con la huella de esta

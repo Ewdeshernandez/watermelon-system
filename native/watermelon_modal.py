@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.81"
+__version__ = "0.9.82"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -3726,8 +3726,53 @@ def build_app(layout: OMALayout, simulated: bool = True):
             f"{T('Account','Cuenta')}: {_ls.get('account') or '—'} · {T('Expires','Vence')}: {_expd}<br>"
             f"<b>{T('This computer','Este equipo')}:</b> {_lic.machine_label()}<br>"
             f"<span style='color:#94a3b8'>Machine ID: {_ls.get('fingerprint','')[:24]}…</span>")
+        _lic_ok = bool(_ls.get("valid"))
     except Exception:  # noqa: BLE001
-        _lic_lbl.setText("")
+        _lic_lbl.setText(""); _lic_ok = False
+    # --- Desactivar este equipo (libera el cupo → mover la licencia a otra PC) ---
+    _deact = QtWidgets.QPushButton(T("Deactivate this computer", "Desactivar este equipo"))
+    _deact.setCursor(QtCore.Qt.PointingHandCursor); _deact.setFont(_mkfont(9))
+    _deact.setStyleSheet("QPushButton{background:transparent;color:#ef4444;border:1px solid #f2c4c4;"
+                         "border-radius:8px;padding:6px 14px;} QPushButton:hover{background:#fef2f2;}"
+                         "QPushButton:disabled{color:#cbd5e1;border-color:#eef2f8;}")
+    _deact.setEnabled(_lic_ok)
+    _deact_row = QtWidgets.QHBoxLayout(); _deact_row.addWidget(_deact); _deact_row.addStretch(1)
+
+    def _do_deactivate():
+        m = QtWidgets.QMessageBox(_card)
+        m.setIcon(QtWidgets.QMessageBox.Warning)
+        m.setWindowTitle(T("Deactivate this computer", "Desactivar este equipo"))
+        m.setText(T("Release this license from this computer?",
+                    "¿Liberar esta licencia de este equipo?"))
+        m.setInformativeText(T("The app will require a license key again on next start. "
+                               "You can then activate the license on another computer.",
+                               "La app volverá a pedir la clave al iniciar. Luego podrás activar "
+                               "la licencia en otro equipo."))
+        m.setStandardButtons(QtWidgets.QMessageBox.Cancel | QtWidgets.QMessageBox.Yes)
+        m.setDefaultButton(QtWidgets.QMessageBox.Cancel)
+        if m.exec() != QtWidgets.QMessageBox.Yes:
+            return
+        _deact.setEnabled(False); _deact.setText(T("Deactivating…", "Desactivando…"))
+        QtWidgets.QApplication.processEvents()
+        try:
+            from core.modal import licensing as _lic2
+            r = _lic2.deactivate_machine()
+        except Exception as e:  # noqa: BLE001
+            r = {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+        if r.get("ok"):
+            done = QtWidgets.QMessageBox(_card)
+            done.setIcon(QtWidgets.QMessageBox.Information)
+            done.setWindowTitle("Watermelon Modal")
+            done.setText(T("This computer was deactivated.", "Este equipo fue desactivado."))
+            done.setInformativeText(T("The app will now close. Reopen it to activate a license.",
+                                      "La app se cerrará. Ábrela de nuevo para activar una licencia."))
+            done.exec()
+            QtWidgets.QApplication.quit()
+        else:
+            _deact.setEnabled(True); _deact.setText(T("Deactivate this computer", "Desactivar este equipo"))
+            QtWidgets.QMessageBox.warning(_card, "Watermelon Modal",
+                T("Could not deactivate: ", "No se pudo desactivar: ") + str(r.get("reason", "")))
+    _deact.clicked.connect(_do_deactivate)
     _status = QtWidgets.QLabel("Press <b>Check for updates</b> to see if a newer version is available.")
     _status.setFont(_mkfont(10)); _status.setStyleSheet("color:#64748b;border:none;")
     _status.setWordWrap(True); _status.setTextFormat(QtCore.Qt.RichText)
@@ -3746,7 +3791,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _brow_row = QtWidgets.QHBoxLayout(); _brow_row.setSpacing(12)
     _brow_row.addWidget(_brow); _brow_row.addWidget(_bgo); _brow_row.addStretch(1)
     _cl.addWidget(_uh); _cl.addSpacing(2); _cl.addWidget(_cur)
-    _cl.addWidget(_lic_lbl); _cl.addSpacing(4); _cl.addWidget(_status)
+    _cl.addWidget(_lic_lbl); _cl.addLayout(_deact_row); _cl.addSpacing(4); _cl.addWidget(_status)
     _cl.addWidget(_notes); _cl.addSpacing(8); _cl.addLayout(_brow_row)
     _foot = QtWidgets.QLabel(T("Updates download and install automatically; the app restarts when done. "
                              "Requires an internet connection.", "Las actualizaciones se descargan e instalan automáticamente; la app se reinicia al terminar. Requiere conexión a internet."))
