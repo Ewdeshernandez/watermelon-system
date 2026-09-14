@@ -308,7 +308,7 @@ def activate_online(email: str, password: str, endpoint: Optional[str] = None
     return {"ok": ok, "reason": why, "account": payload.get("account"), "exp": payload.get("exp")}
 
 
-def gate_check(grace_recheck_days: int = 14) -> Dict[str, Any]:
+def gate_check(grace_recheck_days: int = 3) -> Dict[str, Any]:
     """Decisión de arranque. Devuelve {allowed, reason, needs_activation, account, exp,
     recheck_soon}. La app corre si hay token válido (funciona OFFLINE hasta que expire);
     si no, exige activación. `recheck_soon` sugiere refrescar el token online."""
