@@ -6,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const b64u = (b: Uint8Array) =>
   btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const LICENSE_PUBKEY = "6yd-Rfp0GEdlFo_hLZ3O0oQD890vc_ylecJi4TyYWzA";
+const LICENSE_PUBKEY = "ozjVKHml8OE4E-1h07evyw5IOcGnO-IbdB7lV_OUaeM";
 
 async function signToken(payload: Record<string, unknown>): Promise<string> {
   const jwk = { kty: "OKP", crv: "Ed25519",

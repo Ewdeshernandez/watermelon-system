@@ -32,7 +32,7 @@ from typing import Any, Dict, Optional, Tuple
 # sólo VERIFICA; no puede firmar. La PRIVADA vive SOLO en el servidor (Edge Function).
 # Segura de embeber en el .exe. Override por env para pruebas.
 LICENSE_PUBKEY_B64 = os.environ.get("WM_LICENSE_PUBKEY", "") or \
-    "6yd-Rfp0GEdlFo_hLZ3O0oQD890vc_ylecJi4TyYWzA"
+    "ozjVKHml8OE4E-1h07evyw5IOcGnO-IbdB7lV_OUaeM"
 
 _STATE_DIR = os.path.join(os.path.expanduser("~"), ".watermelon")
 _STATE_FILE = os.path.join(_STATE_DIR, "wm_license.json")

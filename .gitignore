@@ -109,3 +109,7 @@ planta/installer/build/
 
 # credenciales embebidas en el build (generadas por CI, nunca commitear)
 core/remote_monitoring/_cloud_config.py
+
+# Llaves privadas de licenciamiento — NUNCA subir
+*.pem
+wm_license_private*
