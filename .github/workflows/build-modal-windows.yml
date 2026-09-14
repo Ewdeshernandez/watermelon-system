@@ -61,7 +61,7 @@ jobs:
             --hidden-import core.modal.modal_cloud \
             --hidden-import core.modal.updater \
             --hidden-import core.modal.licensing \
-            --collect-submodules cryptography \
+            --collect-all cryptography \
             --hidden-import cryptography \
             --hidden-import certifi \
             --copy-metadata certifi \

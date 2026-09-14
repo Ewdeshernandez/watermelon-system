@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.74"
+__version__ = "0.9.75"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -3889,9 +3889,9 @@ def _show_update_banner(win, info):
         pass
 
 
-# Interruptor del licenciamiento. FALSE = la app corre sin bloquear (hasta desplegar el
-# servidor Fase 2). Poner en True (o env WM_LICENSING=1) para EXIGIR activación.
-_LICENSING_ENABLED = os.environ.get("WM_LICENSING", "0") == "1"
+# Interruptor del licenciamiento. Por defecto ENCENDIDO (exige activación por clave).
+# Para desarrollo en el Mac: exportar WM_LICENSING=0 para saltar el gate.
+_LICENSING_ENABLED = os.environ.get("WM_LICENSING", "1") != "0"
 
 
 def _activation_dialog(app, lic) -> bool:
