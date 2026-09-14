@@ -269,7 +269,9 @@ def activate_with_key(license_key: str, endpoint: Optional[str] = None) -> Dict[
             return {"ok": False, "reason": f"activate_failed: {e}"}
     token = data.get("token")
     if not token:
-        return {"ok": False, "reason": data.get("error", "no_token")}
+        # el servidor de Supabase usa 'error'; el gateway de auth usa 'message'/'msg'
+        return {"ok": False, "reason": data.get("error") or data.get("message")
+                or data.get("msg") or "no_token"}
     st = _load_state()
     st["token"] = token
     st["license_key"] = (license_key or "").strip()        # para re-chequeo silencioso
