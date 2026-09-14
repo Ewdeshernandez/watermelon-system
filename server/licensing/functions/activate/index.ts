@@ -10,9 +10,17 @@ const b64u = (b: Uint8Array) =>
 const b64uDec = (s: string) =>
   Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 
+// Llave pública (x) — pública por diseño; debe coincidir con la del .exe.
+const LICENSE_PUBKEY = "6yd-Rfp0GEdlFo_hLZ3O0oQD890vc_ylecJi4TyYWzA";
+
 async function signToken(payload: Record<string, unknown>): Promise<string> {
-  const priv = b64uDec(Deno.env.get("WM_LICENSE_PRIVKEY")!);          // 32 bytes raw
-  const key = await crypto.subtle.importKey("raw", priv, { name: "Ed25519" }, false, ["sign"]);
+  // Ed25519 en WebCrypto: la privada se importa como JWK (d = seed raw, x = pública).
+  const jwk = {
+    kty: "OKP", crv: "Ed25519",
+    d: Deno.env.get("WM_LICENSE_PRIVKEY")!, x: LICENSE_PUBKEY,
+    key_ops: ["sign"], ext: true,
+  };
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, false, ["sign"]);
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key, bytes));
   return `${b64u(bytes)}.${b64u(sig)}`;
