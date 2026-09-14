@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.73"
+__version__ = "0.9.74"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -3889,6 +3889,71 @@ def _show_update_banner(win, info):
         pass
 
 
+# Interruptor del licenciamiento. FALSE = la app corre sin bloquear (hasta desplegar el
+# servidor Fase 2). Poner en True (o env WM_LICENSING=1) para EXIGIR activación.
+_LICENSING_ENABLED = os.environ.get("WM_LICENSING", "0") == "1"
+
+
+def _activation_dialog(app, lic) -> bool:
+    """Ventana de activación: login (cuenta Watermelon) → activa esta máquina.
+    Devuelve True si quedó activada. Bilingüe. Muestra la huella (para soporte)."""
+    dlg = QtWidgets.QDialog()
+    dlg.setWindowTitle("Watermelon Modal — " + T("Activation", "Activación"))
+    dlg.setMinimumWidth(460); dlg.setStyleSheet(f"QDialog{{background:{NAVY};}}")
+    v = QtWidgets.QVBoxLayout(dlg); v.setContentsMargins(26, 24, 26, 22); v.setSpacing(10)
+    head = QtWidgets.QLabel(
+        "<span style='color:#fff;font-weight:800;letter-spacing:2px;font-size:17px;'>WATERMELON</span>"
+        "<span style='color:#1AAEE5;font-weight:800;letter-spacing:2px;font-size:17px;'>&nbsp;MODAL</span>")
+    head.setTextFormat(QtCore.Qt.RichText); v.addWidget(head)
+    v.addWidget(QtWidgets.QLabel("<span style='color:#93c5fd;font-size:12px;'>"
+                + T("Sign in to activate this computer.", "Inicia sesión para activar este equipo.")
+                + "</span>"))
+    _le = lambda ph: (lambda w: (w.setPlaceholderText(ph), w.setStyleSheet(
+        "background:white;border-radius:7px;padding:8px;"))[0] or w)(QtWidgets.QLineEdit())
+    e_mail = _le(T("Email", "Correo")); v.addWidget(e_mail)
+    e_pass = _le(T("Password", "Contraseña")); e_pass.setEchoMode(QtWidgets.QLineEdit.Password); v.addWidget(e_pass)
+    msg = QtWidgets.QLabel(""); msg.setWordWrap(True); msg.setStyleSheet("color:#fca5a5;font-size:12px;"); v.addWidget(msg)
+    fp = lic.machine_fingerprint()
+    v.addWidget(QtWidgets.QLabel(f"<span style='color:#5b6b86;font-size:10px;'>Machine ID: {fp[:16]}…</span>"))
+    row = QtWidgets.QHBoxLayout()
+    b_quit = QtWidgets.QPushButton(T("Quit", "Salir"))
+    b_act = QtWidgets.QPushButton(T("Activate", "Activar"))
+    b_act.setStyleSheet(f"QPushButton{{background:{ACC};color:#08243a;font-weight:800;padding:8px 18px;}}")
+    row.addWidget(b_quit); row.addStretch(1); row.addWidget(b_act); v.addLayout(row)
+    state = {"ok": False}
+
+    def _do_activate():
+        b_act.setEnabled(False); b_act.setText(T("Activating…", "Activando…")); QtWidgets.QApplication.processEvents()
+        r = lic.activate_online(e_mail.text().strip(), e_pass.text())
+        if r.get("ok"):
+            state["ok"] = True; dlg.accept()
+        else:
+            msg.setText(T("Could not activate: ", "No se pudo activar: ") + str(r.get("reason", "")))
+            b_act.setEnabled(True); b_act.setText(T("Activate", "Activar"))
+    b_act.clicked.connect(_do_activate)
+    b_quit.clicked.connect(dlg.reject)
+    dlg.exec()
+    return state["ok"]
+
+
+def _license_gate(app) -> bool:
+    """Si el licenciamiento está activo y no hay licencia válida → exige activación.
+    Devuelve True si la app puede arrancar."""
+    if not _LICENSING_ENABLED:
+        return True
+    try:
+        from core.modal import licensing as lic
+    except Exception:  # noqa: BLE001  — build sin el módulo → no bloquear
+        return True
+    try:
+        g = lic.gate_check()
+    except Exception:  # noqa: BLE001
+        return True
+    if g.get("allowed"):
+        return True
+    return _activation_dialog(app, lic)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Watermelon Modal — EMA + OMA (native)")
     ap.add_argument("--sim", action="store_true", default=True)
@@ -3898,6 +3963,11 @@ def main(argv=None):
     # la carga (Load local) o —lo recomendado— usa un ⭐ Preset.
     lay = OMALayout(name=args.name, machine_components=[], points=[])
     try:
+        # Gate de licencia (Fase 3): si está activo y no hay licencia válida, exige activación.
+        _app0 = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+        _app0.setStyleSheet(_stylesheet())
+        if not _license_gate(_app0):
+            sys.exit(0)
         app, win = build_app(lay, simulated=True); win.showMaximized()
         # Auto-actualizador: al conectar a internet, avisa si hay versión nueva.
         try:

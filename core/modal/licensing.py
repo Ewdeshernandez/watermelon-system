@@ -226,3 +226,69 @@ def local_license_status() -> Dict[str, Any]:
 
 def store_token(token: str) -> None:
     st = _load_state(); st["token"] = token; _save_state(st)
+
+
+# =====================================================================
+# 5) Activación online (login + Edge Function) y GATE de arranque
+# =====================================================================
+def _supabase_url() -> str:
+    for src in ("WM_SUPABASE_URL", "SUPABASE_URL"):
+        if os.environ.get(src):
+            return os.environ[src].rstrip("/")
+    try:
+        from core.remote_monitoring import _cloud_config as _cc
+        return str(getattr(_cc, "SUPABASE_URL", "")).rstrip("/")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def activate_online(email: str, password: str, endpoint: Optional[str] = None
+                    ) -> Dict[str, Any]:
+    """Login (Supabase) + llama a la Edge Function `activate` con la huella de esta
+    máquina; guarda y verifica el token firmado. Devuelve {ok, reason, ...}."""
+    try:
+        from core.supabase_auth import signin_user
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"auth_unavailable: {e}"}
+    r = signin_user(email, password)
+    if not r.get("ok"):
+        return {"ok": False, "reason": r.get("error", "signin_failed")}
+    access = (r.get("session") or {}).get("access_token")
+    if not access:
+        return {"ok": False, "reason": "no_session"}
+    url = endpoint or (_supabase_url() + "/functions/v1/activate")
+    is_vm, _ = detect_vm()
+    body = json.dumps({"machine_fp": machine_fingerprint(), "is_vm": is_vm}).encode()
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, data=body, method="POST", headers={
+            "Authorization": f"Bearer {access}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"activate_failed: {e}"}
+    token = data.get("token")
+    if not token:
+        return {"ok": False, "reason": data.get("error", "no_token")}
+    store_token(token)
+    ok, why, payload = verify_license_token(token)
+    return {"ok": ok, "reason": why, "account": payload.get("account"), "exp": payload.get("exp")}
+
+
+def gate_check(grace_recheck_days: int = 14) -> Dict[str, Any]:
+    """Decisión de arranque. Devuelve {allowed, reason, needs_activation, account, exp,
+    recheck_soon}. La app corre si hay token válido (funciona OFFLINE hasta que expire);
+    si no, exige activación. `recheck_soon` sugiere refrescar el token online."""
+    st = _load_state()
+    token = st.get("token", "")
+    if not token:
+        return {"allowed": False, "reason": "no_license", "needs_activation": True}
+    ok, why, payload = verify_license_token(token)
+    if ok:
+        exp = float(payload.get("exp", 0))
+        recheck = (exp - time.time()) < (grace_recheck_days * 86400)
+        return {"allowed": True, "reason": why, "needs_activation": False,
+                "account": payload.get("account"), "exp": exp, "recheck_soon": recheck}
+    # inválido: expirado / otra máquina / firma mala → exige (re)activación
+    return {"allowed": False, "reason": why, "needs_activation": True,
+            "account": payload.get("account")}
