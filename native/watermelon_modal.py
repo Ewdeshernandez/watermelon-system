@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.79"
+__version__ = "0.9.80"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -3710,6 +3710,24 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _uh.setFont(_mkfont(16, True)); _uh.setStyleSheet(f"color:{NAVY};border:none;")
     _cur = QtWidgets.QLabel(f"Installed version:  v{__version__}")
     _cur.setFont(_mkfont(11)); _cur.setStyleSheet("color:#475569;border:none;")
+    # --- Panel de licencia (para soporte: identificar/activar este equipo) ---
+    _lic_lbl = QtWidgets.QLabel(""); _lic_lbl.setFont(_mkfont(10)); _lic_lbl.setWordWrap(True)
+    _lic_lbl.setTextFormat(QtCore.Qt.RichText); _lic_lbl.setStyleSheet("color:#475569;border:none;")
+    try:
+        from core.modal import licensing as _lic
+        _ls = _lic.local_license_status()
+        _exp = _ls.get("exp")
+        import datetime as _dt2
+        _expd = _dt2.date.fromtimestamp(float(_exp)).isoformat() if _exp else "—"
+        _stt = (f"<span style='color:#10b981'>● {T('Licensed','Con licencia')}</span>"
+                if _ls.get("valid") else f"<span style='color:#ef4444'>● {T('Not activated','Sin activar')}</span>")
+        _lic_lbl.setText(
+            f"<b>{T('License','Licencia')}:</b> {_stt}<br>"
+            f"{T('Account','Cuenta')}: {_ls.get('account') or '—'} · {T('Expires','Vence')}: {_expd}<br>"
+            f"<b>{T('This computer','Este equipo')}:</b> {_lic.machine_label()}<br>"
+            f"<span style='color:#94a3b8'>Machine ID: {_ls.get('fingerprint','')[:24]}…</span>")
+    except Exception:  # noqa: BLE001
+        _lic_lbl.setText("")
     _status = QtWidgets.QLabel("Press <b>Check for updates</b> to see if a newer version is available.")
     _status.setFont(_mkfont(10)); _status.setStyleSheet("color:#64748b;border:none;")
     _status.setWordWrap(True); _status.setTextFormat(QtCore.Qt.RichText)
@@ -3727,7 +3745,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _brow.setMinimumHeight(42); _bgo.setMinimumHeight(42)
     _brow_row = QtWidgets.QHBoxLayout(); _brow_row.setSpacing(12)
     _brow_row.addWidget(_brow); _brow_row.addWidget(_bgo); _brow_row.addStretch(1)
-    _cl.addWidget(_uh); _cl.addSpacing(2); _cl.addWidget(_cur); _cl.addWidget(_status)
+    _cl.addWidget(_uh); _cl.addSpacing(2); _cl.addWidget(_cur)
+    _cl.addWidget(_lic_lbl); _cl.addSpacing(4); _cl.addWidget(_status)
     _cl.addWidget(_notes); _cl.addSpacing(8); _cl.addLayout(_brow_row)
     _foot = QtWidgets.QLabel(T("Updates download and install automatically; the app restarts when done. "
                              "Requires an internet connection.", "Las actualizaciones se descargan e instalan automáticamente; la app se reinicia al terminar. Requiere conexión a internet."))
