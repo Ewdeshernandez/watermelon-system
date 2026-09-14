@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.69"
+__version__ = "0.9.70"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -79,6 +79,32 @@ def _wl(text) -> str:
     return s
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
+
+# =====================================================================
+# i18n — bilingüe EN/ES. T("English", "Español") devuelve según el idioma
+# activo. El idioma se guarda (QSettings) y se aplica al reiniciar la app.
+# =====================================================================
+_LANG = "en"
+
+
+def T(en, es=None):
+    """Devuelve el texto en el idioma activo (en por defecto)."""
+    return es if (es is not None and _LANG == "es") else en
+
+
+def _load_lang():
+    try:
+        v = QtCore.QSettings("WatermelonSystem", "Modal").value("lang", "en")
+        return "es" if str(v).lower().startswith("es") else "en"
+    except Exception:  # noqa: BLE001
+        return "en"
+
+
+def _save_lang(v):
+    try:
+        QtCore.QSettings("WatermelonSystem", "Modal").setValue("lang", "es" if v == "es" else "en")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 DEMO_MODES = [SynthMode(19.4, 0.020, 1.0), SynthMode(38.8, 0.015, 0.7),
@@ -623,6 +649,8 @@ def _led(color, on, label):
 
 
 def build_app(layout: OMALayout, simulated: bool = True):
+    global _LANG
+    _LANG = _load_lang()                                   # idioma guardado (EN/ES)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     app.setStyleSheet(_stylesheet())
     pg.setConfigOptions(antialias=True)
@@ -659,6 +687,28 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ver_lbl.setToolTip("Watermelon Modal software version"); tb.addWidget(ver_lbl)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
+    # --- Selector de idioma EN/ES (el cliente lo elige) ---
+    lang_cb = QtWidgets.QComboBox(); lang_cb.addItems(["EN", "ES"])
+    lang_cb.setCurrentIndex(1 if _LANG == "es" else 0)
+    lang_cb.setToolTip(T("Interface language", "Idioma de la interfaz"))
+    lang_cb.setStyleSheet("QComboBox{background:#1e3a5f; color:white; font-weight:700; border-radius:7px;"
+                          "padding:2px 8px; margin-right:10px;} QComboBox QAbstractItemView{background:white;color:#0f172a;}")
+
+    def _on_lang(i):
+        new = "es" if i == 1 else "en"
+        if new == _LANG:
+            return
+        _save_lang(new)
+        QtWidgets.QMessageBox.information(win, "Watermelon Modal",
+            T("Language changed. The app will restart to apply it across the whole interface.",
+              "Idioma cambiado. La app se reiniciará para aplicarlo en toda la interfaz."))
+        try:
+            QtCore.QProcess.startDetached(QtWidgets.QApplication.applicationFilePath(), sys.argv[1:])
+        except Exception:  # noqa: BLE001
+            pass
+        app.quit()
+    lang_cb.currentIndexChanged.connect(_on_lang)
+    tb.addWidget(lang_cb)
     # ¿Hay una NI 9234 conectada AHORA? Autodetecta al arrancar (no depende de --sim).
     def _detect_ni_channels():
         try:
@@ -716,21 +766,21 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ml.addWidget(QtWidgets.QLabel("<b>Machine &amp; client</b>"))
     frm = QtWidgets.QFormLayout()
     e_name = QtWidgets.QLineEdit(layout.name)
-    e_type = QtWidgets.QLineEdit(layout.machine_type); e_type.setPlaceholderText("Motor-pump, turbine train…")
-    e_tag = QtWidgets.QLineEdit(layout.tag); e_tag.setPlaceholderText("asset tag / nameplate")
-    e_client = QtWidgets.QLineEdit(layout.client); e_client.setPlaceholderText("client")
-    e_loc = QtWidgets.QLineEdit(layout.location); e_loc.setPlaceholderText("plant / location")
+    e_type = QtWidgets.QLineEdit(layout.machine_type); e_type.setPlaceholderText(T("Motor-pump, turbine train…", "Motor-bomba, tren de turbina…"))
+    e_tag = QtWidgets.QLineEdit(layout.tag); e_tag.setPlaceholderText(T("asset tag / nameplate", "tag / placa del activo"))
+    e_client = QtWidgets.QLineEdit(layout.client); e_client.setPlaceholderText(T("client", "cliente"))
+    e_loc = QtWidgets.QLineEdit(layout.location); e_loc.setPlaceholderText(T("plant / location", "planta / ubicación"))
     sp_rpm = QtWidgets.QDoubleSpinBox(); sp_rpm.setRange(0, 60000); sp_rpm.setValue(layout.running_speed_rpm)
     r1 = QtWidgets.QHBoxLayout(); r1.addWidget(e_name, 2); r1.addSpacing(8)
-    r1.addWidget(QtWidgets.QLabel("Type:")); r1.addWidget(e_type, 2)
+    r1.addWidget(QtWidgets.QLabel(T("Type:", "Tipo:"))); r1.addWidget(e_type, 2)
     _w1 = QtWidgets.QWidget(); _w1.setLayout(r1); frm.addRow("Machine:", _w1)
     r2 = QtWidgets.QHBoxLayout(); r2.addWidget(e_tag, 1); r2.addSpacing(8)
-    r2.addWidget(QtWidgets.QLabel("Client:")); r2.addWidget(e_client, 1); r2.addSpacing(8)
-    r2.addWidget(QtWidgets.QLabel("Location:")); r2.addWidget(e_loc, 1)
+    r2.addWidget(QtWidgets.QLabel(T("Client:", "Cliente:"))); r2.addWidget(e_client, 1); r2.addSpacing(8)
+    r2.addWidget(QtWidgets.QLabel(T("Location:", "Ubicación:"))); r2.addWidget(e_loc, 1)
     _w2 = QtWidgets.QWidget(); _w2.setLayout(r2); frm.addRow("Tag:", _w2)
-    r3 = QtWidgets.QHBoxLayout(); r3.addWidget(QtWidgets.QLabel("Running speed (RPM):")); r3.addWidget(sp_rpm)
-    r3.addSpacing(16); r3.addWidget(QtWidgets.QLabel("Test:"))
-    chk_ema = QtWidgets.QCheckBox("EMA (impact)"); chk_oma = QtWidgets.QCheckBox("OMA (operational)")
+    r3 = QtWidgets.QHBoxLayout(); r3.addWidget(QtWidgets.QLabel(T("Running speed (RPM):", "Velocidad (RPM):"))); r3.addWidget(sp_rpm)
+    r3.addSpacing(16); r3.addWidget(QtWidgets.QLabel(T("Test:", "Ensayo:")))
+    chk_ema = QtWidgets.QCheckBox(T("EMA (impact)", "EMA (impacto)")); chk_oma = QtWidgets.QCheckBox(T("OMA (operational)", "OMA (operacional)"))
     chk_ema.setChecked("EMA" in layout.test_modes); chk_oma.setChecked("OMA" in layout.test_modes or not layout.test_modes)
     r3.addWidget(chk_ema); r3.addWidget(chk_oma); r3.addStretch(1)
     _w3 = QtWidgets.QWidget(); _w3.setLayout(r3); frm.addRow("Operation:", _w3)
@@ -740,12 +790,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     row_add = QtWidgets.QHBoxLayout()
     row_add.addWidget(QtWidgets.QLabel("<b>Equipment</b>"))
     cb_kind = QtWidgets.QComboBox(); cb_kind.addItems(COMPONENT_KINDS); cb_kind.setMinimumWidth(190)
-    btn_addcomp = QtWidgets.QPushButton("➕ Add"); btn_delcomp = QtWidgets.QPushButton("– Remove")
+    btn_addcomp = QtWidgets.QPushButton(T("➕ Add", "➕ Agregar")); btn_delcomp = QtWidgets.QPushButton(T("– Remove", "– Quitar"))
     row_add.addWidget(cb_kind); row_add.addWidget(btn_addcomp); row_add.addWidget(btn_delcomp)
     row_add.addSpacing(24)
     row_add.addWidget(QtWidgets.QLabel("<b>Name</b>"))
     e_compname = QtWidgets.QLineEdit(); e_compname.setMinimumWidth(160)
-    e_compname.setPlaceholderText("e.g. ABB motor")
+    e_compname.setPlaceholderText(T("e.g. ABB motor", "ej. motor ABB"))
     e_compname.setToolTip("Name shown above the equipment in the drawing (editable).")
     row_add.addWidget(e_compname)
     row_add.addStretch(1)
@@ -762,14 +812,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
     for lab, w in (("L", sp_len), ("H", sp_hei), ("W", sp_wid)):
         bld.addWidget(QtWidgets.QLabel(lab)); bld.addWidget(w)
     bld.addSpacing(16)
-    btn_color = QtWidgets.QPushButton("🎨 Colour")
+    btn_color = QtWidgets.QPushButton(T("🎨 Colour", "🎨 Color"))
     btn_color.setToolTip("Pick the colour of the selected equipment (e.g. grey motor, green pump).")
     btn_colreset = QtWidgets.QPushButton("↺")
     btn_colreset.setToolTip("Reset to the default colour for the equipment type.")
     btn_colreset.setMaximumWidth(34)
     bld.addWidget(btn_color); bld.addWidget(btn_colreset)
     bld.addSpacing(16)
-    chk_lock = QtWidgets.QCheckBox("🔒 Rotate whole assembly")
+    chk_lock = QtWidgets.QCheckBox(T("🔒 Rotate whole assembly", "🔒 Rotar todo el conjunto"))
     chk_lock.setToolTip("ON: drag rotates/positions the WHOLE assembly (X/Y/Z). "
                         "OFF: drag moves each equipment separately.")
     bld.addWidget(chk_lock)
@@ -779,7 +829,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         "<i style='color:#64748b'>🖱️ left-drag = rotate · wheel = zoom · right-drag = pan · "
         "click = move the selected equipment. Build the figure, then go to <b>Sensors</b>.</i>"))
     vgeo = _make_view("geo"); ml.addWidget(vgeo["plot"], 1)
-    cfg_tabs.addTab(pg_m, "Machine")
+    cfg_tabs.addTab(pg_m, T("Machine", "Máquina"))
 
     # ---------- Sensors ----------
     pg_sen = QtWidgets.QWidget(); snl = QtWidgets.QVBoxLayout(pg_sen)
@@ -789,27 +839,27 @@ def build_app(layout: OMALayout, simulated: bool = True):
     prow = QtWidgets.QHBoxLayout()
     prow.addWidget(QtWidgets.QLabel("No.:"))
     sp_num = QtWidgets.QSpinBox(); sp_num.setRange(1, 999); sp_num.setValue(1); prow.addWidget(sp_num)
-    prow.addWidget(QtWidgets.QLabel("Axes:"))
+    prow.addWidget(QtWidgets.QLabel(T("Axes:", "Ejes:")))
     cbx = QtWidgets.QCheckBox("X"); cby = QtWidgets.QCheckBox("Y"); cbz = QtWidgets.QCheckBox("Z"); cby.setChecked(True)
     for w in (cbx, cby, cbz): prow.addWidget(w)
-    prow.addWidget(QtWidgets.QLabel("Measures:"))
+    prow.addWidget(QtWidgets.QLabel(T("Measures:", "Mide:")))
     cb_mtype = QtWidgets.QComboBox(); cb_mtype.addItems(MEAS_TYPES); prow.addWidget(cb_mtype)
-    prow.addSpacing(12); prow.addWidget(QtWidgets.QLabel("Click mode:"))
+    prow.addSpacing(12); prow.addWidget(QtWidgets.QLabel(T("Click mode:", "Modo de clic:")))
     cb_click = QtWidgets.QComboBox(); cb_click.addItems(["Place point", "Move sensor"]); prow.addWidget(cb_click)
-    prow.addWidget(QtWidgets.QLabel("Sensor:"))
+    prow.addWidget(QtWidgets.QLabel(T("Sensor:", "Sensor:")))
     cb_place = QtWidgets.QComboBox(); cb_place.setMinimumWidth(150); prow.addWidget(cb_place)
     prow.addStretch(1)
     snl.addLayout(prow)
     nrow = QtWidgets.QHBoxLayout()
-    btn_norm = QtWidgets.QPushButton("📐 Place by standard (API 670 / ISO 20816)")
+    btn_norm = QtWidgets.QPushButton(T("📐 Place by standard (API 670 / ISO 20816)", "📐 Ubicar por norma (API 670 / ISO 20816)"))
     btn_norm.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
-    btn_clrpts = QtWidgets.QPushButton("🧹 Clear sensors")
+    btn_clrpts = QtWidgets.QPushButton(T("🧹 Clear sensors", "🧹 Limpiar sensores"))
     nrow.addWidget(btn_norm); nrow.addWidget(btn_clrpts)
     nrow.addWidget(QtWidgets.QLabel("<i style='color:#64748b'>· In 'Move sensor' mode, click-and-hold on a "
                                     "sensor to drag it.</i>")); nrow.addStretch(1)
     snl.addLayout(nrow)
     vsen = _make_view("sensors"); snl.addWidget(vsen["plot"], 1)
-    cfg_tabs.addTab(pg_sen, "Sensors")
+    cfg_tabs.addTab(pg_sen, T("Sensors", "Sensores"))
 
     # ---------- Measurement points (table) ----------
     pg_pts = QtWidgets.QWidget(); pl = QtWidgets.QVBoxLayout(pg_pts)
@@ -821,11 +871,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tbl_pts.verticalHeader().setVisible(False)
     pl.addWidget(tbl_pts, 1)
     r_pt = QtWidgets.QHBoxLayout()
-    btn_delp = QtWidgets.QPushButton("– Remove selected")
+    btn_delp = QtWidgets.QPushButton(T("– Remove selected", "– Quitar selección"))
     r_pt.addWidget(btn_delp); r_pt.addStretch(1)
     pl.addLayout(r_pt)
     lbl_val = QtWidgets.QLabel(""); pl.addWidget(lbl_val)
-    cfg_tabs.addTab(pg_pts, "Measurement points")
+    cfg_tabs.addTab(pg_pts, T("Measurement points", "Puntos de medición"))
 
     # ---------- Acquisition ----------
     pg_acq = QtWidgets.QWidget(); aol = QtWidgets.QVBoxLayout(pg_acq)
@@ -834,8 +884,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     cb_blk = QtWidgets.QComboBox(); cb_blk.addItems(["1024", "2048", "4096", "8192", "16384"]); cb_blk.setCurrentText(str(layout.block_size))
     sp_fmax = QtWidgets.QDoubleSpinBox(); sp_fmax.setRange(10, 25600); sp_fmax.setValue(layout.fmax_hz)
     sp_dur = QtWidgets.QSpinBox(); sp_dur.setRange(5, 3600); sp_dur.setValue(int(layout.duration_s))
-    chk_fwin = QtWidgets.QCheckBox("Force window (EMA)"); chk_fwin.setChecked(True)
-    chk_ewin = QtWidgets.QCheckBox("Exponential window (EMA)"); chk_ewin.setChecked(True)
+    chk_fwin = QtWidgets.QCheckBox(T("Force window (EMA)", "Ventana de fuerza (EMA)")); chk_fwin.setChecked(True)
+    chk_ewin = QtWidgets.QCheckBox(T("Exponential window (EMA)", "Ventana exponencial (EMA)")); chk_ewin.setChecked(True)
     sp_tgt = QtWidgets.QSpinBox(); sp_tgt.setRange(1, 64); sp_tgt.setValue(5)
     al.addRow("Sampling fs (Hz):", sp_fs)
     al.addRow("Block size (EMA, samples/hit):", cb_blk)
@@ -847,7 +897,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     al.addRow("Windows:", _wb)
     # Keyphasor / tach OPCIONAL: si no hay, se deja apagado y no cambia nada.
     _tb = QtWidgets.QWidget(); _tbl = QtWidgets.QHBoxLayout(_tb); _tbl.setContentsMargins(0, 0, 0, 0)
-    chk_tach = QtWidgets.QCheckBox("Keyphasor / tach on BNC")
+    chk_tach = QtWidgets.QCheckBox(T("Keyphasor / tach on BNC", "Keyphasor / tacóm. en BNC"))
     chk_tach.setChecked(layout.tach_bnc > 0)
     chk_tach.setToolTip("OPTIONAL. If the machine has a once-per-rev pulse, capture it on a FREE BNC "
                         "to measure exact RPM, anchor Campbell and flag harmonics. If not, leave it off.")
@@ -859,13 +909,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
     lbl_df = QtWidgets.QLabel(""); al.addRow("Resolution:", lbl_df)
     aol.addLayout(al)
     rrow = QtWidgets.QHBoxLayout()
-    btn_reco = QtWidgets.QPushButton("📏 Recommended (per standard)")
+    btn_reco = QtWidgets.QPushButton(T("📏 Recommended (per standard)", "📏 Recomendado (por norma)"))
     btn_reco.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
     rrow.addWidget(btn_reco); rrow.addStretch(1)
     aol.addLayout(rrow)
     lbl_reco = QtWidgets.QLabel(""); lbl_reco.setWordWrap(True); lbl_reco.setStyleSheet("color:#334155;")
     aol.addWidget(lbl_reco); aol.addStretch(1)
-    cfg_tabs.addTab(pg_acq, "Acquisition")
+    cfg_tabs.addTab(pg_acq, T("Acquisition", "Adquisición"))
 
     # ---------- Summary ----------
     pg_sum = QtWidgets.QWidget(); sul = QtWidgets.QVBoxLayout(pg_sum)
@@ -876,21 +926,21 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tbl_sum.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_sum.verticalHeader().setVisible(False)
     sul.addWidget(tbl_sum, 1)
     save_row = QtWidgets.QHBoxLayout()
-    btn_preset = QtWidgets.QPushButton("⭐ Presets")
+    btn_preset = QtWidgets.QPushButton(T("⭐ Presets", "⭐ Presets"))
     btn_preset.setToolTip("Load a ready factory configuration (machine + sensors + acquisition).")
-    btn_savelocal = QtWidgets.QPushButton("💾 Save locally")
-    btn_loadlocal = QtWidgets.QPushButton("📂 Load local")
-    btn_savecloud = QtWidgets.QPushButton("☁ Save to Watermelon System")
+    btn_savelocal = QtWidgets.QPushButton(T("💾 Save locally", "💾 Guardar local"))
+    btn_loadlocal = QtWidgets.QPushButton(T("📂 Load local", "📂 Cargar local"))
+    btn_savecloud = QtWidgets.QPushButton(T("☁ Save to Watermelon System", "☁ Guardar en Watermelon System"))
     btn_savecloud.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
     for b in (btn_preset, btn_savelocal, btn_loadlocal, btn_savecloud):
         save_row.addWidget(b)
     save_row.addStretch(1)
     sul.addLayout(save_row)
-    cfg_tabs.addTab(pg_sum, "Summary")
+    cfg_tabs.addTab(pg_sum, T("Summary", "Resumen"))
 
     # Apply & auto-arrange bar (shared, present under every config tab)
     apply_bar = QtWidgets.QHBoxLayout()
-    btn_apply = QtWidgets.QPushButton("✓ Apply changes & auto-arrange")
+    btn_apply = QtWidgets.QPushButton(T("✓ Apply changes & auto-arrange", "✓ Aplicar y auto-organizar"))
     btn_apply.setStyleSheet(f"QPushButton{{background:{ACC};font-size:13px;padding:9px 18px;}} QPushButton:hover{{background:#1490c2;}}")
     lbl_applyinfo = QtWidgets.QLabel("")
     apply_bar.addWidget(btn_apply); apply_bar.addWidget(lbl_applyinfo); apply_bar.addStretch(1)
@@ -906,14 +956,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     "<span style='color:#64748b'>— confirm every channel is wired before capturing. "
                     "Tap a sensor and watch its lane react.</span>"))
     scbar.addStretch(1)
-    scbar.addWidget(QtWidgets.QLabel("Source:"))
+    scbar.addWidget(QtWidgets.QLabel(T("Source:", "Fuente:")))
     cb_scsrc = QtWidgets.QComboBox(); cb_scsrc.addItems(["Simulated", f"{DAQ_NAME} (live)"])
     if hw_present:
         cb_scsrc.setCurrentIndex(1)
     scbar.addWidget(cb_scsrc)
-    btn_scstart = QtWidgets.QPushButton("▶ Start live"); btn_scstart.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
-    btn_scstop = QtWidgets.QPushButton("⏹ Stop")
-    btn_scsnap = QtWidgets.QPushButton("📸 Save as verification record")
+    btn_scstart = QtWidgets.QPushButton(T("▶ Start live", "▶ Iniciar en vivo")); btn_scstart.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    btn_scstop = QtWidgets.QPushButton(T("⏹ Stop", "⏹ Detener"))
+    btn_scsnap = QtWidgets.QPushButton(T("📸 Save as verification record", "📸 Guardar verificación"))
     btn_scsnap.setToolTip("Save this sensor check (waveforms + status) as proof the sensors are OK — "
                           "it goes into the preliminary and final report.")
     scbar.addWidget(btn_scstart); scbar.addWidget(btn_scstop); scbar.addWidget(btn_scsnap)
@@ -931,7 +981,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tbl_sc.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
     scsplit.addWidget(tbl_sc)
     scl.addLayout(scsplit, 1)
-    lbl_sc = QtWidgets.QLabel("Idle — press ▶ Start live."); lbl_sc.setStyleSheet("color:#334155;")
+    lbl_sc = QtWidgets.QLabel(T("Idle — press ▶ Start live.", "Inactivo — presiona ▶ Iniciar en vivo.")); lbl_sc.setStyleSheet("color:#334155;")
     scl.addWidget(lbl_sc)
     tabs.addTab(pg_sc, "Sensor check")
 
@@ -989,7 +1039,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         st["layout"].fix_proximity_axes()          # 1XD/1XD → 1XD/1YD (repara ejes duplicados)
         pts = st["layout"].active_points()
         if not pts:
-            lbl_sc.setText("No sensors configured — load a preset or build the machine first."); return
+            lbl_sc.setText(T("No sensors configured — load a preset or build the machine first.", "Sin sensores — carga un preset o arma la máquina primero.")); return
         _sc_stop()
         nch = len(pts); Nd = 512
         names = [p.code for p in pts]
@@ -1554,12 +1604,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_imp = QtWidgets.QWidget(); il = QtWidgets.QVBoxLayout(pg_imp)
     ctl = QtWidgets.QHBoxLayout()
-    btn_hit = QtWidgets.QPushButton("🔨 Impact"); btn_hit.setStyleSheet(
+    btn_hit = QtWidgets.QPushButton(T("🔨 Impact", "🔨 Impacto")); btn_hit.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
-    btn_badhit = QtWidgets.QPushButton("⚠ Impact w/ fault")
-    btn_acc = QtWidgets.QPushButton("✓ Accept"); btn_acc.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
-    btn_rej = QtWidgets.QPushButton("✗ Reject"); btn_rej.setStyleSheet(f"QPushButton{{background:{RED};}}")
-    btn_acc.setEnabled(False); btn_rej.setEnabled(False); btn_rst = QtWidgets.QPushButton("↻ Reset")
+    btn_badhit = QtWidgets.QPushButton(T("⚠ Impact w/ fault", "⚠ Impacto con falla"))
+    btn_acc = QtWidgets.QPushButton(T("✓ Accept", "✓ Aceptar")); btn_acc.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    btn_rej = QtWidgets.QPushButton(T("✗ Reject", "✗ Rechazar")); btn_rej.setStyleSheet(f"QPushButton{{background:{RED};}}")
+    btn_acc.setEnabled(False); btn_rej.setEnabled(False); btn_rst = QtWidgets.QPushButton(T("↻ Reset", "↻ Reiniciar"))
     for w in (btn_hit, btn_badhit): ctl.addWidget(w)
     ctl.addSpacing(14); ctl.addWidget(btn_acc); ctl.addWidget(btn_rej); ctl.addStretch(1); ctl.addWidget(btn_rst)
     il.addLayout(ctl)
@@ -1630,26 +1680,26 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_oc = QtWidgets.QWidget(); cl2 = QtWidgets.QVBoxLayout(pg_oc)
     crow = QtWidgets.QHBoxLayout()
-    crow.addWidget(QtWidgets.QLabel("Source:"))
+    crow.addWidget(QtWidgets.QLabel(T("Source:", "Fuente:")))
     cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulado", f"{DAQ_NAME} (live)"]); crow.addWidget(cb_src)
     if hw_present:
         cb_src.setCurrentIndex(1)                          # hay hardware → live por defecto
-    chk_harm = QtWidgets.QCheckBox("Reduce harmonics (kurtosis)")
+    chk_harm = QtWidgets.QCheckBox(T("Reduce harmonics (kurtosis)", "Reducir armónicos (kurtosis)"))
     chk_harm.setToolTip("Detect and remove machine harmonics by kurtosis, revealing the structural "
                         "mode underneath. Analysis only — raw data untouched. Recommended for running machines.")
     crow.addWidget(chk_harm)
-    btn_testni = QtWidgets.QPushButton("🔌 Test acquisition")
-    btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
+    btn_testni = QtWidgets.QPushButton(T("🔌 Test acquisition", "🔌 Probar adquisición"))
+    btn_ocap = QtWidgets.QPushButton(T("▶ Capture + FDD", "▶ Capturar + FDD")); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
-    btn_saverun = QtWidgets.QPushButton("💾 Save locally")
+    btn_saverun = QtWidgets.QPushButton(T("💾 Save locally", "💾 Guardar local"))
     btn_saverun.setToolTip("Save this run (results + raw data) to a visible folder on this PC.")
-    btn_upload = QtWidgets.QPushButton("☁ Upload to cloud")
+    btn_upload = QtWidgets.QPushButton(T("☁ Upload to cloud", "☁ Subir a la nube"))
     btn_upload.setToolTip("Upload the CURRENT run (in memory) to Watermelon System (cloud).")
-    btn_upsaved = QtWidgets.QPushButton("☁ Upload saved")
+    btn_upsaved = QtWidgets.QPushButton(T("☁ Upload saved", "☁ Subir guardada"))
     btn_upsaved.setToolTip("Pick a run saved on this PC (offline) and upload it now that you are online.")
-    btn_openrun = QtWidgets.QPushButton("📂 Open saved")
+    btn_openrun = QtWidgets.QPushButton(T("📂 Open saved", "📂 Abrir guardada"))
     btn_openrun.setToolTip("Reopen a run saved on this PC and review it here (modes, spectral density, mode shapes, Campbell).")
-    btn_delmode = QtWidgets.QPushButton("✖ Remove mode")
+    btn_delmode = QtWidgets.QPushButton(T("✖ Remove mode", "✖ Quitar modo"))
     btn_delmode.setToolTip("Remove the selected mode from the table (or click its marker on the plot).")
 
     def _tbsep():
@@ -1671,16 +1721,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # Fila 3 — PREPROCESO de señal (solo análisis; la data cruda se guarda intacta)
     crowP = QtWidgets.QHBoxLayout()
     crowP.addWidget(_grp("Preprocess:"))
-    chk_detr = QtWidgets.QCheckBox("Detrend"); chk_detr.setChecked(True)
+    chk_detr = QtWidgets.QCheckBox(T("Detrend", "Detrend")); chk_detr.setChecked(True)
     chk_detr.setToolTip("Remove linear drift/ramp from each channel before analysis (recommended).")
     crowP.addWidget(chk_detr)
-    chk_band = QtWidgets.QCheckBox("Band-pass"); chk_band.setToolTip(
+    chk_band = QtWidgets.QCheckBox(T("Band-pass", "Pasa-banda")); chk_band.setToolTip(
         "Zero-phase band-pass to focus on a frequency band (isolate the modes of interest). Analysis only.")
     sp_blo = QtWidgets.QDoubleSpinBox(); sp_blo.setRange(0.5, 5000); sp_blo.setValue(5.0); sp_blo.setSuffix(" Hz")
     sp_bhi = QtWidgets.QDoubleSpinBox(); sp_bhi.setRange(1.0, 25000); sp_bhi.setValue(500.0); sp_bhi.setSuffix(" Hz")
     crowP.addWidget(chk_band); crowP.addWidget(QtWidgets.QLabel("lo")); crowP.addWidget(sp_blo)
     crowP.addWidget(QtWidgets.QLabel("hi")); crowP.addWidget(sp_bhi)
-    crowP.addWidget(_tbsep()); crowP.addWidget(QtWidgets.QLabel("Decimate"))
+    crowP.addWidget(_tbsep()); crowP.addWidget(QtWidgets.QLabel(T("Decimate", "Decimar")))
     cb_dec = QtWidgets.QComboBox(); cb_dec.addItems(["×1", "×2", "×4"])
     cb_dec.setToolTip("Anti-alias decimation: lower fs → finer frequency resolution in the low band. ×2 = half fs, double Δf.")
     crowP.addWidget(cb_dec)
@@ -1770,7 +1820,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _bar = QtWidgets.QProgressBar(); _bar.setRange(0, 100); _dv.addWidget(_bar)
         _dst = QtWidgets.QLabel("● Acquisition started — capturing… (please do not press again)")
         _dst.setStyleSheet("color:#16a34a; font-weight:700;"); _dv.addWidget(_dst)
-        _dbtn = QtWidgets.QPushButton("Close"); _dbtn.setEnabled(False); _dbtn.clicked.connect(dlg.accept)
+        _dbtn = QtWidgets.QPushButton(T("Close", "Cerrar")); _dbtn.setEnabled(False); _dbtn.clicked.connect(dlg.accept)
         _dv.addWidget(_dbtn, alignment=QtCore.Qt.AlignRight)
         dlg.setModal(True); dlg.show(); QtWidgets.QApplication.processEvents()
 
@@ -1832,7 +1882,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             data += 0.05 * rng.standard_normal((N, nch))
             _cap_progress(0.9, "Simulated data ready")
         _mb = data.shape[0] * data.shape[1] * 4 / 1e6
-        _dst.setText("Processing FDD… (please wait, do not close)")
+        _dst.setText(T("Processing FDD… (please wait, do not close)", "Procesando FDD… (espera, no cierres)"))
         _bar.setRange(0, 0); QtWidgets.QApplication.processEvents()   # barra indeterminada (procesando)
         st["oma_data"] = (data, float(fs))              # RAW — guardado/upload intacto
         st["_run_saved"] = False                        # nueva corrida → aún sin guardar
@@ -2320,7 +2370,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if not btn_ocap.isEnabled():
             return
         _txt0 = btn_ocap.text()
-        btn_ocap.setEnabled(False); btn_ocap.setText("● Capturing… please wait")
+        btn_ocap.setEnabled(False); btn_ocap.setText(T("● Capturing… please wait", "● Capturando… espera"))
         QtWidgets.QApplication.processEvents()
         try:
             _oma_capture()
@@ -2369,7 +2419,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if near:
             victim = min(near, key=lambda m: abs(m.natural_frequency_hz - fclick))
             if round(victim.natural_frequency_hz, 1) not in st.get("_manual_freqs", set()):
-                lbl_ost.setText("🔒 System-identified modes cannot be removed (only manual ones).")
+                lbl_ost.setText(T("🔒 System-identified modes cannot be removed (only manual ones).", "🔒 Los modos identificados por el sistema no se pueden quitar (solo los manuales)."))
                 return
             fdd.modes.remove(victim)
             st.get("_manual_freqs", set()).discard(round(victim.natural_frequency_hz, 1))
@@ -2416,10 +2466,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return
         row = tbl_om.currentRow()
         if not (0 <= row < len(fdd.modes)):
-            lbl_ost.setText("Select a mode row in the table first."); return
+            lbl_ost.setText(T("Select a mode row in the table first.", "Selecciona una fila de modo en la tabla primero.")); return
         victim = fdd.modes[row]          # la tabla está ordenada igual que fdd.modes (por fn)
         if round(victim.natural_frequency_hz, 1) not in st.get("_manual_freqs", set()):
-            lbl_ost.setText("🔒 System-identified modes cannot be removed (only manual ones)."); return
+            lbl_ost.setText(T("🔒 System-identified modes cannot be removed (only manual ones).", "🔒 Los modos identificados por el sistema no se pueden quitar (solo los manuales).")); return
         fdd.modes.remove(victim)
         st.get("_manual_freqs", set()).discard(round(victim.natural_frequency_hz, 1))
         lbl_ost.setText(f"✖ Manual mode removed at {victim.natural_frequency_hz:.2f} Hz.")
@@ -2431,8 +2481,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_mod = QtWidgets.QWidget(); ql = QtWidgets.QVBoxLayout(pg_mod)
     mrow = QtWidgets.QHBoxLayout()
-    btn_ident = QtWidgets.QPushButton("🎯 Identify modes (EMA)"); btn_ident.setStyleSheet(f"QPushButton{{background:{ACC};}}")
-    mrow.addWidget(btn_ident); mrow.addWidget(QtWidgets.QLabel("Peak-picking + half-power damping (ISO 7626-6).")); mrow.addStretch(1); ql.addLayout(mrow)
+    btn_ident = QtWidgets.QPushButton(T("🎯 Identify modes (EMA)", "🎯 Identificar modos (EMA)")); btn_ident.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    mrow.addWidget(btn_ident); mrow.addWidget(QtWidgets.QLabel(T("Peak-picking + half-power damping (ISO 7626-6).", "Selección de picos + amortiguamiento half-power (ISO 7626-6)."))); mrow.addStretch(1); ql.addLayout(mrow)
     ms = QtWidgets.QHBoxLayout()
     tbl_modes = QtWidgets.QTableWidget(0, 4); tbl_modes.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Coherence", "Reliable"])
     tbl_modes.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_modes.verticalHeader().setVisible(False); tbl_modes.setMaximumWidth(520)
@@ -2460,7 +2510,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     pg_cmp = QtWidgets.QWidget(); cpl = QtWidgets.QVBoxLayout(pg_cmp)
     cpl.addWidget(QtWidgets.QLabel("<b>EMA ↔ OMA correlation</b> — impact-test modes vs operational modes "
                                    "(ISO 7626-6 / API 684)."))
-    crow3 = QtWidgets.QHBoxLayout(); btn_cmp = QtWidgets.QPushButton("↻ Compare EMA vs OMA"); btn_cmp.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    crow3 = QtWidgets.QHBoxLayout(); btn_cmp = QtWidgets.QPushButton(T("↻ Compare EMA vs OMA", "↻ Comparar EMA vs OMA")); btn_cmp.setStyleSheet(f"QPushButton{{background:{ACC};}}")
     crow3.addWidget(btn_cmp); crow3.addStretch(1); cpl.addLayout(crow3)
     tbl_cmp = QtWidgets.QTableWidget(0, 4); tbl_cmp.setHorizontalHeaderLabels(["EMA mode (Hz)", "OMA mode (Hz)", "Δf (Hz)", "Δ (%)"])
     tbl_cmp.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_cmp.verticalHeader().setVisible(False); cpl.addWidget(tbl_cmp, 1)
@@ -2477,7 +2527,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             miss = []
             if not ema: miss.append("EMA (accept hits in Impact test)")
             if not oma: miss.append("OMA (run OMA capture)")
-            lbl_cmp.setText("Missing: " + " and ".join(miss) + "."); return
+            lbl_cmp.setText(T("Missing: ", "Falta: ") + " and ".join(miss) + "."); return
         matches = correlate(ema, oma, tol_hz=2.5)
         for m in matches:
             r = tbl_cmp.rowCount(); tbl_cmp.insertRow(r)
@@ -2495,7 +2545,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     cb_mac = QtWidgets.QComboBox()
     cb_mac.addItems(["OMA (FDD) auto-MAC", "SSI auto-MAC", "OMA ↔ SSI cross-MAC"])
     mrow.addWidget(cb_mac)
-    btn_mac = QtWidgets.QPushButton("↻ Compute MAC"); btn_mac.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    btn_mac = QtWidgets.QPushButton(T("↻ Compute MAC", "↻ Calcular MAC")); btn_mac.setStyleSheet(f"QPushButton{{background:{ACC};}}")
     mrow.addWidget(btn_mac); mrow.addStretch(1); mcl.addLayout(mrow)
     p_mac = pg.PlotWidget(); p_mac.setBackground("w"); p_mac.setTitle("MAC matrix", color=NAVY)
     p_mac.setLabel("bottom", "Mode (Hz)"); p_mac.setLabel("left", "Mode (Hz)")
@@ -2516,7 +2566,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         p_mac.clear()
         M = np.asarray(M, float)
         if M.size == 0 or M.shape[0] == 0 or M.shape[1] == 0:
-            lbl_mac.setText("Not enough modes to compute MAC."); return
+            lbl_mac.setText(T("Not enough modes to compute MAC.", "No hay modos suficientes para la MAC.")); return
         img = pg.ImageItem(M.T)                        # x = columna, y = fila
         img.setLookupTable(_mac_lut); img.setLevels([0.0, 1.0])
         p_mac.addItem(img)
@@ -2539,7 +2589,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         fdd = st.get("oma_fdd"); ssi = st.get("ssi")
         if idx == 0:                                   # OMA auto-MAC
             if not fdd or not getattr(fdd, "modes", None):
-                p_mac.clear(); lbl_mac.setText("Run OMA capture first."); return
+                p_mac.clear(); lbl_mac.setText(T("Run OMA capture first.", "Corre Captura OMA primero.")); return
             f = [m.natural_frequency_hz for m in fdd.modes]
             dup = detect_redundant_modes(fdd.modes, 0.7)
             note = ("Auto-MAC OMA: diagonal = 1 (each mode with itself). Off-diagonal RED (>0.7) = "
@@ -2551,13 +2601,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
             _render_mac(compute_mac_matrix(fdd.modes), f, f, note)
         elif idx == 1:                                 # SSI auto-MAC
             if not ssi or not getattr(ssi, "modes", None):
-                p_mac.clear(); lbl_mac.setText("Run SSI (subspace) first."); return
+                p_mac.clear(); lbl_mac.setText(T("Run SSI (subspace) first.", "Corre SSI (subespacio) primero.")); return
             f = [m.frequency_hz for m in ssi.modes]
             _render_mac(compute_mac_matrix(ssi.modes), f, f,
                         "Auto-MAC SSI: internal consistency of the modes identified by SSI.")
         else:                                          # OMA ↔ SSI cross-MAC
             if not fdd or not getattr(fdd, "modes", None) or not ssi or not getattr(ssi, "modes", None):
-                p_mac.clear(); lbl_mac.setText("You need BOTH: OMA capture and SSI (subspace)."); return
+                p_mac.clear(); lbl_mac.setText(T("You need BOTH: OMA capture and SSI (subspace).", "Necesitas AMBOS: Captura OMA y SSI (subespacio).")); return
             fr = [m.natural_frequency_hz for m in fdd.modes]
             fc = [m.frequency_hz for m in ssi.modes]
             _render_mac(compute_cross_mac(fdd.modes, ssi.modes), fr, fc,
@@ -2571,17 +2621,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # CAMPBELL
     # =====================================================================
     pg_cam = QtWidgets.QWidget(); cml = QtWidgets.QVBoxLayout(pg_cam)
-    crow2 = QtWidgets.QHBoxLayout(); btn_refc = QtWidgets.QPushButton("↻ Recompute Campbell"); btn_refc.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    crow2 = QtWidgets.QHBoxLayout(); btn_refc = QtWidgets.QPushButton(T("↻ Recompute Campbell", "↻ Recalcular Campbell")); btn_refc.setStyleSheet(f"QPushButton{{background:{ACC};}}")
     crow2.addWidget(btn_refc)
     crow2.addWidget(QtWidgets.QLabel("Automatic fn↔order crossings (0.5×..8×) + operating bands (API 684)."))
     crow2.addSpacing(16)
-    chk_cam2 = QtWidgets.QCheckBox("Compare 2nd speed:")
+    chk_cam2 = QtWidgets.QCheckBox(T("Compare 2nd speed:", "Comparar 2ª velocidad:"))
     chk_cam2.setToolTip("Overlay a second operating speed to compare (e.g. 3600 vs 3200 RPM). "
                         "The order lines do NOT move — only the operating speed line/band.")
     sp_cam2 = QtWidgets.QDoubleSpinBox(); sp_cam2.setRange(0, 60000); sp_cam2.setValue(3200); sp_cam2.setSuffix(" RPM")
     crow2.addWidget(chk_cam2); crow2.addWidget(sp_cam2)
     crow2.addSpacing(12)
-    chk_half = QtWidgets.QCheckBox("½× band (sub-sync)")
+    chk_half = QtWidgets.QCheckBox(T("½× band (sub-sync)", "Banda ½× (sub-sínc.)"))
     chk_half.setToolTip("Optional — NOT required by API 684. Screens sub-synchronous excitation "
                         "(oil whirl ~0.42-0.48x, looseness) at half the operating speed.")
     crow2.addWidget(chk_half); crow2.addStretch(1); cml.addLayout(crow2)
@@ -2608,7 +2658,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         SM = 0.15; lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM)
         rpm_max = max(rpm_op * 1.4, rpm2 * 1.4, 1500.0)
         if not modes:
-            lbl_cam.setText("No modes yet — run OMA capture or identify EMA modes."); tbl_cam.setRowCount(0); return
+            lbl_cam.setText(T("No modes yet — run OMA capture or identify EMA modes.", "Sin modos aún — corre Captura OMA o identifica modos EMA.")); tbl_cam.setRowCount(0); return
         ymax = max(modes) * 1.30; orders = (0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0); rpm = np.linspace(0, rpm_max, 60)
         reg = pg.LinearRegionItem([max(0, lo), min(rpm_max, hi)], movable=False, brush=pg.mkBrush(239, 68, 68, 32)); reg.setZValue(-20); p_cam.addItem(reg)
         if chk_half.isChecked():
@@ -2677,7 +2727,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_ssi = QtWidgets.QWidget(); ssl = QtWidgets.QVBoxLayout(pg_ssi)
     srow = QtWidgets.QHBoxLayout()
-    btn_ssi = QtWidgets.QPushButton("🎯 Run SSI (subspace)"); btn_ssi.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    btn_ssi = QtWidgets.QPushButton(T("🎯 Run SSI (subspace)", "🎯 Correr SSI (subespacio)")); btn_ssi.setStyleSheet(f"QPushButton{{background:{ACC};}}")
     srow.addWidget(btn_ssi)
     srow.addWidget(QtWidgets.QLabel("Time-domain SSI-COV — natural modes with UNCERTAINTY + stabilization diagram (beyond FDD)."))
     srow.addStretch(1); ssl.addLayout(srow)
@@ -2699,7 +2749,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             QtWidgets.QMessageBox.information(win, "SSI", "Run OMA capture first (it stores the time data)."); return
         from core.modal.ssi import run_ssi_cov
         data, fs = d; lay = st["layout"]; fmax = min(fs / 2.56, lay.fmax_hz)
-        lbl_ssi.setText("Running SSI-COV (sweeping model orders)…"); QtWidgets.QApplication.processEvents()
+        lbl_ssi.setText(T("Running SSI-COV (sweeping model orders)…", "Corriendo SSI-COV (barriendo órdenes)…")); QtWidgets.QApplication.processEvents()
         try:
             res = run_ssi_cov(data, fs, orders=range(4, 45, 2), i_block=25, fmin_hz=2.0, fmax_hz=fmax)
         except Exception as e:  # noqa: BLE001
@@ -2760,32 +2810,32 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_anim = QtWidgets.QWidget(); anl = QtWidgets.QVBoxLayout(pg_anim)
     arow = QtWidgets.QHBoxLayout()
-    arow.addWidget(QtWidgets.QLabel("Source:"))
+    arow.addWidget(QtWidgets.QLabel(T("Source:", "Fuente:")))
     cb_asrc = QtWidgets.QComboBox(); cb_asrc.addItems(["OMA (FDD)", "SSI", "ODS (operating)"])
     cb_asrc.setToolTip("OMA/SSI = identified MODAL shapes. ODS = OPERATING deflection: how the machine "
                        "actually moves at a frequency (1×, blade-pass), with phase relative to the highest-response channel.")
     arow.addWidget(cb_asrc)
-    arow.addWidget(QtWidgets.QLabel("Mode / ODS f:"))
+    arow.addWidget(QtWidgets.QLabel(T("Mode / ODS f:", "Modo / f ODS:")))
     cb_amode = QtWidgets.QComboBox(); cb_amode.setMinimumWidth(160); arow.addWidget(cb_amode)
-    arow.addWidget(QtWidgets.QLabel("Scale:"))
+    arow.addWidget(QtWidgets.QLabel(T("Scale:", "Escala:")))
     sp_ascale = QtWidgets.QDoubleSpinBox(); sp_ascale.setRange(0.01, 0.5); sp_ascale.setValue(0.10); sp_ascale.setSingleStep(0.02)
     arow.addWidget(sp_ascale)
-    chk_showsen = QtWidgets.QCheckBox("Sensors"); chk_showsen.setChecked(False)
-    chk_ghost = QtWidgets.QCheckBox("Ghost"); chk_ghost.setChecked(False)
+    chk_showsen = QtWidgets.QCheckBox(T("Sensors", "Sensores")); chk_showsen.setChecked(False)
+    chk_ghost = QtWidgets.QCheckBox(T("Ghost", "Fantasma")); chk_ghost.setChecked(False)
     chk_ghost.setToolTip("Optional: dashed outline of the machine AT REST — to compare rest vs deformed.")
-    chk_wire = QtWidgets.QCheckBox("Wire"); chk_wire.setChecked(False)
+    chk_wire = QtWidgets.QCheckBox(T("Wire", "Malla")); chk_wire.setChecked(False)
     chk_wire.setToolTip("Optional: deflection mesh (lines through the sensors) — the classic OMA wireframe.")
     arow.addWidget(chk_showsen); arow.addWidget(chk_ghost); arow.addWidget(chk_wire)
-    btn_play = QtWidgets.QPushButton("▶ Animate"); btn_play.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
-    btn_stop = QtWidgets.QPushButton("⏹ Stop")
+    btn_play = QtWidgets.QPushButton(T("▶ Animate", "▶ Animar")); btn_play.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    btn_stop = QtWidgets.QPushButton(T("⏹ Stop", "⏹ Detener"))
     arow.addWidget(btn_play); arow.addWidget(btn_stop)
-    arow.addSpacing(10); arow.addWidget(QtWidgets.QLabel("View:"))
-    btn_v_iso = QtWidgets.QPushButton("Iso"); btn_v_top = QtWidgets.QPushButton("Top")
-    btn_v_side = QtWidgets.QPushButton("Side"); btn_v_front = QtWidgets.QPushButton("Front")
+    arow.addSpacing(10); arow.addWidget(QtWidgets.QLabel(T("View:", "Vista:")))
+    btn_v_iso = QtWidgets.QPushButton(T("Iso", "Iso")); btn_v_top = QtWidgets.QPushButton(T("Top", "Superior"))
+    btn_v_side = QtWidgets.QPushButton(T("Side", "Lateral")); btn_v_front = QtWidgets.QPushButton(T("Front", "Frente"))
     for _b in (btn_v_iso, btn_v_top, btn_v_side, btn_v_front):
         _b.setMaximumWidth(52); _b.setStyleSheet("QPushButton{background:#334155;padding:6px 8px;}")
         arow.addWidget(_b)
-    btn_gif = QtWidgets.QPushButton("🎥 Save clip")
+    btn_gif = QtWidgets.QPushButton(T("🎥 Save clip", "🎥 Guardar clip"))
     btn_gif.setToolTip("Export a short animated clip (GIF) of the current mode shape.")
     arow.addWidget(btn_gif); arow.addStretch(1)
     anl.addLayout(arow)
@@ -2802,7 +2852,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     m_anim.set_show_ghost(chk_ghost.isChecked()); m_anim.set_show_wire(chk_wire.isChecked())
     anim_split.addWidget(p_anim, 3)
     right_panel = QtWidgets.QVBoxLayout()
-    lbl_modal = QtWidgets.QLabel("Select a mode."); lbl_modal.setTextFormat(QtCore.Qt.RichText)
+    lbl_modal = QtWidgets.QLabel(T("Select a mode.", "Elige un modo.")); lbl_modal.setTextFormat(QtCore.Qt.RichText)
     lbl_modal.setStyleSheet(f"background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;")
     lbl_modal.setAlignment(QtCore.Qt.AlignTop); lbl_modal.setWordWrap(True)
     right_panel.addWidget(lbl_modal)
@@ -2913,7 +2963,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         p_argand.clear()
         i = cb_amode.currentIndex(); fl = st.get("_ods_freqs") or []
         if not (0 <= i < len(fl)):
-            lbl_modal.setText("Run OMA capture and pick a frequency (1×, peak…)."); return
+            lbl_modal.setText(T("Run OMA capture and pick a frequency (1×, peak…).", "Corre Captura OMA y elige una frecuencia (1×, pico…).")); return
         _lbl, f = fl[i]; sh = _ods_shape(f)
         rr = st["layout"].running_speed_rpm or 0.0
         html = ("<b style='font-size:13px'>Operating Deflection Shape (ODS)</b>"
@@ -2943,7 +2993,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             _update_ods_panel(); return
         m = _cur_mode(); p_argand.clear()
         if m is None:
-            lbl_modal.setText("Select a mode."); return
+            lbl_modal.setText(T("Select a mode.", "Elige un modo.")); return
         fn = getattr(m, "natural_frequency_hz", getattr(m, "frequency_hz", 0.0))
         zeta = getattr(m, "damping_ratio_pct", 0.0)
         cplx = getattr(m, "complexity_pct", 0.0)
@@ -3141,18 +3191,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
         "preliminary results + resonance screening + findings. The full report is generated from the web."))
     pf = QtWidgets.QFormLayout()
     e_tech = QtWidgets.QLineEdit(); e_rev = QtWidgets.QLineEdit()
-    e_find = QtWidgets.QPlainTextEdit(); e_find.setPlaceholderText("One finding per line…"); e_find.setMaximumHeight(70)
-    e_rec = QtWidgets.QPlainTextEdit(); e_rec.setPlaceholderText("One recommendation per line…"); e_rec.setMaximumHeight(70)
+    e_find = QtWidgets.QPlainTextEdit(); e_find.setPlaceholderText(T("One finding per line…", "Un hallazgo por línea…")); e_find.setMaximumHeight(70)
+    e_rec = QtWidgets.QPlainTextEdit(); e_rec.setPlaceholderText(T("One recommendation per line…", "Una recomendación por línea…")); e_rec.setMaximumHeight(70)
     pf.addRow("Technician:", e_tech); pf.addRow("Reviewed by:", e_rev)
     pf.addRow("Findings:", e_find); pf.addRow("Recommendations:", e_rec)
     prl.addLayout(pf)
     prow2 = QtWidgets.QHBoxLayout()
-    btn_photos = QtWidgets.QPushButton("🖼 Add photos")
-    lbl_photos = QtWidgets.QLabel("0 photos")
-    prow2.addWidget(QtWidgets.QLabel("Language:"))
+    btn_photos = QtWidgets.QPushButton(T("🖼 Add photos", "🖼 Agregar fotos"))
+    lbl_photos = QtWidgets.QLabel(T("0 photos", "0 fotos"))
+    prow2.addWidget(QtWidgets.QLabel(T("Language:", "Idioma:")))
     cb_lang = QtWidgets.QComboBox(); cb_lang.addItems(["Español", "English"]); prow2.addWidget(cb_lang)
-    btn_qual = QtWidgets.QPushButton("↻ Compute data quality")
-    btn_prel = QtWidgets.QPushButton("📄 Generate preliminary PDF"); btn_prel.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    btn_qual = QtWidgets.QPushButton(T("↻ Compute data quality", "↻ Evaluar calidad de datos"))
+    btn_prel = QtWidgets.QPushButton(T("📄 Generate preliminary PDF", "📄 Generar PDF preliminar")); btn_prel.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     prow2.addWidget(btn_photos); prow2.addWidget(lbl_photos); prow2.addStretch(1)
     prow2.addWidget(btn_qual); prow2.addWidget(btn_prel)
     prl.addLayout(prow2)
@@ -3483,7 +3533,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if st.get("_help_done"):
             return
         st["_help_done"] = True
-        btn_ex.setEnabled(False); btn_ex.setText("Generating…"); QtWidgets.QApplication.processEvents()
+        btn_ex.setEnabled(False); btn_ex.setText(T("Generating…", "Generando…")); QtWidgets.QApplication.processEvents()
         try:
             from core.modal.oma_engine import run_oma
             from core.modal.campbell import compute_crossings, SpeedBand
@@ -3621,7 +3671,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                              "<p style='color:#475569'>A complete OMA of a motor + multistage pump, "
                              "step by step, with the real graphs the software produces.</p>")
     _exhdr.setTextFormat(QtCore.Qt.RichText); _exhdr.setWordWrap(True); _hin.addWidget(_exhdr)
-    btn_ex = QtWidgets.QPushButton("🍉 Generate worked example (Cenit Medellín)")
+    btn_ex = QtWidgets.QPushButton(T("🍉 Generate worked example (Cenit Medellín)", "🍉 Generar ejemplo (Cenit Medellín)"))
     btn_ex.setStyleSheet(f"QPushButton{{background:{GREEN};font-size:14px;padding:10px 18px;}}")
     _hin.addWidget(btn_ex)
     _exw = QtWidgets.QWidget(); exl = QtWidgets.QVBoxLayout(_exw); _hin.addWidget(_exw)
@@ -3652,10 +3702,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _notes.setStyleSheet("QTextBrowser{border:1px solid #eef2f8;border-radius:10px;background:#fbfcfe;"
                          "color:#334155;padding:8px;}")
     _notes.setMaximumHeight(200); _notes.hide()
-    _brow = QtWidgets.QPushButton("🔍  Check for updates"); _brow.setFont(_mkfont(11, True))
+    _brow = QtWidgets.QPushButton(T("🔍  Check for updates", "🔍  Buscar actualizaciones")); _brow.setFont(_mkfont(11, True))
     _brow.setStyleSheet(f"QPushButton{{background:{NAVY};color:white;padding:10px 20px;"
                         "border-radius:9px;}QPushButton:hover{background:#12325a;}")
-    _bgo = QtWidgets.QPushButton("⬇  Update now"); _bgo.setFont(_mkfont(11, True))
+    _bgo = QtWidgets.QPushButton(T("⬇  Update now", "⬇  Actualizar ahora")); _bgo.setFont(_mkfont(11, True))
     _bgo.setStyleSheet(f"QPushButton{{background:{GREEN};color:white;padding:10px 20px;"
                        "border-radius:9px;}QPushButton:hover{background:#12833a;}")
     _bgo.hide()
@@ -3672,7 +3722,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     st["_pending_update"] = None
 
     def _upd_check():
-        _brow.setEnabled(False); _brow.setText("🔍  Checking…"); QtWidgets.QApplication.processEvents()
+        _brow.setEnabled(False); _brow.setText(T("🔍  Checking…", "🔍  Buscando…")); QtWidgets.QApplication.processEvents()
         try:
             from core.modal.updater import diagnose
             info, msg = diagnose(__version__)
@@ -3712,12 +3762,24 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _cur = next((i for i in range(tabs.count()) if tabs.tabText(i) == _title), None)
         if _cur is not None and _cur != _target:
             _bar.moveTab(_cur, _target)
-    # Etiquetas cortas para que TODAS las pestañas quepan sin flechas de scroll.
-    _short_tabs = {"Configuration": "Setup", "Impact test (EMA)": "Impact (EMA)",
-                   "SSI (subspace)": "SSI", "Validation (MAC)": "MAC",
-                   "Preliminary report": "Report"}
+    # Etiquetas cortas + bilingües para que TODAS las pestañas quepan sin scroll.
+    _tab_tr = {
+        "Configuration": T("Setup", "Config"),
+        "Sensor check": T("Sensor check", "Sensores"),
+        "Impact test (EMA)": T("Impact (EMA)", "Impacto (EMA)"),
+        "Modes (EMA)": T("Modes (EMA)", "Modos (EMA)"),
+        "OMA capture": T("OMA capture", "Captura OMA"),
+        "SSI (subspace)": T("SSI", "SSI"),
+        "Comparative": T("Comparative", "Comparativo"),
+        "Validation (MAC)": T("MAC", "MAC"),
+        "Campbell": T("Campbell", "Campbell"),
+        "Mode shapes": T("Mode shapes", "Formas modales"),
+        "Preliminary report": T("Report", "Reporte"),
+        "Help": T("Help", "Ayuda"),
+        "Updates": T("Updates", "Actualizaciones"),
+    }
     for _i in range(tabs.count()):
-        _st = _short_tabs.get(tabs.tabText(_i))
+        _st = _tab_tr.get(tabs.tabText(_i))
         if _st:
             tabs.setTabText(_i, _st)
     tabs.setElideMode(QtCore.Qt.ElideNone)          # no recortar texto
