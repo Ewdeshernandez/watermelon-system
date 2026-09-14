@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.84"
+__version__ = "0.9.85"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2234,6 +2234,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                                              None, 0, 0, win)
             _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
             _dlg.show(); QtWidgets.QApplication.processEvents()
+            rr = {}
             try:
                 with _cf2.ThreadPoolExecutor(max_workers=1) as _ex2:
                     _fu = _ex2.submit(modal_cloud.upload_raw, rid, _d, _fs, lay.channel_names())
@@ -2242,14 +2243,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     rr = _fu.result()
                 if rr.get("ok"):
                     payload["raw_ref"] = rr
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _eu:  # noqa: BLE001
+                rr = {"reason": f"{type(_eu).__name__}: {_eu}"}
             finally:
                 _dlg.close()
             if not payload.get("raw_ref"):
+                _why = str(rr.get("reason", "")) or T("check your internet", "revisa tu internet")
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    T("Could not upload the raw data (check your internet). The run stays saved "
-                    "locally; upload it later with 'Upload saved'.", "No se pudo subir la data cruda (revisa tu internet). La corrida queda guardada localmente; súbela luego con 'Subir guardada'.")); return
+                    T(f"Could not upload the raw data ({_why}). The run stays saved "
+                    "locally; upload it later with 'Upload saved'.",
+                    f"No se pudo subir la data cruda ({_why}). La corrida queda guardada localmente; súbela luego con 'Subir guardada'.")); return
             r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
@@ -2294,6 +2297,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                                              None, 0, 0, win)
             _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
             _dlg.show(); QtWidgets.QApplication.processEvents()
+            rr = {}
             try:
                 with _cf3.ThreadPoolExecutor(max_workers=1) as _ex3:
                     _fu = _ex3.submit(modal_cloud.upload_raw, rid, _d, _fs, _ch)
@@ -2302,13 +2306,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     rr = _fu.result()
                 if rr.get("ok"):
                     payload["raw_ref"] = rr
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _eu:  # noqa: BLE001
+                rr = {"reason": f"{type(_eu).__name__}: {_eu}"}
             finally:
                 _dlg.close()
             if not payload.get("raw_ref"):
+                _why = str(rr.get("reason", "")) or T("check your internet", "revisa tu internet")
                 QtWidgets.QMessageBox.warning(win, "Cloud",
-                    T("Could not upload the raw data (check your internet). Try again.", "No se pudo subir la data cruda (revisa tu internet). Intenta de nuevo.")); return
+                    T(f"Could not upload the raw data ({_why}). Try again.",
+                    f"No se pudo subir la data cruda ({_why}). Intenta de nuevo.")); return
             r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",

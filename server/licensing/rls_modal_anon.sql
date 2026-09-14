@@ -29,13 +29,17 @@ create policy "anon read runs"   on public.modal_runs for select to anon using (
 create policy "anon write runs"  on public.modal_runs for insert to anon with check (true);
 create policy "anon update runs" on public.modal_runs for update to anon using (true) with check (true);
 
--- ---- Storage: bucket `modal-raw` (data cruda gzip). anon SOLO sube (insert/update). ----
+-- ---- Storage: bucket `modal-raw` (data cruda gzip). Subir (insert/update). ----
+-- OJO: en el motor de Storage las policies con `to anon` NO casan bien; se usan SIN
+-- restricción de rol (forma canónica de Supabase) y la seguridad la da el `bucket_id`.
 -- Sin policy de select → nadie descarga con la anon key; la web descarga con service key.
 drop policy if exists "anon upload modal-raw" on storage.objects;
 drop policy if exists "anon update modal-raw" on storage.objects;
-create policy "anon upload modal-raw" on storage.objects for insert to anon
+drop policy if exists "modal-raw insert" on storage.objects;
+drop policy if exists "modal-raw update" on storage.objects;
+create policy "modal-raw insert" on storage.objects for insert
   with check (bucket_id = 'modal-raw');
-create policy "anon update modal-raw" on storage.objects for update to anon
+create policy "modal-raw update" on storage.objects for update
   using (bucket_id = 'modal-raw') with check (bucket_id = 'modal-raw');
 
 -- NOTA: el bucket `modal-raw` debe existir y ser PRIVADO (Storage → New bucket, sin marcar

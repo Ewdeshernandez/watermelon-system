@@ -110,10 +110,16 @@ def upload_raw(run_id: str, data, fs: float, channels=None) -> Dict[str, Any]:
         except Exception:  # noqa: BLE001
             pass
         store = c.storage.from_(_RAW_BUCKET)
+        # Upload PLANO (sin upsert): el run_id es único por corrida, así que no hay
+        # colisión normalmente. `upsert:true` requiere permisos de update/select que la
+        # anon key (Fase 2c) NO tiene por diseño → daba 403. Si el objeto ya existe
+        # (re-subida del mismo run), la data cruda ya está en la nube → se toma como OK.
         try:
-            store.upload(key, raw, {"upsert": "true"})
-        except Exception:  # noqa: BLE001
-            store.update(key, raw)
+            store.upload(key, raw)
+        except Exception as _e:  # noqa: BLE001
+            _m = str(_e).lower()
+            if not any(x in _m for x in ("exist", "409", "duplicate", "resource already")):
+                raise                                        # error real → lo reporta upload_raw
         return {"ok": True, "bucket": _RAW_BUCKET, "path": key, "fs": float(fs),
                 "n_ch": int(arr.shape[1]), "n_samples": int(arr.shape[0]),
                 "channels": list(channels or []), "size_bytes": len(raw)}
