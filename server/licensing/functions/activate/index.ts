@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "no_seats" }), { status: 403 });
     await admin.from("activations").upsert({ license_id: lic.id, account: lic.account, machine_fp,
       is_vm: !!is_vm, last_seen: new Date().toISOString() }, { onConflict: "license_id,machine_fp" });
-    const exp = Math.min(Date.now() / 1000 + 14 * 86400, new Date(lic.expires_at).getTime() / 1000);
+    const exp = Math.min(Date.now() / 1000 + 30 * 86400, new Date(lic.expires_at).getTime() / 1000);
     const token = await signToken({ account: lic.account, machine_fp, exp, seat: lic.seats,
       features: lic.features, iat: Date.now() / 1000 });
     return new Response(JSON.stringify({ token, exp, account: lic.account }),
