@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.75"
+__version__ = "0.9.76"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -3894,43 +3894,111 @@ def _show_update_banner(win, info):
 _LICENSING_ENABLED = os.environ.get("WM_LICENSING", "1") != "0"
 
 
+def _fmt_license_key(text: str) -> str:
+    """Formatea la clave a MAYÚSCULAS con guiones automáticos: WM-XXXX-XXXX-XXXX."""
+    raw = "".join(c for c in (text or "").upper() if c.isalnum())
+    if raw.startswith("WM"):
+        rest = raw[2:16]                                   # hasta 3 grupos de 4
+        groups = [rest[i:i + 4] for i in range(0, len(rest), 4)]
+        return "WM" + ("-" + "-".join(groups) if groups else "")
+    groups = [raw[i:i + 4] for i in range(0, min(len(raw), 16), 4)]
+    return "-".join(groups)
+
+
+def _activation_reason_text(reason: str) -> str:
+    """Traduce el motivo técnico a un mensaje humano y bilingüe."""
+    r = str(reason or "")
+    M = {
+        "invalid_key": T("License key not found. Check it and try again.",
+                         "Clave de licencia no encontrada. Revísala e intenta de nuevo."),
+        "license_expired": T("This license has expired.", "Esta licencia venció."),
+        "no_seats": T("No activations left — all seats on this license are in use.",
+                      "Sin cupos — todas las máquinas de esta licencia ya están en uso."),
+        "machine_revoked": T("This computer's access was revoked.",
+                             "El acceso de este equipo fue revocado."),
+        "no_server_url": T("Could not reach the activation server.",
+                           "No se pudo contactar el servidor de activación."),
+        "missing_fields": T("Enter a valid license key.", "Ingresa una clave válida."),
+        "machine_mismatch": T("This license is bound to another computer.",
+                              "Esta licencia está ligada a otro equipo."),
+    }
+    if r in M:
+        return M[r]
+    if r.startswith("activate_failed"):
+        return T("Could not reach the activation server. Check your internet.",
+                 "No se pudo contactar el servidor. Revisa tu internet.")
+    return T("Could not activate. ", "No se pudo activar. ") + r
+
+
 def _activation_dialog(app, lic) -> bool:
-    """Ventana de activación: login (cuenta Watermelon) → activa esta máquina.
-    Devuelve True si quedó activada. Bilingüe. Muestra la huella (para soporte)."""
+    """Ventana de activación por CLAVE de licencia. Devuelve True si quedó activada."""
     dlg = QtWidgets.QDialog()
-    dlg.setWindowTitle("Watermelon Modal — " + T("Activation", "Activación"))
-    dlg.setMinimumWidth(460); dlg.setStyleSheet(f"QDialog{{background:{NAVY};}}")
-    v = QtWidgets.QVBoxLayout(dlg); v.setContentsMargins(26, 24, 26, 22); v.setSpacing(10)
+    dlg.setWindowTitle(T("Activate Watermelon Modal", "Activar Watermelon Modal"))
+    dlg.setFixedWidth(500); dlg.setModal(True)
+    dlg.setStyleSheet(f"QDialog{{background:{NAVY};}}")
+    v = QtWidgets.QVBoxLayout(dlg); v.setContentsMargins(38, 34, 38, 30); v.setSpacing(0)
     head = QtWidgets.QLabel(
-        "<span style='color:#fff;font-weight:800;letter-spacing:2px;font-size:17px;'>WATERMELON</span>"
-        "<span style='color:#1AAEE5;font-weight:800;letter-spacing:2px;font-size:17px;'>&nbsp;MODAL</span>")
-    head.setTextFormat(QtCore.Qt.RichText); v.addWidget(head)
-    v.addWidget(QtWidgets.QLabel("<span style='color:#93c5fd;font-size:12px;'>"
-                + T("Enter your license key to activate this computer.",
-                    "Ingresa tu clave de licencia para activar este equipo.")
-                + "</span>"))
-    e_key = QtWidgets.QLineEdit(); e_key.setPlaceholderText(T("License key", "Clave de licencia"))
-    e_key.setStyleSheet("background:white;border-radius:7px;padding:10px;font-family:monospace;font-size:13px;")
+        "<span style='color:#fff;font-weight:800;letter-spacing:3px;font-size:22px;'>WATERMELON</span>"
+        "<span style='color:#1AAEE5;font-weight:800;letter-spacing:3px;font-size:22px;'>&nbsp;MODAL</span>")
+    head.setTextFormat(QtCore.Qt.RichText); head.setAlignment(QtCore.Qt.AlignCenter)
+    v.addWidget(head)
+    sub = QtWidgets.QLabel(T("Activate this computer", "Activa este equipo"))
+    sub.setAlignment(QtCore.Qt.AlignCenter)
+    sub.setStyleSheet("color:#5b6b86; font-weight:600; letter-spacing:1px; font-size:11px; margin-top:2px;")
+    v.addWidget(sub)
+    v.addSpacing(22)
+    lbl = QtWidgets.QLabel(T("License key", "Clave de licencia"))
+    lbl.setStyleSheet("color:#93c5fd; font-weight:700; font-size:11px; letter-spacing:1px;")
+    v.addWidget(lbl); v.addSpacing(6)
+    e_key = QtWidgets.QLineEdit(); e_key.setPlaceholderText("WM-XXXX-XXXX-XXXX")
+    e_key.setMaxLength(17); e_key.setAlignment(QtCore.Qt.AlignCenter)
+    e_key.setStyleSheet("QLineEdit{background:white;color:#0f172a;border:2px solid #2a3a57;border-radius:10px;"
+                        "padding:13px;font-family:monospace;font-size:20px;font-weight:700;letter-spacing:3px;}"
+                        "QLineEdit:focus{border:2px solid #1AAEE5;}")
     v.addWidget(e_key)
-    msg = QtWidgets.QLabel(""); msg.setWordWrap(True); msg.setStyleSheet("color:#fca5a5;font-size:12px;"); v.addWidget(msg)
-    fp = lic.machine_fingerprint()
-    v.addWidget(QtWidgets.QLabel(f"<span style='color:#5b6b86;font-size:10px;'>Machine ID: {fp[:16]}…</span>"))
+
+    def _on_edit(_t):
+        e_key.blockSignals(True)
+        e_key.setText(_fmt_license_key(_t))
+        e_key.setCursorPosition(len(e_key.text()))
+        e_key.blockSignals(False)
+    e_key.textEdited.connect(_on_edit)
+
+    msg = QtWidgets.QLabel(""); msg.setWordWrap(True); msg.setAlignment(QtCore.Qt.AlignCenter)
+    msg.setStyleSheet("color:#fca5a5; font-size:12px; margin-top:8px;")
+    v.addWidget(msg)
+    v.addSpacing(20)
     row = QtWidgets.QHBoxLayout()
     b_quit = QtWidgets.QPushButton(T("Quit", "Salir"))
+    b_quit.setStyleSheet("QPushButton{background:transparent;color:#8ea0bd;border:1px solid #2a3a57;"
+                         "border-radius:9px;padding:11px 20px;font-weight:700;} QPushButton:hover{color:#dbe6f5;}")
     b_act = QtWidgets.QPushButton(T("Activate", "Activar"))
-    b_act.setStyleSheet(f"QPushButton{{background:{ACC};color:#08243a;font-weight:800;padding:8px 18px;}}")
+    b_act.setCursor(QtCore.Qt.PointingHandCursor)
+    b_act.setStyleSheet(f"QPushButton{{background:{ACC};color:#08243a;font-weight:800;border-radius:9px;"
+                        "padding:11px 26px;font-size:14px;} QPushButton:hover{background:#38b6e6;}")
     row.addWidget(b_quit); row.addStretch(1); row.addWidget(b_act); v.addLayout(row)
+    fp = lic.machine_fingerprint()
+    foot = QtWidgets.QLabel(T("Machine ID: ", "ID de máquina: ") + fp[:20] + "…  ·  "
+                            + T("Need a key? Contact Watermelon System.",
+                                "¿No tienes clave? Contacta a Watermelon System."))
+    foot.setAlignment(QtCore.Qt.AlignCenter)
+    foot.setStyleSheet("color:#44526b; font-size:10px; margin-top:16px;")
+    v.addSpacing(6); v.addWidget(foot)
     state = {"ok": False}
 
     def _do_activate():
-        b_act.setEnabled(False); b_act.setText(T("Activating…", "Activando…")); QtWidgets.QApplication.processEvents()
+        if len(e_key.text().strip()) < 8:
+            msg.setText(T("Enter your license key.", "Ingresa tu clave de licencia.")); return
+        b_act.setEnabled(False); b_act.setText(T("Activating…", "Activando…"))
+        QtWidgets.QApplication.processEvents()
         r = lic.activate_with_key(e_key.text().strip())
         if r.get("ok"):
             state["ok"] = True; dlg.accept()
         else:
-            msg.setText(T("Could not activate: ", "No se pudo activar: ") + str(r.get("reason", "")))
+            msg.setText(_activation_reason_text(r.get("reason", "")))
             b_act.setEnabled(True); b_act.setText(T("Activate", "Activar"))
     b_act.clicked.connect(_do_activate)
+    e_key.returnPressed.connect(_do_activate)
     b_quit.clicked.connect(dlg.reject)
     dlg.exec()
     return state["ok"]
