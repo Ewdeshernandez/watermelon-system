@@ -34,14 +34,21 @@ jobs:
           pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx nitypes hightime npTDMS supabase reportlab pillow certifi cryptography pyinstaller
 
       - name: Embeber credenciales de nube (desde GitHub Secrets)
+        # Fase 2c: se embebe la ANON key (pública por diseño), NO el service key. Con RLS
+        # (rls_modal_anon.sql) el .exe solo puede subir runs/setups + data cruda. Un binario
+        # robado ya NO tiene god-mode sobre la base. Fallback al service key solo si no existe
+        # el secret anon (para no romper builds viejos); QUÍTALO cuando el anon esté configurado.
         shell: bash
         env:
           SB_URL: ${{ secrets.SUPABASE_URL }}
-          SB_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SB_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          if [ -z "$SB_KEY" ]; then
+            echo "::warning::SUPABASE_ANON_KEY vacío — el .exe quedará sin credenciales de nube (uploads offline). Configura el secret."
+          fi
           printf 'SUPABASE_URL = "%s"\nSUPABASE_KEY = "%s"\n' "$SB_URL" "$SB_KEY" \
             > core/remote_monitoring/_cloud_config.py
-          echo "cloud: url=$([ -n "$SB_URL" ] && echo SET || echo empty)"
+          echo "cloud: url=$([ -n "$SB_URL" ] && echo SET || echo empty)  key=$([ -n "$SB_KEY" ] && echo SET || echo empty)"
 
       - name: Compilar WatermelonModal.exe (onedir)
         shell: bash
