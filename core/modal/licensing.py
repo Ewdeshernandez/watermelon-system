@@ -244,7 +244,8 @@ def _supabase_url() -> str:
         return ""
 
 
-def activate_with_key(license_key: str, endpoint: Optional[str] = None) -> Dict[str, Any]:
+def activate_with_key(license_key: str, endpoint: Optional[str] = None,
+                      timeout: float = 20.0) -> Dict[str, Any]:
     """Activa esta máquina con una CLAVE DE LICENCIA (modelo comercial, sin login/OTP).
     Llama a la Edge Function `activate` con {license_key, machine_fp}; guarda y verifica
     el token firmado. Devuelve {ok, reason, account, exp}."""
@@ -267,7 +268,7 @@ def activate_with_key(license_key: str, endpoint: Optional[str] = None) -> Dict[
     req = urllib.request.Request(url, data=body, method="POST",
                                  headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=20, context=_ctx) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ctx) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:                     # 4xx/5xx → hay cuerpo con el motivo
         try:
@@ -338,17 +339,23 @@ def gate_check(grace_recheck_days: int = 3, hard_offline_days: int = 30) -> Dict
     last_online = float(st.get("last_online", now))         # default now → no bloquea corridas viejas
     key = st.get("license_key", "")
     exp = float(payload.get("exp", 0)) if payload else 0.0
-    # ¿toca re-chequear online? (token por vencer, o mucho sin contacto, o token inválido)
-    due = (not ok) or ((exp - now) < grace_recheck_days * 86400) \
-        or ((now - last_online) > (hard_offline_days - 5) * 86400)
-    if due and key:
-        rr = activate_with_key(key)                         # re-activa/refresca (best-effort)
+    # Re-chequeo online EN CADA ARRANQUE (kill-switch + expiración inmediatos), con timeout
+    # corto para que offline sea ágil. Si el SERVIDOR responde que la máquina fue revocada /
+    # la licencia venció → BLOQUEA ya. Si sólo falla la red → se usa el token en caché (gracia).
+    _REVOKE = ("machine_revoked", "invalid_key", "license_expired", "no_seats", "no_active_license")
+    if key:
+        rr = activate_with_key(key, timeout=7.0)
         if rr.get("ok"):
             st = _load_state(); token = st.get("token", "")
             ok, why, payload = verify_license_token(token)
             now = time.time(); last_online = float(st.get("last_online", now))
             exp = float(payload.get("exp", 0)) if payload else 0.0
-        # si no hay red, seguimos con lo que había (gracia offline hasta el límite duro)
+        else:
+            _rs = str(rr.get("reason", ""))
+            if any(x in _rs for x in _REVOKE):              # el servidor dijo NO → bloquea ya
+                return {"allowed": False, "reason": _rs, "needs_activation": True,
+                        "account": (payload or {}).get("account")}
+            # red/SSL/timeout → seguimos con el token en caché (gracia offline)
     if ok:
         if (now - last_online) > hard_offline_days * 86400:
             return {"allowed": False, "reason": "offline_too_long", "needs_activation": True,
