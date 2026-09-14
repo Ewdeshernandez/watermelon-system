@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.72"
+__version__ = "0.9.73"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -687,28 +687,37 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ver_lbl.setToolTip("Watermelon Modal software version"); tb.addWidget(ver_lbl)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
-    # --- Selector de idioma EN/ES (el cliente lo elige) ---
-    lang_cb = QtWidgets.QComboBox(); lang_cb.addItems(["EN", "ES"])
-    lang_cb.setCurrentIndex(1 if _LANG == "es" else 0)
-    lang_cb.setToolTip(T("Interface language", "Idioma de la interfaz"))
-    lang_cb.setStyleSheet("QComboBox{background:#1e3a5f; color:white; font-weight:700; border-radius:7px;"
-                          "padding:2px 8px; margin-right:10px;} QComboBox QAbstractItemView{background:white;color:#0f172a;}")
-
-    def _on_lang(i):
-        new = "es" if i == 1 else "en"
+    # --- Selector de idioma EN·ES (segmented control tipo iOS) ---
+    def _switch_lang(new):
         if new == _LANG:
             return
         _save_lang(new)
         QtWidgets.QMessageBox.information(win, "Watermelon Modal",
-            T("Language changed. The app will restart to apply it across the whole interface.",
-              "Idioma cambiado. La app se reiniciará para aplicarlo en toda la interfaz."))
+            T("Language set to English. The app will restart to apply it.",
+              "Idioma cambiado a Español. La app se reiniciará para aplicarlo."))
         try:
             QtCore.QProcess.startDetached(QtWidgets.QApplication.applicationFilePath(), sys.argv[1:])
         except Exception:  # noqa: BLE001
             pass
         app.quit()
-    lang_cb.currentIndexChanged.connect(_on_lang)
-    tb.addWidget(lang_cb)
+    lang_wrap = QtWidgets.QWidget()
+    lang_wrap.setStyleSheet("QWidget{background:#16233b; border:1px solid #2a3a57; border-radius:9px;}")
+    _lh = QtWidgets.QHBoxLayout(lang_wrap); _lh.setContentsMargins(3, 2, 3, 2); _lh.setSpacing(2)
+    _glob = QtWidgets.QLabel("\U0001F310"); _glob.setStyleSheet("background:transparent; border:none; font-size:12px;")
+    _lh.addWidget(_glob)
+    for _code in ("EN", "ES"):
+        _b = QtWidgets.QToolButton(); _b.setText(_code); _b.setCheckable(True)
+        _b.setChecked(_code.lower() == _LANG); _b.setCursor(QtCore.Qt.PointingHandCursor)
+        _b.setToolTip(T("Interface language", "Idioma de la interfaz"))
+        _b.setStyleSheet(
+            "QToolButton{background:transparent; color:#8ea0bd; border:none; border-radius:6px;"
+            "padding:3px 12px; font-weight:800; font-size:11px; letter-spacing:1px;}"
+            "QToolButton:hover{color:#dbe6f5;}"
+            "QToolButton:checked{background:#1AAEE5; color:#08243a;}")
+        _b.clicked.connect(lambda _=0, c=_code.lower(): _switch_lang(c))
+        _lh.addWidget(_b)
+    tb.addWidget(lang_wrap)
+    _sp2 = QtWidgets.QWidget(); _sp2.setFixedWidth(12); tb.addWidget(_sp2)
     # ¿Hay una NI 9234 conectada AHORA? Autodetecta al arrancar (no depende de --sim).
     def _detect_ni_channels():
         try:
