@@ -254,19 +254,28 @@ def activate_with_key(license_key: str, endpoint: Optional[str] = None) -> Dict[
     is_vm, _ = detect_vm()
     body = json.dumps({"license_key": (license_key or "").strip(),
                        "machine_fp": machine_fingerprint(), "is_vm": is_vm}).encode()
+    import urllib.request
+    import urllib.error
+    import ssl
+    # Contexto SSL con los certificados de certifi → funciona en el .exe congelado
+    # (sin esto, la conexión HTTPS a Supabase falla en Windows y parecía 'no_token').
     try:
-        import urllib.request
-        req = urllib.request.Request(url, data=body, method="POST",
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        import certifi
+        _ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001
+        _ctx = ssl.create_default_context()
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=_ctx) as resp:
             data = json.loads(resp.read().decode())
-    except Exception as e:  # noqa: BLE001
-        # urllib lanza HTTPError con cuerpo JSON en 4xx → intenta leer el motivo
+    except urllib.error.HTTPError as e:                     # 4xx/5xx → hay cuerpo con el motivo
         try:
-            import json as _j
-            data = _j.loads(getattr(e, "read", lambda: b"{}")().decode())
+            data = json.loads(e.read().decode())
         except Exception:  # noqa: BLE001
-            return {"ok": False, "reason": f"activate_failed: {e}"}
+            data = {"error": f"http_{e.code}"}
+    except Exception as e:  # noqa: BLE001  — sin red / SSL / timeout
+        return {"ok": False, "reason": f"activate_failed: {type(e).__name__}: {e}"}
     token = data.get("token")
     if not token:
         # el servidor de Supabase usa 'error'; el gateway de auth usa 'message'/'msg'
