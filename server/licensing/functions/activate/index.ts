@@ -19,7 +19,7 @@ async function signToken(payload: Record<string, unknown>): Promise<string> {
 
 Deno.serve(async (req) => {
   try {
-    const { license_key, machine_fp, is_vm } = await req.json();
+    const { license_key, machine_fp, is_vm, hostname } = await req.json();
     if (!license_key || !machine_fp)
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400 });
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -34,7 +34,8 @@ Deno.serve(async (req) => {
     if (!existing && (acts?.filter((a: any) => !a.revoked).length ?? 0) >= lic.seats)
       return new Response(JSON.stringify({ error: "no_seats" }), { status: 403 });
     await admin.from("activations").upsert({ license_id: lic.id, account: lic.account, machine_fp,
-      is_vm: !!is_vm, last_seen: new Date().toISOString() }, { onConflict: "license_id,machine_fp" });
+      is_vm: !!is_vm, hostname: hostname || null, last_seen: new Date().toISOString() },
+      { onConflict: "license_id,machine_fp" });
     const exp = Math.min(Date.now() / 1000 + 30 * 86400, new Date(lic.expires_at).getTime() / 1000);
     const token = await signToken({ account: lic.account, machine_fp, exp, seat: lic.seats,
       features: lic.features, iat: Date.now() / 1000 });

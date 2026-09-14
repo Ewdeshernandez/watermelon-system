@@ -78,6 +78,16 @@ def _cpu_id() -> str:
     return platform.processor() or ""
 
 
+def machine_label() -> str:
+    """Nombre legible del equipo (para identificarlo en el panel de licencias): hostname + usuario."""
+    try:
+        host = platform.node() or "PC"
+        user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+        return (host + (f" / {user}" if user else "")).strip()[:80]
+    except Exception:  # noqa: BLE001
+        return "PC"
+
+
 def machine_fingerprint() -> str:
     """Huella ESTABLE del equipo (hash). Combina MAC + CPU + disco + plataforma.
     Igual en cada arranque de la MISMA máquina; distinta en otra máquina/VM clonada."""
@@ -254,7 +264,8 @@ def activate_with_key(license_key: str, endpoint: Optional[str] = None,
         return {"ok": False, "reason": "no_server_url"}
     is_vm, _ = detect_vm()
     body = json.dumps({"license_key": (license_key or "").strip(),
-                       "machine_fp": machine_fingerprint(), "is_vm": is_vm}).encode()
+                       "machine_fp": machine_fingerprint(), "is_vm": is_vm,
+                       "hostname": machine_label()}).encode()
     import urllib.request
     import urllib.error
     import ssl
