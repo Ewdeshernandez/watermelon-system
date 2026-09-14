@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.70"
+__version__ = "0.9.71"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -820,22 +820,22 @@ def build_app(layout: OMALayout, simulated: bool = True):
     bld.addWidget(btn_color); bld.addWidget(btn_colreset)
     bld.addSpacing(16)
     chk_lock = QtWidgets.QCheckBox(T("🔒 Rotate whole assembly", "🔒 Rotar todo el conjunto"))
-    chk_lock.setToolTip("ON: drag rotates/positions the WHOLE assembly (X/Y/Z). "
-                        "OFF: drag moves each equipment separately.")
+    chk_lock.setToolTip(T("ON: drag rotates/positions the WHOLE assembly (X/Y/Z). "
+                        "OFF: drag moves each equipment separately.", "ON: arrastrar rota/posiciona TODO el conjunto (X/Y/Z). OFF: arrastrar mueve cada equipo por separado."))
     bld.addWidget(chk_lock)
     bld.addStretch(1)
     ml.addLayout(bld)
     ml.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>🖱️ left-drag = rotate · wheel = zoom · right-drag = pan · "
-        "click = move the selected equipment. Build the figure, then go to <b>Sensors</b>.</i>"))
+        T("<i style='color:#64748b'>🖱️ left-drag = rotate · wheel = zoom · right-drag = pan · "
+        "click = move the selected equipment. Build the figure, then go to <b>Sensors</b>.</i>", "<i style='color:#64748b'>🖱️ arrastrar-izq = rotar · rueda = zoom · arrastrar-der = desplazar · clic = mover el equipo. Arma la figura y ve a <b>Sensores</b>.</i>")))
     vgeo = _make_view("geo"); ml.addWidget(vgeo["plot"], 1)
     cfg_tabs.addTab(pg_m, T("Machine", "Máquina"))
 
     # ---------- Sensors ----------
     pg_sen = QtWidgets.QWidget(); snl = QtWidgets.QVBoxLayout(pg_sen)
     snl.addWidget(QtWidgets.QLabel(
-        "<b>Place the sensors on the machine.</b> Set number, axes and quantity, then "
-        "<b>click on the drawing</b> — or use <b>Place by standard</b>."))
+        T("<b>Place the sensors on the machine.</b> Set number, axes and quantity, then "
+        "<b>click on the drawing</b> — or use <b>Place by standard</b>.", "<b>Coloca los sensores en la máquina.</b> Define número, ejes y cantidad, luego <b>haz clic en el dibujo</b> — o usa <b>Ubicar por norma</b>.")))
     prow = QtWidgets.QHBoxLayout()
     prow.addWidget(QtWidgets.QLabel("No.:"))
     sp_num = QtWidgets.QSpinBox(); sp_num.setRange(1, 999); sp_num.setValue(1); prow.addWidget(sp_num)
@@ -855,8 +855,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_norm.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
     btn_clrpts = QtWidgets.QPushButton(T("🧹 Clear sensors", "🧹 Limpiar sensores"))
     nrow.addWidget(btn_norm); nrow.addWidget(btn_clrpts)
-    nrow.addWidget(QtWidgets.QLabel("<i style='color:#64748b'>· In 'Move sensor' mode, click-and-hold on a "
-                                    "sensor to drag it.</i>")); nrow.addStretch(1)
+    nrow.addWidget(QtWidgets.QLabel(T("<i style='color:#64748b'>· In 'Move sensor' mode, click-and-hold on a "
+                                    "sensor to drag it.</i>", "<i style='color:#64748b'>· En modo 'Mover sensor', mantén presionado un sensor para arrastrarlo.</i>"))); nrow.addStretch(1)
     snl.addLayout(nrow)
     vsen = _make_view("sensors"); snl.addWidget(vsen["plot"], 1)
     cfg_tabs.addTab(pg_sen, T("Sensors", "Sensores"))
@@ -899,8 +899,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _tb = QtWidgets.QWidget(); _tbl = QtWidgets.QHBoxLayout(_tb); _tbl.setContentsMargins(0, 0, 0, 0)
     chk_tach = QtWidgets.QCheckBox(T("Keyphasor / tach on BNC", "Keyphasor / tacóm. en BNC"))
     chk_tach.setChecked(layout.tach_bnc > 0)
-    chk_tach.setToolTip("OPTIONAL. If the machine has a once-per-rev pulse, capture it on a FREE BNC "
-                        "to measure exact RPM, anchor Campbell and flag harmonics. If not, leave it off.")
+    chk_tach.setToolTip(T("OPTIONAL. If the machine has a once-per-rev pulse, capture it on a FREE BNC "
+                        "to measure exact RPM, anchor Campbell and flag harmonics. If not, leave it off.", "OPCIONAL. Si la máquina tiene un pulso 1×/vuelta, captúralo en un BNC LIBRE para medir la RPM exacta, anclar Campbell y marcar armónicos. Si no, déjalo apagado."))
     sp_tach = QtWidgets.QSpinBox(); sp_tach.setRange(1, 20); sp_tach.setValue(layout.tach_bnc or 20)
     sp_tach.setEnabled(chk_tach.isChecked())
     chk_tach.toggled.connect(sp_tach.setEnabled)
@@ -952,9 +952,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =================================================================
     pg_sc = QtWidgets.QWidget(); scl = QtWidgets.QVBoxLayout(pg_sc)
     scbar = QtWidgets.QHBoxLayout()
-    scbar.addWidget(QtWidgets.QLabel("<b>Live sensor check</b> "
+    scbar.addWidget(QtWidgets.QLabel(T("<b>Live sensor check</b> "
                     "<span style='color:#64748b'>— confirm every channel is wired before capturing. "
-                    "Tap a sensor and watch its lane react.</span>"))
+                    "Tap a sensor and watch its lane react.</span>", "<b>Verificación de sensores en vivo</b> <span style='color:#64748b'>— confirma que cada canal esté conectado antes de capturar. Toca un sensor y observa su curva reaccionar.</span>")))
     scbar.addStretch(1)
     scbar.addWidget(QtWidgets.QLabel(T("Source:", "Fuente:")))
     cb_scsrc = QtWidgets.QComboBox(); cb_scsrc.addItems(["Simulated", f"{DAQ_NAME} (live)"])
@@ -964,8 +964,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_scstart = QtWidgets.QPushButton(T("▶ Start live", "▶ Iniciar en vivo")); btn_scstart.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn_scstop = QtWidgets.QPushButton(T("⏹ Stop", "⏹ Detener"))
     btn_scsnap = QtWidgets.QPushButton(T("📸 Save as verification record", "📸 Guardar verificación"))
-    btn_scsnap.setToolTip("Save this sensor check (waveforms + status) as proof the sensors are OK — "
-                          "it goes into the preliminary and final report.")
+    btn_scsnap.setToolTip(T("Save this sensor check (waveforms + status) as proof the sensors are OK — "
+                          "it goes into the preliminary and final report.", "Guarda esta verificación (ondas + estado) como evidencia de que los sensores están OK — va en el reporte preliminar y final."))
     scbar.addWidget(btn_scstart); scbar.addWidget(btn_scstop); scbar.addWidget(btn_scsnap)
     scl.addLayout(scbar)
     scsplit = QtWidgets.QHBoxLayout()
@@ -1685,8 +1685,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     if hw_present:
         cb_src.setCurrentIndex(1)                          # hay hardware → live por defecto
     chk_harm = QtWidgets.QCheckBox(T("Reduce harmonics (kurtosis)", "Reducir armónicos (kurtosis)"))
-    chk_harm.setToolTip("Detect and remove machine harmonics by kurtosis, revealing the structural "
-                        "mode underneath. Analysis only — raw data untouched. Recommended for running machines.")
+    chk_harm.setToolTip(T("Detect and remove machine harmonics by kurtosis, revealing the structural "
+                        "mode underneath. Analysis only — raw data untouched. Recommended for running machines.", "Detecta y remueve armónicos de la máquina por kurtosis, revelando el modo estructural debajo. Solo análisis — la data cruda no se toca. Recomendado en máquinas en operación."))
     crow.addWidget(chk_harm)
     btn_testni = QtWidgets.QPushButton(T("🔌 Test acquisition", "🔌 Probar adquisición"))
     btn_ocap = QtWidgets.QPushButton(T("▶ Capture + FDD", "▶ Capturar + FDD")); btn_ocap.setStyleSheet(
@@ -1796,8 +1796,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     p_svd = pg.PlotWidget(); p_svd.setBackground("w"); p_svd.setLabel("left", "dB | (1 g)² / Hz"); p_svd.setLabel("bottom", "Frequency", "Hz")
     p_svd.setTitle("Singular values of spectral densities — all channels", color=NAVY); p_svd.showGrid(x=True, y=True, alpha=0.3); p_svd.addLegend(offset=(-10, 10))
     ocs.addWidget(tbl_om, 3); ocs.addWidget(p_svd, 4); cl2.addLayout(ocs, 1)
-    lbl_ost = QtWidgets.QLabel("<i style='color:#64748b'>Tip: click on a peak of the spectral "
-                              "density to add a mode manually.</i>"); cl2.addWidget(lbl_ost)
+    lbl_ost = QtWidgets.QLabel(T("<i style='color:#64748b'>Tip: click on a peak of the spectral "
+                              "density to add a mode manually.</i>", "<i style='color:#64748b'>Tip: haz clic en un pico de la densidad espectral para agregar un modo manualmente.</i>")); cl2.addWidget(lbl_ost)
     lbl_omasum = QtWidgets.QLabel(""); lbl_omasum.setStyleSheet("color:#334155;"); cl2.addWidget(lbl_omasum)
     tabs.addTab(pg_oc, "OMA capture")
 
@@ -2508,8 +2508,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # COMPARATIVE (EMA vs OMA)
     # =====================================================================
     pg_cmp = QtWidgets.QWidget(); cpl = QtWidgets.QVBoxLayout(pg_cmp)
-    cpl.addWidget(QtWidgets.QLabel("<b>EMA ↔ OMA correlation</b> — impact-test modes vs operational modes "
-                                   "(ISO 7626-6 / API 684)."))
+    cpl.addWidget(QtWidgets.QLabel(T("<b>EMA ↔ OMA correlation</b> — impact-test modes vs operational modes "
+                                   "(ISO 7626-6 / API 684).", "<b>Correlación EMA ↔ OMA</b> — modos de impacto vs modos operacionales (ISO 7626-6 / API 684).")))
     crow3 = QtWidgets.QHBoxLayout(); btn_cmp = QtWidgets.QPushButton(T("↻ Compare EMA vs OMA", "↻ Comparar EMA vs OMA")); btn_cmp.setStyleSheet(f"QPushButton{{background:{ACC};}}")
     crow3.addWidget(btn_cmp); crow3.addStretch(1); cpl.addLayout(crow3)
     tbl_cmp = QtWidgets.QTableWidget(0, 4); tbl_cmp.setHorizontalHeaderLabels(["EMA mode (Hz)", "OMA mode (Hz)", "Δf (Hz)", "Δ (%)"])
@@ -2551,8 +2551,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     p_mac.setLabel("bottom", "Mode (Hz)"); p_mac.setLabel("left", "Mode (Hz)")
     p_mac.getViewBox().invertY(True); p_mac.getViewBox().setAspectLocked(True)
     mcl.addWidget(p_mac, 1)
-    lbl_mac = QtWidgets.QLabel("Run OMA capture (and SSI for the cross-check). MAC validates that the mode "
-                              "SHAPES are consistent.")
+    lbl_mac = QtWidgets.QLabel(T("Run OMA capture (and SSI for the cross-check). MAC validates that the mode "
+                              "SHAPES are consistent.", "Corre Captura OMA (y SSI para el cruce). La MAC valida que las FORMAS modales sean consistentes."))
     lbl_mac.setWordWrap(True); mcl.addWidget(lbl_mac)
     tabs.addTab(pg_mac, "Validation (MAC)")
 
@@ -2626,14 +2626,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
     crow2.addWidget(QtWidgets.QLabel("Automatic fn↔order crossings (0.5×..8×) + operating bands (API 684)."))
     crow2.addSpacing(16)
     chk_cam2 = QtWidgets.QCheckBox(T("Compare 2nd speed:", "Comparar 2ª velocidad:"))
-    chk_cam2.setToolTip("Overlay a second operating speed to compare (e.g. 3600 vs 3200 RPM). "
-                        "The order lines do NOT move — only the operating speed line/band.")
+    chk_cam2.setToolTip(T("Overlay a second operating speed to compare (e.g. 3600 vs 3200 RPM). "
+                        "The order lines do NOT move — only the operating speed line/band.", "Superpone una segunda velocidad para comparar (ej. 3600 vs 3200 RPM). Las líneas de orden NO se mueven — solo la línea/banda de velocidad."))
     sp_cam2 = QtWidgets.QDoubleSpinBox(); sp_cam2.setRange(0, 60000); sp_cam2.setValue(3200); sp_cam2.setSuffix(" RPM")
     crow2.addWidget(chk_cam2); crow2.addWidget(sp_cam2)
     crow2.addSpacing(12)
     chk_half = QtWidgets.QCheckBox(T("½× band (sub-sync)", "Banda ½× (sub-sínc.)"))
-    chk_half.setToolTip("Optional — NOT required by API 684. Screens sub-synchronous excitation "
-                        "(oil whirl ~0.42-0.48x, looseness) at half the operating speed.")
+    chk_half.setToolTip(T("Optional — NOT required by API 684. Screens sub-synchronous excitation "
+                        "(oil whirl ~0.42-0.48x, looseness) at half the operating speed.", "Opcional — NO requerido por API 684. Detecta excitación sub-síncrona (oil whirl ~0.42-0.48x, holguras) a la mitad de la velocidad."))
     crow2.addWidget(chk_half); crow2.addStretch(1); cml.addLayout(crow2)
     cams = QtWidgets.QHBoxLayout()
     p_cam = pg.PlotWidget(); p_cam.setBackground("w"); p_cam.setLabel("left", "Frequency", "Hz"); p_cam.setLabel("bottom", "Speed", "RPM")
@@ -2812,8 +2812,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     arow = QtWidgets.QHBoxLayout()
     arow.addWidget(QtWidgets.QLabel(T("Source:", "Fuente:")))
     cb_asrc = QtWidgets.QComboBox(); cb_asrc.addItems(["OMA (FDD)", "SSI", "ODS (operating)"])
-    cb_asrc.setToolTip("OMA/SSI = identified MODAL shapes. ODS = OPERATING deflection: how the machine "
-                       "actually moves at a frequency (1×, blade-pass), with phase relative to the highest-response channel.")
+    cb_asrc.setToolTip(T("OMA/SSI = identified MODAL shapes. ODS = OPERATING deflection: how the machine "
+                       "actually moves at a frequency (1×, blade-pass), with phase relative to the highest-response channel.", "OMA/SSI = formas MODALES identificadas. ODS = deflexión OPERACIONAL: cómo se mueve la máquina a una frecuencia (1×, paso de álabes), con fase relativa al canal de mayor respuesta."))
     arow.addWidget(cb_asrc)
     arow.addWidget(QtWidgets.QLabel(T("Mode / ODS f:", "Modo / f ODS:")))
     cb_amode = QtWidgets.QComboBox(); cb_amode.setMinimumWidth(160); arow.addWidget(cb_amode)
@@ -2840,9 +2840,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     arow.addWidget(btn_gif); arow.addStretch(1)
     anl.addLayout(arow)
     anl.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>Colour = vibration amplitude (green→red). Rotate with the view "
+        T("<i style='color:#64748b'>Colour = vibration amplitude (green→red). Rotate with the view "
         "buttons or left-drag. The panel on the right shows the modal values and the complexity "
-        "(Argand) plot of the selected mode.</i>"))
+        "(Argand) plot of the selected mode.</i>", "<i style='color:#64748b'>Color = amplitud de vibración (verde→rojo). Rota con los botones de vista o arrastrando. El panel derecho muestra los valores modales y el gráfico de complejidad (Argand) del modo seleccionado.</i>")))
     # --- layout: 3D a la izquierda, panel de datos + complejidad a la derecha ---
     anim_split = QtWidgets.QHBoxLayout()
     p_anim = pg.PlotWidget(viewBox=OrbitViewBox()); p_anim.setBackground("w"); p_anim.setAspectLocked(True)
@@ -3187,8 +3187,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_prel = QtWidgets.QWidget(); prl = QtWidgets.QVBoxLayout(pg_prel)
     prl.addWidget(QtWidgets.QLabel(
-        "<b>Preliminary field report</b> — quick same-day deliverable: data-quality Go/No-Go + "
-        "preliminary results + resonance screening + findings. The full report is generated from the web."))
+        T("<b>Preliminary field report</b> — quick same-day deliverable: data-quality Go/No-Go + "
+        "preliminary results + resonance screening + findings. The full report is generated from the web.", "<b>Reporte preliminar de campo</b> — entregable rápido del mismo día: Go/No-Go de calidad + resultados preliminares + tamizado de resonancia + hallazgos. El reporte completo se genera desde la web.")))
     pf = QtWidgets.QFormLayout()
     e_tech = QtWidgets.QLineEdit(); e_rev = QtWidgets.QLineEdit()
     e_find = QtWidgets.QPlainTextEdit(); e_find.setPlaceholderText(T("One finding per line…", "Un hallazgo por línea…")); e_find.setMaximumHeight(70)
@@ -3601,10 +3601,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     "Orders 0.5×–8× (grey) vs natural frequencies (green). The red band is the "
                     "operating speed ±15%. A mode inside the band near an order = resonance risk.")
             lbl_ex_done = QtWidgets.QLabel(
-                "<div style='background:#ecfdf5;border-radius:8px;padding:10px;color:#065f46'>"
+                T("<div style='background:#ecfdf5;border-radius:8px;padding:10px;color:#065f46'>"
                 "<b>Auto-diagnosis (example):</b> the 19.4 Hz mode shows high motion at the skid feet "
                 "with damping ~3% → consistent with <b>low skid rigidity</b>. Recommendation: verify "
-                "base/grouting stiffness and separation from 1× (60 Hz).</div>")
+                "base/grouting stiffness and separation from 1× (60 Hz).</div>", "<div style='background:#ecfdf5;border-radius:8px;padding:10px;color:#065f46'><b>Autodiagnóstico (ejemplo):</b> el modo de 19.4 Hz muestra alto movimiento en las patas del skid con amortiguamiento ~3% → consistente con <b>baja rigidez del skid</b>. Recomendación: verificar rigidez de base/grouting y separación de 1× (60 Hz).</div>"))
             lbl_ex_done.setWordWrap(True); lbl_ex_done.setTextFormat(QtCore.Qt.RichText); exl.addWidget(lbl_ex_done)
         except Exception as e:  # noqa: BLE001
             err = QtWidgets.QLabel(f"Could not generate the example: {type(e).__name__}: {e}")
@@ -3714,8 +3714,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _brow_row.addWidget(_brow); _brow_row.addWidget(_bgo); _brow_row.addStretch(1)
     _cl.addWidget(_uh); _cl.addSpacing(2); _cl.addWidget(_cur); _cl.addWidget(_status)
     _cl.addWidget(_notes); _cl.addSpacing(8); _cl.addLayout(_brow_row)
-    _foot = QtWidgets.QLabel("Updates download and install automatically; the app restarts when done. "
-                             "Requires an internet connection.")
+    _foot = QtWidgets.QLabel(T("Updates download and install automatically; the app restarts when done. "
+                             "Requires an internet connection.", "Las actualizaciones se descargan e instalan automáticamente; la app se reinicia al terminar. Requiere conexión a internet."))
     _foot.setFont(_mkfont(9)); _foot.setStyleSheet("color:#94a3b8;border:none;"); _foot.setWordWrap(True)
     _cl.addSpacing(6); _cl.addWidget(_foot)
     ul.addWidget(_card, 0, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop); ul.addStretch(1)
