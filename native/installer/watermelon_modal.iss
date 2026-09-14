@@ -33,6 +33,12 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
+; Fija el modo per-usuario SIEMPRE -> {autopf} = %LocalAppData%\Programs de forma consistente
+; (evita que una instalación previa "como admin" deje una copia vieja en C:\Program Files que
+; el acceso directo siga lanzando). Cierra la app si está abierta para poder reemplazar el .exe.
+PrivilegesRequiredOverridesAllowed=dialog
+CloseApplications=yes
+RestartApplications=no
 ArchitecturesInstallIn64BitMode=x64
 
 [Languages]

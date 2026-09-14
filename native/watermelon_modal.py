@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.80"
+__version__ = "0.9.81"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -4023,19 +4023,41 @@ def _activation_dialog(app, lic) -> bool:
     return state["ok"]
 
 
+def _license_block_dialog(app, detail: str) -> None:
+    """Bloqueo FAIL-CLOSED: la capa de licencia no pudo verificar (módulo ausente o error
+    inesperado). NO se abre la app. Mensaje claro y diagnosticable en vez de crash silencioso."""
+    try:
+        box = QtWidgets.QMessageBox()
+        box.setIcon(QtWidgets.QMessageBox.Critical)
+        box.setWindowTitle("WATERMELON MODAL")
+        box.setText(T("Licensing verification unavailable — the app cannot start.",
+                      "No se pudo verificar la licencia — la app no puede iniciar."))
+        box.setInformativeText(
+            T("Please reinstall the latest version or contact Watermelon System.",
+              "Reinstala la última versión o contacta a Watermelon System.")
+            + "\n\n" + detail[-400:])
+        box.setStandardButtons(QtWidgets.QMessageBox.Close)
+        box.exec()
+    except Exception:  # noqa: BLE001
+        print("LICENSE BLOCK:", detail)
+
+
 def _license_gate(app) -> bool:
-    """Si el licenciamiento está activo y no hay licencia válida → exige activación.
-    Devuelve True si la app puede arrancar."""
+    """Gate de licencia — FAIL-CLOSED. Si el licenciamiento está activo y no se puede
+    verificar (módulo ausente / error inesperado), NO se abre la app: se muestra un bloqueo
+    diagnosticable. Sólo devuelve True con licencia válida (o activación exitosa)."""
     if not _LICENSING_ENABLED:
         return True
     try:
         from core.modal import licensing as lic
-    except Exception:  # noqa: BLE001  — build sin el módulo → no bloquear
-        return True
+    except Exception:  # noqa: BLE001  — módulo de seguridad ausente en la build → BLOQUEA
+        _license_block_dialog(app, "import core.modal.licensing failed:\n" + traceback.format_exc())
+        return False
     try:
         g = lic.gate_check()
-    except Exception:  # noqa: BLE001
-        return True
+    except Exception:  # noqa: BLE001  — error inesperado del gate (offline ya se maneja adentro) → BLOQUEA
+        _license_block_dialog(app, "gate_check() raised:\n" + traceback.format_exc())
+        return False
     if g.get("allowed"):
         return True
     return _activation_dialog(app, lic)
