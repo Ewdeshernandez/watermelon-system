@@ -49,6 +49,24 @@ if not is_page_allowed_for_role("pages/18_Modal_Analysis.py", _my_role):
 
 NAVY = "#0F1E3D"; GREEN = "#16a34a"; BLUE = "#2563eb"; AMBER = "#f59e0b"; RED = "#dc2626"; SLATE = "#475569"
 
+# ---- Config / constantes del análisis (UNA sola fuente; antes estaban regadas) ----
+CFG_NPERSEG = 4096              # ventana de Welch para EFDD
+CFG_SSI_BAND = (2.0, 200.0)    # banda de frecuencia para el SSI (Hz)
+CFG_SSI_ORDERS = range(2, 41, 2)  # órdenes del modelo SSI
+CFG_MAC_REDUNDANT = 0.7        # MAC off-diagonal > este valor → modos redundantes
+CFG_CAMPBELL_MARGIN = 0.15     # ±15% banda de operación (API 684)
+CFG_REPORT_SHAPE_CAP = 8       # máx. formas modales embebidas en el PDF
+CFG_CONF_EN = {"Alta": "High", "Media": "Medium", "Baja": "Low"}  # mapa de confianza ES→EN
+
+
+def _run_geometry(D, lay):
+    """Geometría de la corrida: la del payload de campo si trae nodos; si no, la default.
+    Fuente única — antes este patrón frágil estaba repetido en 3 sitios."""
+    from core.modal.oma_layout import default_geometry as _dg
+    g = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
+    return g if (g and g.get("nodes")) else _dg(lay)
+
+
 # --- Tema de gráficos "watermelon" (industrial, consistente en toda la página) ---
 import plotly.io as _pio
 import plotly.graph_objects as _go
@@ -1176,7 +1194,7 @@ def _build_demo_D():
     lay = _default_layout(); nch = lay.n_channels()
     data, fs = _demo_oma(nch)
     fmax = min(fs / 2.56, lay.fmax_hz)
-    fdd = run_oma(time_data=data, sample_rate_hz=fs, nperseg=4096,
+    fdd = run_oma(time_data=data, sample_rate_hz=fs, nperseg=CFG_NPERSEG,
                   channel_names=lay.channel_names(), f_min_hz=5.0, f_max_hz=fmax)
     freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
     if sv.ndim == 1:
@@ -1311,7 +1329,7 @@ def _analyze_from_raw(path, bucket, fs, detrend, band, decf, harm, run_hz, fmax_
     data, rfs = rr
     adata, afs = preprocess_signals(data, rfs, detrend=detrend, band=band, decimate_factor=int(decf))
     fmax = min(afs / 2.56, fmax_lay)
-    fdd = run_oma(time_data=adata, sample_rate_hz=afs, nperseg=4096,
+    fdd = run_oma(time_data=adata, sample_rate_hz=afs, nperseg=CFG_NPERSEG,
                   channel_names=list(channels), f_min_hz=5.0, f_max_hz=fmax, running_speed_hz=run_hz)
     nharm = 0
     if harm and fdd.modes:
@@ -1663,7 +1681,7 @@ if nav == T_OMA:
     _rows_html = []
     from core.modal.run_report import mode_confidence as _mode_conf
     # UI del analista en inglés (el reporte va en español)
-    _CONF_EN = {"Alta": "High", "Media": "Medium", "Baja": "Low"}
+    _CONF_EN = CFG_CONF_EN
     _CONFCOL = {"High": ("#166534", "#e7f7ee"), "Medium": ("#b45309", "#fdf3e3"),
                 "Low": ("#b91c1c", "#fdeaea")}
     for i, m in enumerate(D["oma_modes"], 1):
@@ -1720,7 +1738,8 @@ if nav == T_SSI:
     _diagram = None; _rows = None; _freqs = []
     if D["raw"] is not None:
         data, fs = D["raw"]
-        ssi = run_ssi_cov(data, fs, orders=list(range(2, 41, 2)), fmin_hz=2.0, fmax_hz=200.0)
+        ssi = run_ssi_cov(data, fs, orders=list(CFG_SSI_ORDERS),
+                          fmin_hz=CFG_SSI_BAND[0], fmax_hz=CFG_SSI_BAND[1])
         _diagram = ssi.diagram; _freqs = [m.frequency_hz for m in ssi.modes]
         _rows = [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m.frequency_hz:.2f}<span class='u'> Hz</span></span>",
                   f"<span class='num'>±{m.std_frequency_hz:.2f}</span>",
@@ -1806,7 +1825,7 @@ if nav == T_CAMP:
             _half = st.checkbox("½× band (sub-sync)", value=False, key="camp_half",
                                 help="Optional (not API 684): screens sub-synchronous excitation at half speed.")
 
-        rpm_op = float(D["rpm"]); SM = 0.15
+        rpm_op = float(D["rpm"]); SM = CFG_CAMPBELL_MARGIN
         lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM)
         rpm2 = float(_rpm2) if _cmp2 and _rpm2 > 0 else 0.0
         rpm_max = max(rpm_op * 1.4, rpm2 * 1.4, 1500.0)
@@ -1903,7 +1922,7 @@ if nav == T_SHAPES:
     else:
         # Confianza por modo (para filtrar las formas que valen la pena)
         from core.modal.run_report import mode_confidence as _mc
-        _CONF_EN = {"Alta": "High", "Media": "Medium", "Baja": "Low"}
+        _CONF_EN = CFG_CONF_EN
         _ssf = [mm["fn"] for mm in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
         _conf_all = [_CONF_EN.get(_mc(mm["fn"], mm["zeta"], mm["complexity"], mm.get("cls", "natural"),
                                       _ssf, D["rpm"]), "—") for mm in modes]
@@ -1929,9 +1948,7 @@ if nav == T_SHAPES:
                           and len(D["shapes"][idx]) == len(pts))
         amp = np.asarray(D["shapes"][idx], float) if _has_shape else None
         _smul = float(_scl.replace("×", ""))
-        from core.modal.oma_layout import default_geometry as _default_geometry
-        _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
-        _geom = _pl_geom if (_pl_geom and _pl_geom.get("nodes")) else _default_geometry(lay)
+        _geom = _run_geometry(D, lay)
 
         # incertidumbres (Std.) desde SSI si hay un modo que coincide
         _stdf = _stdz = "N/A"
@@ -2012,7 +2029,7 @@ if nav == T_MAC:
                             margin=dict(l=60, r=20, t=20, b=50))
         _chart(_figM)
         n = len(_kept)
-        _dup = [(fs_lbl[i], fs_lbl[j], M[i, j]) for i in range(n) for j in range(i + 1, n) if M[i, j] > 0.7]
+        _dup = [(fs_lbl[i], fs_lbl[j], M[i, j]) for i in range(n) for j in range(i + 1, n) if M[i, j] > CFG_MAC_REDUNDANT]
         if _dup:
             st.warning("Redundant modes (MAC>0.7, same shape → review/remove one): "
                        + ", ".join(f"{a:.1f}↔{b:.1f} ({v:.2f})" for a, b, v in _dup))
@@ -2075,9 +2092,7 @@ if nav == T_ODS:
             if len(_amp) != len(_ptsO):
                 st.warning("The ODS does not match the number of active sensors.")
             else:
-                from core.modal.oma_layout import default_geometry as _dgeoO
-                _plgO = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
-                _geomO = _plgO if (_plgO and _plgO.get("nodes")) else _dgeoO(lay)
+                _geomO = _run_geometry(D, lay)
                 _ordO = (_f0 / (_rpmO / 60.0)) if _rpmO else 0.0
                 st.markdown(f"<div style='text-align:center;color:#64748b;font-weight:600;font-size:13px'>"
                             f"ODS @ {_f0:.2f} Hz" + (f" · {_ordO:.2f}×" if _rpmO else "") + "</div>",
@@ -2255,10 +2270,8 @@ if nav == T_REPORT:
                 from core.modal.run_report import build_report_from_run
                 import base64 as _b64m
                 with st.spinner("Rendering figures (config · sensors · spectral density · SSI · mode shapes) and building the SIGA report…"):
-                    from core.modal.oma_layout import default_geometry as _dg_r
                     pts = lay.active_points()
-                    _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
-                    _geom_r = _pl_geom if (_pl_geom and _pl_geom.get("nodes")) else _dg_r(lay)
+                    _geom_r = _run_geometry(D, lay)
                     # filtro spurious/harmonic + confianza (1 clic): modos + sus formas, en paralelo
                     _pairs = list(zip(D["oma_modes"], (D["shapes"] or [None] * len(D["oma_modes"]))))
                     if _hide_spur:
@@ -2267,7 +2280,7 @@ if nav == T_REPORT:
                     if _only_conf:
                         _pairs = [(mm, ss) for (mm, ss) in _pairs if _conf_of(mm) == "Alta"]
                     _modes_r = [mm for mm, ss in _pairs]; _shapes_r = [ss for mm, ss in _pairs]
-                    _SHAPE_CAP = 8   # todas las formas confiables (tope para no inflar el PDF)
+                    _SHAPE_CAP = CFG_REPORT_SHAPE_CAP   # tope de formas en el PDF
                     # formas modales estilo ARTeMIS (superficies + cuadrícula), estáticas para el PDF
                     shape_pngs = []
                     for i, m in enumerate(_modes_r[:_SHAPE_CAP]):
