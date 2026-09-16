@@ -1249,100 +1249,145 @@ if nav == T_SHAPES:
 
 # ---------------------------------------------------------------- MAC / validation
 if nav == T_GEOM:
-    _sec("Geometry", "Improve the structure the mode shape animates on — sensor nodes come from "
-         "the field and stay locked", "ARTeMIS-style")
+    _sec("Geometry", "Connect the sensors into a body so the mode shape looks like your machine — "
+         "the sensors come from the field and stay locked", "ARTeMIS-style")
     import pandas as _pd
-    import copy as _copy
-    _gk = f"geom_work::{_run_key}"
+    from core.modal.modal_web_plots import _AX as _DOF_AX, _stn_key as _stn
+    _wk = f"geomw::{_run_key}"
     _field_g = _field_geometry(D, lay)
     _saved = st.session_state.get(f"geom_edit::{_run_key}")
-    if _gk not in st.session_state:
-        st.session_state[_gk] = _copy.deepcopy(_saved if (_saved and _saved.get("nodes")) else _field_g)
-    _gw = st.session_state[_gk]
-    _nodes0 = _gw.get("nodes", [])
-    _sensor_nodes = [dict(n) for n in _nodes0 if n.get("sensor")]
-    _struct_nodes = [n for n in _nodes0 if not n.get("sensor")]
-    st.caption(f"**{len(_sensor_nodes)} sensor nodes** (from the field — locked) · "
-               f"**{len(_struct_nodes)} structure nodes** (editable). Sensor positions are physical and "
-               "never change; add structure nodes + lines so the mode animates on a realistic body.")
+    _srcg = _saved if (_saved and _saved.get("nodes")) else _field_g
+    _sensor_nodes = [dict(n) for n in _srcg.get("nodes", []) if n.get("sensor")]
+    # Estado de trabajo por IDS (robusto al reordenamiento). Se inicializa una vez.
+    if _wk not in st.session_state:
+        _n0 = _srcg.get("nodes", [])
+        _snodes0 = [{"id": n["id"], "x": float(n.get("x", 0)), "y": float(n.get("y", 0)),
+                     "z": float(n.get("z", 0))} for n in _n0 if not n.get("sensor")]
+        _lines0 = []
+        for a, b in _srcg.get("lines", []):
+            _ia = _n0[a]["id"] if isinstance(a, int) and a < len(_n0) else a
+            _ib = _n0[b]["id"] if isinstance(b, int) and b < len(_n0) else b
+            _lines0.append([_ia, _ib])
+        _surfs0 = [[_n0[i]["id"] if isinstance(i, int) and i < len(_n0) else i for i in s]
+                   for s in _srcg.get("surfaces", [])]
+        st.session_state[_wk] = {"snodes": _snodes0, "lines": _lines0, "surfs": _surfs0}
+    _wg = st.session_state[_wk]
 
-    _cE, _cP = st.columns([1.0, 1.35])
+    # DOF por sensor (dirección física medida) para las flechas
+    _dofmap = {}
+    for _p in lay.active_points():
+        _kk = _stn(_p); _vv = np.array(_DOF_AX.get(_p.axis, (0, 0, 1)), float)
+        _sg = -1.0 if str(getattr(_p, "dof", "")).startswith("-") else 1.0
+        _dofmap.setdefault(_kk, []).append(_vv * _sg)
+
+    _s_ids = [n["id"] for n in _sensor_nodes]
+    _st_ids = [n["id"] for n in _wg["snodes"]]
+    _all_ids = _s_ids + _st_ids
+    _lab = {nid: ("📍 " + nid) for nid in _s_ids}
+    _lab.update({nid: ("○ " + nid) for nid in _st_ids})
+    _flab = lambda x: _lab.get(x, str(x))   # noqa: E731
+
+    st.caption(f"**{len(_sensor_nodes)} sensors** (📍 green, locked) · **{len(_wg['lines'])} connections**. "
+               "Sensor positions are physical — you only draw the body around them.")
+
+    _cE, _cP = st.columns([1.0, 1.4])
     with _cE:
-        _ncol = st.column_config
-        st.markdown("<div class='geo-h'>◆ Structure nodes<span>unmeasured — shape only</span></div>",
+        st.markdown("<div class='geo-h'>Connect two points<span>build the body</span></div>",
                     unsafe_allow_html=True)
-        _sdf = _pd.DataFrame(
-            [{"Node": n.get("id", f"N{i+1}"), "X": round(float(n.get("x", 0)), 4),
-              "Y": round(float(n.get("y", 0)), 4), "Z": round(float(n.get("z", 0)), 4)}
-             for i, n in enumerate(_struct_nodes)] or [{"Node": "N1", "X": 0.0, "Y": 0.0, "Z": 0.0}])
-        _sed = st.data_editor(_sdf, num_rows="dynamic", use_container_width=True,
-                              key=f"nodes_ed::{_run_key}", hide_index=True, column_config={
-                                  "Node": _ncol.TextColumn("Node", width="small", help="Node id, e.g. N1"),
-                                  "X": _ncol.NumberColumn("X", format="%.3f", step=0.05, width="small"),
-                                  "Y": _ncol.NumberColumn("Y", format="%.3f", step=0.05, width="small"),
-                                  "Z": _ncol.NumberColumn("Z", format="%.3f", step=0.05, width="small")})
-        # ids disponibles = sensores (bloqueados) + estructura editada
-        _all_ids = [n["id"] for n in _sensor_nodes] + [str(r["Node"]).strip()
-                    for _, r in _sed.iterrows() if str(r.get("Node", "")).strip()]
-        st.markdown("<div class='geo-h'>◆ Lines<span>connect nodes → wireframe</span></div>",
+        _cc = st.columns([1, 1, 0.8])
+        _p1 = _cc[0].selectbox("From", _all_ids, format_func=_flab, key=f"cx1::{_run_key}",
+                               label_visibility="collapsed")
+        _p2 = _cc[1].selectbox("To", _all_ids, index=min(1, len(_all_ids) - 1), format_func=_flab,
+                               key=f"cx2::{_run_key}", label_visibility="collapsed")
+        if _cc[2].button("🔗 Connect", use_container_width=True):
+            if _p1 != _p2 and [_p1, _p2] not in _wg["lines"] and [_p2, _p1] not in _wg["lines"]:
+                _wg["lines"].append([_p1, _p2]); st.session_state[_wk] = _wg; st.rerun()
+        _cc2 = st.columns(2)
+        if _cc2[0].button("🔗 Auto-connect sensors", use_container_width=True,
+                          help="Link the sensors in order along the machine (one click)"):
+            _order = sorted(_sensor_nodes, key=lambda n: float(n.get("x", 0)))
+            for _u, _v in zip(_order, _order[1:]):
+                if [_u["id"], _v["id"]] not in _wg["lines"] and [_v["id"], _u["id"]] not in _wg["lines"]:
+                    _wg["lines"].append([_u["id"], _v["id"]])
+            st.session_state[_wk] = _wg; st.rerun()
+        if _cc2[1].button("🧹 Clear all lines", use_container_width=True):
+            _wg["lines"] = []; st.session_state[_wk] = _wg; st.rerun()
+
+        st.markdown(f"<div class='geo-h'>Connections<span>{len(_wg['lines'])} · ✕ to remove</span></div>",
                     unsafe_allow_html=True)
-        _lrows = []
-        for a, b in _gw.get("lines", []):
-            _ia = _nodes0[a]["id"] if isinstance(a, int) and a < len(_nodes0) else a
-            _ib = _nodes0[b]["id"] if isinstance(b, int) and b < len(_nodes0) else b
-            _lrows.append({"From": _ia, "To": _ib})
-        _ldf = _pd.DataFrame(_lrows or [{"From": (_all_ids[0] if _all_ids else ""), "To": ""}])
-        _led = st.data_editor(_ldf, num_rows="dynamic", use_container_width=True, key=f"lines_ed::{_run_key}",
-                              hide_index=True, column_config={
-                                  "From": _ncol.SelectboxColumn("From node", options=_all_ids, width="medium"),
-                                  "To": _ncol.SelectboxColumn("To node", options=_all_ids, width="medium")})
-        st.markdown("<div class='geo-h'>◆ Surfaces<span>fill faces (3–4 node ids)</span></div>",
-                    unsafe_allow_html=True)
-        _surfrows = []
-        for s in _gw.get("surfaces", []):
-            _sid = [_nodes0[i]["id"] if isinstance(i, int) and i < len(_nodes0) else i for i in s]
-            _sid = (_sid + ["", "", "", ""])[:4]
-            _surfrows.append({"N1": _sid[0], "N2": _sid[1], "N3": _sid[2], "N4": _sid[3]})
-        _surdf = _pd.DataFrame(_surfrows or [{"N1": "", "N2": "", "N3": "", "N4": ""}])
-        _sured = st.data_editor(_surdf, num_rows="dynamic", use_container_width=True,
-                                key=f"surf_ed::{_run_key}", hide_index=True, column_config={
-                                    c: _ncol.SelectboxColumn(lbl, options=[""] + _all_ids, width="small")
-                                    for c, lbl in [("N1", "N1"), ("N2", "N2"), ("N3", "N3"), ("N4", "N4 (opt)")]})
+        if not _wg["lines"]:
+            st.caption("No connections yet — try **Auto-connect sensors**, or pick two points above and Connect.")
+        else:
+            for _i, _pair in enumerate(list(_wg["lines"])[:40]):
+                _a, _b = _pair
+                _rc = st.columns([6, 1])
+                _rc[0].markdown(f"<div style='padding:5px 0;color:#334155;font-size:13px'>"
+                                f"{_flab(_a)} &nbsp;↔&nbsp; {_flab(_b)}</div>", unsafe_allow_html=True)
+                if _rc[1].button("✕", key=f"rmln::{_run_key}::{_i}", help="Remove"):
+                    del _wg["lines"][_i]; st.session_state[_wk] = _wg; st.rerun()
+
+        with st.expander("⚙ Advanced — exact coordinates & surfaces"):
+            _ncol = st.column_config
+            st.markdown("<div class='geo-h'>Structure points<span>extra shape points (optional)</span></div>",
+                        unsafe_allow_html=True)
+            _sdf = _pd.DataFrame([{"Node": n["id"], "X": round(n["x"], 4), "Y": round(n["y"], 4),
+                                   "Z": round(n["z"], 4)} for n in _wg["snodes"]]
+                                 or [{"Node": "", "X": 0.0, "Y": 0.0, "Z": 0.0}])
+            _sed = st.data_editor(_sdf, num_rows="dynamic", use_container_width=True, hide_index=True,
+                                  key=f"nodes_ed::{_run_key}", column_config={
+                                      "Node": _ncol.TextColumn("Point", width="small"),
+                                      "X": _ncol.NumberColumn("X", format="%.3f", step=0.05, width="small"),
+                                      "Y": _ncol.NumberColumn("Y", format="%.3f", step=0.05, width="small"),
+                                      "Z": _ncol.NumberColumn("Z", format="%.3f", step=0.05, width="small")})
+            _wg["snodes"] = [{"id": str(r.get("Node", "")).strip(), "x": float(r.get("X", 0) or 0),
+                              "y": float(r.get("Y", 0) or 0), "z": float(r.get("Z", 0) or 0)}
+                             for _, r in _sed.iterrows() if str(r.get("Node", "")).strip()]
+            st.markdown("<div class='geo-h'>Surfaces<span>fill faces (3–4 points)</span></div>",
+                        unsafe_allow_html=True)
+            _surdf = _pd.DataFrame([{"P1": (s + ["", "", "", ""])[0], "P2": (s + ["", "", "", ""])[1],
+                                     "P3": (s + ["", "", "", ""])[2], "P4": (s + ["", "", "", ""])[3]}
+                                    for s in _wg["surfs"]] or [{"P1": "", "P2": "", "P3": "", "P4": ""}])
+            _sured = st.data_editor(_surdf, num_rows="dynamic", use_container_width=True, hide_index=True,
+                                    key=f"surf_ed::{_run_key}", column_config={
+                                        c: _ncol.SelectboxColumn(c, options=[""] + _all_ids, width="small")
+                                        for c in ("P1", "P2", "P3", "P4")})
+            _wg["surfs"] = [[v for v in (str(r.get(c, "")).strip() for c in ("P1", "P2", "P3", "P4")) if v]
+                            for _, r in _sured.iterrows()
+                            if len([v for v in (str(r.get(c, "")).strip() for c in ("P1", "P2", "P3", "P4")) if v]) >= 3]
+            st.session_state[_wk] = _wg
+
         _bc = st.columns(3)
         _apply = _bc[0].button("✓ Apply to shapes", use_container_width=True, type="primary")
         _cloud = _bc[1].button("☁ Save to cloud", use_container_width=True)
         _reset = _bc[2].button("↺ Reset to field", use_container_width=True)
 
-    # --- Reconstruye la geometría de trabajo (sensores del campo + estructura editada) ---
-    _new_nodes = [dict(n) for n in _sensor_nodes]                 # sensores: intactos
-    for _, r in _sed.iterrows():
-        _rid = str(r.get("Node", "")).strip()
-        if not _rid:
-            continue
-        _new_nodes.append({"id": _rid, "x": float(r.get("X", 0) or 0), "y": float(r.get("Y", 0) or 0),
-                           "z": float(r.get("Z", 0) or 0), "sensor": ""})
+    # --- Geometría final (sensores del campo + estructura), ids → índices ---
+    _new_nodes = [dict(n) for n in _sensor_nodes]
+    for n in _wg["snodes"]:
+        _new_nodes.append({"id": n["id"], "x": n["x"], "y": n["y"], "z": n["z"], "sensor": ""})
     _idmap = {n["id"]: k for k, n in enumerate(_new_nodes)}
     _new_lines = []
-    for _, r in _led.iterrows():
-        _a = str(r.get("From", "")).strip(); _b = str(r.get("To", "")).strip()
-        if _a in _idmap and _b in _idmap and _a != _b and [_idmap[_a], _idmap[_b]] not in _new_lines:
-            _new_lines.append([_idmap[_a], _idmap[_b]])
-    # superficies EDITADAS por el analista (3–4 ids). Solo se guardan las válidas.
+    for _a, _b in _wg["lines"]:
+        if _a in _idmap and _b in _idmap and _a != _b:
+            _pr = [_idmap[_a], _idmap[_b]]
+            if _pr not in _new_lines and _pr[::-1] not in _new_lines:
+                _new_lines.append(_pr)
     _new_surf = []
-    for _, r in _sured.iterrows():
-        _sv = [str(r.get(c, "")).strip() for c in ("N1", "N2", "N3", "N4")]
-        _sv = [v for v in _sv if v and v in _idmap]
-        if len(_sv) >= 3:
-            _face = [_idmap[v] for v in _sv[:4]]
+    for s in _wg["surfs"]:
+        _ids = [v for v in s if v in _idmap]
+        if len(_ids) >= 3:
+            _face = [_idmap[v] for v in _ids[:4]]
             if _face not in _new_surf:
                 _new_surf.append(_face)
     _gw2 = {"nodes": _new_nodes, "lines": _new_lines, "surfaces": _new_surf}
-    st.session_state[_gk] = _gw2
 
     with _cP:
         _fig = go.Figure()
-        _xs = [n["x"] for n in _new_nodes]; _ys = [n["y"] for n in _new_nodes]; _zs = [n["z"] for n in _new_nodes]
+        _coords = np.array([[n["x"], n["y"], n["z"]] for n in _new_nodes], float) if _new_nodes else np.zeros((1, 3))
+        _span = float(np.ptp(_coords, axis=0).max()) or 1.0
+        _L = 0.11 * _span
         if _new_surf:
+            _xs = [n["x"] for n in _new_nodes]; _ys = [n["y"] for n in _new_nodes]; _zs = [n["z"] for n in _new_nodes]
             _si = []; _sj = []; _sk = []
             for s in _new_surf:
                 if len(s) >= 3:
@@ -1351,41 +1396,60 @@ if nav == T_GEOM:
                     _si.append(s[0]); _sj.append(s[2]); _sk.append(s[3])
             if _si:
                 _fig.add_trace(go.Mesh3d(x=_xs, y=_ys, z=_zs, i=_si, j=_sj, k=_sk,
-                                         color="#93c5fd", opacity=0.15, hoverinfo="skip"))
+                                         color="#93c5fd", opacity=0.14, hoverinfo="skip"))
         for a, b in _new_lines:
             _fig.add_trace(go.Scatter3d(x=[_new_nodes[a]["x"], _new_nodes[b]["x"]],
                                         y=[_new_nodes[a]["y"], _new_nodes[b]["y"]],
                                         z=[_new_nodes[a]["z"], _new_nodes[b]["z"]],
                                         mode="lines", line=dict(color="#64748b", width=3),
                                         hoverinfo="skip", showlegend=False))
+        # Flechas de DOF (dirección medida por cada sensor) — cono ámbar + astil
+        _cx = []; _cy = []; _cz = []; _cu = []; _cv = []; _cw = []
+        for n in _new_nodes:
+            if not n["sensor"]:
+                continue
+            _seen = set()
+            for d in _dofmap.get(n["sensor"], []):
+                _t = (round(d[0], 2), round(d[1], 2), round(d[2], 2))
+                if _t in _seen:
+                    continue
+                _seen.add(_t)
+                _tx = n["x"] + _L * d[0]; _ty = n["y"] + _L * d[1]; _tz = n["z"] + _L * d[2]
+                _fig.add_trace(go.Scatter3d(x=[n["x"], _tx], y=[n["y"], _ty], z=[n["z"], _tz],
+                                            mode="lines", line=dict(color=AMBER, width=5),
+                                            hoverinfo="skip", showlegend=False))
+                _cx.append(_tx); _cy.append(_ty); _cz.append(_tz)
+                _cu.append(d[0]); _cv.append(d[1]); _cw.append(d[2])
+        if _cx:
+            _fig.add_trace(go.Cone(x=_cx, y=_cy, z=_cz, u=_cu, v=_cv, w=_cw, anchor="tail",
+                                   sizemode="absolute", sizeref=_L * 0.55, showscale=False,
+                                   colorscale=[[0, AMBER], [1, AMBER]], hoverinfo="skip"))
         _stx = [n["x"] for n in _new_nodes if not n["sensor"]]
-        _sty = [n["y"] for n in _new_nodes if not n["sensor"]]
-        _stz = [n["z"] for n in _new_nodes if not n["sensor"]]
-        _stt = [n["id"] for n in _new_nodes if not n["sensor"]]
         if _stx:
-            _fig.add_trace(go.Scatter3d(x=_stx, y=_sty, z=_stz, mode="markers+text", text=_stt,
-                                        textposition="top center", textfont=dict(size=9, color="#64748b"),
-                                        marker=dict(size=4, color=SLATE), hoverinfo="text", showlegend=False))
+            _fig.add_trace(go.Scatter3d(
+                x=_stx, y=[n["y"] for n in _new_nodes if not n["sensor"]],
+                z=[n["z"] for n in _new_nodes if not n["sensor"]],
+                mode="markers", marker=dict(size=3.5, color=SLATE), hoverinfo="skip", showlegend=False))
         _snx = [n["x"] for n in _new_nodes if n["sensor"]]
-        _sny = [n["y"] for n in _new_nodes if n["sensor"]]
-        _snz = [n["z"] for n in _new_nodes if n["sensor"]]
-        _snt = [n["sensor"] for n in _new_nodes if n["sensor"]]
         if _snx:
-            _fig.add_trace(go.Scatter3d(x=_snx, y=_sny, z=_snz, mode="markers+text", text=_snt,
-                                        textposition="bottom center", textfont=dict(size=10, color=GREEN),
-                                        marker=dict(size=7, color=GREEN, symbol="diamond"),
-                                        hoverinfo="text", showlegend=False))
-        _fig.update_layout(height=560, template="watermelon", showlegend=False,
-                           scene=dict(aspectmode="data", xaxis_title="x", yaxis_title="y", zaxis_title="z"),
+            _fig.add_trace(go.Scatter3d(
+                x=_snx, y=[n["y"] for n in _new_nodes if n["sensor"]],
+                z=[n["z"] for n in _new_nodes if n["sensor"]],
+                mode="markers+text", text=[n["sensor"] for n in _new_nodes if n["sensor"]],
+                textposition="bottom center", textfont=dict(size=10, color=GREEN),
+                marker=dict(size=7, color=GREEN, symbol="diamond"), hoverinfo="text", showlegend=False))
+        _fig.update_layout(height=580, template="watermelon", showlegend=False,
+                           scene=dict(aspectmode="data", xaxis_title="", yaxis_title="", zaxis_title=""),
                            margin=dict(l=0, r=0, t=0, b=0))
         _chart(_fig)
-        st.caption("🟢 Sensor nodes (field, locked) · ⚫ structure nodes (editable). Drag to rotate.")
+        st.caption("📍 Sensors (green) with **amber DOF arrows** = the direction each one measures · "
+                   "gray = structure points · lines = the body. Drag to rotate.")
 
     if _apply:
         st.session_state[f"geom_edit::{_run_key}"] = _gw2
         st.success("Applied — Mode shapes, ODS and the report now animate on this geometry.")
     if _reset:
-        st.session_state.pop(_gk, None)
+        st.session_state.pop(_wk, None)
         st.session_state.pop(f"geom_edit::{_run_key}", None)
         st.rerun()
     if _cloud:
