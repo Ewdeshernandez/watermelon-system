@@ -1197,11 +1197,12 @@ _inject_theme()
 page_header("Watermelon Modal", subtitle="EMA + OMA field analysis — one platform, field to report")
 
 # --- selector de fuente: corridas reales de la nube o dataset de muestra ---
+_runs = []; _cloud_err = None
 try:
     from core.modal.modal_cloud import list_runs, load_run
     _runs = list_runs()
-except Exception:  # noqa: BLE001
-    _runs = []
+except Exception as _e:  # noqa: BLE001  — no ocultar: distinguir "sin runs" de "no se pudo conectar"
+    _cloud_err = f"{type(_e).__name__}: {_e}"
 
 _opts = {f"☁ {r.get('name','run')} · {str(r.get('updated_at',''))[:16]}": r.get("id") for r in _runs}
 _labels = ["🧪 Sample dataset (demo)"] + list(_opts.keys())
@@ -1212,6 +1213,9 @@ with _sc1:
 with _sc2:
     if st.button("🔄 Refresh runs", use_container_width=True):
         st.rerun()
+if _cloud_err:
+    st.warning(f"Could not reach the cloud to list field runs ({_cloud_err}). "
+               "Check your connection — showing only the sample dataset below, not real data.")
 
 if _choice != _labels[0] and _opts:
     _rid = _opts.get(_choice)
@@ -1433,29 +1437,36 @@ st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 if nav == T_EMA:
     _sec("Impact test (EMA)", "FRF + coherence per hammer hit", "ISO 7626-5")
     from plotly.subplots import make_subplots
-    if D["ema_curve"] is not None:
+    _is_demo = D["source"] != "cloud"          # dataset de muestra (demo explícito)
+    if D["ema_curve"] is not None:             # FRF de impacto REAL de la corrida
         _fx = D["ema_curve"]["freqs"]; _mag = D["ema_curve"]["mag_db"]; _coh = D["ema_curve"]["coh"]
-    else:
+        _show_frf = True
+    elif _is_demo:                             # solo en el dataset de muestra se dibuja la curva demo
         f, H, coh = _demo_frf(); _fx = f; _mag = 20 * np.log10(np.abs(H)); _coh = coh
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3],
-                        vertical_spacing=0.06, subplot_titles=("Mobility |H(f)|", "Coherence"))
-    fig.add_trace(go.Scatter(x=_fx, y=_mag, line=dict(color=BLUE)), 1, 1)
-    fig.add_trace(go.Scatter(x=_fx, y=_coh, line=dict(color=GREEN)), 2, 1)
-    fig.update_yaxes(title_text="dB", row=1, col=1); fig.update_yaxes(range=[0, 1.05], row=2, col=1)
-    fig.update_xaxes(title_text="Frequency (Hz)", row=2, col=1)
-    fig.update_layout(height=470, template="watermelon", showlegend=False)
-    _chart(fig)
+        _show_frf = True
+    else:
+        _show_frf = False                      # corrida real sin EMA → NO se dibuja una curva demo
+    if _show_frf:
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3],
+                            vertical_spacing=0.06, subplot_titles=("Mobility |H(f)|", "Coherence"))
+        fig.add_trace(go.Scatter(x=_fx, y=_mag, line=dict(color=BLUE)), 1, 1)
+        fig.add_trace(go.Scatter(x=_fx, y=_coh, line=dict(color=GREEN)), 2, 1)
+        fig.update_yaxes(title_text="dB", row=1, col=1); fig.update_yaxes(range=[0, 1.05], row=2, col=1)
+        fig.update_xaxes(title_text="Frequency (Hz)", row=2, col=1)
+        fig.update_layout(height=470, template="watermelon", showlegend=False)
+        _chart(fig)
     if D["ema_curve"] is not None:
         st.success("Real impact FRF from the field run (ISO 7626-5).")
-    elif D["source"] == "cloud":
-        st.caption("This cloud run is operational (OMA) — no impact test uploaded.")
+    elif _is_demo:
+        st.caption("Sample dataset — illustrative impact FRF (not a real measurement).")
     else:
-        st.success("5/5 averages accepted · coherence ≥ 0.8 in band (ISO 7626-5).")
+        st.info("This cloud run is operational (OMA) — no impact (EMA) test was uploaded, "
+                "so there is no FRF to display.")
 
 # ---------------------------------------------------------------- 3 MODES EMA
 if nav == T_MODES:
     _sec("Modes (EMA)", "Peak-picking + half-power damping + Nyquist", "ISO 7626-6")
-    f, H, coh = _demo_frf()
+    _is_demo = D["source"] != "cloud"          # dataset de muestra (demo explícito)
     cc1, cc2 = st.columns([2, 3])
     with cc1:
         if D["ema_modes_full"]:
@@ -1464,18 +1475,28 @@ if nav == T_MODES:
                           f"<span class='num'>{m['zeta']:.2f}<span class='u'> %</span></span>",
                           f"<span class='num'>{round(m['coh'],3) if m.get('coh') is not None else '—'}</span>"]
                          for i, m in enumerate(D["ema_modes_full"], 1)])
+        elif D["ema_freqs"]:
+            _show_table(["Frequency", "Status"],
+                        [[f"<span class='fn'>{fr:.2f}<span class='u'> Hz</span></span>", _pill("reliable", "#16a34a", "#eaf7ef")]
+                         for fr in D["ema_freqs"]])
+        elif _is_demo:
+            _show_table(["Frequency", "Damping ζ"],
+                        [[f"<span class='fn'>{fn:.2f}<span class='u'> Hz</span></span>",
+                          f"<span class='num'>{round(z*100,2)}<span class='u'> %</span></span>"] for fn, z in DEMO_MODES])
         else:
-            _er = ([[f"<span class='fn'>{fr:.2f}<span class='u'> Hz</span></span>", _pill("reliable", "#16a34a", "#eaf7ef")]
-                    for fr in D["ema_freqs"]] or
-                   [[f"<span class='fn'>{fn:.2f}<span class='u'> Hz</span></span>",
-                     f"<span class='num'>{round(z*100,2)}<span class='u'> %</span></span>"] for fn, z in DEMO_MODES])
-            _show_table(["Frequency", "Damping ζ" if not D["ema_freqs"] else "Status"], _er)
+            st.info("No EMA (impact) modes in this run — it is operational (OMA) only.")
     with cc2:
-        fig = go.Figure(go.Scatter(x=H.real, y=H.imag, mode="lines", line=dict(color=NAVY)))
-        fig.update_layout(title="Nyquist (mobility)", height=380, template="watermelon",
-                          xaxis_title="Re", yaxis_title="Im")
-        fig.update_yaxes(scaleanchor="x", scaleratio=1)
-        _chart(fig)
+        if _is_demo:                           # Nyquist ilustrativo solo en el dataset de muestra
+            f, H, coh = _demo_frf()
+            fig = go.Figure(go.Scatter(x=H.real, y=H.imag, mode="lines", line=dict(color=NAVY)))
+            fig.update_layout(title="Nyquist (mobility)", height=380, template="watermelon",
+                              xaxis_title="Re", yaxis_title="Im")
+            fig.update_yaxes(scaleanchor="x", scaleratio=1)
+            _chart(fig)
+            st.caption("Sample dataset — illustrative Nyquist (not a real measurement).")
+        else:
+            st.info("Nyquist requires the complex impact FRF, which this run does not carry. "
+                    "The modal table on the left is from the real run.")
 
 # ---------------------------------------------------------------- 4 OMA (análisis)
 if nav == T_OMA:
@@ -1848,11 +1869,11 @@ if nav == T_SHAPES:
         idx = _sel_idx[opts.index(sel)]
         m = modes[idx]
         pts = lay.active_points()
-        if D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None \
-                and len(D["shapes"][idx]) == len(pts):
-            amp = np.asarray(D["shapes"][idx], float)          # forma modal (con signo)
-        else:
-            amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
+        # Vector de forma modal REAL o nada. NUNCA se inventa (ni ruido aleatorio):
+        # mostrar una forma falsa a un cliente destruiría la credibilidad del reporte.
+        _has_shape = bool(D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None
+                          and len(D["shapes"][idx]) == len(pts))
+        amp = np.asarray(D["shapes"][idx], float) if _has_shape else None
         _smul = float(_scl.replace("×", ""))
         from core.modal.oma_layout import default_geometry as _default_geometry
         _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
@@ -1870,7 +1891,12 @@ if nav == T_SHAPES:
             st.markdown(f"<div style='text-align:center;color:#64748b;font-weight:600;font-size:13px;"
                         f"margin-bottom:2px'>Mode {idx+1} · operating deflection shape · {m['fn']:.3f} Hz</div>",
                         unsafe_allow_html=True)
-            if _rotor_is(lay):                   # proximidad → forma modal del ROTOR (eje + impulsores)
+            if not _has_shape:
+                st.info("**Mode shape not available for this mode.** The captured data did not "
+                        "resolve a shape vector for this frequency (needs enough measurement DOFs / "
+                        "roving). Nothing is shown rather than fabricating a shape. The modal values "
+                        "on the right (frequency, damping) are real.")
+            elif _rotor_is(lay):                 # proximidad → forma modal del ROTOR (eje + impulsores)
                 _chart(_mode_rotor_fig(lay, amp, height=600, scale_mul=_smul))
                 st.caption("Press ▶ Play — **rotor** deflection shape (shaft + motor mass + pump impellers) "
                            "from the proximity probes. This is the ROTOR, not the casing.")
@@ -1897,7 +1923,7 @@ if nav == T_SHAPES:
                 "<div style='display:flex;flex-direction:column;justify-content:space-between;height:118px;"
                 "font-size:11px;color:#64748b'><span>Max</span><span>0</span></div></div></div>",
                 unsafe_allow_html=True)
-            if st.button("🎬 Export video (GIF)", key="ms_gif", use_container_width=True):
+            if _has_shape and st.button("🎬 Export video (GIF)", key="ms_gif", use_container_width=True):
                 with st.spinner("Rendering the animated video (~30–60 s, please wait)…"):
                     _gif = _mode_video_gif(lay, _geom, amp, _rotor_is(lay), scale_mul=_smul)
                 if _gif:
@@ -1906,7 +1932,7 @@ if nav == T_SHAPES:
                     st.session_state["_ms_gif_name"] = f"mode_{idx+1}_{m['fn']:.0f}Hz_{_kind}.gif"
                 else:
                     st.warning("Could not render the video. Try again.")
-            if st.session_state.get("_ms_gif"):
+            if _has_shape and st.session_state.get("_ms_gif"):
                 st.download_button("⬇ Download", data=st.session_state["_ms_gif"],
                                    file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
                                    mime="image/gif", use_container_width=True)
@@ -2182,11 +2208,13 @@ if nav == T_REPORT:
                     # formas modales estilo ARTeMIS (superficies + cuadrícula), estáticas para el PDF
                     shape_pngs = []
                     for i, m in enumerate(_modes_r[:_SHAPE_CAP]):
-                        if i < len(_shapes_r) and _shapes_r[i] is not None \
-                                and len(_shapes_r[i]) == len(pts):
-                            a = np.asarray(_shapes_r[i], float)
-                        else:
-                            a = np.random.default_rng(i + 1).standard_normal(len(pts))
+                        # Solo se dibuja la forma modal si existe el vector REAL. Si falta,
+                        # se omite (None) — JAMÁS se fabrica una forma para el reporte del cliente.
+                        if not (i < len(_shapes_r) and _shapes_r[i] is not None
+                                and len(_shapes_r[i]) == len(pts)):
+                            shape_pngs.append(None)
+                            continue
+                        a = np.asarray(_shapes_r[i], float)
                         try:
                             _fig_ms = (_mode_rotor_fig(lay, a, height=520, static=True) if _rotor_is(lay)
                                        else _mode_geom_fig(lay, _geom_r, a, height=520, static=True))
