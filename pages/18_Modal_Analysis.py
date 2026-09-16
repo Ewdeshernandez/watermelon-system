@@ -157,7 +157,16 @@ def _inject_theme():
       .wm-mv .sw { width:22px; height:12px; border-radius:3px; display:inline-block; }
       .wm-cbar { width:16px; height:118px; border-radius:4px; border:1px solid #e2e8f0;
         background:linear-gradient(to top,#00007f,#1f3fff,#00c8ff,#22e06b,#ffd21a,#ff6a00,#c11414,#7f0000); }
+      /* Editor de geometría: headers de sección + tablas más limpias */
+      .geo-h { font-weight:700; color:#0F1E3D; font-size:13px; margin:16px 0 5px;
+        display:flex; align-items:baseline; gap:9px; letter-spacing:.01em; }
+      .geo-h span { font-weight:400; color:#94a3b8; font-size:11px; letter-spacing:0; }
+      div[data-testid="stDataFrame"], div[data-testid="stDataEditor"]{
+        border-radius:10px; border:1px solid #e6ecf5; overflow:hidden;
+        box-shadow:0 1px 2px rgba(15,30,61,.04); }
       @media (prefers-color-scheme: dark){
+        .geo-h { color:#eaf0f7; }
+        div[data-testid="stDataFrame"], div[data-testid="stDataEditor"]{ border-color:#243040; }
         .wm-kpi{ background:#141b26; border-color:#243040; }
         .wm-kpi .v{ color:#eaf0f7; }
         .wm-kpi .k{ color:#8ea0bd; }
@@ -2040,29 +2049,46 @@ if nav == T_GEOM:
 
     _cE, _cP = st.columns([1.0, 1.35])
     with _cE:
-        st.markdown("**Structure nodes** &nbsp;<span style='color:#94a3b8;font-size:11px'>(unmeasured — shape only)</span>",
+        _ncol = st.column_config
+        st.markdown("<div class='geo-h'>◆ Structure nodes<span>unmeasured — shape only</span></div>",
                     unsafe_allow_html=True)
         _sdf = _pd.DataFrame(
-            [{"id": n.get("id", f"N{i+1}"), "x": round(float(n.get("x", 0)), 4),
-              "y": round(float(n.get("y", 0)), 4), "z": round(float(n.get("z", 0)), 4)}
-             for i, n in enumerate(_struct_nodes)] or [{"id": "N1", "x": 0.0, "y": 0.0, "z": 0.0}])
+            [{"Node": n.get("id", f"N{i+1}"), "X": round(float(n.get("x", 0)), 4),
+              "Y": round(float(n.get("y", 0)), 4), "Z": round(float(n.get("z", 0)), 4)}
+             for i, n in enumerate(_struct_nodes)] or [{"Node": "N1", "X": 0.0, "Y": 0.0, "Z": 0.0}])
         _sed = st.data_editor(_sdf, num_rows="dynamic", use_container_width=True,
-                              key=f"nodes_ed::{_run_key}", hide_index=True)
+                              key=f"nodes_ed::{_run_key}", hide_index=True, column_config={
+                                  "Node": _ncol.TextColumn("Node", width="small", help="Node id, e.g. N1"),
+                                  "X": _ncol.NumberColumn("X", format="%.3f", step=0.05, width="small"),
+                                  "Y": _ncol.NumberColumn("Y", format="%.3f", step=0.05, width="small"),
+                                  "Z": _ncol.NumberColumn("Z", format="%.3f", step=0.05, width="small")})
         # ids disponibles = sensores (bloqueados) + estructura editada
-        _all_ids = [n["id"] for n in _sensor_nodes] + [str(r["id"]).strip()
-                    for _, r in _sed.iterrows() if str(r.get("id", "")).strip()]
-        st.markdown("**Lines** &nbsp;<span style='color:#94a3b8;font-size:11px'>(connect node ids → wireframe)</span>",
+        _all_ids = [n["id"] for n in _sensor_nodes] + [str(r["Node"]).strip()
+                    for _, r in _sed.iterrows() if str(r.get("Node", "")).strip()]
+        st.markdown("<div class='geo-h'>◆ Lines<span>connect nodes → wireframe</span></div>",
                     unsafe_allow_html=True)
         _lrows = []
         for a, b in _gw.get("lines", []):
             _ia = _nodes0[a]["id"] if isinstance(a, int) and a < len(_nodes0) else a
             _ib = _nodes0[b]["id"] if isinstance(b, int) and b < len(_nodes0) else b
-            _lrows.append({"from": _ia, "to": _ib})
-        _ldf = _pd.DataFrame(_lrows or [{"from": (_all_ids[0] if _all_ids else ""), "to": ""}])
+            _lrows.append({"From": _ia, "To": _ib})
+        _ldf = _pd.DataFrame(_lrows or [{"From": (_all_ids[0] if _all_ids else ""), "To": ""}])
         _led = st.data_editor(_ldf, num_rows="dynamic", use_container_width=True, key=f"lines_ed::{_run_key}",
-                              hide_index=True,
-                              column_config={"from": st.column_config.SelectboxColumn("from", options=_all_ids),
-                                             "to": st.column_config.SelectboxColumn("to", options=_all_ids)})
+                              hide_index=True, column_config={
+                                  "From": _ncol.SelectboxColumn("From node", options=_all_ids, width="medium"),
+                                  "To": _ncol.SelectboxColumn("To node", options=_all_ids, width="medium")})
+        st.markdown("<div class='geo-h'>◆ Surfaces<span>fill faces (3–4 node ids)</span></div>",
+                    unsafe_allow_html=True)
+        _surfrows = []
+        for s in _gw.get("surfaces", []):
+            _sid = [_nodes0[i]["id"] if isinstance(i, int) and i < len(_nodes0) else i for i in s]
+            _sid = (_sid + ["", "", "", ""])[:4]
+            _surfrows.append({"N1": _sid[0], "N2": _sid[1], "N3": _sid[2], "N4": _sid[3]})
+        _surdf = _pd.DataFrame(_surfrows or [{"N1": "", "N2": "", "N3": "", "N4": ""}])
+        _sured = st.data_editor(_surdf, num_rows="dynamic", use_container_width=True,
+                                key=f"surf_ed::{_run_key}", hide_index=True, column_config={
+                                    c: _ncol.SelectboxColumn(lbl, options=[""] + _all_ids, width="small")
+                                    for c, lbl in [("N1", "N1"), ("N2", "N2"), ("N3", "N3"), ("N4", "N4 (opt)")]})
         _bc = st.columns(3)
         _apply = _bc[0].button("✓ Apply to shapes", use_container_width=True, type="primary")
         _cloud = _bc[1].button("☁ Save to cloud", use_container_width=True)
@@ -2071,26 +2097,26 @@ if nav == T_GEOM:
     # --- Reconstruye la geometría de trabajo (sensores del campo + estructura editada) ---
     _new_nodes = [dict(n) for n in _sensor_nodes]                 # sensores: intactos
     for _, r in _sed.iterrows():
-        _rid = str(r.get("id", "")).strip()
+        _rid = str(r.get("Node", "")).strip()
         if not _rid:
             continue
-        _new_nodes.append({"id": _rid, "x": float(r.get("x", 0) or 0), "y": float(r.get("y", 0) or 0),
-                           "z": float(r.get("z", 0) or 0), "sensor": ""})
+        _new_nodes.append({"id": _rid, "x": float(r.get("X", 0) or 0), "y": float(r.get("Y", 0) or 0),
+                           "z": float(r.get("Z", 0) or 0), "sensor": ""})
     _idmap = {n["id"]: k for k, n in enumerate(_new_nodes)}
     _new_lines = []
     for _, r in _led.iterrows():
-        _a = str(r.get("from", "")).strip(); _b = str(r.get("to", "")).strip()
+        _a = str(r.get("From", "")).strip(); _b = str(r.get("To", "")).strip()
         if _a in _idmap and _b in _idmap and _a != _b and [_idmap[_a], _idmap[_b]] not in _new_lines:
             _new_lines.append([_idmap[_a], _idmap[_b]])
-    # superficies del campo: remapear por ID (el orden de nodos cambió: sensores primero)
+    # superficies EDITADAS por el analista (3–4 ids). Solo se guardan las válidas.
     _new_surf = []
-    for s in _gw.get("surfaces", []):
-        try:
-            _sids = [_nodes0[i]["id"] if isinstance(i, int) and i < len(_nodes0) else i for i in s]
-            if all(_sid in _idmap for _sid in _sids):
-                _new_surf.append([_idmap[_sid] for _sid in _sids])
-        except Exception:  # noqa: BLE001
-            pass
+    for _, r in _sured.iterrows():
+        _sv = [str(r.get(c, "")).strip() for c in ("N1", "N2", "N3", "N4")]
+        _sv = [v for v in _sv if v and v in _idmap]
+        if len(_sv) >= 3:
+            _face = [_idmap[v] for v in _sv[:4]]
+            if _face not in _new_surf:
+                _new_surf.append(_face)
     _gw2 = {"nodes": _new_nodes, "lines": _new_lines, "surfaces": _new_surf}
     st.session_state[_gk] = _gw2
 
