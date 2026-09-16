@@ -1707,7 +1707,7 @@ if nav == T_OMA:
             f"</tr>")
     _table_html = ('<table class="wm-modes"><thead><tr>'
                    "<th>#</th><th>Frequency</th><th>Damping ζ</th><th>Complexity</th>"
-                   "<th>Class</th><th>Source</th><th>Validation</th><th>Confianza</th></tr></thead>"
+                   "<th>Class</th><th>Source</th><th>Validation</th><th>Confidence</th></tr></thead>"
                    f"<tbody>{''.join(_rows_html)}</tbody></table>")
     if D["oma_modes"]:
         st.markdown(_table_html, unsafe_allow_html=True)
