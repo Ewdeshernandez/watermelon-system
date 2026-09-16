@@ -132,6 +132,20 @@ def _inject_theme():
       @media (prefers-color-scheme: dark){
         .wm-kpi{ background:#141b26; border-color:#243040; }
         .wm-kpi .v{ color:#eaf0f7; }
+        .wm-kpi .k{ color:#8ea0bd; }
+        /* Tablas de modos en oscuro */
+        table.wm-modes{ background:#0f1622; box-shadow:0 1px 3px rgba(0,0,0,.4); }
+        table.wm-modes td{ color:#dbe4f0; border-top-color:#1e2836; }
+        table.wm-modes tr:nth-child(even) td{ background:#141d2b; }
+        table.wm-modes tr:hover td{ background:#1b2740; }
+        table.wm-modes td.idx{ color:#5f7290; }
+        table.wm-modes .u{ color:#6b7d99; }
+        table.wm-modes .cls{ color:#93a4bd; }
+        /* Panel Modal Values en oscuro */
+        .wm-mv{ background:#141b26; border-color:#243040; box-shadow:0 1px 2px rgba(0,0,0,.4); }
+        .wm-mv .h{ color:#eaf0f7; border-bottom-color:#243040; }
+        .wm-mv .row{ color:#93a4bd; }
+        .wm-mv .row b{ color:#eaf0f7; }
       }
     </style>
     """, unsafe_allow_html=True)
@@ -170,6 +184,46 @@ def _chart(fig, **kw):
     import streamlit as _st
     return _st.plotly_chart(fig, use_container_width=True,
                             config={"displayModeBar": False}, **kw)
+
+
+def _mac_from_shapes(shapes):
+    """MAC (Modal Assurance Criterion) desde una lista de vectores de forma modal.
+    Fuente ÚNICA de verdad: la usan la vista MAC y el reporte PDF (antes se calculaba
+    con dos dobles-loops inline duplicados). Salta formas None/vacías.
+    Devuelve (M, kept_idx) donde kept_idx mapea filas de M → índice del modo original."""
+    vs, kept = [], []
+    for i, s in enumerate(shapes or []):
+        if s is not None and len(np.ravel(s)):
+            vs.append(np.asarray(s, float).ravel()); kept.append(i)
+    n = len(vs); M = np.eye(n)
+    for i in range(n):
+        for j in range(n):
+            num = abs(np.vdot(vs[i], vs[j])) ** 2
+            den = (np.vdot(vs[i], vs[i]).real * np.vdot(vs[j], vs[j]).real) or 1e-30
+            M[i, j] = num / den
+    return M, kept
+
+
+def _cross_mac_from_shapes(shapes_a, shapes_b):
+    """Cross-MAC entre dos sets de formas (EMA↔OMA). Devuelve (M[na,nb], idx_a, idx_b).
+    Diagonal alta = mismos modos físicos por métodos distintos (validación cruzada, API 684)."""
+    va, ia = [], []
+    for i, s in enumerate(shapes_a or []):
+        if s is not None and len(np.ravel(s)):
+            va.append(np.asarray(s, float).ravel()); ia.append(i)
+    vb, ib = [], []
+    for j, s in enumerate(shapes_b or []):
+        if s is not None and len(np.ravel(s)):
+            vb.append(np.asarray(s, float).ravel()); ib.append(j)
+    M = np.zeros((len(va), len(vb)))
+    for i in range(len(va)):
+        for j in range(len(vb)):
+            if va[i].size != vb[j].size:
+                continue
+            num = abs(np.vdot(va[i], vb[j])) ** 2
+            den = (np.vdot(va[i], va[i]).real * np.vdot(vb[j], vb[j]).real) or 1e-30
+            M[i, j] = num / den
+    return M, ia, ib
 
 
 def _ssi_plot(diagram, mode_freqs, sv_trace=None):
@@ -1284,26 +1338,26 @@ _rref = D.get("raw_ref")
 _has_raw = bool(_rref and D.get("source") == "cloud" and _rref.get("path"))
 if _has_raw:
     _mb = (_rref.get("size_bytes", 0) or 0) / 1e6
-    with st.expander(f"⚙ Análisis desde data cruda — EFDD ({_rref.get('n_ch','?')} ch · ~{_mb:.1f} MB)", expanded=True):
+    with st.expander(f"⚙ Analysis from raw data — EFDD ({_rref.get('n_ch','?')} ch · ~{_mb:.1f} MB)", expanded=True):
         _pc = st.columns([1, 1, 1.2, 1.2, 1.4])
-        _detr = _pc[0].checkbox("Detrend", value=True, help="Quita deriva lineal por canal (recomendado).")
-        _bp = _pc[1].checkbox("Band-pass", value=False, help="Filtro pasa-banda de fase cero.")
+        _detr = _pc[0].checkbox("Detrend", value=True, help="Removes per-channel linear drift (recommended).")
+        _bp = _pc[1].checkbox("Band-pass", value=False, help="Zero-phase band-pass filter.")
         _blo = _pc[2].number_input("lo (Hz)", 0.5, 5000.0, 5.0, step=1.0, disabled=not _bp)
         _bhi = _pc[3].number_input("hi (Hz)", 1.0, 25000.0, 500.0, step=10.0, disabled=not _bp)
         _dec = _pc[4].selectbox("Decimate", ["×1", "×2", "×4"], index=0,
-                                help="Baja fs → más resolución en la banda baja.")
+                                help="Lower fs → more resolution in the low band.")
         _harm = st.checkbox("Reduce harmonics (kurtosis)", value=False,
-                            help="Detecta armónicos de la máquina por kurtosis y los remueve del espectro.")
+                            help="Detects machine harmonics by kurtosis and removes them from the spectrum.")
     _band = (float(_blo), float(_bhi)) if _bp else None
     _decf = {"×1": 1, "×2": 2, "×4": 4}[_dec]
     _run_hz = (float(D.get("rpm") or 0.0) / 60.0) or None
-    with st.spinner("Descargando cruda y analizando (EFDD)…"):
+    with st.spinner("Downloading raw data and analyzing (EFDD)…"):
         try:
             _res = _analyze_from_raw(_rref.get("path"), _rref.get("bucket", "modal-raw"),
                                      _rref.get("fs"), bool(_detr), _band, _decf, bool(_harm),
                                      _run_hz, float(lay.fmax_hz), tuple(lay.channel_names()))
         except Exception as _e:  # noqa: BLE001
-            _res = None; st.warning(f"Fallo el análisis desde cruda: {type(_e).__name__}: {_e}")
+            _res = None; st.warning(f"Raw-data analysis failed: {type(_e).__name__}: {_e}")
     if _res is not None:
         _fdd = _res["fdd"]; D["fdd"] = _fdd
         # reemplaza modos y formas con lo recomputado por EFDD desde la cruda
@@ -1321,14 +1375,14 @@ if _has_raw:
         _rr0 = _load_raw_cached(_rref.get("path"), _rref.get("bucket", "modal-raw"), _rref.get("fs"))
         if _rr0 is not None:
             D["raw"] = _rr0
-        _hmsg = f" · {_res['nharm']} armónico(s) removido(s)" if _res["nharm"] else ""
-        st.caption(f"⚡ Análisis EFDD desde cruda — {len(_fdd.modes)} modos{_hmsg} · SVD completo · SSI en vivo · ODS y MAC disponibles.")
+        _hmsg = f" · {_res['nharm']} harmonic(s) removed" if _res["nharm"] else ""
+        st.caption(f"⚡ EFDD analysis from raw — {len(_fdd.modes)} modes{_hmsg} · full SVD · live SSI · ODS and MAC available.")
     else:
-        st.warning("No se pudo descargar/analizar la data cruda de esta corrida.")
+        st.warning("Could not download/analyze the raw data for this run.")
 elif D.get("source") == "cloud":
-    st.info("Esta corrida no trae data cruda (subida con una versión anterior del campo). "
-            "Se muestran los resultados guardados. Vuelve a capturar y subir con la versión "
-            "nueva para el análisis completo (EFDD, armónicos, ODS, MAC) en la web.")
+    st.info("This run has no raw data (uploaded with an older field version). "
+            "Stored results are shown. Re-capture and upload with the new version "
+            "for the full analysis (EFDD, harmonics, ODS, MAC) on the web.")
 
 # --- Modos manuales (peak-picking en la web) — se fusionan con los automáticos.
 #     Los automáticos (FDD) quedan PROTEGIDOS: sólo se pueden quitar los manuales. ---
@@ -1502,9 +1556,9 @@ if nav == T_MODES:
 if nav == T_OMA:
     _sec("Spectral density (FDD)", "", "ISO 20816")
     if D.get("fdd") is not None:
-        st.caption("✓ **EFDD activo** — los modos se identifican por Enhanced FDD: forma refinada "
-                   "por la campana SDOF (MAC≥0.80) y amortiguamiento por **decremento logarítmico** "
-                   "(no half-power). La curva mostrada es la densidad espectral (valores singulares).")
+        st.caption("✓ **EFDD active** — modes are identified by Enhanced FDD: shape refined by the "
+                   "SDOF bell (MAC≥0.80) and damping by **logarithmic decrement** (not half-power). "
+                   "The curve shown is the spectral density (singular values).")
     from core.modal.mode_validation import validate_modes, summarize as mv_sum
     _ssi_freqs = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
     _verd = validate_modes(D["oma_modes"], ssi_freqs_hz=_ssi_freqs, running_speed_rpm=D["rpm"]) \
@@ -1939,22 +1993,13 @@ if nav == T_SHAPES:
 
 # ---------------------------------------------------------------- MAC / validation
 if nav == T_MAC:
-    _sec("MAC / validation", "Modal Assurance Criterion — consistencia de las formas modales (auto-MAC)")
+    _sec("MAC / validation", "Modal Assurance Criterion — mode-shape consistency (auto-MAC)", "ISO 7626-6")
     modes = D["oma_modes"]; shapes = D.get("shapes") or []
-    vs = []; fs_lbl = []
-    for i, mm in enumerate(modes):
-        s = shapes[i] if i < len(shapes) else None
-        if s is not None and len(s):
-            vs.append(np.asarray(s, float).ravel()); fs_lbl.append(float(mm["fn"]))
-    if len(vs) < 2:
-        st.info("Se necesitan ≥2 modos con forma modal para calcular la MAC.")
+    M, _kept = _mac_from_shapes([shapes[i] if i < len(shapes) else None for i in range(len(modes))])
+    if len(_kept) < 2:
+        st.info("Need ≥2 modes with a resolved mode shape to compute the MAC.")
     else:
-        n = len(vs); M = np.zeros((n, n))
-        for i in range(n):
-            for j in range(n):
-                num = abs(np.vdot(vs[i], vs[j])) ** 2
-                den = (np.vdot(vs[i], vs[i]).real * np.vdot(vs[j], vs[j]).real) or 1e-30
-                M[i, j] = num / den
+        fs_lbl = [float(modes[i]["fn"]) for i in _kept]
         import plotly.graph_objects as _goM
         lbl = [f"{f:.1f}" for f in fs_lbl]
         _figM = _goM.Figure(_goM.Heatmap(
@@ -1963,24 +2008,42 @@ if nav == T_MAC:
             text=[[f"{v:.2f}" for v in row] for row in M], texttemplate="%{text}",
             textfont={"size": 10}, colorbar=dict(title="MAC")))
         _figM.update_layout(height=520, yaxis_autorange="reversed",
-                            xaxis_title="Modo (Hz)", yaxis_title="Modo (Hz)",
+                            xaxis_title="Mode (Hz)", yaxis_title="Mode (Hz)",
                             margin=dict(l=60, r=20, t=20, b=50))
         _chart(_figM)
+        n = len(_kept)
         _dup = [(fs_lbl[i], fs_lbl[j], M[i, j]) for i in range(n) for j in range(i + 1, n) if M[i, j] > 0.7]
         if _dup:
-            st.warning("Modos redundantes (MAC>0.7, misma forma → revisar/eliminar uno): "
+            st.warning("Redundant modes (MAC>0.7, same shape → review/remove one): "
                        + ", ".join(f"{a:.1f}↔{b:.1f} ({v:.2f})" for a, b, v in _dup))
-        st.caption("Diagonal = 1 (modo consigo mismo). Fuera de la diagonal: ROJO (>0.7) = modos "
-                   "redundantes; AZUL (~0) = independientes (bien separados). Igual que ARTeMIS.")
+        st.caption("Diagonal = 1 (a mode with itself). Off-diagonal: RED (>0.7) = redundant modes; "
+                   "BLUE (~0) = independent (well separated).")
+        # Cross-MAC EMA↔OMA: se activa cuando la corrida trae un impacto (EMA) con formas roving.
+        _ema_shapes = D.get("ema_shapes")
+        if _ema_shapes:
+            CM, _ia, _ib = _cross_mac_from_shapes(_ema_shapes, shapes)
+            if CM.size:
+                st.markdown("**Cross-MAC — EMA ↔ OMA** (diagonal alta = mismo modo por ambos métodos, API 684)")
+                _figCM = _goM.Figure(_goM.Heatmap(
+                    z=CM, zmin=0, zmax=1,
+                    colorscale=[[0, "#eef4ff"], [0.5, "#78aaeb"], [0.8, "#f59e0b"], [1, "#16a34a"]],
+                    text=[[f"{v:.2f}" for v in row] for row in CM], texttemplate="%{text}",
+                    textfont={"size": 10}, colorbar=dict(title="MAC")))
+                _figCM.update_layout(height=380, yaxis_autorange="reversed",
+                                     xaxis_title="OMA modes", yaxis_title="EMA modes",
+                                     margin=dict(l=60, r=20, t=20, b=50))
+                _chart(_figCM)
+        else:
+            st.caption("Cross-MAC (EMA↔OMA) activates when an impact test with roving mode shapes "
+                       "is uploaded with this run.")
 
 # ---------------------------------------------------------------- ODS (operating)
 if nav == T_ODS:
-    _sec("ODS — operating deflection", "Cómo se mueve la máquina a una frecuencia (1×, paso de álabes)")
+    _sec("ODS — operating deflection", "How the machine moves at a given frequency (1×, blade-pass)")
     _fddO = D.get("fdd")
     if _fddO is None:
-        st.info("El ODS necesita el análisis desde DATA CRUDA (SVD completo). Elige una corrida que "
-                "haya subido la cruda — la web la analiza y habilita el ODS. Las corridas viejas "
-                "(solo resultados) no lo permiten.")
+        st.info("ODS requires analysis from RAW DATA (full SVD). Pick a run that uploaded its raw "
+                "data — the web analyzes it and enables ODS. Older runs (results only) cannot.")
     else:
         _frO = np.asarray(_fddO.frequencies_hz, float)
         _rpmO = float(D.get("rpm") or 0.0)
@@ -1995,9 +2058,9 @@ if nav == T_ODS:
         _f_sel = 0.0
         if _sug:
             _lblopts = [s[0] for s in _sug]
-            _selO = _c1.selectbox("Frecuencia sugerida", _lblopts)
+            _selO = _c1.selectbox("Suggested frequency", _lblopts)
             _f_sel = _sug[_lblopts.index(_selO)][1]
-        _fpO = _c2.number_input("o Hz exacto (0 = usar selección)", 0.0, float(_frO.max()),
+        _fpO = _c2.number_input("or exact Hz (0 = use selection)", 0.0, float(_frO.max()),
                                 0.0, step=1.0)
         _f0 = _fpO if _fpO > 0 else _f_sel
         _UO = np.asarray(_fddO.mode_shapes_at_freq); _svO = np.asarray(_fddO.singular_values)
@@ -2010,7 +2073,7 @@ if nav == T_ODS:
             _amp = _amp / (np.max(np.abs(_amp)) or 1.0)
             _ptsO = lay.active_points()
             if len(_amp) != len(_ptsO):
-                st.warning("La ODS no coincide con el número de sensores activos.")
+                st.warning("The ODS does not match the number of active sensors.")
             else:
                 from core.modal.oma_layout import default_geometry as _dgeoO
                 _plgO = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
@@ -2023,11 +2086,11 @@ if nav == T_ODS:
                     _chart(_mode_rotor_fig(lay, _amp, height=560, scale_mul=1.5))
                 else:
                     _chart(_mode_geom_fig(lay, _geomO, _amp, height=560, scale_mul=1.5))
-                st.caption("Deflexión OPERACIONAL (no un modo identificado): cómo se mueve la máquina a "
-                           "esa frecuencia, con fase relativa al canal de mayor respuesta. Ideal para ver "
-                           "el 1× (desbalance), el paso de álabes, etc.")
+                st.caption("OPERATIONAL deflection (not an identified mode): how the machine moves at "
+                           "that frequency, with phase relative to the highest-response channel. Ideal "
+                           "for seeing 1× (unbalance), blade-pass, etc.")
         else:
-            st.info("Elige una frecuencia para reconstruir la ODS.")
+            st.info("Pick a frequency to reconstruct the ODS.")
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
 if nav == T_TREND:
@@ -2246,20 +2309,12 @@ if nav == T_REPORT:
                             except Exception:  # noqa: BLE001
                                 sensor_png = None
                         sensor_rows = _scr.get("rows") or None
-                    # --- MAC (validación de formas) para el reporte ---
+                    # --- MAC (validación de formas) para el reporte — mismo helper que la vista ---
                     mac_png = None
-                    _macpairs = [(mm["fn"], np.asarray(ss, float).ravel())
-                                 for mm, ss in zip(_modes_r, _shapes_r) if ss is not None and len(ss)]
-                    if len(_macpairs) >= 2:
+                    _MM, _kM = _mac_from_shapes(list(_shapes_r))
+                    if len(_kM) >= 2:
                         try:
-                            _macf = [a for a, _ in _macpairs]; _macvs = [b for _, b in _macpairs]
-                            _nM = len(_macvs); _MM = np.zeros((_nM, _nM))
-                            for _i in range(_nM):
-                                for _j in range(_nM):
-                                    _num = abs(np.vdot(_macvs[_i], _macvs[_j])) ** 2
-                                    _den = (np.vdot(_macvs[_i], _macvs[_i]).real *
-                                            np.vdot(_macvs[_j], _macvs[_j]).real) or 1e-30
-                                    _MM[_i, _j] = _num / _den
+                            _macf = [_modes_r[i]["fn"] for i in _kM]
                             _lblM = [f"{f:.1f}" for f in _macf]
                             _figMac = go.Figure(go.Heatmap(
                                 z=_MM, x=_lblM, y=_lblM, zmin=0, zmax=1,
