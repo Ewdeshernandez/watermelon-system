@@ -443,10 +443,12 @@ def _build_demo_D() -> RunModel:
     oma_modes = [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
                   "complexity": m.complexity_pct, "cls": m.classification} for m in fdd.modes]
     _fb = freqs[band]; _sv1 = sv[0][band]; _st = max(1, len(_fb) // 900)
+    _nsv = min(sv.shape[0], 4)   # SV1..SVn (no solo SV1) para que el reporte grafique todas
     payload = {"name": lay.name, "kind": "OMA", "running_rpm": lay.running_speed_rpm,
                "client": lay.client, "asset": lay.machine_type, "location": lay.location,
                "channel_names": lay.channel_names(), "ema_modes": [fn for fn, _ in DEMO_MODES],
-               "svd": {"freqs": _fb[::_st].tolist(), "sv1": _sv1[::_st].tolist()},
+               "svd": {"freqs": _fb[::_st].tolist(), "sv1": _sv1[::_st].tolist(),
+                       "sv": [sv[r][band][::_st].tolist() for r in range(_nsv)]},
                "modes": [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
                           "complexity": m.complexity_pct, "class": m.classification,
                           "shape": {"re": [], "im": []}} for m in fdd.modes],
