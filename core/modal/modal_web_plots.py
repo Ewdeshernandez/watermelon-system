@@ -359,7 +359,7 @@ def _geom_preview_fig(lay, geom, height=460, show_machine=True):
 
 def _dense_mesh(P, surfaces, n=4):
     """Subdivide cada cara (quad o triángulo) en una malla n×n → muchos vértices
-    para un gradiente FINO (como ARTeMIS)."""
+    para un gradiente FINO."""
     V, I, J, K = [], [], [], []
     for f in surfaces:
         if len(f) < 3:
@@ -567,7 +567,7 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False, p
 
 
 def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=False, phase=np.pi / 2):
-    """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): superficie
+    """Forma modal animada sobre la GEOMETRÍA del campo: superficie
     sólida con malla densa (gradiente Jet), aristas, flechas de DOF por eje y triada.
     static=True → sin animación ni botón Play, con colorbar (para el PDF del reporte)."""
     nodes = geom.get("nodes") or []
@@ -586,7 +586,7 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=Fal
     MAGn = np.clip(MAG / cnorm, 0.0, 1.0)
     scale = 0.16 * span / (MAG.max() or 1.0) * scale_mul
     # Malla densa por interpolación BILINEAL de las 4 esquinas de cada cara: la
-    # cuadrícula se deforma coherente (no se "derrite") y agrega MUCHAS líneas (ARTeMIS).
+    # cuadrícula se deforma coherente (no se "derrite") y agrega MUCHAS líneas.
     N = 5
     Vr, Vd, Vi, I, J, K, LP = [], [], [], [], [], [], []
     for f in surfaces:
@@ -707,7 +707,7 @@ def _idw(V, P0, DISP, power=2.0):
 
 def _mode_surface_comps(lay, amps_signed, scale_mul=1.0):
     """Para cada componente (caja) interpola el campo de desplazamiento a sus vértices
-    → superficie sólida que se deforma y se colorea por amplitud (estilo ARTeMIS)."""
+    → superficie sólida que se deforma y se colorea por amplitud."""
     d = _mode_shape_data(lay, amps_signed, scale_mul)
     if d is None:
         return None
@@ -755,7 +755,7 @@ def _mode_surface_fig(lay, amps_signed, height=600, scale_mul=1.0, annotate=True
     for tr in _surface_meshes(s, np.pi / 2):
         fig.add_trace(tr)
     ncomp = len(s["comps"])
-    # nodos de medición + números + flechas de dirección (DOF) estilo ARTeMIS
+    # nodos de medición + números + flechas de dirección (DOF) 
     P0, DISP = s["P0"], s["DISP"]
     if annotate and len(P0):
         alen = 0.09 * s["span"]

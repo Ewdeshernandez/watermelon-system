@@ -169,7 +169,7 @@ def _inject_theme():
       table.wm-modes .cls { font-size:12px; color:#475569; }
       table.wm-modes .badge, table.wm-modes .pill { padding:3px 10px; border-radius:999px;
         font-size:11px; font-weight:700; white-space:nowrap; }
-      /* Panel Modal Values (estilo ARTeMIS) */
+      /* Panel Modal Values */
       .wm-mv { background:#fff; border:1px solid #e6ecf5; border-radius:12px; padding:12px 14px;
         margin-bottom:12px; box-shadow:0 1px 2px rgba(15,30,61,.04); }
       .wm-mv .h { font-size:13px; font-weight:700; color:#0F1E3D; letter-spacing:.02em;
@@ -720,7 +720,7 @@ st.markdown(f"""
 
 T_OMA = "🟡  Spectral density (FDD)"
 T_SHAPES = "⚫  Mode shapes"
-T_ODS = "🌀  ODS (operating)"
+T_ODS = "🔵  ODS (operating)"
 T_SSI = "🟠  SSI (subspace)"
 T_MAC = "🔷  MAC / validation"
 T_CAMP = "🟤  Campbell"
@@ -728,8 +728,8 @@ T_EMA = "🟢  Impact test (EMA)"
 T_MODES = "🟣  Modes (EMA)"
 T_CMP = "🔴  Comparative"
 T_TREND = "🔵  Trend / Compare"
-T_GEOM = "🧩  Geometry"
-T_REPORT = "📄  Report"
+T_GEOM = "🟢  Geometry"
+T_REPORT = "⚪  Report"
 _NAVOPTS = [T_OMA, T_SSI, T_MAC, T_CAMP, T_SHAPES, T_GEOM, T_ODS, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
 
 # Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
@@ -1250,7 +1250,7 @@ if nav == T_SHAPES:
 # ---------------------------------------------------------------- MAC / validation
 if nav == T_GEOM:
     _sec("Geometry", "Connect the sensors into a body so the mode shape looks like your machine — "
-         "the sensors come from the field and stay locked", "ARTeMIS-style")
+         "the sensors come from the field and stay locked", "")
     import pandas as _pd
     from core.modal.modal_web_plots import _AX as _DOF_AX, _stn_key as _stn
     _wk = f"geomw::{_run_key}"
@@ -1737,7 +1737,7 @@ if nav == T_REPORT:
                         _pairs = [(mm, ss) for (mm, ss) in _pairs if _conf_of(mm) == "Alta"]
                     _modes_r = [mm for mm, ss in _pairs]; _shapes_r = [ss for mm, ss in _pairs]
                     _SHAPE_CAP = CFG_REPORT_SHAPE_CAP   # tope de formas en el PDF
-                    # formas modales estilo ARTeMIS (superficies + cuadrícula), estáticas para el PDF
+                    # formas modales  (superficies + cuadrícula), estáticas para el PDF
                     shape_pngs = []
                     for i, m in enumerate(_modes_r[:_SHAPE_CAP]):
                         # Solo se dibuja la forma modal si existe el vector REAL. Si falta,
