@@ -59,12 +59,22 @@ CFG_REPORT_SHAPE_CAP = 8       # máx. formas modales embebidas en el PDF
 CFG_CONF_EN = {"Alta": "High", "Media": "Medium", "Baja": "Low"}  # mapa de confianza ES→EN
 
 
-def _run_geometry(D, lay):
-    """Geometría de la corrida: la del payload de campo si trae nodos; si no, la default.
-    Fuente única — antes este patrón frágil estaba repetido en 3 sitios."""
+def _field_geometry(D, lay):
+    """Geometría AUTORITATIVA del campo: la del payload si trae nodos; si no, la default
+    derivada del layout. Fuente única (antes el patrón ((payload)...geometry) estaba en 3 sitios)."""
     from core.modal.oma_layout import default_geometry as _dg
     g = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
     return g if (g and g.get("nodes")) else _dg(lay)
+
+
+def _run_geometry(D, lay):
+    """Geometría que se ANIMA: la mejorada por el analista en el editor (si aplicó una),
+    o la del campo. Los sensores (nodos con 'sensor') vienen del campo y no se alteran."""
+    import streamlit as _st
+    _ov = _st.session_state.get(f"geom_edit::{D.get('name', 'run')}")
+    if _ov and _ov.get("nodes"):
+        return _ov
+    return _field_geometry(D, lay)
 
 
 # --- Tema de gráficos "watermelon" (industrial, consistente en toda la página) ---
@@ -1490,8 +1500,9 @@ T_EMA = "🟢  Impact test (EMA)"
 T_MODES = "🟣  Modes (EMA)"
 T_CMP = "🔴  Comparative"
 T_TREND = "🔵  Trend / Compare"
+T_GEOM = "🧩  Geometry"
 T_REPORT = "📄  Report"
-_NAVOPTS = [T_OMA, T_SSI, T_MAC, T_CAMP, T_SHAPES, T_ODS, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
+_NAVOPTS = [T_OMA, T_SSI, T_MAC, T_CAMP, T_SHAPES, T_GEOM, T_ODS, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
 
 # Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
 # conserva la sección activa tras cada rerun (arregla el "salto" al generar reporte).
@@ -2009,6 +2020,142 @@ if nav == T_SHAPES:
                                    mime="image/gif", use_container_width=True)
 
 # ---------------------------------------------------------------- MAC / validation
+if nav == T_GEOM:
+    _sec("Geometry", "Improve the structure the mode shape animates on — sensor nodes come from "
+         "the field and stay locked", "ARTeMIS-style")
+    import pandas as _pd
+    import copy as _copy
+    _gk = f"geom_work::{_run_key}"
+    _field_g = _field_geometry(D, lay)
+    _saved = st.session_state.get(f"geom_edit::{_run_key}")
+    if _gk not in st.session_state:
+        st.session_state[_gk] = _copy.deepcopy(_saved if (_saved and _saved.get("nodes")) else _field_g)
+    _gw = st.session_state[_gk]
+    _nodes0 = _gw.get("nodes", [])
+    _sensor_nodes = [dict(n) for n in _nodes0 if n.get("sensor")]
+    _struct_nodes = [n for n in _nodes0 if not n.get("sensor")]
+    st.caption(f"**{len(_sensor_nodes)} sensor nodes** (from the field — locked) · "
+               f"**{len(_struct_nodes)} structure nodes** (editable). Sensor positions are physical and "
+               "never change; add structure nodes + lines so the mode animates on a realistic body.")
+
+    _cE, _cP = st.columns([1.0, 1.35])
+    with _cE:
+        st.markdown("**Structure nodes** &nbsp;<span style='color:#94a3b8;font-size:11px'>(unmeasured — shape only)</span>",
+                    unsafe_allow_html=True)
+        _sdf = _pd.DataFrame(
+            [{"id": n.get("id", f"N{i+1}"), "x": round(float(n.get("x", 0)), 4),
+              "y": round(float(n.get("y", 0)), 4), "z": round(float(n.get("z", 0)), 4)}
+             for i, n in enumerate(_struct_nodes)] or [{"id": "N1", "x": 0.0, "y": 0.0, "z": 0.0}])
+        _sed = st.data_editor(_sdf, num_rows="dynamic", use_container_width=True,
+                              key=f"nodes_ed::{_run_key}", hide_index=True)
+        # ids disponibles = sensores (bloqueados) + estructura editada
+        _all_ids = [n["id"] for n in _sensor_nodes] + [str(r["id"]).strip()
+                    for _, r in _sed.iterrows() if str(r.get("id", "")).strip()]
+        st.markdown("**Lines** &nbsp;<span style='color:#94a3b8;font-size:11px'>(connect node ids → wireframe)</span>",
+                    unsafe_allow_html=True)
+        _lrows = []
+        for a, b in _gw.get("lines", []):
+            _ia = _nodes0[a]["id"] if isinstance(a, int) and a < len(_nodes0) else a
+            _ib = _nodes0[b]["id"] if isinstance(b, int) and b < len(_nodes0) else b
+            _lrows.append({"from": _ia, "to": _ib})
+        _ldf = _pd.DataFrame(_lrows or [{"from": (_all_ids[0] if _all_ids else ""), "to": ""}])
+        _led = st.data_editor(_ldf, num_rows="dynamic", use_container_width=True, key=f"lines_ed::{_run_key}",
+                              hide_index=True,
+                              column_config={"from": st.column_config.SelectboxColumn("from", options=_all_ids),
+                                             "to": st.column_config.SelectboxColumn("to", options=_all_ids)})
+        _bc = st.columns(3)
+        _apply = _bc[0].button("✓ Apply to shapes", use_container_width=True, type="primary")
+        _cloud = _bc[1].button("☁ Save to cloud", use_container_width=True)
+        _reset = _bc[2].button("↺ Reset to field", use_container_width=True)
+
+    # --- Reconstruye la geometría de trabajo (sensores del campo + estructura editada) ---
+    _new_nodes = [dict(n) for n in _sensor_nodes]                 # sensores: intactos
+    for _, r in _sed.iterrows():
+        _rid = str(r.get("id", "")).strip()
+        if not _rid:
+            continue
+        _new_nodes.append({"id": _rid, "x": float(r.get("x", 0) or 0), "y": float(r.get("y", 0) or 0),
+                           "z": float(r.get("z", 0) or 0), "sensor": ""})
+    _idmap = {n["id"]: k for k, n in enumerate(_new_nodes)}
+    _new_lines = []
+    for _, r in _led.iterrows():
+        _a = str(r.get("from", "")).strip(); _b = str(r.get("to", "")).strip()
+        if _a in _idmap and _b in _idmap and _a != _b and [_idmap[_a], _idmap[_b]] not in _new_lines:
+            _new_lines.append([_idmap[_a], _idmap[_b]])
+    # superficies del campo: remapear por ID (el orden de nodos cambió: sensores primero)
+    _new_surf = []
+    for s in _gw.get("surfaces", []):
+        try:
+            _sids = [_nodes0[i]["id"] if isinstance(i, int) and i < len(_nodes0) else i for i in s]
+            if all(_sid in _idmap for _sid in _sids):
+                _new_surf.append([_idmap[_sid] for _sid in _sids])
+        except Exception:  # noqa: BLE001
+            pass
+    _gw2 = {"nodes": _new_nodes, "lines": _new_lines, "surfaces": _new_surf}
+    st.session_state[_gk] = _gw2
+
+    with _cP:
+        _fig = go.Figure()
+        _xs = [n["x"] for n in _new_nodes]; _ys = [n["y"] for n in _new_nodes]; _zs = [n["z"] for n in _new_nodes]
+        if _new_surf:
+            _si = []; _sj = []; _sk = []
+            for s in _new_surf:
+                if len(s) >= 3:
+                    _si.append(s[0]); _sj.append(s[1]); _sk.append(s[2])
+                if len(s) == 4:
+                    _si.append(s[0]); _sj.append(s[2]); _sk.append(s[3])
+            if _si:
+                _fig.add_trace(go.Mesh3d(x=_xs, y=_ys, z=_zs, i=_si, j=_sj, k=_sk,
+                                         color="#93c5fd", opacity=0.15, hoverinfo="skip"))
+        for a, b in _new_lines:
+            _fig.add_trace(go.Scatter3d(x=[_new_nodes[a]["x"], _new_nodes[b]["x"]],
+                                        y=[_new_nodes[a]["y"], _new_nodes[b]["y"]],
+                                        z=[_new_nodes[a]["z"], _new_nodes[b]["z"]],
+                                        mode="lines", line=dict(color="#64748b", width=3),
+                                        hoverinfo="skip", showlegend=False))
+        _stx = [n["x"] for n in _new_nodes if not n["sensor"]]
+        _sty = [n["y"] for n in _new_nodes if not n["sensor"]]
+        _stz = [n["z"] for n in _new_nodes if not n["sensor"]]
+        _stt = [n["id"] for n in _new_nodes if not n["sensor"]]
+        if _stx:
+            _fig.add_trace(go.Scatter3d(x=_stx, y=_sty, z=_stz, mode="markers+text", text=_stt,
+                                        textposition="top center", textfont=dict(size=9, color="#64748b"),
+                                        marker=dict(size=4, color=SLATE), hoverinfo="text", showlegend=False))
+        _snx = [n["x"] for n in _new_nodes if n["sensor"]]
+        _sny = [n["y"] for n in _new_nodes if n["sensor"]]
+        _snz = [n["z"] for n in _new_nodes if n["sensor"]]
+        _snt = [n["sensor"] for n in _new_nodes if n["sensor"]]
+        if _snx:
+            _fig.add_trace(go.Scatter3d(x=_snx, y=_sny, z=_snz, mode="markers+text", text=_snt,
+                                        textposition="bottom center", textfont=dict(size=10, color=GREEN),
+                                        marker=dict(size=7, color=GREEN, symbol="diamond"),
+                                        hoverinfo="text", showlegend=False))
+        _fig.update_layout(height=560, template="watermelon", showlegend=False,
+                           scene=dict(aspectmode="data", xaxis_title="x", yaxis_title="y", zaxis_title="z"),
+                           margin=dict(l=0, r=0, t=0, b=0))
+        _chart(_fig)
+        st.caption("🟢 Sensor nodes (field, locked) · ⚫ structure nodes (editable). Drag to rotate.")
+
+    if _apply:
+        st.session_state[f"geom_edit::{_run_key}"] = _gw2
+        st.success("Applied — Mode shapes, ODS and the report now animate on this geometry.")
+    if _reset:
+        st.session_state.pop(_gk, None)
+        st.session_state.pop(f"geom_edit::{_run_key}", None)
+        st.rerun()
+    if _cloud:
+        try:
+            lay.geometry = _gw2
+            from core.modal.modal_cloud import save_layout_cloud
+            _rc = save_layout_cloud(lay)
+            if _rc.get("ok"):
+                st.session_state[f"geom_edit::{_run_key}"] = _gw2
+                st.success("Saved to the cloud — the field app will reuse this geometry.")
+            else:
+                st.warning(f"Could not save to cloud: {_rc.get('reason')}")
+        except Exception as _eg:  # noqa: BLE001
+            st.warning(f"Save failed: {type(_eg).__name__}: {_eg}")
+
 if nav == T_MAC:
     _sec("MAC / validation", "Modal Assurance Criterion — mode-shape consistency (auto-MAC)", "ISO 7626-6")
     modes = D["oma_modes"]; shapes = D.get("shapes") or []
