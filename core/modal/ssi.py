@@ -99,6 +99,124 @@ def _mpc(shape: np.ndarray) -> float:
     return float(np.clip((1.0 - mpc) * 100.0, 0.0, 100.0))
 
 
+def _modes_from_obs(O: np.ndarray, ch: int, fs: float):
+    """Polos (fn, zeta, shape) desde una matriz de observabilidad Γ (ch·i × n)."""
+    O_up = O[:-ch, :]; O_dn = O[ch:, :]
+    A = np.linalg.pinv(O_up) @ O_dn
+    C = O[:ch, :]
+    mu, V = np.linalg.eig(A)
+    out = []; dt = 1.0 / fs
+    for k in range(len(mu)):
+        m = mu[k]
+        if np.abs(m) < 1e-12 or m.imag <= 0:
+            continue
+        lam = np.log(m) / dt; wn = np.abs(lam); fn = wn / (2 * np.pi)
+        zeta = -lam.real / wn if wn > 0 else 1.0
+        out.append((float(fn), float(zeta), C @ V[:, k]))
+    return out
+
+
+def _stabilize(per_order, f_tol, z_tol):
+    """Diagrama de estabilización + clustering → (modes_raw, diagram). Compartido
+    por SSI-COV y SSI-DATA. modes_raw = [(fn, zeta, std_fn, std_z, shape, n_stable)]."""
+    diagram = []; prev = []; pool = []
+    for (n, poles) in per_order:
+        freqs = np.array([p[0] for p in poles]); mask = np.zeros(len(poles), bool)
+        for idx, (fn, z, sh) in enumerate(poles):
+            for (pfn, pz, _p) in prev:
+                if pfn > 0 and abs(fn - pfn) / pfn < f_tol and abs(z - pz) < z_tol:
+                    mask[idx] = True; pool.append((fn, z, sh)); break
+        diagram.append((n, freqs, mask)); prev = poles
+    pool.sort(key=lambda t: t[0]); clusters = []
+    for (fn, z, sh) in pool:
+        if clusters and abs(fn - np.mean([c[0] for c in clusters[-1]])) / fn < 2 * f_tol:
+            clusters[-1].append((fn, z, sh))
+        else:
+            clusters.append([(fn, z, sh)])
+    modes_raw = []
+    for cl in clusters:
+        if len(cl) < 2:
+            continue
+        fns = np.array([c[0] for c in cl]); zs = np.array([c[1] for c in cl]) * 100.0
+        modes_raw.append((float(np.mean(fns)), float(np.mean(zs)), float(np.std(fns)),
+                          float(np.std(zs)), cl[-1][2], len(cl)))
+    modes_raw.sort(key=lambda t: t[0])
+    return modes_raw, diagram
+
+
+def run_ssi_data(
+    data: np.ndarray,
+    fs: float,
+    method: str = "UPC",             # UPC | PC | CVA (PC≡UPC en esta forma reducida)
+    orders: Optional[Sequence[int]] = None,
+    i_block: int = 20,
+    fmin_hz: float = 2.0,
+    fmax_hz: Optional[float] = None,
+    f_tol: float = 0.01,
+    z_tol: float = 0.05,
+    max_damp: float = 0.20,
+    max_cols: int = 60000,           # cap de columnas del Hankel (memoria); suficiente para identificar
+) -> SSIResult:
+    """SSI-DATA (data-driven) por proyección LQ, con pesos UPC/CVA. Método en dominio
+    del tiempo alterno al SSI-COV: proyecta el futuro sobre el pasado (Hankel) → SVD →
+    observabilidad → A,C. UPC = sin pesos; CVA = blanquea el futuro (canonical variate).
+    Mismo diagrama de estabilización e incertidumbre por dispersión que SSI-COV."""
+    y = np.asarray(data, float)
+    if y.ndim == 1:
+        y = y[:, None]
+    y = y - y.mean(axis=0, keepdims=True)
+    N, ch = y.shape
+    fmax_hz = fmax_hz or fs / 2.56
+    if orders is None:
+        orders = list(range(2, 41, 2))
+    orders = sorted(int(o) for o in orders if o >= 2)
+    i = int(i_block)
+    j = N - 2 * i + 1
+    if j > max_cols:                                   # submuestrea columnas (no decima la señal)
+        j = max_cols
+    # Hankel por bloques (2i·ch × j), escalado 1/sqrt(j)
+    H = np.empty((2 * i * ch, j), dtype=np.float64)
+    for b in range(2 * i):
+        H[b * ch:(b + 1) * ch, :] = y[b:b + j].T
+    H /= np.sqrt(j)
+    # LQ vía QR de H^T: H = L Q, L (2i·ch × 2i·ch) triangular inferior
+    R = np.linalg.qr(H.T, mode="reduced")[1]           # R = (2i·ch × 2i·ch)
+    L = R.T
+    p = i * ch
+    R21 = L[p:2 * p, 0:p]                                # futuro↔pasado (proyección Oi)
+    R22 = L[p:2 * p, p:2 * p]
+    # Peso W1 sobre el futuro
+    if method.upper() == "CVA":
+        Sig = R21 @ R21.T + R22 @ R22.T                 # ≈ Yf Yf^T
+        w, Vv = np.linalg.eigh((Sig + Sig.T) / 2)
+        w = np.clip(w, 1e-12, None)
+        W1 = Vv @ np.diag(1.0 / np.sqrt(w)) @ Vv.T
+        W1inv = Vv @ np.diag(np.sqrt(w)) @ Vv.T
+        M = W1 @ R21
+    else:                                               # UPC / PC
+        W1inv = None
+        M = R21
+    U, s, _ = np.linalg.svd(M)
+
+    per_order = []
+    for n in orders:
+        n = min(n, p - ch)
+        if n < 2:
+            continue
+        O = U[:, :n] * np.sqrt(s[:n])[None, :]
+        if W1inv is not None:
+            O = W1inv @ O
+        poles = [pp for pp in _modes_from_obs(O, ch, fs)
+                 if fmin_hz <= pp[0] <= fmax_hz and 0 < pp[1] < max_damp]
+        per_order.append((n, poles))
+
+    modes_raw, diagram = _stabilize(per_order, f_tol, z_tol)
+    modes = [SSIMode(frequency_hz=fn, damping_ratio_pct=z, std_frequency_hz=sfn,
+                     std_damping_pct=sz, mode_shape=sh, n_stable=ns, complexity_pct=_mpc(sh))
+             for (fn, z, sfn, sz, sh, ns) in modes_raw]
+    return SSIResult(modes=modes, orders=orders, diagram=diagram, fmin_hz=fmin_hz, fmax_hz=fmax_hz)
+
+
 def run_ssi_cov(
     data: np.ndarray,
     fs: float,

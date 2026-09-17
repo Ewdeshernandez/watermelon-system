@@ -33,7 +33,8 @@ from core.ui_theme import page_header
 
 from core.modal.oma_layout import motor_multistage_pump_layout, OMALayout
 from core.modal.oma_engine import run_oma
-from core.modal.ssi import run_ssi_cov
+from core.modal.ssi import run_ssi_cov, run_ssi_data
+from core.modal.poser import Setup as _PoSetup, poser_merge as _poser_merge, mac as _poser_mac
 from core.modal.ema_oma_correlation import correlate, correlation_table, summarize as ema_oma_summary
 from core.modal.campbell import compute_crossings, crossings_table, SpeedBand, summarize as camp_summary
 
@@ -1013,8 +1014,17 @@ if nav == T_SSI:
     _diagram = None; _rows = None; _freqs = []
     if D["raw"] is not None:
         data, fs = D["raw"]
-        ssi = run_ssi_cov(data, fs, orders=list(CFG_SSI_ORDERS),
-                          fmin_hz=CFG_SSI_BAND[0], fmax_hz=CFG_SSI_BAND[1])
+        _mopts = {"SSI-COV (covariance)": "COV", "SSI-DATA · UPC": "UPC", "SSI-DATA · CVA": "CVA"}
+        _mlabel = st.radio("Identification method", list(_mopts.keys()), horizontal=True, key="ssi_method",
+                           help="Three independent time-domain estimators. Modes that appear in all "
+                                "of them are the most trustworthy (cross-validation).")
+        _mkey = _mopts[_mlabel]
+        if _mkey == "COV":
+            ssi = run_ssi_cov(data, fs, orders=list(CFG_SSI_ORDERS),
+                              fmin_hz=CFG_SSI_BAND[0], fmax_hz=CFG_SSI_BAND[1])
+        else:
+            ssi = run_ssi_data(data, fs, method=_mkey, orders=list(CFG_SSI_ORDERS),
+                               fmin_hz=CFG_SSI_BAND[0], fmax_hz=CFG_SSI_BAND[1])
         _diagram = ssi.diagram; _freqs = [m.frequency_hz for m in ssi.modes]
         _rows = [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m.frequency_hz:.2f}<span class='u'> Hz</span></span>",
                   f"<span class='num'>±{m.std_frequency_hz:.2f}</span>",
@@ -1653,6 +1663,61 @@ if nav == T_TREND:
                    "(loosening, cracking, or skid/base degradation). Investigate.")
     else:
         st.success("Natural frequencies stable across runs — no stiffness loss detected.")
+
+    # ---- Roving / multi-setup merge (PoSER) ----
+    with st.expander("🔗 Roving — merge setups into global mode shapes (PoSER)"):
+        st.caption("When you have more measurement points than channels, you measure in several "
+                   "**setups** keeping some **reference** sensors fixed. PoSER re-scales each setup by "
+                   "the shared reference DOFs and assembles ONE global mode shape.")
+        _ppick = st.multiselect("Setups (field runs sharing reference sensors)", list(_opts.keys()),
+                                default=[], key="poser_pick")
+        if len(_ppick) < 2:
+            st.info("Pick 2+ runs of the same machine that share at least one common sensor (reference).")
+        else:
+            try:
+                from core.modal.modal_cloud import download_raw as _dl_raw
+                _setups = []; _allnames = []
+                for lab in _ppick:
+                    pl = load_run(_opts[lab]) or {}
+                    rr = pl.get("raw_ref") or {}
+                    if not rr.get("path"):
+                        st.warning(f"'{lab}' has no raw data — re-upload from the field. Skipped.")
+                        continue
+                    dl = _dl_raw(rr)
+                    if dl is None:
+                        continue
+                    _d, _f = dl; _d = np.asarray(_d, float); _f = float(_f or rr.get("fs") or 0)
+                    _names = pl.get("channel_names") or rr.get("channels") or [f"c{i}" for i in range(_d.shape[1])]
+                    _fmax = min(_f / 2.56, 600.0)
+                    _res = run_oma(time_data=_d, sample_rate_hz=_f, nperseg=CFG_NPERSEG,
+                                   channel_names=list(_names), f_min_hz=5.0, f_max_hz=_fmax)
+                    _sh = np.array([np.asarray(m.mode_shape, complex) for m in _res.modes]) \
+                        if _res.modes else np.zeros((0, len(_names)), complex)
+                    _fr = [m.natural_frequency_hz for m in _res.modes]
+                    _setups.append((lab, list(_names), _fr, _sh)); _allnames.append(set(_names))
+                if len(_setups) >= 2:
+                    _common = set(_allnames[0]).intersection(*_allnames[1:])
+                    if not _common:
+                        st.error("The selected setups share no common sensor. PoSER needs at least one "
+                                 "reference sensor present in every setup.")
+                    else:
+                        _objs = [_PoSetup(fr, sh, dof_ids=names, ref_ids=[c for c in names if c in _common])
+                                 for (_lab, names, fr, sh) in _setups]
+                        _fg, _Sg, _order = _poser_merge(_objs, tol_hz=1.5)
+                        st.success(f"Merged **{len(_fg)} global mode(s)** from **{len(_setups)} setups** — "
+                                   f"{len(_order)} total DOFs, {len(_common)} reference sensor(s): "
+                                   f"{', '.join(sorted(_common))}.")
+                        _prows = [[f"<span class='idx'>{i+1}</span>",
+                                   f"<span class='fn'>{f:.2f}<span class='u'> Hz</span></span>",
+                                   f"<span class='num'>{len(_order)}</span>"]
+                                  for i, f in enumerate(_fg)]
+                        if _prows:
+                            _show_table(["#", "Global frequency", "DOFs in shape"], _prows)
+                        st.caption("Each global mode spans all measurement points across every setup, "
+                                   "phase-aligned through the reference sensors.")
+            except Exception as _e:  # noqa: BLE001
+                st.warning(f"Could not merge the setups: {type(_e).__name__}. "
+                           "Make sure the runs share reference sensors and have raw data.")
 
 # ---------------------------------------------------------------- 9 PRELIMINARY
 if nav == T_REPORT:

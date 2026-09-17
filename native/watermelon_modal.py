@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.89"
+__version__ = "0.9.90"
 
 
 def _run_trace_tags():
@@ -991,7 +991,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_loadlocal = QtWidgets.QPushButton(T("📂 Load local", "📂 Cargar local"))
     btn_savecloud = QtWidgets.QPushButton(T("☁ Save to Watermelon System", "☁ Guardar en Watermelon System"))
     btn_savecloud.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
-    for b in (btn_preset, btn_savelocal, btn_loadlocal, btn_savecloud):
+    btn_loadcloud = QtWidgets.QPushButton(T("☁ Load from Watermelon System", "☁ Cargar de Watermelon System"))
+    btn_loadcloud.setToolTip(T("Load a configuration saved in the cloud.", "Cargar una configuración guardada en la nube."))
+    for b in (btn_preset, btn_savelocal, btn_loadlocal, btn_savecloud, btn_loadcloud):
         save_row.addWidget(b)
     save_row.addStretch(1)
     sul.addLayout(save_row)
@@ -1654,7 +1656,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_apply.clicked.connect(_apply_all)
     btn_preset.clicked.connect(_load_preset)
     btn_savelocal.clicked.connect(_save_local); btn_loadlocal.clicked.connect(_load_local)
-    btn_savecloud.clicked.connect(_save_cloud)
+    btn_savecloud.clicked.connect(_save_cloud); btn_loadcloud.clicked.connect(_load_cloud)
 
     _fill_points(); _sync_comp_combo(); _refresh_summary(); _upd_df(); _draw_train(fit=True)
 
