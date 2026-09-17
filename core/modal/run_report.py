@@ -218,8 +218,21 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
     if sensor_png is None and sensor_rows is None:
         sensor_png, sensor_rows = _sensor_check_from_run(run)
 
+    # --- Título DINÁMICO según el tipo de ensayo (OMA / EMA / ambos = MODAL) ---
+    # Fuente autoritativa: layout.test_modes; si falta, se infiere de los modos presentes.
+    _tm = [str(t).upper() for t in ((run.get("layout") or {}).get("test_modes") or [])]
+    if _tm:
+        _has_ema = "EMA" in _tm; _has_oma = "OMA" in _tm
+    else:
+        _has_ema = bool(run.get("ema_modes")); _has_oma = bool(fdd.modes) or bool(run.get("modes"))
+    if _has_ema and _has_oma:
+        _dyn_title = "Reporte de Análisis Modal (EMA + OMA)"
+    elif _has_ema and not _has_oma:
+        _dyn_title = "Reporte de Análisis Modal Experimental (EMA)"
+    else:
+        _dyn_title = "Reporte de Análisis Modal Operacional (OMA)"
     meta = {
-        "report_title": "Reporte Análisis Modal Operacional (OMA)",
+        "report_title": _dyn_title,
         "hide_format_band": True,        # sin banda/título de formato (FMT) — pedido del usuario
         "asset": run.get("asset") or run.get("name") or "Equipo",
         "client": run.get("client", ""), "location": run.get("location", ""),
