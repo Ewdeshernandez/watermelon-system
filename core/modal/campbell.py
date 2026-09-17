@@ -8,7 +8,7 @@ orden (1×, 2×, ...) y detecta automáticamente las velocidades de coincidencia
 (potenciales resonancias), su ubicación respecto a las bandas de operación y su
 margen de separación.
 
-Reemplaza el trabajo manual "a ojo" sobre el gráfico de ARTeMIS: entrega la
+Reemplaza el trabajo manual "a ojo" sobre el gráfico de software modal externo: entrega la
 TABLA de cruces lista para el reporte + una figura (Plotly) con las bandas de
 operación sombreadas y los cruces marcados.
 

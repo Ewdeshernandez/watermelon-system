@@ -165,7 +165,7 @@ def build_complexity_polar_plot(
     mode_label: str = "",
 ):
     """
-    Complexity Polar Plot estilo Artemis (Figura 10).
+    Complexity Polar Plot estilo software modal externo (Figura 10).
 
     Cada componente del mode shape se dibuja como vector radial en el plano
     complejo (Real horizontal, Imag vertical). Si todos los vectores son
@@ -252,14 +252,14 @@ def build_mac_matrix_plot(
     """
     Visualización de la matriz MAC.
 
-    Si use_3d=True → barras 3D (estilo Figura 9 Artemis).
+    Si use_3d=True → barras 3D (estilo Figura 9 software modal externo).
     Si use_3d=False → heatmap 2D (más rápido y siempre legible).
 
     Args:
         mac_matrix: numpy array (N, N) con valores MAC ∈ [0, 1]
         mode_labels: etiquetas de cada modo (e.g. "21.77 Hz")
         title: título
-        use_3d: usar bar chart 3D estilo Artemis
+        use_3d: usar bar chart 3D estilo software modal externo
 
     Returns:
         plotly Figure
@@ -274,7 +274,7 @@ def build_mac_matrix_plot(
     n = M.shape[0]
 
     if use_3d and n > 1:
-        # Bar3d via Mesh3d cubes — más complejo pero replica visual Artemis
+        # Bar3d via Mesh3d cubes — más complejo pero replica visual software modal externo
         # Versión simplificada: surface plot 3D estilo "stem"
         x_grid, y_grid = _np.meshgrid(_np.arange(n), _np.arange(n))
         fig = go.Figure()

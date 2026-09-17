@@ -6,7 +6,7 @@ Aplica los criterios objetivos de ISO 7626-5 (impact hammer testing) a un
 conjunto input + output(s) capturados y devuelve un checklist con
 pass/fail por cada criterio.
 
-Esto es lo que diferencia Watermelon de Artemis / CSI Emerson / Bently:
+Esto es lo que diferencia Watermelon de software modal externo / CSI Emerson / Bently:
 ninguno de esos te dice "tu ensayo es conforme ISO 7626" — solo te dan
 los datos. Watermelon valida automáticamente y emite un veredicto.
 

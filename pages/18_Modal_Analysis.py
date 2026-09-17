@@ -549,7 +549,7 @@ def _run_label(r):
     _who = f" · {_who}" if _who else ""
     return f"☁ {r.get('name','run')}{_who} · {str(r.get('updated_at',''))[:16]}"
 _opts = {_run_label(r): r.get("id") for r in _runs}
-_labels = ["🧪 Sample dataset (demo)"] + list(_opts.keys())
+_labels = ["⚪ Sample dataset (demo)"] + list(_opts.keys())
 _sc1, _sc2 = st.columns([3, 1])
 with _sc1:
     _choice = st.selectbox("Data source", _labels, index=(1 if _opts else 0),
@@ -739,7 +739,7 @@ st.markdown(f"""
   </div>
   <div style="text-align:right">
     <span class="wm-chip {_cls}">{_chip}</span>
-    <div class="meta" style="margin-top:8px">{'☁ Field run' if D['source']=='cloud' else '🧪 Sample dataset'}</div>
+    <div class="meta" style="margin-top:8px">{'☁ Field run' if D['source']=='cloud' else '⚪ Sample dataset'}</div>
   </div>
 </div>
 <div class="wm-kpis">

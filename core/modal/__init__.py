@@ -3,8 +3,8 @@ core/modal — Modal Analysis Module
 ===================================
 
 Módulo de análisis modal experimental (EMA) y operacional (OMA) para
-Watermelon System. Sustituye dependencia del software externo Artemis
-Modal con stack open-source nativo (pyEMA + PyOMA2 + scipy).
+Watermelon System. Motor propio con stack open-source nativo
+(pyEMA + PyOMA2 + scipy) — independiente de software modal externo.
 
 Marco normativo aplicable
 -------------------------
@@ -37,7 +37,6 @@ Estructura del módulo
 geometry_3d       — Wireframe 3D (nodes + edges + faces) en JSON nativo
 sensor_3d_mapping — Mapea sensor_map.plane_label → nodo geometría + DOF
 tdms_importer     — Lee archivos .tdms nativos del hardware de captura (npTDMS)
-artemis_importer  — Lee exports legacy de Artemis Modal (.txt) — compat
 acq_backend       — Adquisición live del hardware (EMA triggered + OMA continuous)
 signal_scaling    — Aplica sensitivities (mV/g, mV/mil) → engineering units
 frf_compute       — Cálculo FRF: H1, H2 estimators + coherencia (scipy.signal)
@@ -53,7 +52,6 @@ __all__ = [
     "geometry_3d",
     "sensor_3d_mapping",
     "tdms_importer",
-    "artemis_importer",
     "acq_backend",
     "signal_scaling",
     "frf_compute",

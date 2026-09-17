@@ -50,7 +50,9 @@ def check_for_update(current_version: str, timeout: float = 6.0) -> Optional[Dic
     """Devuelve info del release más nuevo (`modal-v*`) si supera a current_version,
     o None (sin red / sin actualización / error). No lanza excepciones."""
     try:
-        url = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+        # per_page=100 (máximo de la API): los releases de Modal y Planta se intercalan,
+        # así que con 30 el modal-v* más nuevo podía caer fuera de la primera página.
+        url = f"https://api.github.com/repos/{REPO}/releases?per_page=100"
         req = urllib.request.Request(url, headers=_UA)
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
             rels = json.load(r)
@@ -86,7 +88,7 @@ def diagnose(current_version: str, timeout: float = 6.0):
     """Chequeo MANUAL con diagnóstico legible (para el botón del campo). Devuelve
     (info_or_None, mensaje). Sirve para ver por qué no aparece la actualización
     (red bloqueada, proxy, al día, etc.)."""
-    url = f"https://api.github.com/repos/{REPO}/releases?per_page=10"
+    url = f"https://api.github.com/repos/{REPO}/releases?per_page=100"
     try:
         req = urllib.request.Request(url, headers=_UA)
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:

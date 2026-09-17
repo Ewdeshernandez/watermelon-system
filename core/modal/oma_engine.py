@@ -476,7 +476,7 @@ def detect_oma_modes(
         # find_peaks devuelve el CENTRO del bin FFT → la frecuencia queda cuantizada
         # a df (~0.39 Hz). Ajustando una parábola a σ1(dB) en [idx-1, idx, idx+1] se
         # estima el vértice real del pico → frecuencia con resolución sub-bin (como
-        # ARTeMIS / cualquier estimador paramétrico), sin cambiar la forma modal ni
+        # software modal externo / cualquier estimador paramétrico), sin cambiar la forma modal ni
         # el índice usado aguas abajo.
         if 0 < idx_full < len(sv1_db) - 1:
             _ym1, _y0, _yp1 = float(sv1_db[idx_full - 1]), float(sv1_db[idx_full]), float(sv1_db[idx_full + 1])
@@ -523,7 +523,7 @@ def detect_oma_modes(
         else:
             mode_shape = fdd_result.mode_shapes_at_freq[:, 0, idx_full]
 
-        # Modal Complexity (MPC) — criterio Artemis para natural vs harmonic
+        # Modal Complexity (MPC) — criterio software modal externo para natural vs harmonic
         complexity_pct = modal_complexity_mpc(mode_shape)
 
         # Clasificación combinada: complexity + harmonic match
@@ -604,7 +604,7 @@ def preprocess_signals(time_data: np.ndarray, sample_rate_hz: float,
       · band=(lo,hi) Hz → filtro pasa-banda Butterworth de fase cero (sosfiltfilt) para
         enfocar una banda (p.ej. aislar los modos de interés del ruido de baja frecuencia).
       · decimate_factor N>1 → decimación con anti-alias (baja fs a fs/N) → más resolución
-        en frecuencia dentro de la banda baja (equivalente al 'decimation' de ARTeMIS).
+        en frecuencia dentro de la banda baja (equivalente al 'decimation' de software modal externo).
     No modifica la data cruda del llamador (opera sobre copia)."""
     from scipy import signal as _sg
     x = np.asarray(time_data, float)

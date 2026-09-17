@@ -4,7 +4,7 @@ core/modal/geometry_3d.py — Geometria 3D para analisis modal
 
 Define la representacion de la geometria 3D del activo (compresor, generador,
 turbina, etc.) que se usa como soporte visual para los mode shapes y como
-editor estilo Artemis Modal.
+editor estilo software modal externo.
 
 Modelo de datos (v3.31.170)
 ---------------------------
@@ -812,7 +812,7 @@ def build_geometry_with_mode_shape(
     haga match con un canal del FDD/EMA por nombre.
 
     Si animate=True, la figura incluye frames Plotly que oscilan las flechas
-    segun cos(phase + omega·t), equivalente a la animacion Artemis Modal donde
+    segun cos(phase + omega·t), equivalente a la animacion software modal externo donde
     el mode shape se ve "pulsar" a la frecuencia del modo (frecuencia visual
     es escalada, no la real).
 
@@ -902,7 +902,7 @@ def build_geometry_with_mode_shape(
 
     span = max(geom.shaft_end - geom.shaft_start, 100.0)
     # Deformacion visual: hasta deform_pct del span — exageracion estetica para
-    # que la flexion sea claramente visible (Artemis usa ~20% por default)
+    # que la flexion sea claramente visible (software modal externo usa ~20% por default)
     deform_scale = (span * float(deform_pct)) / max_disp if max_disp > 1e-9 else 0.0
 
     def _kind_to_mounting(kind: str) -> str:
@@ -1155,7 +1155,7 @@ def build_geometry_with_mode_shape(
                 f"capa carcasa: {n_casing} accel · capa eje: {n_shaft} prox · "
                 f"colormap: rojo = +amp, azul = −amp")
 
-    # Agrega triad XYZ discreto en esquina (estilo Artemis Modal)
+    # Agrega triad XYZ discreto en esquina (estilo software modal externo)
     _add_axis_triad(fig, geom)
 
     # Camera EXPLÍCITA en cada render usando los presets seleccionados.
@@ -1262,7 +1262,7 @@ def build_geometry_with_mode_shape(
                 ],
             )],
             # sliders=[] explicito — no mostrar el indicador de fase
-            # (estilo Artemis: solo Play/Pause, sin tick marks de timeline)
+            # (estilo software modal externo: solo Play/Pause, sin tick marks de timeline)
             sliders=[],
         )
 
@@ -1399,7 +1399,7 @@ def _render_mode_shape_frames(
             mode_label="", animate=False,
             show_arrows=False, show_ghost=show_ghost, colormap=colormap,
         )
-        # Quitar titulo y ejes (estilo Artemis: ejes invisibles, triad XYZ
+        # Quitar titulo y ejes (estilo software modal externo: ejes invisibles, triad XYZ
         # ya esta en la esquina via _add_axis_triad)
         fig.update_layout(
             title=None,

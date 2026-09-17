@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.88"
+__version__ = "0.9.89"
 
 
 def _run_trace_tags():
@@ -167,7 +167,7 @@ DEMO_MODES = [SynthMode(19.4, 0.020, 1.0), SynthMode(38.8, 0.015, 0.7),
 _AXIS_DIR = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1),
              "A": (1, 0, 0), "H": (0, 1, 0), "V": (0, 0, 1)}
 
-# Subdivisión de cada cara en la animación → malla fina tipo ARTeMIS. Más alto =
+# Subdivisión de cada cara en la animación → malla fina tipo software modal externo. Más alto =
 # deflexión más suave/continua (a costa de más líneas de grilla; el lápiz de la
 # grilla es sutil para que se lea limpio).
 _MESH_N = 7
@@ -263,7 +263,7 @@ def _subdivide_quad(q, n):
 
 def _field_disp(v, anim):
     """IDW en el vértice v: posición (desde amps instantáneos) + magnitud de COLOR
-    (desde mags = amplitud/envolvente por sensor, para colorear como ARTeMIS)."""
+    (desde mags = amplitud/envolvente por sensor, para colorear como software modal externo)."""
     pts = anim["pts"]; dirs = anim["dirs"]; amps = anim["amps"]; mags = anim.get("mags")
     if len(pts) == 0:
         return np.zeros(3), 0.0
@@ -277,7 +277,7 @@ def _field_disp(v, anim):
 
 def _jet_qcolor(t):
     """Jet colormap (dark blue -> cyan -> yellow -> red) — para la forma modal del ROTOR
-    (proximidad), igual a la web / ARTeMIS."""
+    (proximidad), igual a la web / software modal externo."""
     t = max(0.0, min(1.0, t))
     stops = [(0.0, (0, 0, 143)), (0.12, (0, 0, 255)), (0.35, (0, 190, 255)),
              (0.55, (110, 255, 130)), (0.75, (255, 220, 0)), (0.9, (255, 90, 0)), (1.0, (170, 0, 0))]
@@ -543,7 +543,7 @@ class Machine3DItem(pg.GraphicsObject):
                 deform = anim is not None and not is_static
                 for f in _cuboid_faces(c):
                     # en animación cada cara móvil se subdivide en una malla fina (degradé
-                    # suave + mallado visible tipo ARTeMIS); la fundación queda como caja fija
+                    # suave + mallado visible tipo software modal externo); la fundación queda como caja fija
                     quads = _subdivide_quad(f, _MESH_N) if deform else [f]
                     for q in quads:
                         colmag = None
@@ -572,7 +572,7 @@ class Machine3DItem(pg.GraphicsObject):
             col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade), int(base.blue() * shade))
             poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
             painter.setBrush(QtGui.QBrush(col))
-            if mesh:                                         # MALLADO tipo ARTeMIS (líneas de la malla)
+            if mesh:                                         # MALLADO tipo software modal externo (líneas de la malla)
                 pen = QtGui.QPen(QtGui.QColor(15, 23, 42, 55)); pen.setCosmetic(True); pen.setWidthF(0.5)
             elif is_rotor:                                   # rotor: superficie lisa (sin grilla)
                 pen = QtGui.QPen(col); pen.setCosmetic(True); pen.setWidthF(0.3)
@@ -2151,7 +2151,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             sc_rec = {"rows": _scr["rows"], "ts": _scr["ts"], "n_ok": _scr["n_ok"],
                       "n_total": _scr["n_total"], "live": _scr.get("live", False),
                       "png_b64": _b64.b64encode(_scr["png"]).decode()}
-        if not lay.geometry:                     # geometría ARTeMIS para la web (viaja en el layout)
+        if not lay.geometry:                     # geometría software modal externo para la web (viaja en el layout)
             from core.modal.oma_layout import default_geometry
             lay.geometry = default_geometry(lay)
         return {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
@@ -2258,7 +2258,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 sc_rec = {"rows": _scr["rows"], "ts": _scr["ts"], "n_ok": _scr["n_ok"],
                           "n_total": _scr["n_total"], "live": _scr.get("live", False),
                           "png_b64": _b64sc.b64encode(_scr["png"]).decode()}
-            if not lay.geometry:                 # geometría ARTeMIS para la web (viaja en el layout)
+            if not lay.geometry:                 # geometría software modal externo para la web (viaja en el layout)
                 from core.modal.oma_layout import default_geometry
                 lay.geometry = default_geometry(lay)
             payload = {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
@@ -3382,7 +3382,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _shape_pngs(top=4, es=True):
         """Renderiza las formas modales de los N modos más relevantes en 3D con color,
-        SIN sensores (como ARTeMIS). Devuelve [(caption, png)]."""
+        SIN sensores (como software modal externo). Devuelve [(caption, png)]."""
         _L = lambda s, e: s if es else e
         out = []
         fdd = st.get("oma_fdd")

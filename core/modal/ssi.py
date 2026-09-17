@@ -3,7 +3,7 @@ core/modal/ssi.py — Stochastic Subspace Identification (SSI-COV) + incertidumb
 ================================================================================
 
 Identificación modal en dominio del TIEMPO (OMA), el método premium que hace fuerte
-a ARTeMIS Pro. SSI-COV: covarianzas de salida → Toeplitz por bloques → SVD →
+a software modal profesional. SSI-COV: covarianzas de salida → Toeplitz por bloques → SVD →
 matriz de observabilidad → A, C → autovalores → frecuencias / amortiguamiento /
 formas modales. Barrido de ÓRDENES → diagrama de ESTABILIZACIÓN. La dispersión de
 los polos estables da la INCERTIDUMBRE (std de fn y ζ) — equivalente a las barras

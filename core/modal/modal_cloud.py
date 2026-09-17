@@ -112,7 +112,13 @@ def upload_raw(run_id: str, data, fs: float, channels=None) -> Dict[str, Any]:
             arr = arr[:, None]
         buf = io.BytesIO(); np.save(buf, arr)
         raw = gzip.compress(buf.getvalue(), 6)
-        key = f"{run_id}.npy.gz"
+        # El key de Storage DEBE ser ASCII: Supabase rechaza tildes/ñ (StorageApiError
+        # InvalidKey 400). Saneamos aquí también por si el run_id trae no-ASCII (corridas
+        # viejas guardadas con nombre acentuado). El path real se guarda en raw_ref.
+        import unicodedata
+        _rid = unicodedata.normalize("NFKD", str(run_id)).encode("ascii", "ignore").decode("ascii")
+        _rid = "".join(c if (c.isascii() and c.isalnum()) or c in "-_." else "_" for c in _rid).strip("_") or "run"
+        key = f"{_rid}.npy.gz"
         try:
             c.storage.create_bucket(_RAW_BUCKET)            # idempotente
         except Exception:  # noqa: BLE001

@@ -1,5 +1,5 @@
 """
-core/modal/oma_siga_report.py — Reporte OMA estilo SIGA (independiente de ARTeMIS)
+core/modal/oma_siga_report.py — Reporte OMA estilo SIGA (independiente de software modal externo)
 =================================================================================
 
 Ensambla un PDF de Análisis Modal Operacional con la MISMA estructura de tus

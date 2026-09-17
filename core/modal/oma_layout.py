@@ -208,7 +208,7 @@ class OMALayout:
     module_model: str = "NI 9234"
     running_speed_rpm: float = 1185.0
     tach_bnc: int = 0                     # 0 = sin keyphasor/tach; >0 = BNC del pulso 1×/vuelta
-    # Geometría ARTeMIS para formas modales: {"nodes":[{id,x,y,z,sensor}], "lines":[[i,j]],
+    # Geometría software modal externo para formas modales: {"nodes":[{id,x,y,z,sensor}], "lines":[[i,j]],
     # "surfaces":[[i,j,k(,l)]]}. Se define en el campo y la web SOLO la visualiza.
     geometry: dict = field(default_factory=dict)
 
@@ -312,7 +312,7 @@ def _cube_verts(c: "MachineComponent"):
 
 
 def default_geometry(layout: "OMALayout") -> dict:
-    """Geometría ARTeMIS por defecto a partir de los componentes: wireframe de cajas
+    """Geometría software modal externo por defecto a partir de los componentes: wireframe de cajas
     (8 esquinas + 12 aristas + 6 caras por componente) + un nodo por estación de
     sensor. Editable en el campo; la web la visualiza."""
     nodes, lines, surfaces = [], [], []
@@ -363,7 +363,12 @@ def layouts_dir() -> str:
 
 
 def _slug(name: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_" else "_" for c in (name or "modal")).strip("_")
+    # Normaliza a ASCII: quita tildes/ñ (Medellín→Medellin). CLAVE porque el slug se usa
+    # como key de Supabase Storage, que RECHAZA no-ASCII (StorageApiError InvalidKey 400).
+    # Ojo: en Python 'í'.isalnum() es True, así que sin esto la tilde pasaba y rompía la subida.
+    import unicodedata
+    s = unicodedata.normalize("NFKD", name or "modal").encode("ascii", "ignore").decode("ascii")
+    return ("".join(c if (c.isascii() and c.isalnum()) or c in "-_" else "_" for c in s).strip("_")) or "modal"
 
 
 def save_layout_local(layout: "OMALayout") -> str:
