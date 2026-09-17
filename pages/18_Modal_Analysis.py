@@ -516,7 +516,39 @@ try:
 except Exception as _e:  # noqa: BLE001  — no ocultar: distinguir "sin runs" de "no se pudo conectar"
     _cloud_err = f"{type(_e).__name__}: {_e}"
 
-_opts = {f"☁ {r.get('name','run')} · {str(r.get('updated_at',''))[:16]}": r.get("id") for r in _runs}
+# --- Control de acceso multi-tenant: cada cliente ve SOLO sus activos; admin/specialist ven todo. ---
+def _runs_in_scope(runs):
+    _role = str(_user.get("role", "")).lower()
+    if _user.get("is_admin") or _role in ("admin", "specialist"):
+        return runs
+    try:                                   # rol cliente → solo sus asset_tags (fail-closed)
+        from core.clients import get_client_for_email
+        _c = get_client_for_email(_user.get("email", ""))
+        _tags = {t.strip().lower() for t in (getattr(_c, "asset_tags", None) or []) if t}
+        if not _tags:
+            return []
+        return [r for r in runs if str(r.get("tag") or r.get("client") or "").strip().lower() in _tags]
+    except Exception:  # noqa: BLE001
+        return []
+_runs = _runs_in_scope(_runs)
+# Indicador de "corridas nuevas" (últimas 24 h) para saber que llegó algo del campo.
+import datetime as _dt0
+_now0 = _dt0.datetime.now(_dt0.timezone.utc)
+def _is_new(r):
+    _t = str(r.get("created_at") or r.get("updated_at") or "")
+    try:
+        _d = _dt0.datetime.fromisoformat(_t.replace("Z", "+00:00"))
+        if _d.tzinfo is None:
+            _d = _d.replace(tzinfo=_dt0.timezone.utc)
+        return (_now0 - _d).total_seconds() < 86400
+    except Exception:  # noqa: BLE001
+        return False
+_n_new = sum(1 for r in _runs if _is_new(r))
+def _run_label(r):
+    _who = (r.get("client") or r.get("account") or "").strip()
+    _who = f" · {_who}" if _who else ""
+    return f"☁ {r.get('name','run')}{_who} · {str(r.get('updated_at',''))[:16]}"
+_opts = {_run_label(r): r.get("id") for r in _runs}
 _labels = ["🧪 Sample dataset (demo)"] + list(_opts.keys())
 _sc1, _sc2 = st.columns([3, 1])
 with _sc1:
@@ -525,6 +557,8 @@ with _sc1:
 with _sc2:
     if st.button("🔄 Refresh runs", use_container_width=True):
         st.rerun()
+if _n_new:
+    st.success(f"🔔 {_n_new} corrida(s) nueva(s) del campo en las últimas 24 h — aparece(n) arriba en la lista.")
 if _cloud_err:
     st.warning(f"Could not reach the cloud to list field runs ({_cloud_err}). "
                "Check your connection — showing only the sample dataset below, not real data.")

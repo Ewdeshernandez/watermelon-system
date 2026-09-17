@@ -56,7 +56,22 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.85"
+__version__ = "0.9.86"
+
+
+def _run_trace_tags():
+    """(account, hostname) para trazabilidad de la corrida subida a la nube: quién
+    (cuenta de la licencia) y desde qué PC. Robusto si el módulo de licencia no está."""
+    try:
+        from core.modal import licensing as _lic
+        _acc = str((_lic.local_license_status() or {}).get("account") or "")
+        return _acc, _lic.machine_label()
+    except Exception:  # noqa: BLE001
+        try:
+            import socket as _s, getpass as _g
+            return "", f"{_s.gethostname()} / {_g.getuser()}"
+        except Exception:  # noqa: BLE001
+            return "", ""
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2253,7 +2268,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     T(f"Could not upload the raw data ({_why}). The run stays saved "
                     "locally; upload it later with 'Upload saved'.",
                     f"No se pudo subir la data cruda ({_why}). La corrida queda guardada localmente; súbela luego con 'Subir guardada'.")); return
-            r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts)
+            _acc, _host = _run_trace_tags()
+            r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts, account=_acc,
+                                     client=lay.client or "", tag=lay.tag or "", hostname=_host)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
                     T(f"☁ Run uploaded with RAW DATA (~{_mbraw:.0f} MB). The web will run the full "
@@ -2315,7 +2332,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 QtWidgets.QMessageBox.warning(win, "Cloud",
                     T(f"Could not upload the raw data ({_why}). Try again.",
                     f"No se pudo subir la data cruda ({_why}). Intenta de nuevo.")); return
-            r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts)
+            _acc, _host = _run_trace_tags()
+            _lyp = payload.get("layout") or {}
+            r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts, account=_acc,
+                                     client=payload.get("client") or "",
+                                     tag=_lyp.get("tag") or payload.get("tag") or "", hostname=_host)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
                     T(f"☁ Run uploaded with RAW DATA (~{_mb:.0f} MB). The web will run the full analysis and the report.", f"☁ Corrida subida con DATA CRUDA (~{_mb:.0f} MB). La web hará el análisis completo y el reporte."))

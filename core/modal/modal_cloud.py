@@ -70,17 +70,22 @@ def new_run_id(name: str):
     return f"{_slug(name)}_{ts.replace(':', '').replace('-', '')}", ts
 
 
-def save_run(name: str, payload: Dict[str, Any], run_id: str = "", ts: str = "") -> Dict[str, Any]:
+def save_run(name: str, payload: Dict[str, Any], run_id: str = "", ts: str = "",
+             account: str = "", client: str = "", tag: str = "", hostname: str = "") -> Dict[str, Any]:
     """Sube una CORRIDA OMA (modos + config) a la nube (tabla `modal_runs`) para
     que la web genere el reporte. payload libre (jsonb). Si se pasan run_id/ts se
-    usan (para que coincidan con la data cruda subida a Storage)."""
+    usan (para que coincidan con la data cruda subida a Storage).
+    account/client/tag/hostname: TRAZABILIDAD — quién/de qué cliente subió (para que
+    la web filtre por cliente y sepa quién subió qué)."""
     c = _client()
     if c is None:
         return {"ok": False, "reason": "offline"}
     try:
         if not run_id or not ts:
             run_id, ts = new_run_id(name)
-        row = {"id": run_id, "name": name or "Modal run", "metadata": payload, "updated_at": ts}
+        row = {"id": run_id, "name": name or "Modal run", "metadata": payload, "updated_at": ts,
+               "account": account or "", "client": client or "", "tag": tag or "",
+               "hostname": hostname or ""}
         try:
             c.table(_RUNS_TABLE).upsert(row).execute()
         except Exception:  # noqa: BLE001
@@ -151,7 +156,7 @@ def list_runs() -> List[Dict[str, Any]]:
     if c is None:
         return []
     try:
-        r = c.table(_RUNS_TABLE).select("id, name, updated_at").execute()
+        r = c.table(_RUNS_TABLE).select("id, name, updated_at, account, client, tag, hostname, created_at").execute()
         return sorted(r.data or [], key=lambda x: x.get("updated_at", ""), reverse=True)
     except Exception:  # noqa: BLE001
         return []
