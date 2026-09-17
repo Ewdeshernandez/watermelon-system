@@ -153,23 +153,21 @@ jobs:
           if (Test-Path WatermelonModal-Setup.exe) { "OK: setup built" | Tee-Object -Append installer_log.txt }
           else { "no setup exe" | Tee-Object -Append installer_log.txt }
 
-      - name: Empaquetar zip para el Release
-        if: startsWith(github.ref, 'refs/tags/modal-v')
-        shell: pwsh
-        run: Compress-Archive -Path out_modal/* -DestinationPath WatermelonModal-windows.zip -Force
-
       - name: Publicar Release
         if: startsWith(github.ref, 'refs/tags/modal-v')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          ASSETS="WatermelonModal-windows.zip"
-          [ -f WatermelonModal-Setup.exe ] && ASSETS="WatermelonModal-Setup.exe $ASSETS"
+          # Solo el instalador (+ log). NO se adjunta el zip portable (cientos de MB): su
+          # subida colgaba el paso por >20 min y el auto-updater solo necesita el Setup.exe.
+          # El portable sigue disponible como artefacto del build (upload-artifact, 30 días).
+          ASSETS=""
+          [ -f WatermelonModal-Setup.exe ] && ASSETS="WatermelonModal-Setup.exe"
           [ -f installer_log.txt ] && ASSETS="$ASSETS installer_log.txt"
           gh release create "${GITHUB_REF_NAME}" $ASSETS \
             --title "Watermelon Modal ${GITHUB_REF_NAME}" \
-            --notes "Watermelon Modal — native analysis module (Windows). Installer: WatermelonModal-Setup.exe. Portable: WatermelonModal-windows.zip. Not code-signed yet -> SmartScreen may ask for confirmation." \
+            --notes "Watermelon Modal — native analysis module (Windows). Installer: WatermelonModal-Setup.exe. Not code-signed yet -> SmartScreen may ask for confirmation." \
           || for a in $ASSETS; do gh release upload "${GITHUB_REF_NAME}" "$a" --clobber; done
           # CRÍTICO: publicar (no draft). El auto-updater del campo (core/modal/updater.py)
           # IGNORA los releases en draft -> si queda en borrador, el campo nunca ve la actualización.
