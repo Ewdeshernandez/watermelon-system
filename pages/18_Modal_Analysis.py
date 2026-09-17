@@ -1669,17 +1669,24 @@ if nav == T_REPORT:
         _uname = (_user.get("name") or _user.get("full_name") or _user.get("email", "")).split("@")[0]
         m1 = st.columns([1.2, 1, 1.4])
         with m1[0]:
-            # consecutivo AUTOMÁTICO: siguiente OMA-<año>-NNN según el histórico (se calcula
-            # una vez por sesión y se cachea; el usuario lo puede editar si lo necesita).
-            if "rep_consec_auto" not in st.session_state:
+            # consecutivo AUTOMÁTICO: el PREFIJO sale del tipo de ensayo (OMA / EMA / MODAL si
+            # son ambos); la secuencia NNN se calcula por prefijo+año según el histórico. Cada
+            # prefijo cuenta por separado. El usuario lo puede editar si lo necesita.
+            _tm = [str(t).upper() for t in (getattr(lay, "test_modes", None) or ["OMA"])]
+            _pfx = "MODAL" if ("EMA" in _tm and "OMA" in _tm) else ("EMA" if "EMA" in _tm else "OMA")
+            _consec_pref = f"{_pfx}-{_date.today().year}-"
+            if st.session_state.get("rep_consec_pref") != _consec_pref:
+                # el tipo/año cambió → recalcular el consecutivo automático
                 try:
                     from core.reports_archive import next_consecutive as _nc
-                    st.session_state["rep_consec_auto"] = _nc(
-                        f"OMA-{_date.today().year}-", _user.get("email", ""), _my_role)
+                    st.session_state["rep_consec_auto"] = _nc(_consec_pref, _user.get("email", ""), _my_role)
                 except Exception:  # noqa: BLE001
-                    st.session_state["rep_consec_auto"] = f"OMA-{_date.today().year}-001"
+                    st.session_state["rep_consec_auto"] = f"{_consec_pref}001"
+                st.session_state["rep_consec_pref"] = _consec_pref
+                st.session_state.pop("rep_consec", None)   # refrescar el campo al nuevo prefijo
             _consec = st.text_input("Consecutive (auto)", key="rep_consec",
-                                    value=st.session_state.get("rep_consec", st.session_state["rep_consec_auto"]))
+                                    value=st.session_state.get("rep_consec", st.session_state["rep_consec_auto"]),
+                                    help="Prefijo automático por tipo: OMA / EMA / MODAL (ambos). Editable.")
         with m1[1]:
             _rdate = st.text_input("Date", key="rep_date", value=st.session_state.get("rep_date", str(_date.today())))
         with m1[2]:
