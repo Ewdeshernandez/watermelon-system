@@ -20,7 +20,11 @@ Deno.serve(async (req) => {
     const client = String(rec.client ?? "—");
     const host = String(rec.hostname ?? "—");
     const acc = String(rec.account ?? "—");
+    const ip = String(rec.ip ?? "").trim();
+    const geo = String(rec.geo ?? "").trim();
     const when = String(rec.created_at ?? rec.updated_at ?? "");
+    const rowIp = ip ? `<tr><td style="padding:4px 10px;color:#64748b">IP de conexión</td><td style="padding:4px 10px">${ip}</td></tr>` : "";
+    const rowGeo = geo ? `<tr><td style="padding:4px 10px;color:#64748b">Ubicación aprox.</td><td style="padding:4px 10px">${geo}</td></tr>` : "";
     const html = `
       <div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937">
         <h2 style="color:#0f2a4a">🍉 Nueva corrida de campo en Watermelon System</h2>
@@ -30,6 +34,8 @@ Deno.serve(async (req) => {
           <tr><td style="padding:4px 10px;color:#64748b">Cliente</td><td style="padding:4px 10px">${client}</td></tr>
           <tr><td style="padding:4px 10px;color:#64748b">PC de campo</td><td style="padding:4px 10px">${host}</td></tr>
           <tr><td style="padding:4px 10px;color:#64748b">Cuenta</td><td style="padding:4px 10px">${acc}</td></tr>
+          ${rowIp}
+          ${rowGeo}
           <tr><td style="padding:4px 10px;color:#64748b">Fecha</td><td style="padding:4px 10px">${when}</td></tr>
         </table>
         <p style="color:#94a3b8;font-size:12px;margin-top:16px">Aviso automático de Watermelon System.</p>

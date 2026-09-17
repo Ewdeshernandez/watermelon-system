@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.86"
+__version__ = "0.9.87"
 
 
 def _run_trace_tags():
@@ -72,6 +72,41 @@ def _run_trace_tags():
             return "", f"{_s.gethostname()} / {_g.getuser()}"
         except Exception:  # noqa: BLE001
             return "", ""
+
+
+def _conn_ip_geo():
+    """(ip, geo) PÚBLICOS del PC de campo al momento de subir — para trazabilidad
+    informativa (aviso por correo + web). geo = 'Ciudad, Región, PAÍS' APROXIMADO por
+    IP (nivel ISP, NO es GPS; con VPN/datos móviles muestra la ubicación del proveedor).
+    Best-effort con timeout corto: si falla, devuelve ('', '') y NO frena la subida."""
+    import json as _j, urllib.request as _u
+    def _ssl():
+        import ssl as _s
+        try:
+            import certifi as _c
+            return _s.create_default_context(cafile=_c.where())
+        except Exception:  # noqa: BLE001
+            try:
+                return _s.create_default_context()
+            except Exception:  # noqa: BLE001
+                return None
+    def _get(url, t=3.5):
+        req = _u.Request(url, headers={"User-Agent": "WatermelonModal"})
+        with _u.urlopen(req, timeout=t, context=_ssl()) as r:
+            return _j.loads(r.read().decode("utf-8", "replace"))
+    try:
+        d = _get("https://ipapi.co/json/")
+        ip = str(d.get("ip") or "")
+        parts = [d.get("city"), d.get("region"), d.get("country_name") or d.get("country")]
+        geo = ", ".join(str(p) for p in parts if p)
+        if ip:
+            return ip, geo
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return str(_get("https://api.ipify.org?format=json").get("ip") or ""), ""
+    except Exception:  # noqa: BLE001
+        return "", ""
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2269,8 +2304,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     "locally; upload it later with 'Upload saved'.",
                     f"No se pudo subir la data cruda ({_why}). La corrida queda guardada localmente; súbela luego con 'Subir guardada'.")); return
             _acc, _host = _run_trace_tags()
+            _ip, _geo = _conn_ip_geo()
             r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts, account=_acc,
-                                     client=lay.client or "", tag=lay.tag or "", hostname=_host)
+                                     client=lay.client or "", tag=lay.tag or "", hostname=_host,
+                                     ip=_ip, geo=_geo)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
                     T(f"☁ Run uploaded with RAW DATA (~{_mbraw:.0f} MB). The web will run the full "
@@ -2333,10 +2370,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     T(f"Could not upload the raw data ({_why}). Try again.",
                     f"No se pudo subir la data cruda ({_why}). Intenta de nuevo.")); return
             _acc, _host = _run_trace_tags()
+            _ip, _geo = _conn_ip_geo()
             _lyp = payload.get("layout") or {}
             r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts, account=_acc,
                                      client=payload.get("client") or "",
-                                     tag=_lyp.get("tag") or payload.get("tag") or "", hostname=_host)
+                                     tag=_lyp.get("tag") or payload.get("tag") or "", hostname=_host,
+                                     ip=_ip, geo=_geo)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
                     T(f"☁ Run uploaded with RAW DATA (~{_mb:.0f} MB). The web will run the full analysis and the report.", f"☁ Corrida subida con DATA CRUDA (~{_mb:.0f} MB). La web hará el análisis completo y el reporte."))
