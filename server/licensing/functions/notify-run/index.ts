@@ -3,7 +3,7 @@
 // Envía el correo vía Resend (https://resend.com). Requiere secrets:
 //   RESEND_API_KEY  — API key de Resend
 //   NOTIFY_EMAILS   — destinatarios separados por coma (ej. ehernandez@sigasas.com,otro@...)
-//   RESEND_FROM     — remitente (opcional; por defecto el de pruebas de Resend)
+//   RESEND_FROM     — remitente (opcional; por defecto avisos@watermelonsystem.app, dominio verificado)
 // "Verify JWT" puede quedar OFF (lo protege que solo el webhook conoce la URL) o ON con header.
 
 Deno.serve(async (req) => {
@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
     if (!key || to.length === 0) {
       return new Response(JSON.stringify({ skipped: "falta RESEND_API_KEY o NOTIFY_EMAILS" }), { status: 200 });
     }
-    const from = Deno.env.get("RESEND_FROM") || "Watermelon System <onboarding@resend.dev>";
+    const from = Deno.env.get("RESEND_FROM") || "Watermelon System <avisos@watermelonsystem.app>";
     const name = String(rec.name ?? "corrida");
     const client = String(rec.client ?? "—");
     const host = String(rec.hostname ?? "—");
