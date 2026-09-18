@@ -44,7 +44,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.7.1"
+__version__ = "0.8.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -970,13 +970,42 @@ def build_app(simulated: bool = True):
         "Simulated run-up → torsional naturals vs excitation orders (API 684). Red × = coincidence in the operating band.",
         "Runup simulado → naturales torsionales vs órdenes de excitación (API 684). × roja = coincidencia en banda de operación.")))
     cb_ctrl = QtWidgets.QHBoxLayout()
-    sb_cb_rpm = QtWidgets.QDoubleSpinBox(); sb_cb_rpm.setRange(60, 12000); sb_cb_rpm.setValue(1800); sb_cb_rpm.setSuffix(" rpm")
+    _np0 = float((st["setup_fn"]() if st.get("setup_fn") else {}).get("nameplate_rpm") or 1800)
+    sb_cb_rpm = QtWidgets.QDoubleSpinBox(); sb_cb_rpm.setRange(60, 12000); sb_cb_rpm.setValue(_np0); sb_cb_rpm.setSuffix(" rpm")
+    # Velocidad de operación por DEFECTO = RPM de placa (Setup). Botones para
+    # re-tomarla de placa o medirla del keyphasor. Cero errores del operador.
+    btn_cb_plate = QtWidgets.QToolButton(); btn_cb_plate.setText(T("↺ Nameplate", "↺ Placa"))
+    btn_cb_kph = QtWidgets.QToolButton(); btn_cb_kph.setText(T("◉ Keyphasor", "◉ Keyphasor"))
+    sb_cb_rpm2 = QtWidgets.QDoubleSpinBox(); sb_cb_rpm2.setRange(0, 12000); sb_cb_rpm2.setValue(0); sb_cb_rpm2.setSuffix(" rpm")
+    sb_cb_rpm2.setSpecialValueText(T("off", "—"))       # 0 = sin segunda banda
     cb_margin = QtWidgets.QComboBox(); cb_margin.addItems(["±10% (API 684)", "±15% (ISO 22266)", "±5%"])
     cb_ctrl.addWidget(QtWidgets.QLabel(T("Operating speed", "Velocidad de operación"))); cb_ctrl.addWidget(sb_cb_rpm)
+    cb_ctrl.addWidget(btn_cb_plate); cb_ctrl.addWidget(btn_cb_kph)
+    cb_ctrl.addWidget(QtWidgets.QLabel(T("Additional speed", "Velocidad adicional"))); cb_ctrl.addWidget(sb_cb_rpm2)
     cb_ctrl.addWidget(QtWidgets.QLabel(T("Permissible band", "Franja permisible"))); cb_ctrl.addWidget(cb_margin)
     btn_cb = QtWidgets.QPushButton(T("▶ Run Campbell", "▶ Correr Campbell"))
     cb_ctrl.addWidget(btn_cb); cb_ctrl.addStretch(1)
     cb_l.addLayout(cb_ctrl)
+
+    def _cb_from_plate():
+        _n = float((st["setup_fn"]() if st.get("setup_fn") else {}).get("nameplate_rpm") or 0)
+        if _n > 0:
+            sb_cb_rpm.setValue(_n)
+    def _cb_from_keyphasor():
+        # mide la velocidad real del keyphasor de una captura estable simulada
+        if not _rebuild_scaling():
+            return
+        p = _preset(); fs = st["fs"]; sc = st["scaling"]
+        cfg = TorsionalStreamConfig(sample_rate_hz=fs, rpm=p["rpm"],
+            channels=make_torsional_channels(units=sc.units), block_seconds=0.25, buffer_seconds=4,
+            mean_torque=p["mean"], orders=p["orders"], scaling=sc, torque_units=sc.units)
+        src = SimulatedTorsionalSource(cfg); src.start()
+        data = np.concatenate([src.read_block() for _ in range(12)], axis=1)
+        _, ri = keyphasor_to_rpm(data[cfg.keyphasor_index()], fs)
+        if ri.size:
+            sb_cb_rpm.setValue(float(np.median(ri)))
+    btn_cb_plate.clicked.connect(_cb_from_plate)
+    btn_cb_kph.clicked.connect(_cb_from_keyphasor)
     p_cb = pg.PlotWidget(); p_cb.setBackground("w"); p_cb.showGrid(x=True, y=True, alpha=0.3)
     p_cb.setLabel("bottom", "RPM"); p_cb.setLabel("left", T("frequency (Hz)", "frecuencia (Hz)"))
     p_cb.setTitle(T("Campbell / interference diagram", "Diagrama de Campbell / interferencia"))
@@ -1021,8 +1050,11 @@ def build_app(simulated: bool = True):
                         naturals.append(fv)
         naturals = naturals or [res]
         from core.modal.campbell import compute_crossings, SpeedBand
-        rpm_max = r1 * 1.05; band = SpeedBand(rpm, _mrg * rpm, "Op")
-        crossings = compute_crossings(naturals, 0.0, rpm_max, (1., 2., 3., 4., 6.), bands=[band],
+        rpm2 = sb_cb_rpm2.value()                              # velocidad adicional (0 = off)
+        rpm_max = max(r1, rpm2 * 1.6) * 1.05
+        band = SpeedBand(rpm, _mrg * rpm, "Op")
+        bands = [band] + ([SpeedBand(rpm2, _mrg * rpm2, "Op2")] if rpm2 > 0 else [])
+        crossings = compute_crossings(naturals, 0.0, rpm_max, (1., 2., 3., 4., 6.), bands=bands,
                                       mode_labels=[f"TNF{i+1}" for i in range(len(naturals))])
         st["camp"] = {"naturals": naturals, "crossings": crossings, "rpm": rpm, "rpm_max": rpm_max,
                       "margin": _mrg}
@@ -1035,6 +1067,12 @@ def build_app(simulated: bool = True):
         _bl = pg.TextItem(T(f"Operating ±{_mrg*100:.0f}%", f"Operación ±{_mrg*100:.0f}%"),
                           color="#b45309", anchor=(0, 1))
         _bl.setPos(band.low, _ymax); p_cb.addItem(_bl)
+        if rpm2 > 0:                                           # 2ª banda de operación (velocidad adicional)
+            _b2 = SpeedBand(rpm2, _mrg * rpm2, "Op2")
+            _reg2 = pg.LinearRegionItem(values=[_b2.low, _b2.high], orientation="vertical", movable=False,
+                                        brush=pg.mkBrush(59, 130, 246, 40), pen=pg.mkPen(None))
+            _reg2.setZValue(-10); p_cb.addItem(_reg2)
+            p_cb.addItem(pg.InfiniteLine(pos=rpm2, angle=90, pen=pg.mkPen("#2563eb", width=2, style=QtCore.Qt.DashLine)))
         xr = np.linspace(0, rpm_max, 60)
         for o in (1., 2., 3., 4., 6.):
             p_cb.plot(xr, o * xr / 60.0, pen=pg.mkPen("#94a3b8", width=1, style=QtCore.Qt.DotLine))
@@ -1199,11 +1237,16 @@ def build_app(simulated: bool = True):
         ]
         _su = st["setup_fn"]() if st.get("setup_fn") else {}
         _asset = _su.get("machine") or _su.get("tag") or "—"
+        from datetime import date as _date
         meta = {"title": T("Preliminary Torsional Report", "Reporte Torsional Preliminar"),
                 "asset": _asset, "client": _su.get("client") or "—",
-                "prep": _su.get("operator") or "—",
-                "location": _su.get("location", ""), "type": _su.get("type", ""),
-                "rpm": f"{rpm:,.0f}", "equip": "TorqueTrak 10K + NI 9229"}
+                "machine_type": _su.get("type") or "—",
+                "location": _su.get("location") or "—",
+                "test_type": T("Torsional analysis", "Análisis torsional"),
+                "rpm": f"{rpm:,.0f}",
+                "technician": _su.get("operator") or "—",
+                "date": _date.today().isoformat(),
+                "equipment": "TorqueTrak 10K + NI 9229"}
         try:
             from core.modal.preliminary_report import build_preliminary_pdf
             _es = (cb_rp_lang.currentIndex() == 0)     # idioma elegido en el Report
