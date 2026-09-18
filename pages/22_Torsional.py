@@ -42,6 +42,7 @@ from core.torsional.analysis import (
     torque_metrics, torque_spectrum, order_amplitudes,
     keyphasor_to_rpm, order_tracking, fatigue_ranges,
 )
+from core.modal.campbell import compute_crossings, SpeedBand, separation_margin_pct
 
 st.set_page_config(page_title="Watermelon System | Torsional", page_icon="🍉", layout="wide")
 
@@ -173,7 +174,9 @@ PILL_RED = ("#dc2626", "#fdeaea"); PILL_SLATE = ("#64748b", "#eef2f8")
 T_OVR = "🟢  Overview"
 T_SPEC = "🟡  Spectrum & orders"
 T_ORD = "🔵  Order tracking"
+T_CAMP = "🟤  Campbell"
 T_FAT = "🔴  Fatigue"
+T_REPORT = "⚪  Report"
 
 
 # =====================================================================
@@ -211,6 +214,40 @@ def _demo_runup(r0=600.0, r1=3600.0, res_hz=30.0, units="nm"):
     data = np.concatenate([src.read_block() for _ in range(n)], axis=1)
     kph_i = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != kph_i)
     return dict(torque=voltage_to_torque(data[ti], sc), kph=data[kph_i], fs=fs, res_hz=res_hz, units=units)
+
+
+@st.cache_data(show_spinner=False)
+def _runup_analysis(units="nm"):
+    """Corre el runup, hace order tracking y detecta las naturales torsionales
+    (rpm de pico de cada orden → fn = orden·rpm/60). Compartido por Order
+    tracking, Campbell y Report."""
+    ru = _demo_runup(units=units)
+    rt = ru["torque"]; rkph = ru["kph"]; rfs = ru["fs"]
+    t_rev, rpm_inst = keyphasor_to_rpm(rkph, rfs)
+    tt = np.arange(rt.size) / rfs
+    rpm_ps = np.interp(tt, t_rev, rpm_inst, left=rpm_inst[0], right=rpm_inst[-1])
+    tracks = order_tracking(rt, rfs, rpm_ps, orders=(1, 2, 3), n_segments=30)
+    # Naturales torsionales por ESPECTRO DE RESONANCIA SUMADO POR ÓRDENES:
+    # cada orden se mapea a fn = orden·rpm/60 y se acumula en una grilla común.
+    # La natural real la cruzan TODAS las órdenes (a distinta rpm) → se refuerza;
+    # las bumps de una sola orden no se alinean → se suprimen. Robusto vs argmax.
+    fgrid = np.linspace(2.0, 200.0, 600)
+    acc = np.zeros_like(fgrid)
+    for tr in tracks:
+        fn_arr = tr.order * tr.rpm / 60.0
+        srt = np.argsort(fn_arr)
+        acc += np.interp(fgrid, fn_arr[srt], tr.amplitude[srt], left=0.0, right=0.0)
+    naturals = []
+    if acc.max() > 0:
+        thr = 0.35 * acc.max()
+        for i in range(1, len(acc) - 1):
+            if acc[i] > thr and acc[i] >= acc[i - 1] and acc[i] > acc[i + 1]:
+                f = float(fgrid[i])
+                if not any(abs(f - x) < 3.0 for x in naturals):
+                    naturals.append(f)
+    return dict(tracks=[(float(t.order), t.rpm, t.amplitude) for t in tracks],
+                naturals=sorted(naturals), rpm_min=float(rpm_ps.min()),
+                rpm_max=float(rpm_ps.max()), res_hz=ru["res_hz"])
 
 
 def _parse_upload(file, sc: TorqueScaling):
@@ -302,7 +339,7 @@ st.markdown(f"""
 # =====================================================================
 # Navegación persistente — bolitas de color (segmented control)
 # =====================================================================
-_NAV = [T_OVR, T_SPEC, T_ORD, T_FAT]
+_NAV = [T_OVR, T_SPEC, T_ORD, T_CAMP, T_FAT, T_REPORT]
 if "tors_nav" not in st.session_state:
     st.session_state["tors_nav"] = T_OVR
 if hasattr(st, "segmented_control"):
@@ -314,34 +351,66 @@ else:
 
 # --------------------------------------------------------------- Overview
 if nav == T_OVR:
-    _sec("Torque waveform", "engineering units vs time")
-    t = np.arange(torque.size) / fs
-    fig = go.Figure(go.Scatter(x=t, y=torque, mode="lines", line=dict(color=BLUE, width=1.3),
-                               name="torque"))
+    _sec("Torque waveform", "zoomed to ~10 revolutions · ISO 22266 / API 684")
+    # Ventana de ~10 vueltas para que el rizado se lea (no un blob denso).
+    n_win = int(np.clip(fs * 10.0 * 60.0 / max(rpm, 1.0), 256, torque.size))
+    tw = np.arange(n_win) / fs
+    yw = torque[:n_win]
+    fig = go.Figure()
+    # relleno suave entre la media y la curva (banda de par dinámico)
+    fig.add_trace(go.Scatter(x=tw, y=np.full(n_win, m.mean), mode="lines",
+                             line=dict(width=0), hoverinfo="skip", showlegend=False))
+    fig.add_trace(go.Scatter(x=tw, y=yw, mode="lines", name="torque",
+                             line=dict(color=BLUE, width=1.8), fill="tonexty",
+                             fillcolor="rgba(37,99,235,0.10)"))
+    # marcadores de vuelta (keyphasor) dentro de la ventana
+    below = kph[:n_win] < -1.0
+    edges = np.where(below[1:] & ~below[:-1])[0] + 1
+    for e in edges:
+        fig.add_vline(x=e / fs, line=dict(color="#cbd5e1", width=1))
     fig.add_hline(y=m.mean, line=dict(color=SLATE, dash="dash"),
                   annotation_text=f"mean {m.mean:,.0f} {u}", annotation_position="top left")
     _navplot(_apply(fig, height=400, xlab="time (s)", ylab=f"torque ({u})"))
     st.caption(f"RMS **{m.rms:,.1f} {u}** · crest factor **{m.crest_factor:.2f}** · "
-               f"dynamic peak **{m.peak_to_peak/2:,.1f} {u}**")
+               f"dynamic peak **{m.peak_to_peak/2:,.1f} {u}** · vertical lines = shaft revolutions (keyphasor)")
 
 # ---------------------------------------------------- Spectrum & orders
 elif nav == T_SPEC:
     freqs, amp = torque_spectrum(torque, fs)
     mask = freqs <= 600.0
     f1 = rpm / 60.0
-    _sec("Torque spectrum", f"1× = {f1:.1f} Hz · equipment bandwidth 500 Hz")
-    fig = go.Figure(go.Scatter(x=freqs[mask], y=amp[mask], mode="lines",
-                               line=dict(color=NAVY, width=1.6), fill="tozeroy",
-                               fillcolor="rgba(15,30,61,0.05)", name="amplitude"))
+    oa = order_amplitudes(torque, fs, rpm, orders=(1, 2, 3, 4, 5))
+    orders = list(range(1, 6))
+    scale = st.radio("Scale", ["dB", "Linear"], horizontal=True, key="tors_spec_scale",
+                     label_visibility="collapsed")
+    _sec("Torque order spectrum", f"1× = {f1:.1f} Hz · equipment bandwidth 500 Hz · {scale}")
+
+    if scale == "dB":
+        y = 20.0 * np.log10(np.maximum(amp[mask], 1e-9))
+        ylab = f"amplitude (dB re 1 {u})"
+    else:
+        y = amp[mask]; ylab = f"amplitude ({u})"
+    fig = go.Figure(go.Scatter(x=freqs[mask], y=y, mode="lines",
+                               line=dict(color=NAVY, width=1.6),
+                               fill=("tozeroy" if scale == "Linear" else None),
+                               fillcolor="rgba(15,30,61,0.06)", name="spectrum"))
+    # cursores de orden (líneas de excitación k×)
     for k in range(1, 6):
         if k * f1 <= 600:
             fig.add_vline(x=k * f1, line=dict(color=AMBER, dash="dot", width=1))
             fig.add_annotation(x=k * f1, y=1, yref="paper", text=f"{k}×", showarrow=False,
                                font=dict(size=10, color=AMBER), yshift=-2)
-    _navplot(_apply(fig, height=340, xlab="frequency (Hz)", ylab=f"amplitude ({u})"))
-
-    oa = order_amplitudes(torque, fs, rpm, orders=(1, 2, 3, 4, 5))
-    orders = list(range(1, 6))
+    # marcadores de pico en las 3 órdenes dominantes (etiqueta con amplitud)
+    top = sorted(range(1, 6), key=lambda k: oa[float(k)][0], reverse=True)[:3]
+    for k in top:
+        fk = k * f1; ak = oa[float(k)][0]
+        yv = 20.0 * np.log10(max(ak, 1e-9)) if scale == "dB" else ak
+        fig.add_trace(go.Scatter(x=[fk], y=[yv], mode="markers+text", text=[f" {k}× {ak:.1f}"],
+                                 textposition="top center", showlegend=False,
+                                 marker=dict(color=GREEN, size=9, line=dict(color="white", width=1.5)),
+                                 textfont=dict(size=10, color=NAVY)))
+    fig.update_layout(showlegend=False)
+    _navplot(_apply(fig, height=360, xlab="frequency (Hz)", ylab=ylab))
     colors = [BLUE, GREEN, AMBER, "#7c3aed", SLATE]
     _sec("Order amplitudes")
     figo = go.Figure(go.Bar(x=[f"{o}×" for o in orders], y=[oa[float(o)][0] for o in orders],
@@ -418,3 +487,128 @@ elif nav == T_FAT:
                                marker_color=NAVY, marker_line=dict(color="#0b1220", width=0.5)))
         fig.update_layout(hovermode="closest", bargap=0.05)
         _navplot(_apply(fig, height=360, xlab=f"torque range ({u})", ylab="cycle count"))
+
+# -------------------------------------------------------------- Campbell
+elif nav == T_CAMP:
+    _sec("Campbell / interference diagram",
+         "API 684 — excitation orders k×RPM vs torsional natural frequencies")
+    ra = _runup_analysis(units=run["units"])
+    naturals = ra["naturals"] or [ra["res_hz"]]
+    rpm_max = max(ra["rpm_max"] * 1.05, rpm * 1.15)
+    orders_c = (1.0, 2.0, 3.0, 4.0, 6.0)          # 6× cubre VFD/engrane
+    band = SpeedBand(center_rpm=rpm, tol_rpm=0.10 * rpm, label="Operating ±10%")
+    labels = [f"TNF{i+1}" for i in range(len(naturals))]
+    crossings = compute_crossings(naturals, 0.0, rpm_max, orders_c, bands=[band],
+                                  mode_labels=labels)
+    xr = np.linspace(0.0, rpm_max, 80)
+    fig = go.Figure()
+    fig.add_vrect(x0=band.low, x1=band.high, fillcolor="rgba(245,158,11,0.13)", line_width=0,
+                  annotation_text="Operating ±10%", annotation_position="top left",
+                  annotation_font=dict(size=10, color="#b45309"))
+    for o in orders_c:
+        fig.add_trace(go.Scatter(x=xr, y=o * xr / 60.0, mode="lines", name=f"{o:g}×",
+                                 line=dict(color="#94a3b8", width=1, dash="dot"),
+                                 hovertemplate=f"{o:g}× rpm<extra></extra>"))
+        fig.add_annotation(x=rpm_max * 0.98, y=o * rpm_max / 60.0, text=f"{o:g}×",
+                           showarrow=False, font=dict(size=10, color="#94a3b8"))
+    for i, fn in enumerate(naturals):
+        fig.add_trace(go.Scatter(x=[0.0, rpm_max], y=[fn, fn], mode="lines",
+                                 name=f"TNF{i+1} · {fn:.1f} Hz", line=dict(color=GREEN, width=2.4)))
+    fig.add_vline(x=rpm, line=dict(color=NAVY, width=2, dash="dash"),
+                  annotation_text=f"Operating {rpm:.0f} rpm", annotation_position="bottom right")
+    _sc = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
+    for c in crossings:
+        fig.add_trace(go.Scatter(x=[c.crossing_rpm], y=[c.mode_hz], mode="markers", showlegend=False,
+                                 marker=dict(color=_sc[c.severity], size=13, symbol="x",
+                                             line=dict(width=2, color="#7f1d1d")),
+                                 hovertemplate=(f"{c.crossing_rpm:.0f} rpm · {c.order:g}× · "
+                                                f"margin {c.sep_margin_pct:.0f}%<extra></extra>")))
+    ymax = (max(naturals) * 1.35) if naturals else 100.0
+    fig.update_layout(showlegend=True, yaxis_range=[0, ymax])
+    _navplot(_apply(fig, height=470, xlab="speed (RPM)", ylab="frequency (Hz)"))
+
+    if crossings:
+        def _sevpill(s):
+            _p = {"coincidence": PILL_RED, "near": PILL_AMBER, "clear": PILL_SLATE}[s]
+            _t = {"coincidence": "coincidence", "near": "near", "clear": "clear"}[s]
+            return _pill(_t, *_p)
+        rows = "".join(
+            f'<tr><td class="idx">{c.mode_label}</td>'
+            f'<td class="num">{c.mode_hz:.1f}<span class="u"> Hz</span></td>'
+            f'<td class="num">{c.order:g}×</td>'
+            f'<td class="num">{c.crossing_rpm:.0f}<span class="u"> rpm</span></td>'
+            f'<td class="num">{c.sep_margin_pct:.0f}<span class="u"> %</span></td>'
+            f'<td>{_sevpill(c.severity)}</td></tr>' for c in crossings)
+        st.markdown('<table class="wm-modes"><thead><tr><th>Natural</th><th>Frequency</th>'
+                    '<th>Order</th><th>Crossing</th><th>Sep. margin</th><th>Status</th>'
+                    f'</tr></thead><tbody>{rows}</tbody></table>', unsafe_allow_html=True)
+    else:
+        st.success("No order crossings within the evaluated speed range — clear of resonances.")
+    st.caption("API 684 §1.6 — a natural ↔ order coincidence marks a zone of interest, not a "
+               "confirmed resonance; correlate with amplitude & phase in operation. Target "
+               "separation margin ≥ 10%.")
+
+# ---------------------------------------------------------------- Report
+elif nav == T_REPORT:
+    _sec("Executive report", "SIGA torsional analysis — auto-generated · API 684 / ISO 22266")
+    ra = _runup_analysis(units=run["units"])
+    naturals = ra["naturals"] or [ra["res_hz"]]
+    band = SpeedBand(center_rpm=rpm, tol_rpm=0.10 * rpm, label="Operating ±10%")
+    crossings = compute_crossings(naturals, 0.0, max(ra["rpm_max"] * 1.05, rpm * 1.15),
+                                  (1.0, 2.0, 3.0, 4.0, 6.0), bands=[band],
+                                  mode_labels=[f"TNF{i+1}" for i in range(len(naturals))])
+    coincid = [c for c in crossings if c.severity == "coincidence"]
+    worst = min((c.sep_margin_pct for c in crossings), default=float("inf"))
+    oa = order_amplitudes(torque, fs, rpm, orders=(1, 2, 3, 4, 5))
+    dom = max(range(1, 6), key=lambda k: oa[float(k)][0])
+    ranges = fatigue_ranges(torque)
+    rmax = max((r for r, _ in ranges), default=0.0)
+
+    if coincid:
+        verdict, vcls = "ATTENTION — order coincidence within operating band", "wm-nogo"
+    elif worst < 10.0:
+        verdict, vcls = "REVIEW — separation margin below 10%", "wm-rev"
+    else:
+        verdict, vcls = "ACCEPTABLE — clear of torsional resonances", "wm-go"
+    st.markdown(f'<span class="wm-chip {vcls}">● {verdict}</span>', unsafe_allow_html=True)
+
+    findings = [
+        f"Mean torque **{m.mean:,.0f} {u}**, dynamic peak-peak **{m.peak_to_peak:,.0f} {u}** "
+        f"(ripple **{'∞' if m.ripple_pct==float('inf') else f'{m.ripple_pct:.1f}%'}**) at **{rpm:,.0f} rpm**.",
+        f"Dominant excitation order: **{dom}×** ({oa[float(dom)][0]:.1f} {u}).",
+        f"Torsional natural frequencies identified: "
+        + (", ".join(f"**{fn:.1f} Hz**" for fn in naturals) if naturals else "none in range") + ".",
+        (f"**{len(coincid)} order coincidence(s)** inside the operating band — worst separation "
+         f"margin **{worst:.0f}%** (API 684 target ≥ 10%)." if coincid
+         else f"No coincidences in the operating band; worst separation margin **{worst:.0f}%**."),
+        f"Fatigue: largest rainflow torque range **{rmax:,.0f} {u}** "
+        f"(ASTM E1049) — input for shaft stress / Goodman life.",
+    ]
+    st.markdown("**Findings**")
+    st.markdown("\n".join(f"- {x}" for x in findings))
+
+    recs = []
+    if coincid:
+        recs.append("Confirm the flagged coincidence with an operating amplitude/phase run; if "
+                    "confirmed, detune (coupling stiffness / inertia) or restrict the speed band.")
+    if m.ripple_pct >= 25:
+        recs.append("High torque ripple — check gear mesh / VFD orders and coupling condition.")
+    recs.append("Evaluate shaft fatigue with the rainflow histogram against the shaft S-N / "
+                "Goodman diagram at the gage location.")
+    recs.append("Re-verify calibration with the on-board shunt (Ref 1/Ref 2) before the next campaign.")
+    st.markdown("**Recommendations**")
+    st.markdown("\n".join(f"- {x}" for x in recs))
+
+    st.caption("Standards: API 684 (Campbell / separation margins) · ISO 22266 (torsional vibration) · "
+               "machinery-specific API 617/618/671/674 · fatigue per ASTM E1049 + Goodman.")
+
+    report_txt = (
+        f"WATERMELON TORSIONAL — EXECUTIVE REPORT\n{'='*44}\n"
+        f"Run: {run.get('name','run')}\nSpeed: {rpm:,.0f} rpm (1x = {rpm/60:.1f} Hz)\n"
+        f"Units: {u}\nVerdict: {verdict}\n\nFINDINGS\n"
+        + "\n".join(f"- {x}" for x in findings).replace("**", "")
+        + "\n\nRECOMMENDATIONS\n" + "\n".join(f"- {x}" for x in recs).replace("**", "")
+        + "\n\nStandards: API 684 / ISO 22266 / API 617-618-671-674 / ASTM E1049 + Goodman.\n")
+    st.download_button("⬇  Download report (.txt)", report_txt,
+                       file_name="watermelon_torsional_report.txt", mime="text/plain")
+    st.info("Full SIGA PDF report (cover, TOC, plots, sign-off) — next step, mirroring the Modal report engine.", icon="📄")
