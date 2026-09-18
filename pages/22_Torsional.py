@@ -565,141 +565,188 @@ elif nav == T_REPORT:
     rmax = max((r for r, _ in ranges), default=0.0)
 
     if coincid:
-        verdict, vcls = "ATTENTION — order coincidence within operating band", "wm-nogo"
+        verdict, vcls = ("ATENCIÓN — coincidencia de orden en la banda de operación", "wm-nogo")
     elif worst < 10.0:
-        verdict, vcls = "REVIEW — separation margin below 10%", "wm-rev"
+        verdict, vcls = ("REVISAR — margen de separación menor a 10%", "wm-rev")
     else:
-        verdict, vcls = "ACCEPTABLE — clear of torsional resonances", "wm-go"
-    st.markdown(f'<span class="wm-chip {vcls}">● {verdict}</span>', unsafe_allow_html=True)
+        verdict, vcls = ("ACEPTABLE — libre de resonancias torsionales", "wm-go")
 
-    findings = [
-        f"Mean torque **{m.mean:,.0f} {u}**, dynamic peak-peak **{m.peak_to_peak:,.0f} {u}** "
-        f"(ripple **{'∞' if m.ripple_pct==float('inf') else f'{m.ripple_pct:.1f}%'}**) at **{rpm:,.0f} rpm**.",
-        f"Dominant excitation order: **{dom}×** ({oa[float(dom)][0]:.1f} {u}).",
-        f"Torsional natural frequencies identified: "
-        + (", ".join(f"**{fn:.1f} Hz**" for fn in naturals) if naturals else "none in range") + ".",
-        (f"**{len(coincid)} order coincidence(s)** inside the operating band — worst separation "
-         f"margin **{worst:.0f}%** (API 684 target ≥ 10%)." if coincid
-         else f"No coincidences in the operating band; worst separation margin **{worst:.0f}%**."),
-        f"Fatigue: largest rainflow torque range **{rmax:,.0f} {u}** "
-        f"(ASTM E1049) — input for shaft stress / Goodman life.",
-    ]
-    st.markdown("**Findings**")
-    st.markdown("\n".join(f"- {x}" for x in findings))
+    _lang = st.radio("Language", ["Español", "English"], horizontal=True, key="tors_rep_lang")
+    _es = (_lang == "Español")
+    _rip = "∞" if m.ripple_pct == float("inf") else f"{m.ripple_pct:.1f}%"
+    _nats = ", ".join(f"{fn:.1f} Hz" for fn in naturals) if naturals else ("—")
 
-    recs = []
-    if coincid:
-        recs.append("Confirm the flagged coincidence with an operating amplitude/phase run; if "
-                    "confirmed, detune (coupling stiffness / inertia) or restrict the speed band.")
-    if m.ripple_pct >= 25:
-        recs.append("High torque ripple — check gear mesh / VFD orders and coupling condition.")
-    recs.append("Evaluate shaft fatigue with the rainflow histogram against the shaft S-N / "
-                "Goodman diagram at the gage location.")
-    recs.append("Re-verify calibration with the on-board shunt (Ref 1/Ref 2) before the next campaign.")
-    st.markdown("**Recommendations**")
-    st.markdown("\n".join(f"- {x}" for x in recs))
+    def _auto_findings(es):
+        f = []
+        if es:
+            f.append(f"Par medio {m.mean:,.0f} {u}, pico-pico dinámico {m.peak_to_peak:,.0f} {u} (rizado {_rip}) a {rpm:,.0f} rpm.")
+            f.append(f"Orden de excitación dominante: {dom}× ({oa[float(dom)][0]:.1f} {u}).")
+            f.append(f"Frecuencias naturales torsionales identificadas: {_nats}.")
+            f.append(f"{len(coincid)} coincidencia(s) de orden dentro de la banda de operación — margen mínimo {worst:.0f}% (objetivo API 684 ≥ 10%)." if coincid
+                     else f"Sin coincidencias en la banda de operación; margen de separación mínimo {worst:.0f}%.")
+            f.append(f"Fatiga: mayor rango rainflow del par {rmax:,.0f} {u} (ASTM E1049) — entrada para esfuerzo/Goodman del eje.")
+        else:
+            f.append(f"Mean torque {m.mean:,.0f} {u}, dynamic peak-peak {m.peak_to_peak:,.0f} {u} (ripple {_rip}) at {rpm:,.0f} rpm.")
+            f.append(f"Dominant excitation order: {dom}× ({oa[float(dom)][0]:.1f} {u}).")
+            f.append(f"Torsional natural frequencies identified: {_nats}.")
+            f.append(f"{len(coincid)} order coincidence(s) inside the operating band — worst separation margin {worst:.0f}% (API 684 target ≥ 10%)." if coincid
+                     else f"No coincidences in the operating band; worst separation margin {worst:.0f}%.")
+            f.append(f"Fatigue: largest rainflow torque range {rmax:,.0f} {u} (ASTM E1049) — input for shaft stress / Goodman.")
+        return f
 
-    st.caption("Standards: API 684 (Campbell / separation margins) · ISO 22266 (torsional vibration) · "
-               "machinery-specific API 617/618/671/674 · fatigue per ASTM E1049 + Goodman.")
+    def _auto_recs(es):
+        r = []
+        if coincid:
+            r.append("Confirmar la coincidencia señalada con una corrida de amplitud/fase en operación; si se confirma, desintonizar (rigidez de acople / inercia) o restringir la banda de velocidad." if es
+                     else "Confirm the flagged coincidence with an operating amplitude/phase run; if confirmed, detune (coupling stiffness / inertia) or restrict the speed band.")
+        if m.ripple_pct >= 25:
+            r.append("Rizado de par elevado — revisar órdenes de engrane / VFD y la condición del acople." if es
+                     else "High torque ripple — check gear mesh / VFD orders and coupling condition.")
+        r.append("Evaluar la fatiga del eje con el histograma rainflow contra el diagrama S-N / Goodman en la ubicación de la galga." if es
+                 else "Evaluate shaft fatigue with the rainflow histogram against the shaft S-N / Goodman diagram at the gage location.")
+        r.append("Reverificar la calibración con el shunt a bordo (Ref 1/Ref 2) antes de la próxima campaña." if es
+                 else "Re-verify calibration with the on-board shunt (Ref 1/Ref 2) before the next campaign.")
+        return r
 
-    report_txt = (
-        f"WATERMELON TORSIONAL — EXECUTIVE REPORT\n{'='*44}\n"
-        f"Run: {run.get('name','run')}\nSpeed: {rpm:,.0f} rpm (1x = {rpm/60:.1f} Hz)\n"
-        f"Units: {u}\nVerdict: {verdict}\n\nFINDINGS\n"
-        + "\n".join(f"- {x}" for x in findings).replace("**", "")
-        + "\n\nRECOMMENDATIONS\n" + "\n".join(f"- {x}" for x in recs).replace("**", "")
-        + "\n\nStandards: API 684 / ISO 22266 / API 617-618-671-674 / ASTM E1049 + Goodman.\n")
-    with st.expander("📄  Report metadata (SIGA cover)", expanded=False):
-        mc1, mc2 = st.columns(2)
-        with mc1:
-            r_asset = st.text_input("Machine / asset", value=run.get("name", "Torsional run"))
-            r_client = st.text_input("Client", value="")
-            r_location = st.text_input("Location", value="")
-        with mc2:
-            r_prep = st.text_input("Prepared by", value=str(_user.get("full_name", "") or ""))
-            r_rev = st.text_input("Reviewed by", value="")
-            r_consec = st.text_input("Report No.", value="")
+    # Auto-diagnóstico (banner azul, como el Modal)
+    if _es:
+        _nar = (f"Se identificaron órdenes de excitación 1×–5× a {rpm:,.0f} rpm con natural(es) torsional(es) en {_nats}. "
+                + (f"⚠ Coincidencia {coincid[0].order:g}× dentro de la banda de operación (margen {worst:.0f}%, API 684) — riesgo de resonancia torsional; correlacionar con amplitud/fase."
+                   if coincid else f"Sin coincidencias dentro de la banda de operación (margen mínimo {worst:.0f}%)."))
+    else:
+        _nar = (f"Excitation orders 1×–5× at {rpm:,.0f} rpm with torsional natural(s) at {_nats}. "
+                + (f"⚠ {coincid[0].order:g}× coincidence within the operating band (margin {worst:.0f}%, API 684) — torsional resonance risk; correlate with amplitude/phase."
+                   if coincid else f"No coincidences within the operating band (worst margin {worst:.0f}%)."))
+    st.markdown(f"<div style='background:#eef6ff;border-left:4px solid {BLUE};border-radius:8px;"
+                f"padding:12px 16px;margin:6px 0'><b>{'Auto-diagnóstico' if _es else 'Auto-diagnosis'}</b><br>"
+                f'<span class="wm-chip {vcls}" style="margin:4px 0 6px 0">● {verdict}</span><br>{_nar}</div>',
+                unsafe_allow_html=True)
 
-    cta1, cta2 = st.columns([1, 1])
-    with cta1:
-        if st.button("📄  Generate full SIGA report (PDF)", type="primary", key="tors_pdf_gen"):
-            with st.spinner("Rendering figures & building the SIGA PDF…"):
-                from core.torsional.report import build_torsional_pdf, plotly_to_png
-                # --- Figuras para el PDF (mismos plots que en pantalla) ---
-                t = np.arange(min(torque.size, int(fs * 10 * 60 / max(rpm, 1)))) / fs
-                yw = torque[:t.size]
-                f_wave = go.Figure()
-                f_wave.add_trace(go.Scatter(x=t, y=np.full(t.size, m.mean), line=dict(width=0),
-                                            hoverinfo="skip", showlegend=False))
-                f_wave.add_trace(go.Scatter(x=t, y=yw, line=dict(color=BLUE, width=1.8),
-                                            fill="tonexty", fillcolor="rgba(37,99,235,0.10)", name="torque"))
-                _apply(f_wave, xlab="time (s)", ylab=f"torque ({u})")
+    # Identificación del reporte (consecutivo automático + firmas)
+    from datetime import date as _date
+    st.markdown(f"**{'Identificación del reporte' if _es else 'Report identification'}**")
+    _pfx = f"TOR-{_date.today().year}-"
+    if st.session_state.get("tors_consec_pref") != _pfx:
+        try:
+            from core.reports_archive import next_consecutive as _nc
+            st.session_state["tors_consec_auto"] = _nc(_pfx, _user.get("email", ""), _my_role)
+        except Exception:  # noqa: BLE001
+            st.session_state["tors_consec_auto"] = f"{_pfx}001"
+        st.session_state["tors_consec_pref"] = _pfx
+        st.session_state.pop("tors_consec", None)
+    _uname = (_user.get("full_name") or _user.get("name") or _user.get("email", "")).split("@")[0]
+    ci = st.columns([1.2, 1, 1.4])
+    with ci[0]:
+        r_consec = st.text_input("Consecutive (auto)", key="tors_consec",
+                                 value=st.session_state.get("tors_consec", st.session_state["tors_consec_auto"]),
+                                 help="Prefijo automático TOR-AÑO-NNN por histórico. Editable.")
+    with ci[1]:
+        r_date = st.text_input("Date", key="tors_date", value=st.session_state.get("tors_date", str(_date.today())))
+    with ci[2]:
+        r_asset = st.text_input("Asset / Tag", key="tors_asset", value=st.session_state.get("tors_asset", run.get("name", "")))
+    cj = st.columns(2)
+    with cj[0]:
+        r_client = st.text_input("Client", key="tors_client", value=st.session_state.get("tors_client", ""))
+    with cj[1]:
+        r_location = st.text_input("Location", key="tors_loc", value=st.session_state.get("tors_loc", ""))
+    ck = st.columns(2)
+    with ck[0]:
+        r_prep = st.text_input("Prepared by (Realizado por)", key="tors_prep", value=st.session_state.get("tors_prep", _uname))
+        r_prep_role = st.text_input("Role", key="tors_prep_role", value=st.session_state.get("tors_prep_role", "Especialista"))
+    with ck[1]:
+        r_rev = st.text_input("Approved by (Aprobado por)", key="tors_rev", value=st.session_state.get("tors_rev", ""))
+        r_rev_role = st.text_input("Role ", key="tors_rev_role", value=st.session_state.get("tors_rev_role", "Gerente"))
+    r_city = st.text_input("City", key="tors_city", value=st.session_state.get("tors_city", "Bogotá D.C."))
 
-                freqs, amp = torque_spectrum(torque, fs); mk = freqs <= 600.0
-                f_spec = go.Figure(go.Scatter(x=freqs[mk], y=20 * np.log10(np.maximum(amp[mk], 1e-9)),
-                                              line=dict(color=NAVY, width=1.6), name="spectrum"))
-                for k in range(1, 6):
-                    if k * rpm / 60 <= 600:
-                        f_spec.add_vline(x=k * rpm / 60, line=dict(color=AMBER, dash="dot", width=1))
-                _apply(f_spec, xlab="frequency (Hz)", ylab=f"amplitude (dB re 1 {u})")
+    # Hallazgos y recomendaciones EDITABLES
+    st.markdown(f"**{'Hallazgos y recomendaciones' if _es else 'Findings & recommendations'}** "
+                f"*({'uno por línea — editable' if _es else 'one per line — edit freely'})*")
+    fr = st.columns(2)
+    with fr[0]:
+        find_txt = st.text_area("Findings (Hallazgos)", key="tors_find",
+                                value=st.session_state.get("tors_find", "\n".join(_auto_findings(_es))), height=175)
+    with fr[1]:
+        rec_txt = st.text_area("Recommendations (Recomendaciones)", key="tors_rec",
+                               value=st.session_state.get("tors_rec", "\n".join(_auto_recs(_es))), height=175)
+    st.caption("Incrustado en el PDF: onda de par · espectro de órdenes · Campbell (API 684) · fatiga rainflow · tablas de órdenes y cruces." if _es
+               else "Embedded in the PDF: torque waveform · order spectrum · Campbell (API 684) · rainflow fatigue · order & crossing tables.")
 
-                rpm_max = max(ra["rpm_max"] * 1.05, rpm * 1.15)
-                band = SpeedBand(center_rpm=rpm, tol_rpm=0.10 * rpm, label="Operating ±10%")
-                xr = np.linspace(0.0, rpm_max, 80)
-                f_camp = go.Figure()
-                f_camp.add_vrect(x0=band.low, x1=band.high, fillcolor="rgba(245,158,11,0.13)", line_width=0)
-                for o in (1.0, 2.0, 3.0, 4.0, 6.0):
-                    f_camp.add_trace(go.Scatter(x=xr, y=o * xr / 60, mode="lines", name=f"{o:g}×",
-                                                line=dict(color="#94a3b8", width=1, dash="dot")))
-                for i, fn in enumerate(naturals):
-                    f_camp.add_trace(go.Scatter(x=[0, rpm_max], y=[fn, fn], mode="lines",
-                                                name=f"TNF{i+1} {fn:.1f} Hz", line=dict(color=GREEN, width=2.4)))
-                f_camp.add_vline(x=rpm, line=dict(color=NAVY, width=2, dash="dash"))
-                _sc = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
-                for c in crossings:
-                    f_camp.add_trace(go.Scatter(x=[c.crossing_rpm], y=[c.mode_hz], mode="markers",
-                                                showlegend=False, marker=dict(color=_sc[c.severity], size=12,
-                                                symbol="x", line=dict(width=2, color="#7f1d1d"))))
-                _apply(f_camp, xlab="speed (RPM)", ylab="frequency (Hz)")
+    if st.button(("📄 Generar reporte completo (PDF)" if _es else "📄 Generate full report (PDF)"),
+                 type="primary", key="tors_pdf_gen"):
+        with st.spinner("Renderizando figuras y armando el reporte SIGA…" if _es else "Rendering figures & building the SIGA report…"):
+            from core.torsional.report import build_torsional_pdf, plotly_to_png
+            t = np.arange(min(torque.size, int(fs * 10 * 60 / max(rpm, 1)))) / fs
+            yw = torque[:t.size]
+            f_wave = go.Figure()
+            f_wave.add_trace(go.Scatter(x=t, y=np.full(t.size, m.mean), line=dict(width=0), hoverinfo="skip", showlegend=False))
+            f_wave.add_trace(go.Scatter(x=t, y=yw, line=dict(color=BLUE, width=1.8), fill="tonexty",
+                                        fillcolor="rgba(37,99,235,0.10)", name="torque"))
+            _apply(f_wave, xlab="time (s)", ylab=f"torque ({u})")
+            freqs, amp = torque_spectrum(torque, fs); mk = freqs <= 600.0
+            f_spec = go.Figure(go.Scatter(x=freqs[mk], y=20 * np.log10(np.maximum(amp[mk], 1e-9)),
+                                          line=dict(color=NAVY, width=1.6), name="spectrum"))
+            for k in range(1, 6):
+                if k * rpm / 60 <= 600:
+                    f_spec.add_vline(x=k * rpm / 60, line=dict(color=AMBER, dash="dot", width=1))
+            _apply(f_spec, xlab="frequency (Hz)", ylab=f"amplitude (dB re 1 {u})")
+            rpm_max = max(ra["rpm_max"] * 1.05, rpm * 1.15)
+            xr = np.linspace(0.0, rpm_max, 80)
+            f_camp = go.Figure()
+            f_camp.add_vrect(x0=band.low, x1=band.high, fillcolor="rgba(245,158,11,0.13)", line_width=0)
+            for o in (1.0, 2.0, 3.0, 4.0, 6.0):
+                f_camp.add_trace(go.Scatter(x=xr, y=o * xr / 60, mode="lines", name=f"{o:g}×",
+                                            line=dict(color="#94a3b8", width=1, dash="dot")))
+            for i, fn in enumerate(naturals):
+                f_camp.add_trace(go.Scatter(x=[0, rpm_max], y=[fn, fn], mode="lines",
+                                            name=f"TNF{i+1} {fn:.1f} Hz", line=dict(color=GREEN, width=2.4)))
+            f_camp.add_vline(x=rpm, line=dict(color=NAVY, width=2, dash="dash"))
+            _scc = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
+            for c in crossings:
+                f_camp.add_trace(go.Scatter(x=[c.crossing_rpm], y=[c.mode_hz], mode="markers", showlegend=False,
+                                            marker=dict(color=_scc[c.severity], size=12, symbol="x",
+                                                        line=dict(width=2, color="#7f1d1d"))))
+            _apply(f_camp, xlab="speed (RPM)", ylab="frequency (Hz)")
+            f_fat = go.Figure()
+            if ranges:
+                rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
+                nb = int(np.clip(len(rr), 8, 24)); edges = np.linspace(0, rr.max() * 1.0001, nb + 1)
+                hist, _ = np.histogram(rr, bins=edges, weights=cc)
+                f_fat.add_trace(go.Bar(x=0.5 * (edges[:-1] + edges[1:]), y=hist,
+                                       width=(edges[1] - edges[0]) * 0.92, marker_color=NAVY))
+                _apply(f_fat, xlab=f"torque range ({u})", ylab="cycle count")
 
-                f_fat = go.Figure()
-                if ranges:
-                    rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
-                    nb = int(np.clip(len(rr), 8, 24)); edges = np.linspace(0, rr.max() * 1.0001, nb + 1)
-                    hist, _ = np.histogram(rr, bins=edges, weights=cc)
-                    f_fat.add_trace(go.Bar(x=0.5 * (edges[:-1] + edges[1:]), y=hist,
-                                           width=(edges[1] - edges[0]) * 0.92, marker_color=NAVY))
-                    _apply(f_fat, xlab=f"torque range ({u})", ylab="cycle count")
+            _amax = max(oa[float(k)][0] for k in range(1, 6)) or 1.0
+            _lvl = (lambda a: ("dominante" if a >= 0.5 * _amax else "presente" if a >= 0.1 * _amax else "traza")) if _es \
+                else (lambda a: ("dominant" if a >= 0.5 * _amax else "present" if a >= 0.1 * _amax else "trace"))
+            order_rows = [[f"{o}×", f"{o*rpm/60:.2f} Hz", f"{oa[float(o)][0]:.2f} {u}",
+                           f"{oa[float(o)][1]:+.1f}°", _lvl(oa[float(o)][0])] for o in range(1, 6)]
+            _stx = ({"coincidence": "Coincidencia", "near": "Cercano", "clear": "Libre"} if _es
+                    else {"coincidence": "Coincidence", "near": "Near", "clear": "Clear"})
+            crossing_rows = [[c.mode_label, f"{c.mode_hz:.1f} Hz", f"{c.order:g}×", f"{c.crossing_rpm:.0f} rpm",
+                              f"{c.sep_margin_pct:.0f} %", _stx[c.severity]] for c in crossings]
 
-                order_rows = [[f"{o}×", f"{o*rpm/60:.2f} Hz", f"{oa[float(o)][0]:.2f} {u}",
-                               f"{oa[float(o)][1]:+.1f}°",
-                               ("dominante" if oa[float(o)][0] >= 0.5 * max(oa[float(k)][0] for k in range(1, 6))
-                                else "presente" if oa[float(o)][0] >= 0.1 * max(oa[float(k)][0] for k in range(1, 6))
-                                else "traza")] for o in range(1, 6)]
-                _stx = {"coincidence": "Coincidencia", "near": "Cercano", "clear": "Libre"}
-                crossing_rows = [[c.mode_label, f"{c.mode_hz:.1f} Hz", f"{c.order:g}×",
-                                  f"{c.crossing_rpm:.0f} rpm", f"{c.sep_margin_pct:.0f} %",
-                                  _stx[c.severity]] for c in crossings]
+            meta = {"report_title": ("ANÁLISIS DE VIBRACIÓN TORSIONAL" if _es else "TORSIONAL VIBRATION ANALYSIS"),
+                    "asset": r_asset, "client": r_client, "location": r_location,
+                    "prepared_by": r_prep, "prepared_role": r_prep_role, "prepared_city": r_city,
+                    "reviewed_by": r_rev, "reviewed_role": r_rev_role,
+                    "consecutive": r_consec, "report_date": r_date, "date": r_date,
+                    "format_code": "SIGA-FMT-180", "format_version": "1"}
+            ctx = {"name": r_asset or run.get("name", "run"), "units_label": u, "rpm": rpm, "mean": m.mean,
+                   "pp": m.peak_to_peak, "ripple": _rip, "rms": m.rms, "fs": fs, "dominant": f"{dom}×"}
+            findings_list = [x.strip() for x in find_txt.splitlines() if x.strip()]
+            recs_list = [x.strip() for x in rec_txt.splitlines() if x.strip()]
+            pdf = build_torsional_pdf(
+                meta=meta, context=ctx, findings=findings_list, recommendations=recs_list,
+                waveform_png=plotly_to_png(f_wave), spectrum_png=plotly_to_png(f_spec),
+                campbell_png=plotly_to_png(f_camp), fatigue_png=plotly_to_png(f_fat) if ranges else None,
+                order_rows=order_rows, crossing_rows=crossing_rows, naturals=naturals,
+                lang=("es" if _es else "en"))
+            st.session_state["_tors_pdf"] = pdf
+            st.session_state["_tors_pdf_name"] = (r_consec or "watermelon_torsional_report")
+        st.success("Reporte SIGA listo." if _es else "SIGA report ready.")
 
-                meta = {"report_title": "ANÁLISIS DE VIBRACIÓN TORSIONAL",
-                        "asset": r_asset, "client": r_client, "location": r_location,
-                        "prepared_by": r_prep, "reviewed_by": r_rev, "consecutive": r_consec,
-                        "format_code": "SIGA-FMT-180", "format_version": "1"}
-                ctx = {"name": run.get("name", "run"), "units_label": u, "rpm": rpm, "mean": m.mean,
-                       "pp": m.peak_to_peak, "ripple": ("∞" if m.ripple_pct == float("inf") else f"{m.ripple_pct:.1f}%"),
-                       "rms": m.rms, "fs": fs, "dominant": f"{dom}×"}
-                pdf = build_torsional_pdf(
-                    meta=meta, context=ctx, findings=[x.replace("**", "") for x in findings],
-                    recommendations=recs,
-                    waveform_png=plotly_to_png(f_wave), spectrum_png=plotly_to_png(f_spec),
-                    campbell_png=plotly_to_png(f_camp), fatigue_png=plotly_to_png(f_fat) if ranges else None,
-                    order_rows=order_rows, crossing_rows=crossing_rows, naturals=naturals)
-                st.session_state["_tors_pdf"] = pdf
-            st.success("SIGA report ready.")
-    with cta2:
-        st.download_button("⬇  Quick summary (.txt)", report_txt,
-                           file_name="watermelon_torsional_summary.txt", mime="text/plain")
     if st.session_state.get("_tors_pdf"):
-        st.download_button("⬇  Download SIGA report (PDF)", st.session_state["_tors_pdf"],
-                           file_name="watermelon_torsional_report.pdf", mime="application/pdf",
-                           type="primary")
+        st.download_button(("⬇ Descargar reporte SIGA (PDF)" if _es else "⬇ Download SIGA report (PDF)"),
+                           st.session_state["_tors_pdf"],
+                           file_name=f"{st.session_state.get('_tors_pdf_name','watermelon_torsional_report')}.pdf",
+                           mime="application/pdf", type="primary")
