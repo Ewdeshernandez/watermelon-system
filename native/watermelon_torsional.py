@@ -44,9 +44,38 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
+
+# Galgas comunes Vishay Micro-Measurements para telemetría de torque
+# (Binsfeld "Shaft Strain Gaging Guide", p.6). bridge_idx: 0=torque, 1=axial, None=flexión.
+# (part#, medida, config, ohms, piezas, bridge_idx, nota_en, nota_es)
+_GAGES = [
+    ("CEA-06-250US-350", "torque", "full", 350, 1, 0,
+     "Torque · full-bridge in ONE piece — use one per shaft.",
+     "Torque · puente completo en UNA pieza — una por eje."),
+    ("CEA-06-187UV-350", "torque", "half", 350, 2, 0,
+     "Torque, bending-insensitive · half-bridge · TWO pieces 180° apart → full bridge.",
+     "Torque, insensible a flexión · media puente · DOS piezas a 180° → puente completo."),
+    ("CEA-06-250UT-350", "axial", "half", 350, 2, 1,
+     "Axial (thrust/tension) · half-bridge · TWO pieces 180° apart → full bridge.",
+     "Axial (empuje/tensión) · media puente · DOS piezas a 180° → puente completo."),
+    ("EA-06-250MQ-350", "bending", "half", 350, 2, None,
+     "Bending, torque-insensitive · half-bridge · TWO pieces 180° apart.",
+     "Flexión, insensible a torque · media puente · DOS piezas a 180°."),
+]
+# Materiales del eje: E en ×10⁶ psi, ν (Poisson). La galga STC 06 está
+# compensada térmicamente para ACERO; otros materiales cambian la compensación.
+_MATERIALS = [
+    ("Steel / Acero", 30.0, 0.30),
+    ("Stainless / Inoxidable", 28.0, 0.30),
+    ("Aluminum / Aluminio", 10.0, 0.33),
+    ("Titanium / Titanio", 16.5, 0.34),
+    ("Brass / Bronce", 15.0, 0.34),
+    ("Copper / Cobre", 17.0, 0.34),
+    ("Custom / Personalizado", None, None),
+]
 
 
 # =====================================================================
@@ -335,25 +364,41 @@ def build_app(simulated: bool = True):
     form_wrap = QtWidgets.QHBoxLayout(); cfg_l.addLayout(form_wrap)
 
     gb_shaft = QtWidgets.QGroupBox(T("Shaft", "Eje")); f1 = QtWidgets.QFormLayout(gb_shaft)
+    cb_material = QtWidgets.QComboBox(); cb_material.addItems([m[0] for m in _MATERIALS])
     sb_do = QtWidgets.QDoubleSpinBox(); sb_do.setRange(0.1, 100.0); sb_do.setDecimals(3); sb_do.setValue(3.0); sb_do.setSuffix(" in")
     sb_di = QtWidgets.QDoubleSpinBox(); sb_di.setRange(0.0, 99.0); sb_di.setDecimals(3); sb_di.setValue(0.0); sb_di.setSuffix(" in")
     sb_e = QtWidgets.QDoubleSpinBox(); sb_e.setRange(1.0, 60.0); sb_e.setDecimals(1); sb_e.setValue(30.0); sb_e.setSuffix(" ×10⁶ psi")
     sb_nu = QtWidgets.QDoubleSpinBox(); sb_nu.setRange(0.1, 0.5); sb_nu.setDecimals(2); sb_nu.setValue(0.30)
+    f1.addRow(T("Material", "Material"), cb_material)
     f1.addRow(T("Outer Ø (Do)", "Ø exterior (Do)"), sb_do)
     f1.addRow(T("Inner Ø (Di)", "Ø interior (Di)"), sb_di)
     f1.addRow(T("Modulus E", "Módulo E"), sb_e)
     f1.addRow(T("Poisson ν", "Poisson ν"), sb_nu)
     form_wrap.addWidget(gb_shaft)
 
+    def _on_material(_=0):
+        name, e, nu = _MATERIALS[cb_material.currentIndex()]
+        custom = (e is None)
+        if not custom:
+            sb_e.setValue(e); sb_nu.setValue(nu)
+        sb_e.setEnabled(custom); sb_nu.setEnabled(custom)
+    cb_material.currentIndexChanged.connect(_on_material)
+
     gb_gage = QtWidgets.QGroupBox(T("Gage / transmitter", "Galga / transmisor")); f2 = QtWidgets.QFormLayout(gb_gage)
-    sb_gf = QtWidgets.QDoubleSpinBox(); sb_gf.setRange(1.0, 3.0); sb_gf.setDecimals(3); sb_gf.setValue(2.0)
+    cb_gage = QtWidgets.QComboBox(); cb_gage.addItems([g[0] for g in _GAGES] + [T("Custom", "Personalizado")])
+    lbl_gage = QtWidgets.QLabel(""); lbl_gage.setWordWrap(True); lbl_gage.setStyleSheet("color:#475569; font-size:11px;")
+    sb_gf = QtWidgets.QDoubleSpinBox(); sb_gf.setRange(1.0, 3.0); sb_gf.setDecimals(3); sb_gf.setValue(2.10)
+    sb_gf.setToolTip(T("Read the EXACT gage factor from the gage package/box.",
+                       "Lee el factor de galga EXACTO de la caja/hoja de la galga."))
     cb_gxmt = QtWidgets.QComboBox(); cb_gxmt.addItems(["500", "1000", "2000", "4000", "8000", "16000"]); cb_gxmt.setCurrentText("4000")
     sb_rg = QtWidgets.QDoubleSpinBox(); sb_rg.setRange(100.0, 1000.0); sb_rg.setDecimals(0); sb_rg.setValue(350.0); sb_rg.setSuffix(" Ω")
-    cb_bridge = QtWidgets.QComboBox(); cb_bridge.addItems([T("Torque (full, 4)", "Torque (completo, 4)"),
-                                                           T("Axial (full, 2.6)", "Axial (completo, 2.6)"),
-                                                           T("¼ bridge (1)", "¼ puente (1)")])
+    cb_bridge = QtWidgets.QComboBox(); cb_bridge.addItems([T("Torque (full bridge)", "Torque (puente completo)"),
+                                                           T("Axial (full bridge)", "Axial (puente completo)"),
+                                                           T("¼ bridge (1 grid)", "¼ puente (1 grilla)")])
     sb_z = QtWidgets.QDoubleSpinBox(); sb_z.setRange(0.25, 4.0); sb_z.setDecimals(4); sb_z.setValue(1.0)
     cb_units = QtWidgets.QComboBox(); cb_units.addItems(["N·m", "ft-lb"])
+    f2.addRow(T("Strain gage", "Galga"), cb_gage)
+    f2.addRow("", lbl_gage)
     f2.addRow(T("Gage factor GF", "Factor de galga GF"), sb_gf)
     f2.addRow(T("Transmitter gain GXMT", "Ganancia transmisor GXMT"), cb_gxmt)
     f2.addRow(T("Gage resistance RG", "Resistencia galga RG"), sb_rg)
@@ -361,6 +406,23 @@ def build_app(simulated: bool = True):
     f2.addRow(T("System-gain scale Z", "Escala System-gain Z"), sb_z)
     f2.addRow(T("Units", "Unidades"), cb_units)
     form_wrap.addWidget(gb_gage)
+
+    def _on_gage(_=0):
+        idx = cb_gage.currentIndex()
+        if idx >= len(_GAGES):     # Custom
+            lbl_gage.setText(T("Custom gage — set RG and bridge manually.",
+                               "Galga personalizada — ajusta RG y puente a mano."))
+            sb_rg.setEnabled(True); cb_bridge.setEnabled(True); return
+        part, meas, cfgc, ohms, pcs, br, note_en, note_es = _GAGES[idx]
+        sb_rg.setValue(float(ohms)); sb_rg.setEnabled(False)
+        if br is not None:
+            cb_bridge.setCurrentIndex(br)
+        cb_bridge.setEnabled(br is None)   # bending: deja elegir (no calcula torque)
+        _pcs = T(f"{pcs} piece(s) per shaft", f"{pcs} pieza(s) por eje")
+        lbl_gage.setText(f"<b>{part}</b> · {_pcs}<br>{note_es if _LANG == 'es' else note_en}"
+                         + ("" if br is not None else T("<br>⚠ Bending gage — not for torque scaling.",
+                                                        "<br>⚠ Galga de flexión — no calcula torque.")))
+    cb_gage.currentIndexChanged.connect(_on_gage)
 
     lbl_tfs = QtWidgets.QLabel(""); lbl_tfs.setWordWrap(True)
     lbl_tfs.setStyleSheet(f"background:white; border:1px solid #dbe4f0; border-radius:8px; padding:10px;")
@@ -454,10 +516,56 @@ def build_app(simulated: bool = True):
 
     live_timer = QtCore.QTimer(win); live_timer.setInterval(120)
 
+    def _preflight():
+        """Checklist de campo — el operador confirma qué colocar/ajustar en el
+        equipo ANTES de capturar. Cero fallas. Debe marcar todo para continuar."""
+        items = [
+            T("Strain gage bonded & wired per diagram; resistance checked; no short to shaft.",
+              "Galga pegada y cableada según diagrama; resistencia verificada; sin corto al eje."),
+            T("TX10K-S powered — status LED solid; fresh 9 V battery; antenna attached.",
+              "TX10K-S energizado — LED de estado sólido; batería 9 V fresca; antena puesta."),
+            T("RX10K RF channel matches the TX10K-S channel; signal strength OK.",
+              "Canal RF del RX10K = canal del TX10K-S; intensidad de señal OK."),
+            T(f"Transmitter gain (GXMT) on the TX10K-S = {cb_gxmt.currentText()}.",
+              f"Ganancia del transmisor (GXMT) en el TX10K-S = {cb_gxmt.currentText()}."),
+            T("AutoZero applied on the RX10K with NO load on the shaft.",
+              "AutoZero aplicado en el RX10K SIN carga en el eje."),
+            T("Shunt calibration verified (Ref 1 / Ref 2) — see the Shunt check tab.",
+              "Calibración por shunt verificada (Ref 1 / Ref 2) — ver pestaña Verificación shunt."),
+            T("RX10K analog output ±10 V wired to NI 9229 (banana→BNC). Analog OR digital, not both.",
+              "Salida analógica ±10 V del RX10K a la NI 9229 (banana→BNC). Analógica O digital, no ambas."),
+        ]
+        dlg = QtWidgets.QDialog(win)
+        dlg.setWindowTitle(T("Field checklist — confirm before capture",
+                             "Checklist de campo — confirmar antes de capturar"))
+        v = QtWidgets.QVBoxLayout(dlg)
+        hdr = QtWidgets.QLabel(T("Confirm each item is set on the equipment. Zero failures.",
+                                 "Confirma cada punto en el equipo. Cero fallas."))
+        hdr.setStyleSheet(f"font-weight:800; color:{NAVY};"); v.addWidget(hdr)
+        checks = []
+        for it in items:
+            c = QtWidgets.QCheckBox(it); v.addWidget(c); checks.append(c)
+        bb = QtWidgets.QDialogButtonBox()
+        ok = bb.addButton(T("Confirm & continue", "Confirmar y continuar"), QtWidgets.QDialogButtonBox.AcceptRole)
+        bb.addButton(T("Cancel", "Cancelar"), QtWidgets.QDialogButtonBox.RejectRole)
+        ok.setEnabled(False)
+        chk_all = QtWidgets.QCheckBox(T("Check all", "Marcar todo"))
+        v.addWidget(chk_all); v.addWidget(bb)
+
+        def _upd(_=0):
+            ok.setEnabled(all(c.isChecked() for c in checks))
+        for c in checks:
+            c.stateChanged.connect(_upd)
+        chk_all.stateChanged.connect(lambda s: [c.setChecked(bool(s)) for c in checks])
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        return dlg.exec() == QtWidgets.QDialog.Accepted
+
     def _start_live():
         if not _rebuild_scaling():
             QtWidgets.QMessageBox.warning(win, "Watermelon Torsional",
                 T("Fix the configuration first.", "Corrige la configuración primero."))
+            return
+        if not _preflight():
             return
         fs = st["fs"]
         units = st["scaling"].units
@@ -926,6 +1034,7 @@ def build_app(simulated: bool = True):
     _ubrow.clicked.connect(_upd_check); _ubgo.clicked.connect(_upd_go)
     tabs.addTab(pg_upd, T("Updates", "Actualizaciones"))
 
+    _on_material(); _on_gage()      # estado inicial (galga/material por defecto)
     _rebuild_scaling()
     return app, win
 
