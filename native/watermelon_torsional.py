@@ -41,10 +41,11 @@ from core.torsional.sim_source import (
 from core.torsional.analysis import (
     torque_metrics, torque_spectrum, order_amplitudes,
     keyphasor_to_rpm, order_tracking, fatigue_ranges,
+    rainflow_cycles, shaft_torsional_fatigue,
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -67,14 +68,15 @@ _GAGES = [
 ]
 # Materiales del eje: E en ×10⁶ psi, ν (Poisson). La galga STC 06 está
 # compensada térmicamente para ACERO; otros materiales cambian la compensación.
+# (nombre, E [×10⁶ psi], ν, Sut [ksi]) — Sut típico de eje de máquina por material.
 _MATERIALS = [
-    ("Steel / Acero", 30.0, 0.30),
-    ("Stainless / Inoxidable", 28.0, 0.30),
-    ("Aluminum / Aluminio", 10.0, 0.33),
-    ("Titanium / Titanio", 16.5, 0.34),
-    ("Brass / Bronce", 15.0, 0.34),
-    ("Copper / Cobre", 17.0, 0.34),
-    ("Custom / Personalizado", None, None),
+    ("Steel / Acero", 30.0, 0.30, 90.0),          # acero medio C (AISI 1045)
+    ("Stainless / Inoxidable", 28.0, 0.30, 95.0), # inox de eje (410/17-4)
+    ("Aluminum / Aluminio", 10.0, 0.33, 45.0),    # 6061-T6
+    ("Titanium / Titanio", 16.5, 0.34, 130.0),    # Ti-6Al-4V
+    ("Brass / Bronce", 15.0, 0.34, 50.0),
+    ("Copper / Cobre", 17.0, 0.34, 32.0),
+    ("Custom / Personalizado", None, None, None),
 ]
 
 
@@ -474,19 +476,23 @@ def build_app(simulated: bool = True):
     sb_di = QtWidgets.QDoubleSpinBox(); sb_di.setRange(0.0, 99.0); sb_di.setDecimals(3); sb_di.setValue(0.0); sb_di.setSuffix(" in")
     sb_e = QtWidgets.QDoubleSpinBox(); sb_e.setRange(1.0, 60.0); sb_e.setDecimals(1); sb_e.setValue(30.0); sb_e.setSuffix(" ×10⁶ psi")
     sb_nu = QtWidgets.QDoubleSpinBox(); sb_nu.setRange(0.1, 0.5); sb_nu.setDecimals(2); sb_nu.setValue(0.30)
+    sb_sut = QtWidgets.QDoubleSpinBox(); sb_sut.setRange(10.0, 400.0); sb_sut.setDecimals(0); sb_sut.setValue(90.0); sb_sut.setSuffix(" ksi")
+    sb_sut.setToolTip(T("Ultimate tensile strength of the shaft material — drives fatigue life.",
+                        "Resistencia última a tracción del material del eje — define la vida a fatiga."))
     f1.addRow(T("Material", "Material"), cb_material)
     f1.addRow(T("Outer Ø (Do)", "Ø exterior (Do)"), sb_do)
     f1.addRow(T("Inner Ø (Di)", "Ø interior (Di)"), sb_di)
     f1.addRow(T("Modulus E", "Módulo E"), sb_e)
     f1.addRow(T("Poisson ν", "Poisson ν"), sb_nu)
+    f1.addRow(T("Ultimate Sut", "Última Sut"), sb_sut)
     form_wrap.addWidget(gb_shaft)
 
     def _on_material(_=0):
-        name, e, nu = _MATERIALS[cb_material.currentIndex()]
+        name, e, nu, sut = _MATERIALS[cb_material.currentIndex()]
         custom = (e is None)
         if not custom:
-            sb_e.setValue(e); sb_nu.setValue(nu)
-        sb_e.setEnabled(custom); sb_nu.setEnabled(custom)
+            sb_e.setValue(e); sb_nu.setValue(nu); sb_sut.setValue(sut)
+        sb_e.setEnabled(custom); sb_nu.setEnabled(custom); sb_sut.setEnabled(custom)
     cb_material.currentIndexChanged.connect(_on_material)
 
     gb_gage = QtWidgets.QGroupBox(T("Gage / transmitter", "Galga / transmisor")); f2 = QtWidgets.QFormLayout(gb_gage)
@@ -548,7 +554,7 @@ def build_app(simulated: bool = True):
 
     def _save_config():
         for k, w in (("do", sb_do), ("di", sb_di), ("e", sb_e), ("nu", sb_nu),
-                     ("gf", sb_gf), ("rg", sb_rg), ("z", sb_z)):
+                     ("sut", sb_sut), ("gf", sb_gf), ("rg", sb_rg), ("z", sb_z)):
             _CFG.setValue(k, w.value())
         _CFG.setValue("gxmt", cb_gxmt.currentText())
         _CFG.setValue("bridge", cb_bridge.currentIndex())
@@ -1110,16 +1116,46 @@ def build_app(simulated: bool = True):
     # =================================================================
     pg_ft = QtWidgets.QWidget(); ft_l = QtWidgets.QVBoxLayout(pg_ft)
     ft_l.addWidget(QtWidgets.QLabel(T(
-        "Rainflow cycle counting (ASTM E1049) on a captured torque history — input for shaft fatigue / Goodman.",
-        "Conteo rainflow (ASTM E1049) sobre el historial de par — entrada para fatiga / Goodman del eje.")))
-    btn_ft = QtWidgets.QPushButton(T("▶ Capture & count (rainflow)", "▶ Capturar y contar (rainflow)"))
-    ft_l.addWidget(btn_ft)
-    ft_read = QtWidgets.QLabel("—"); ft_read.setStyleSheet(f"font-weight:800; color:{NAVY};")
-    ft_l.addWidget(ft_read)
+        "Shaft fatigue-life diagnostic: rainflow (ASTM E1049) → shear stress → Goodman mean-stress "
+        "correction → Palmgren-Miner damage. Traffic light by design safety factor (API 684 / ASME B106.1M).",
+        "Diagnóstico de vida a fatiga del eje: rainflow (ASTM E1049) → esfuerzo cortante → corrección de "
+        "esfuerzo medio (Goodman) → daño de Palmgren-Miner. Semáforo por factor de seguridad (API 684 / ASME B106.1M).")))
+
+    ft_ctrl = QtWidgets.QHBoxLayout(); ft_l.addLayout(ft_ctrl)
+    btn_ft = QtWidgets.QPushButton(T("▶ Capture & diagnose", "▶ Capturar y diagnosticar"))
+    btn_ft.setStyleSheet(f"QPushButton{{background:{NAVY};}}QPushButton:hover{{background:#0b1e38;}}")
+    cb_ft_sf = QtWidgets.QComboBox(); cb_ft_sf.addItems(["2.0", "1.5", "3.0"])
+    cb_ft_sf.setToolTip(T("Design safety factor for 'infinite life' (green). API/AGMA ≈ 1.5–3.",
+                          "Factor de seguridad de diseño para 'vida infinita' (verde). API/AGMA ≈ 1.5–3."))
+    ft_ctrl.addWidget(btn_ft)
+    ft_ctrl.addSpacing(12)
+    ft_ctrl.addWidget(QtWidgets.QLabel(T("Design safety factor", "Factor de seguridad de diseño"))); ft_ctrl.addWidget(cb_ft_sf)
+    ft_ctrl.addStretch(1)
+
+    # --- Semáforo (banner grande de estado) ---
+    ft_light = QtWidgets.QLabel("—"); ft_light.setAlignment(QtCore.Qt.AlignCenter)
+    ft_light.setStyleSheet("background:#e2e8f0; color:#334155; border-radius:12px; padding:14px; "
+                           "font-size:19px; font-weight:800;")
+    ft_l.addWidget(ft_light)
+
+    # --- KPI cards ---
+    ft_kpi = QtWidgets.QHBoxLayout(); ft_l.addLayout(ft_kpi)
+    def _kpi_card():
+        w = QtWidgets.QLabel("—"); w.setAlignment(QtCore.Qt.AlignCenter)
+        w.setStyleSheet("background:white; border:1px solid #e2e8f0; border-radius:10px; padding:10px;")
+        w.setTextFormat(QtCore.Qt.RichText); ft_kpi.addWidget(w); return w
+    kpi_sf, kpi_tau, kpi_life, kpi_cyc = _kpi_card(), _kpi_card(), _kpi_card(), _kpi_card()
+
     p_ft = pg.PlotWidget(); p_ft.setBackground("w"); p_ft.showGrid(x=True, y=True, alpha=0.3)
     p_ft.setLabel("bottom", T("torque range", "rango de par")); p_ft.setLabel("left", T("cycle count", "conteo"))
     p_ft.setTitle(T("Rainflow histogram", "Histograma rainflow"))
     ft_l.addWidget(p_ft, 1)
+
+    _LIGHT_BG = {"green": ("#dcfce7", "#166534"), "yellow": ("#fef9c3", "#854d0e"), "red": ("#fee2e2", "#991b1b")}
+
+    def _set_kpi(w, title, value, accent=NAVY):
+        w.setText(f"<div style='color:#64748b;font-size:11px'>{title}</div>"
+                  f"<div style='color:{accent};font-size:20px;font-weight:800'>{value}</div>")
 
     def _run_fatigue():
         if not _rebuild_scaling():
@@ -1131,21 +1167,48 @@ def build_app(simulated: bool = True):
             gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"], torsional_res_hz=p["res_hz"],
             torque_noise_rms_eu=p["noise"], scaling=sc, torque_units=units)
         src = SimulatedTorsionalSource(cfg); src.start()
+        win_s = 8.0
         data = np.concatenate([src.read_block() for _ in range(32)], axis=1)
         ki = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != ki)
         torque = voltage_to_torque(data[ti], sc)
-        ranges = fatigue_ranges(torque)
         u = "N·m" if units == "nm" else "ft-lb"
-        st["fat"] = {"ranges": ranges, "units": u}
+        cyc = rainflow_cycles(torque)
+        ranges = fatigue_ranges(torque)
+        # --- diagnóstico de vida a fatiga (Goodman + Miner) ---
+        life = shaft_torsional_fatigue(
+            cyc, outer_diameter_in=sb_do.value(), inner_diameter_in=sb_di.value(),
+            ultimate_strength_psi=sb_sut.value() * 1000.0, torque_units=units,
+            window_seconds=win_s, design_safety_factor=float(cb_ft_sf.currentText()))
+        st["fat"] = {"ranges": ranges, "units": u, "life": life}
+
+        bg, fg = _LIGHT_BG[life.status]
+        _dot = {"green": GREEN, "yellow": AMBER, "red": RED}[life.status]
+        _lab = life.label_es if _LANG == "es" else life.label_en
+        ft_light.setStyleSheet(f"background:{bg}; color:{fg}; border-radius:12px; padding:14px; "
+                               f"font-size:19px; font-weight:800;")
+        ft_light.setText(f"● {_lab}")
+        # KPIs
+        _acc = fg
+        _set_kpi(kpi_sf, T("Safety factor (fatigue)", "Factor de seguridad (fatiga)"),
+                 ("∞" if life.safety_factor == float("inf") else f"{life.safety_factor:.2f}"), _acc)
+        _set_kpi(kpi_tau, T("Alt. shear τ<sub>ar</sub>", "Cortante alt. τ<sub>ar</sub>"),
+                 f"{life.tau_alt_max_psi/1000:.1f} ksi", _acc)
+        if life.infinite:
+            _set_kpi(kpi_life, T("Estimated life", "Vida estimada"), T("Infinite", "Infinita"), _acc)
+        else:
+            _yr = life.life_hours / 8760.0
+            _lv = (f"{life.life_hours:,.0f} h" if life.life_hours < 8760 else f"{_yr:,.1f} " + T("yr", "años"))
+            _set_kpi(kpi_life, T("Estimated life", "Vida estimada"), _lv, _acc)
+        _set_kpi(kpi_cyc, T("Cycles / largest range", "Ciclos / rango máx"),
+                 f"{life.n_cycles:,.0f}<br><span style='font-size:12px'>{(max((r for r,_ in ranges),default=0)):,.0f} {u}</span>", _acc)
+
         p_ft.clear()
         if ranges:
             rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
             nb = int(np.clip(len(rr), 8, 24)); edges = np.linspace(0, rr.max() * 1.0001, nb + 1)
             hist, _ = np.histogram(rr, bins=edges, weights=cc)
             ctr = 0.5 * (edges[:-1] + edges[1:])
-            p_ft.addItem(pg.BarGraphItem(x=ctr, height=hist, width=(edges[1] - edges[0]) * 0.9, brush=NAVY))
-            ft_read.setText(T(f"Total cycles: {cc.sum():,.0f}  ·  Largest range: {rr.max():,.1f} {u}",
-                              f"Ciclos totales: {cc.sum():,.0f}  ·  Rango máximo: {rr.max():,.1f} {u}"))
+            p_ft.addItem(pg.BarGraphItem(x=ctr, height=hist, width=(edges[1] - edges[0]) * 0.9, brush=_dot))
     btn_ft.clicked.connect(_run_fatigue)
     tabs.addTab(pg_ft, "Fatigue")
 
@@ -1212,14 +1275,21 @@ def build_app(simulated: bool = True):
         worst = min((c.sep_margin_pct for c in crossings), default=float("inf"))
         ranges = st.get("fat", {}).get("ranges", [])
         rmax = max((r for r, _ in ranges), default=0.0)
+        life = st.get("fat", {}).get("life")
         _rip = "∞" if mm.ripple_pct == float("inf") else f"{mm.ripple_pct:.1f}%"
 
+        _fat_gostat = {"green": "GO", "yellow": "REVIEW", "red": "NO-GO"}.get(getattr(life, "status", ""), "—")
+        _fat_sf = ("∞" if life and life.safety_factor == float("inf") else (f"{life.safety_factor:.2f}" if life else "—"))
         quality = [
             (T("Signal", "Señal"), "OK", T(f"Mean {mm.mean:,.0f} {u}, pp {mm.peak_to_peak:,.0f} {u}",
                                            f"Media {mm.mean:,.0f} {u}, pp {mm.peak_to_peak:,.0f} {u}")),
             (T("Separation margin (API 684)", "Margen de separación (API 684)"),
              "NO-GO" if coincid else ("REVIEW" if worst < 10 else "GO"),
              T(f"Worst {worst:.0f}% (target ≥10%)", f"Mínimo {worst:.0f}% (objetivo ≥10%)")),
+            (T("Shaft fatigue life (Goodman/Miner)", "Vida a fatiga del eje (Goodman/Miner)"),
+             _fat_gostat,
+             T(f"Safety factor {_fat_sf} — {life.label_en if life else '—'}",
+               f"Factor de seguridad {_fat_sf} — {life.label_es if life else '—'}")),
         ]
         analysis = [
             T(f"Dominant order {max(range(1,6), key=lambda k: oa[float(k)][0])}× at {rpm:,.0f} rpm; ripple {_rip}.",
@@ -1233,6 +1303,13 @@ def build_app(simulated: bool = True):
                                       "Sin coincidencias en la banda de operación."),
                     T(f"Largest rainflow torque range {rmax:,.0f} {u} (ASTM E1049).",
                       f"Mayor rango rainflow del par {rmax:,.0f} {u} (ASTM E1049).")]
+        if life is not None:
+            _lifetxt = (T("infinite life", "vida infinita") if life.infinite else
+                        (T(f"~{life.life_hours:,.0f} h", f"~{life.life_hours:,.0f} h") if life.life_hours < 8760
+                         else T(f"~{life.life_hours/8760:,.1f} yr", f"~{life.life_hours/8760:,.1f} años")))
+            findings.append(T(
+                f"Shaft fatigue: safety factor {_fat_sf} vs endurance limit — {life.label_en} ({_lifetxt}).",
+                f"Fatiga del eje: factor de seguridad {_fat_sf} vs límite de fatiga — {life.label_es} ({_lifetxt})."))
         recs = [T("Confirm coincidences with an operating amplitude/phase run (API 684).",
                   "Confirmar coincidencias con corrida de amplitud/fase en operación (API 684)."),
                 T("Evaluate shaft fatigue against the Goodman diagram at the gage location.",

@@ -152,3 +152,39 @@ def test_rainflow_total_count_conserved():
     torque, _, _, _ = _sim(mean=500.0, orders=((1.0, 80.0, 0.0), (2.0, 40.0, 0.0)))
     total = sum(c.count for c in rainflow_cycles(torque))
     assert total > 0
+
+
+# ---------------------------------------------------------------
+# Vida a fatiga (Goodman + Miner) — semáforo por norma
+# ---------------------------------------------------------------
+def test_fatigue_life_safe_is_green_infinite():
+    """Dinámico pequeño sobre par medio alto → vida infinita (verde)."""
+    from core.torsional.analysis import rainflow_cycles, shaft_torsional_fatigue
+    t = np.arange(0, 8, 1 / 2000.0)
+    torque = 4000 + 80 * np.sin(2 * np.pi * 30 * t)   # ft-lb
+    r = shaft_torsional_fatigue(rainflow_cycles(torque), 3.0, 0.0, 90000, "ftlb", 8.0)
+    assert r.status == "green"
+    assert r.infinite and r.life_hours == float("inf")
+    assert r.safety_factor > 2.0
+
+
+def test_fatigue_life_severe_is_red_finite():
+    """Dinámico enorme → riesgo de fatiga (rojo), vida finita y daño > 0."""
+    from core.torsional.analysis import rainflow_cycles, shaft_torsional_fatigue
+    t = np.arange(0, 8, 1 / 2000.0)
+    torque = 4000 + 9000 * np.sin(2 * np.pi * 30 * t) + 3000 * np.sin(2 * np.pi * 60 * t)
+    r = shaft_torsional_fatigue(rainflow_cycles(torque), 3.0, 0.0, 90000, "ftlb", 8.0)
+    assert r.status == "red"
+    assert not r.infinite and r.life_hours < float("inf")
+    assert r.safety_factor < 1.0 and r.damage_window > 0.0
+
+
+def test_fatigue_life_monotonic_in_amplitude():
+    """A mayor amplitud dinámica, menor factor de seguridad."""
+    from core.torsional.analysis import rainflow_cycles, shaft_torsional_fatigue
+    t = np.arange(0, 8, 1 / 2000.0)
+    sfs = []
+    for amp in (500, 2000, 5000):
+        tq = 4000 + amp * np.sin(2 * np.pi * 30 * t)
+        sfs.append(shaft_torsional_fatigue(rainflow_cycles(tq), 3.0, 0.0, 90000, "ftlb", 8.0).safety_factor)
+    assert sfs[0] > sfs[1] > sfs[2]

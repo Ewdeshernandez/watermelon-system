@@ -41,6 +41,7 @@ from core.torsional.sim_source import (
 from core.torsional.analysis import (
     torque_metrics, torque_spectrum, order_amplitudes,
     keyphasor_to_rpm, order_tracking, fatigue_ranges,
+    rainflow_cycles, shaft_torsional_fatigue,
 )
 from core.modal.campbell import compute_crossings, SpeedBand, separation_margin_pct
 
@@ -461,21 +462,49 @@ elif nav == T_ORD:
 
 # -------------------------------------------------------------- Fatigue
 elif nav == T_FAT:
-    _sec("Rainflow cycle counting", "ASTM E1049 — input for fatigue life / Miner damage on the shaft")
+    _sec("Shaft fatigue-life diagnostic",
+         "ASTM E1049 rainflow → shear stress → Goodman → Palmgren-Miner. Traffic light by safety factor (API 684 / ASME B106.1M)")
     ranges = fatigue_ranges(torque)
     if not ranges:
         st.info("Not enough reversals to count cycles.")
     else:
         rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
         rmax = float(rr.max())
+        # --- Datos del eje (para el diagnóstico de vida) ---
+        _shaft = run.get("shaft", {}) if isinstance(run.get("shaft"), dict) else {}
+        c1, c2, c3, c4 = st.columns(4)
+        do_in = c1.number_input("Shaft Ø outer (in)", 0.1, 100.0,
+                                float(_shaft.get("do", 3.0)), 0.1, key="tors_fat_do")
+        di_in = c2.number_input("Shaft Ø inner (in)", 0.0, 99.0,
+                                float(_shaft.get("di", 0.0)), 0.1, key="tors_fat_di")
+        sut_ksi = c3.number_input("Ultimate Sut (ksi)", 10.0, 400.0,
+                                  float(_shaft.get("sut", 90.0)), 1.0, key="tors_fat_sut")
+        design_sf = c4.selectbox("Design safety factor", [2.0, 1.5, 3.0], key="tors_fat_sf")
+        life = shaft_torsional_fatigue(
+            rainflow_cycles(torque), outer_diameter_in=do_in, inner_diameter_in=di_in,
+            ultimate_strength_psi=sut_ksi * 1000.0, torque_units=run["units"],
+            window_seconds=float(torque.size / fs), design_safety_factor=float(design_sf))
+        _bg = {"green": ("#dcfce7", "#166534", GREEN), "yellow": ("#fef9c3", "#854d0e", AMBER),
+               "red": ("#fee2e2", "#991b1b", RED)}[life.status]
+        _sf_txt = "∞" if life.safety_factor == float("inf") else f"{life.safety_factor:.2f}"
+        if life.infinite:
+            _life_txt = "Infinite life"
+        elif life.life_hours < 8760:
+            _life_txt = f"~{life.life_hours:,.0f} h"
+        else:
+            _life_txt = f"~{life.life_hours/8760:,.1f} yr"
+        st.markdown(
+            f"<div style='background:{_bg[0]};color:{_bg[1]};border-radius:12px;padding:14px 18px;"
+            f"font-size:18px;font-weight:800;margin:6px 0'>● {life.label_en} "
+            f"<span style='font-weight:600;font-size:14px'>· SF {_sf_txt} · {_life_txt}</span></div>",
+            unsafe_allow_html=True)
         # Ciclos de rango grande (>50% del máx) — los que dominan el daño de fatiga.
         damaging = float(cc[rr > 0.5 * rmax].sum())
         _kpis([
+            (f"{_sf_txt}", "Safety factor", "vs endurance limit"),
+            (f"{life.tau_alt_max_psi/1000:,.1f}<span style='font-size:13px'> ksi</span>", "Alt. shear τar", "Goodman-corrected"),
             (f"{cc.sum():,.0f}", "Total cycles", "counted"),
             (f"{rmax:,.1f}<span style='font-size:13px'> {u}</span>", "Largest range", "worst cycle"),
-            (f"{np.average(rr, weights=cc):,.1f}<span style='font-size:13px'> {u}</span>",
-             "Mean range", "cycle-weighted"),
-            (f"{damaging:,.0f}", "High-range cycles", "> 50% of max"),
         ])
         # Histograma BINEADO (con ruido cada rango es único → sin binear son miles
         # de barras ilegibles). Suma de conteos por bucket de rango de par.

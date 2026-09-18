@@ -284,3 +284,131 @@ def fatigue_ranges(torque: Sequence[float]) -> List[Tuple[float, float]]:
         key = round(c.range, 9)
         agg[key] = agg.get(key, 0.0) + c.count
     return sorted(agg.items(), key=lambda kv: kv[0])
+
+
+# -----------------------------------------------------------------
+# Vida a fatiga del eje — Goodman (esfuerzo medio) + Miner (daño)
+# -----------------------------------------------------------------
+# Base normativa/ingenieril:
+#   · Rainflow ASTM E1049 (conteo de ciclos, arriba).
+#   · Esfuerzo cortante torsional: τ = 16·T·Do / (π·(Do⁴−Di⁴)).
+#   · Endurance en cortante por energía de distorsión (von Mises):
+#       Se' = 0.5·Sut (acero, Sut<1400 MPa) → Sse = 0.577·Se'·kf   (kf = derating de campo).
+#     Resistencia última en cortante: Ssu ≈ 0.67·Sut.
+#   · Corrección de esfuerzo medio: Goodman (τar = τa / (1 − τm/Ssu)).
+#   · S-N (Basquin) en cortante entre 1e3 y 1e6 ciclos (Shigley/ASME B106.1M).
+#   · Daño acumulado: Palmgren–Miner (Σ n_i/Nf_i). Contexto: API 684.
+
+_NM_TO_LBIN = 8.8507457676   # 1 N·m  = 8.8507 lb·in
+_FTLB_TO_LBIN = 12.0         # 1 ft-lb = 12 lb·in
+_PSI_TO_MPA = 1.0 / 145.0377
+
+
+@dataclass
+class FatigueLife:
+    """Diagnóstico de vida a fatiga torsional del eje."""
+    status: str              # "green" | "yellow" | "red"
+    label_es: str
+    label_en: str
+    safety_factor: float     # SF contra el límite de fatiga (Goodman, vida infinita)
+    tau_alt_max_psi: float    # mayor esfuerzo cortante alternante equivalente (τar) [psi]
+    tau_mean_psi: float       # esfuerzo cortante medio [psi]
+    sse_psi: float           # límite de fatiga en cortante corregido [psi]
+    ssu_psi: float           # resistencia última en cortante [psi]
+    damage_window: float     # daño de Miner en la ventana medida (1.0 = falla)
+    life_hours: float        # vida estimada [h] (inf si SF≥1); asume operación continua
+    n_cycles: float          # ciclos contados en la ventana
+    infinite: bool           # True si vida infinita (bajo el límite de fatiga)
+
+
+def _torque_to_lbin(value: float, units: str) -> float:
+    return value * (_NM_TO_LBIN if units == "nm" else _FTLB_TO_LBIN)
+
+
+def shaft_torsional_fatigue(
+    cycles: Sequence[RainflowCycle],
+    outer_diameter_in: float,
+    inner_diameter_in: float,
+    ultimate_strength_psi: float,
+    torque_units: str = "ftlb",
+    window_seconds: float = 8.0,
+    derating_kf: float = 0.70,
+    design_safety_factor: float = 2.0,
+) -> FatigueLife:
+    """
+    Vida a fatiga torsional del eje a partir de los ciclos rainflow del par.
+
+    cycles: salida de `rainflow_cycles` (rango/media en unidades de par).
+    outer/inner_diameter_in: geometría del eje en la galga [pulgadas].
+    ultimate_strength_psi: resistencia última Sut del material del eje [psi].
+    torque_units: "nm" o "ftlb" (unidades de los ciclos).
+    window_seconds: duración de la captura (para proyectar vida en horas).
+    derating_kf: factor de reducción de campo (superficie/tamaño/confiabilidad).
+    design_safety_factor: SF objetivo para "vida infinita" (verde). API/AGMA ~1.5–2.
+
+    Semáforo:
+      VERDE  → SF ≥ design_safety_factor  (bajo el límite de fatiga, margen amplio).
+      AMARILLO → 1.0 ≤ SF < design_safety_factor (vida finita larga; vigilar).
+      ROJO   → SF < 1.0 (acumula daño; se estima vida en horas).
+    """
+    do = float(outer_diameter_in); di = float(inner_diameter_in)
+    sut = max(float(ultimate_strength_psi), 1.0)
+    # Módulo de sección polar → esfuerzo cortante por par (τ = T / Zp).
+    zp = np.pi * (do ** 4 - di ** 4) / (16.0 * do)     # in³  (T en lb·in → τ en psi)
+    ssu = 0.67 * sut                                    # resistencia última en cortante
+    sse = 0.577 * 0.5 * sut * float(derating_kf)        # límite de fatiga en cortante corregido
+    # Punto de 1e3 ciclos en cortante (Basquin): 0.577 · 0.9 · Sut.
+    ss1e3 = 0.577 * 0.9 * sut
+    # Basquin  Sf = a·N^b  entre (1e3, ss1e3) y (1e6, sse).
+    b = -(np.log10(ss1e3 / sse)) / 3.0                  # pendiente (negativa)
+    a = ss1e3 / (1e3 ** b)
+
+    n_total = 0.0
+    damage = 0.0
+    tau_ar_max = 0.0
+    tau_m_at_max = 0.0
+    for c in cycles:
+        n_total += c.count
+        t_amp = _torque_to_lbin(c.range, torque_units) * 0.5   # amplitud de par
+        t_mean = _torque_to_lbin(c.mean, torque_units)
+        tau_a = abs(t_amp) / zp
+        tau_m = abs(t_mean) / zp
+        if tau_a <= 0.0:
+            continue
+        # Goodman: alternante equivalente totalmente reversible.
+        denom = max(1.0 - tau_m / ssu, 1e-3)
+        tau_ar = tau_a / denom
+        if tau_ar > tau_ar_max:
+            tau_ar_max = tau_ar; tau_m_at_max = tau_m
+        # Daño de Miner (solo por encima del límite de fatiga).
+        if tau_ar > sse:
+            nf = (tau_ar / a) ** (1.0 / b)              # ciclos a la falla
+            nf = max(nf, 1.0)
+            damage += c.count / nf
+
+    sf = (sse / tau_ar_max) if tau_ar_max > 0 else float("inf")
+    infinite = sf >= 1.0 or damage <= 0.0
+    if infinite:
+        life_h = float("inf")
+    else:
+        cps = n_total / max(window_seconds, 1e-6)        # ciclos por segundo
+        d_rate = damage / max(window_seconds, 1e-6)      # daño por segundo
+        life_h = (1.0 / d_rate) / 3600.0 if d_rate > 0 else float("inf")
+
+    if sf >= design_safety_factor:
+        status = "green"
+        label_es = "Vida infinita — eje seguro"; label_en = "Infinite life — shaft safe"
+    elif sf >= 1.0:
+        status = "yellow"
+        label_es = "Vida finita larga — vigilar"; label_en = "Long finite life — monitor"
+    else:
+        status = "red"
+        label_es = "Riesgo de fatiga — vida limitada"; label_en = "Fatigue risk — limited life"
+
+    return FatigueLife(
+        status=status, label_es=label_es, label_en=label_en,
+        safety_factor=float(sf), tau_alt_max_psi=float(tau_ar_max),
+        tau_mean_psi=float(tau_m_at_max), sse_psi=float(sse), ssu_psi=float(ssu),
+        damage_window=float(damage), life_hours=float(life_h),
+        n_cycles=float(n_total), infinite=bool(infinite),
+    )
