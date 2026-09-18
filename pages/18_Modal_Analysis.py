@@ -1558,7 +1558,8 @@ if nav == T_MAC:
 
 # ---------------------------------------------------------------- ODS (operating)
 if nav == T_ODS:
-    _sec("ODS — operating deflection", "How the machine moves at a given frequency (1×, blade-pass)")
+    _sec("ODS — operating deflection", "See WHERE the machine moves at any order 0.5×–10× or exact Hz "
+         "(1× unbalance · 2× misalignment · blade-pass · sub-sync) — reconstructed live from the raw data")
     _fddO = D.get("fdd")
     if _fddO is None:
         st.info("ODS requires analysis from RAW DATA (full SVD). Pick a run that uploaded its raw "
@@ -1568,9 +1569,10 @@ if nav == T_ODS:
         _rpmO = float(D.get("rpm") or 0.0)
         _sug = []
         if _rpmO:
-            _f1 = _rpmO / 60.0; _k = 1
-            while _f1 * _k <= _frO.max() and _k <= 8:
-                _sug.append((f"{_f1*_k:.1f} Hz ({_k}×)", _f1 * _k)); _k += 1
+            _f1 = _rpmO / 60.0
+            for _k in (0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10):   # 0.5× (sub-sync) .. 10× (con data cruda podemos a cualquier orden)
+                if _f1 * _k <= _frO.max():
+                    _sug.append((f"{_f1*_k:.1f} Hz ({_k:g}×)", _f1 * _k))
         for mm in D["oma_modes"]:
             _sug.append((f"{mm['fn']:.1f} Hz (pico)", float(mm["fn"])))
         _c1, _c2 = st.columns([2, 1])
