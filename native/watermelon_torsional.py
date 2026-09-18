@@ -44,7 +44,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -376,14 +376,42 @@ def build_app(simulated: bool = True):
     fset.addRow(T("Location", "Ubicación"), ed_setloc)
     fset.addRow(T("Nameplate RPM", "RPM de placa"), sb_plate_rpm)
     fset.addRow(T("Operator", "Operador"), ed_operator)
-    set_l.addWidget(gb_set); set_l.addStretch(1)
+    btn_savesetup = QtWidgets.QPushButton(T("💾 Save setup", "💾 Guardar setup"))
+    btn_savesetup.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
+    lbl_setsaved = QtWidgets.QLabel(""); lbl_setsaved.setStyleSheet("color:#16a34a; font-weight:700;")
+    _srow = QtWidgets.QHBoxLayout(); _srow.addWidget(btn_savesetup); _srow.addWidget(lbl_setsaved); _srow.addStretch(1)
+    set_l.addLayout(_srow); set_l.addStretch(1)
     tabs.addTab(pg_set, "Setup")
+
+    _SET = QtCore.QSettings("WatermelonSystem", "TorsionalSetup")
 
     def _setup_dict():
         return {"machine": ed_machine.text(), "tag": ed_tag.text(), "type": ed_mtype.text(),
                 "client": ed_setclient.text(), "location": ed_setloc.text(),
                 "nameplate_rpm": sb_plate_rpm.value(), "operator": ed_operator.text()}
     st["setup_fn"] = _setup_dict
+
+    def _save_setup():
+        for k, v in _setup_dict().items():
+            _SET.setValue(k, v)
+        lbl_setsaved.setText(T("✅ Setup saved (persists across restarts).",
+                               "✅ Setup guardado (persiste al reiniciar)."))
+
+    def _load_setup():
+        ed_machine.setText(str(_SET.value("machine", "") or ""))
+        ed_tag.setText(str(_SET.value("tag", "") or ""))
+        ed_mtype.setText(str(_SET.value("type", "") or ""))
+        ed_setclient.setText(str(_SET.value("client", "") or ""))
+        ed_setloc.setText(str(_SET.value("location", "") or ""))
+        try:
+            sb_plate_rpm.setValue(float(_SET.value("nameplate_rpm", 1800) or 1800))
+        except Exception:  # noqa: BLE001
+            pass
+        ed_operator.setText(str(_SET.value("operator", "") or ""))
+        if ed_machine.text():
+            lbl_setsaved.setText(T("Loaded saved setup.", "Setup guardado cargado."))
+    btn_savesetup.clicked.connect(_save_setup)
+    _load_setup()
 
     # =================================================================
     # Helpers de escalado
@@ -503,12 +531,48 @@ def build_app(simulated: bool = True):
     lbl_tfs = QtWidgets.QLabel(""); lbl_tfs.setWordWrap(True)
     lbl_tfs.setStyleSheet(f"background:white; border:1px solid #dbe4f0; border-radius:8px; padding:10px;")
     cfg_l.addWidget(lbl_tfs)
+    btn_savecfg = QtWidgets.QPushButton(T("💾 Save configuration", "💾 Guardar configuración"))
+    btn_savecfg.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
+    lbl_cfgsaved = QtWidgets.QLabel(""); lbl_cfgsaved.setStyleSheet("color:#16a34a; font-weight:700;")
+    _crow = QtWidgets.QHBoxLayout(); _crow.addWidget(btn_savecfg); _crow.addWidget(lbl_cfgsaved); _crow.addStretch(1)
+    cfg_l.addLayout(_crow)
     cfg_l.addStretch(1)
     for _w in (sb_do, sb_di, sb_e, sb_nu, sb_gf, sb_rg, sb_z):
         _w.valueChanged.connect(lambda _=0: _rebuild_scaling())
     cb_gxmt.currentIndexChanged.connect(lambda _=0: _rebuild_scaling())
     cb_bridge.currentIndexChanged.connect(lambda _=0: _rebuild_scaling())
     cb_units.currentIndexChanged.connect(lambda _=0: _rebuild_scaling())
+
+    _CFG = QtCore.QSettings("WatermelonSystem", "TorsionalConfig")
+
+    def _save_config():
+        for k, w in (("do", sb_do), ("di", sb_di), ("e", sb_e), ("nu", sb_nu),
+                     ("gf", sb_gf), ("rg", sb_rg), ("z", sb_z)):
+            _CFG.setValue(k, w.value())
+        _CFG.setValue("gxmt", cb_gxmt.currentText())
+        _CFG.setValue("bridge", cb_bridge.currentIndex())
+        _CFG.setValue("units", cb_units.currentIndex())
+        _CFG.setValue("material", cb_material.currentIndex())
+        _CFG.setValue("gage", cb_gage.currentIndex())
+        lbl_cfgsaved.setText(T("✅ Configuration saved.", "✅ Configuración guardada."))
+
+    def _load_config():
+        if _CFG.value("gage") is None:
+            return
+        try:
+            cb_gage.setCurrentIndex(int(_CFG.value("gage", 0)))
+            cb_material.setCurrentIndex(int(_CFG.value("material", 0)))
+            for k, w in (("do", sb_do), ("di", sb_di), ("e", sb_e), ("nu", sb_nu),
+                         ("gf", sb_gf), ("rg", sb_rg), ("z", sb_z)):
+                w.setValue(float(_CFG.value(k, w.value())))
+            cb_gxmt.setCurrentText(str(_CFG.value("gxmt", "4000")))
+            cb_bridge.setCurrentIndex(int(_CFG.value("bridge", 0)))
+            cb_units.setCurrentIndex(int(_CFG.value("units", 0)))
+            lbl_cfgsaved.setText(T("Loaded saved configuration.", "Configuración guardada cargada."))
+        except Exception:  # noqa: BLE001
+            pass
+    btn_savecfg.clicked.connect(_save_config)
+    st["load_config_fn"] = _load_config
     tabs.addTab(pg_cfg, T("Configuration", "Configuración"))
 
     # =================================================================
@@ -1039,18 +1103,30 @@ def build_app(simulated: bool = True):
     # =================================================================
     pg_rp = QtWidgets.QWidget(); rp_l = QtWidgets.QVBoxLayout(pg_rp)
     rp_l.addWidget(QtWidgets.QLabel(T(
-        "Quick same-day field PDF: metrics + orders + Campbell + fatigue. The full SIGA report is generated on the web.",
-        "PDF de campo del mismo día: métricas + órdenes + Campbell + fatiga. El reporte SIGA completo se genera en la web.")))
-    rform = QtWidgets.QFormLayout()
-    ed_asset = QtWidgets.QLineEdit(); ed_client = QtWidgets.QLineEdit(); ed_prep = QtWidgets.QLineEdit()
-    rform.addRow(T("Asset / Tag", "Activo / Tag"), ed_asset)
-    rform.addRow(T("Client", "Cliente"), ed_client)
-    rform.addRow(T("Prepared by", "Realizado por"), ed_prep)
-    rp_l.addLayout(rform)
+        "Quick same-day field PDF: metrics + orders + Campbell + fatigue. Uses the machine data from "
+        "the Setup tab — no need to re-enter it. The full SIGA report is generated on the web.",
+        "PDF de campo del mismo día: métricas + órdenes + Campbell + fatiga. Usa los datos de máquina de "
+        "la pestaña Setup — no hay que reingresarlos. El reporte SIGA completo se genera en la web.")))
+    lbl_rp_machine = QtWidgets.QLabel(""); lbl_rp_machine.setStyleSheet(f"color:{NAVY}; font-weight:700;")
+    rp_l.addWidget(lbl_rp_machine)
+    _rlrow = QtWidgets.QHBoxLayout()
+    _rlrow.addWidget(QtWidgets.QLabel(T("Report language", "Idioma del reporte")))
+    cb_rp_lang = QtWidgets.QComboBox(); cb_rp_lang.addItems(["Español", "English"])
+    cb_rp_lang.setCurrentIndex(0 if _LANG == "es" else 1)
+    _rlrow.addWidget(cb_rp_lang); _rlrow.addStretch(1)
+    rp_l.addLayout(_rlrow)
     btn_rp = QtWidgets.QPushButton(T("📄 Generate preliminary report (PDF)", "📄 Generar reporte preliminar (PDF)"))
+    btn_rp.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
     rp_l.addWidget(btn_rp)
     rp_status = QtWidgets.QLabel(""); rp_status.setWordWrap(True); rp_l.addWidget(rp_status)
     rp_l.addStretch(1)
+
+    def _refresh_rp_machine():
+        _s = st["setup_fn"]() if st.get("setup_fn") else {}
+        _nm = _s.get("machine") or _s.get("tag") or "—"
+        lbl_rp_machine.setText(T(f"Machine: {_nm}  ·  Client: {_s.get('client','—') or '—'}",
+                                 f"Máquina: {_nm}  ·  Cliente: {_s.get('client','—') or '—'}"))
+    tabs.currentChanged.connect(lambda _=0: _refresh_rp_machine())
 
     def _grab_png(widget):
         try:
@@ -1121,22 +1197,22 @@ def build_app(simulated: bool = True):
              "figures": [(T("Rainflow histogram", "Histograma rainflow"), _grab_png(p_ft))]},
         ]
         _su = st["setup_fn"]() if st.get("setup_fn") else {}
+        _asset = _su.get("machine") or _su.get("tag") or "—"
         meta = {"title": T("Preliminary Torsional Report", "Reporte Torsional Preliminar"),
-                "asset": ed_asset.text() or _su.get("machine") or _su.get("tag") or "—",
-                "client": ed_client.text() or _su.get("client") or "—",
-                "prep": ed_prep.text() or _su.get("operator") or "—",
+                "asset": _asset, "client": _su.get("client") or "—",
+                "prep": _su.get("operator") or "—",
                 "location": _su.get("location", ""), "type": _su.get("type", ""),
                 "rpm": f"{rpm:,.0f}", "equip": "TorqueTrak 10K + NI 9229"}
         try:
             from core.modal.preliminary_report import build_preliminary_pdf
-            _es = (_LANG == "es")
+            _es = (cb_rp_lang.currentIndex() == 0)     # idioma elegido en el Report
             pdf = build_preliminary_pdf(meta=meta, quality=quality, sections=sections, analysis=analysis,
                                         findings=findings, recommendations=recs,
-                                        run_id=f"TOR-{ed_asset.text() or 'run'}", lang=("es" if _es else "en"))
+                                        run_id=f"TOR-{_asset}", lang=("es" if _es else "en"))
         except Exception as exc:  # noqa: BLE001
             rp_status.setText(f"❌ {type(exc).__name__}: {exc}"); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(win, T("Save report", "Guardar reporte"),
-                                                        f"Torsional_{ed_asset.text() or 'run'}.pdf", "PDF (*.pdf)")
+                                                        f"Torsional_{_asset}.pdf", "PDF (*.pdf)")
         if not path:
             return
         with open(path, "wb") as fh:
@@ -1197,6 +1273,8 @@ def build_app(simulated: bool = True):
     tabs.addTab(pg_upd, T("Updates", "Actualizaciones"))
 
     _on_material(); _on_gage()      # estado inicial (galga/material por defecto)
+    if st.get("load_config_fn"):
+        st["load_config_fn"]()      # carga la configuración guardada (si existe)
     _rebuild_scaling()
     return app, win
 
