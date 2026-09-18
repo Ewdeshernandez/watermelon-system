@@ -44,7 +44,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -870,17 +870,15 @@ def build_app(simulated: bool = True):
     sh_intro.setWordWrap(True); sh_l.addWidget(sh_intro)
 
     sh_btns = QtWidgets.QHBoxLayout(); sh_l.addLayout(sh_btns)
-    btn_ref1 = QtWidgets.QPushButton(T("Apply Ref 1 (100 µε)", "Aplicar Ref 1 (100 µε)"))
-    btn_ref2 = QtWidgets.QPushButton(T("Apply Ref 2 (500 µε)", "Aplicar Ref 2 (500 µε)"))
-    sh_btns.addWidget(btn_ref1); sh_btns.addWidget(btn_ref2); sh_btns.addStretch(1)
-    sh_result = QtWidgets.QTextBrowser(); sh_result.setMaximumHeight(220); sh_l.addWidget(sh_result)
+    btn_both = QtWidgets.QPushButton(T("▶ Verify both (Ref 1 + Ref 2)", "▶ Verificar ambas (Ref 1 + Ref 2)"))
+    btn_ref1 = QtWidgets.QPushButton(T("Only Ref 1 (100 µε)", "Solo Ref 1 (100 µε)"))
+    btn_ref2 = QtWidgets.QPushButton(T("Only Ref 2 (500 µε)", "Solo Ref 2 (500 µε)"))
+    sh_btns.addWidget(btn_both); sh_btns.addWidget(btn_ref1); sh_btns.addWidget(btn_ref2); sh_btns.addStretch(1)
+    sh_result = QtWidgets.QTextBrowser(); sh_result.setMaximumHeight(260); sh_l.addWidget(sh_result)
     sh_l.addStretch(1)
 
-    def _run_shunt(ref):
-        if not _rebuild_scaling() or st["gage"] is None:
-            QtWidgets.QMessageBox.warning(win, "Watermelon Torsional",
-                T("Fix the configuration first.", "Corrige la configuración primero."))
-            return
+    def _shunt_html(ref) -> str:
+        """Bloque HTML del resultado de UNA referencia (para mostrar 1 o las 2)."""
         sc = st["scaling"]; gage = st["gage"]
         # En simulado: el RX10K reproduce el shunt con un pequeño error realista.
         from core.torsional.shunt_cal import expected_shunt_voltage, full_scale_strain_torque
@@ -891,8 +889,8 @@ def build_app(simulated: bool = True):
         chk = verify_shunt(measured, ref, gage, scale_factor_z=sc.scale_factor_z)
         color = GREEN if chk.passed else AMBER
         status = T("PASS", "OK") if chk.passed else T("OUT OF TOL", "FUERA DE TOL")
-        sh_result.setHtml(
-            f"<div style='font-size:13px'>"
+        return (
+            f"<div style='font-size:13px; margin-bottom:10px'>"
             f"<b>{ref.name}</b> — {ref.simulated_ue:.0f} µε<br>"
             f"{T('Expected','Esperado')}: <b>{chk.expected_v:.4f} V</b> &nbsp; · &nbsp; "
             f"{T('Measured','Medido')}: <b>{chk.measured_v:.4f} V</b><br>"
@@ -901,20 +899,34 @@ def build_app(simulated: bool = True):
             f"{T('Effective Z revealed by shunt','Z efectivo del shunt')}: <b>{chk.suggested_z:.4f}</b> "
             f"({T('current','actual')}: {sc.scale_factor_z:.4f})</div>")
 
-    btn_ref1.clicked.connect(lambda: _run_shunt(REF1_100UE))
-    btn_ref2.clicked.connect(lambda: _run_shunt(REF2_500UE))
+    def _run_shunt(refs):
+        if not _rebuild_scaling() or st["gage"] is None:
+            QtWidgets.QMessageBox.warning(win, "Watermelon Torsional",
+                T("Fix the configuration first.", "Corrige la configuración primero."))
+            return
+        sh_result.setHtml("".join(_shunt_html(r) for r in refs))
+
+    btn_both.clicked.connect(lambda: _run_shunt([REF1_100UE, REF2_500UE]))
+    btn_ref1.clicked.connect(lambda: _run_shunt([REF1_100UE]))
+    btn_ref2.clicked.connect(lambda: _run_shunt([REF2_500UE]))
     tabs.addTab(pg_sh, T("Shunt check", "Verificación shunt"))
 
     # =================================================================
     # TAB 4 — Runup (order tracking / Campbell de torque)
     # =================================================================
     pg_ru = QtWidgets.QWidget(); ru_l = QtWidgets.QVBoxLayout(pg_ru)
+    ru_intro = QtWidgets.QLabel(T(
+        "The RPM axis is measured from the keyphasor during the ramp (not typed). 'Torsional natural' only "
+        "injects a resonance in simulation — the real natural is detected automatically in Campbell.",
+        "El eje de RPM se mide del keyphasor durante la rampa (no se escribe). 'Natural torsional' solo "
+        "inyecta una resonancia en simulación — la natural real la detecta el Campbell automáticamente."))
+    ru_intro.setWordWrap(True); ru_l.addWidget(ru_intro)
     ru_ctrl = QtWidgets.QHBoxLayout(); ru_l.addLayout(ru_ctrl)
     sb_r0 = QtWidgets.QDoubleSpinBox(); sb_r0.setRange(60, 12000); sb_r0.setValue(600); sb_r0.setSuffix(" rpm")
     sb_r1 = QtWidgets.QDoubleSpinBox(); sb_r1.setRange(60, 12000); sb_r1.setValue(3600); sb_r1.setSuffix(" rpm")
     sb_res = QtWidgets.QDoubleSpinBox(); sb_res.setRange(0, 500); sb_res.setValue(30); sb_res.setSuffix(" Hz")
     for lbl, w in [(T("Start", "Inicio"), sb_r0), (T("End", "Fin"), sb_r1),
-                   (T("Torsional natural", "Natural torsional"), sb_res)]:
+                   (T("Torsional natural (sim)", "Natural torsional (sim)"), sb_res)]:
         ru_ctrl.addWidget(QtWidgets.QLabel(lbl)); ru_ctrl.addWidget(w)
     btn_run = QtWidgets.QPushButton(T("▶ Run simulated run-up", "▶ Correr runup simulado"))
     ru_ctrl.addStretch(1); ru_ctrl.addWidget(btn_run)
