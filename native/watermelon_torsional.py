@@ -33,17 +33,18 @@ except Exception as exc:  # noqa: BLE001
 
 from core.torsional.scaling import (
     ShaftGeometry, GageConfig, BridgeType, TorqueScaling, full_scale_torque,
+    voltage_to_torque,
 )
 from core.torsional.sim_source import (
     TorsionalStreamConfig, SimulatedTorsionalSource, make_torsional_channels,
 )
 from core.torsional.analysis import (
     torque_metrics, torque_spectrum, order_amplitudes,
-    keyphasor_to_rpm, order_tracking,
+    keyphasor_to_rpm, order_tracking, fatigue_ranges,
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -379,11 +380,16 @@ def build_app(simulated: bool = True):
 
     # Controles del simulador
     gb_sim = QtWidgets.QGroupBox(T("Simulated signal", "Señal simulada")); simf = QtWidgets.QHBoxLayout(gb_sim)
+    cb_preset = QtWidgets.QComboBox()
+    cb_preset.addItems([T("Custom", "Personalizado"),
+                        T("Reciprocating engine (1800 rpm)", "Motor recíprocante (1800 rpm)"),
+                        T("Gearbox / VFD", "Caja / VFD")])
     sb_rpm = QtWidgets.QDoubleSpinBox(); sb_rpm.setRange(60, 12000); sb_rpm.setValue(1800); sb_rpm.setSuffix(" rpm")
     sb_mean = QtWidgets.QDoubleSpinBox(); sb_mean.setRange(0, 1e6); sb_mean.setValue(1000); sb_mean.setSuffix(" EU")
     sb_a1 = QtWidgets.QDoubleSpinBox(); sb_a1.setRange(0, 1e5); sb_a1.setValue(60)
     sb_a2 = QtWidgets.QDoubleSpinBox(); sb_a2.setRange(0, 1e5); sb_a2.setValue(25)
     sb_noise = QtWidgets.QDoubleSpinBox(); sb_noise.setRange(0, 1e4); sb_noise.setValue(5)
+    simf.addWidget(QtWidgets.QLabel(T("Preset", "Preset"))); simf.addWidget(cb_preset)
     for lbl, w in [(T("RPM", "RPM"), sb_rpm), (T("Mean", "Media"), sb_mean),
                    ("1×", sb_a1), ("2×", sb_a2), (T("Noise", "Ruido"), sb_noise)]:
         simf.addWidget(QtWidgets.QLabel(lbl)); simf.addWidget(w)
@@ -391,6 +397,30 @@ def build_app(simulated: bool = True):
     btn_stop = QtWidgets.QPushButton(T("■ Stop", "■ Detener")); btn_stop.setEnabled(False)
     simf.addStretch(1); simf.addWidget(btn_start); simf.addWidget(btn_stop)
     live_l.addWidget(gb_sim)
+
+    def _preset():
+        """Parámetros de simulación según el preset (dict con rpm/mean/orders/…).
+        Un motor recíprocante tiene firma torsional rica: medio-orden (0.5×) fuerte +
+        armónicos de la velocidad (firing). Gearbox añade el orden de engrane (GMF)."""
+        idx = cb_preset.currentIndex()
+        if idx == 1:   # Reciprocating engine @ 1800 rpm
+            return dict(rpm=1800.0, mean=1500.0, noise=10.0, res_hz=45.0, gear_teeth=0, gear_amp=0.0,
+                        orders=((0.5, 220.0, 0.0), (1.0, 320.0, 0.0), (1.5, 140.0, 30.0),
+                                (2.0, 260.0, 0.0), (3.0, 120.0, 0.0), (4.0, 70.0, 0.0)))
+        if idx == 2:   # Gearbox / VFD
+            return dict(rpm=1800.0, mean=1200.0, noise=6.0, res_hz=60.0, gear_teeth=23, gear_amp=90.0,
+                        orders=((1.0, 80.0, 0.0), (2.0, 40.0, 0.0), (6.0, 45.0, 0.0)))
+        return dict(rpm=sb_rpm.value(), mean=sb_mean.value(), noise=sb_noise.value(), res_hz=0.0,
+                    gear_teeth=0, gear_amp=0.0,
+                    orders=((1.0, sb_a1.value(), 0.0), (2.0, sb_a2.value(), 0.0)))
+
+    def _on_preset(_=0):
+        p = _preset()
+        sb_rpm.setValue(p["rpm"]); sb_mean.setValue(p["mean"]); sb_noise.setValue(p["noise"])
+        _custom = cb_preset.currentIndex() == 0
+        for w in (sb_rpm, sb_mean, sb_a1, sb_a2, sb_noise):
+            w.setEnabled(_custom)
+    cb_preset.currentIndexChanged.connect(_on_preset)
 
     # Lecturas grandes
     read_row = QtWidgets.QHBoxLayout(); live_l.addLayout(read_row)
@@ -431,13 +461,14 @@ def build_app(simulated: bool = True):
             return
         fs = st["fs"]
         units = st["scaling"].units
+        p = _preset()
         cfg = TorsionalStreamConfig(
-            sample_rate_hz=fs, rpm=sb_rpm.value(),
+            sample_rate_hz=fs, rpm=p["rpm"],
             channels=make_torsional_channels(units=units),
             block_seconds=0.1, buffer_seconds=st["buf_secs"],
-            mean_torque=sb_mean.value(),
-            orders=((1.0, sb_a1.value(), 0.0), (2.0, sb_a2.value(), 0.0)),
-            torque_noise_rms_eu=sb_noise.value(),
+            mean_torque=p["mean"], orders=p["orders"],
+            gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"],
+            torsional_res_hz=p["res_hz"], torque_noise_rms_eu=p["noise"],
             scaling=st["scaling"], torque_units=units,
         )
         src = SimulatedTorsionalSource(cfg); src.start()
@@ -601,7 +632,236 @@ def build_app(simulated: bool = True):
     tabs.addTab(pg_ru, T("Run-up", "Runup"))
 
     # =================================================================
-    # TAB 5 — Updates (auto-actualización por red, como el Modal)
+    # TAB 5 — Campbell / interference (API 684)
+    # =================================================================
+    pg_cb = QtWidgets.QWidget(); cb_l = QtWidgets.QVBoxLayout(pg_cb)
+    cb_l.addWidget(QtWidgets.QLabel(T(
+        "Simulated run-up → torsional naturals vs excitation orders (API 684). Red × = coincidence in the operating band.",
+        "Runup simulado → naturales torsionales vs órdenes de excitación (API 684). × roja = coincidencia en banda de operación.")))
+    btn_cb = QtWidgets.QPushButton(T("▶ Run Campbell (simulated run-up)", "▶ Correr Campbell (runup simulado)"))
+    cb_l.addWidget(btn_cb)
+    p_cb = pg.PlotWidget(); p_cb.setBackground("w"); p_cb.showGrid(x=True, y=True, alpha=0.3)
+    p_cb.setLabel("bottom", "RPM"); p_cb.setLabel("left", T("frequency (Hz)", "frecuencia (Hz)"))
+    p_cb.setTitle(T("Campbell / interference diagram", "Diagrama de Campbell / interferencia"))
+    cb_l.addWidget(p_cb, 1)
+    cb_table = QtWidgets.QTableWidget(0, 6)
+    cb_table.setHorizontalHeaderLabels([T("Natural", "Natural"), T("Freq", "Frec"), T("Order", "Orden"),
+                                        T("Crossing rpm", "RPM cruce"), T("Margin", "Margen"), T("Status", "Estado")])
+    cb_table.horizontalHeader().setStretchLastSection(True); cb_table.setMaximumHeight(180)
+    cb_l.addWidget(cb_table)
+
+    def _run_campbell():
+        if not _rebuild_scaling():
+            return
+        p = _preset(); fs = st["fs"]; sc = st["scaling"]; units = sc.units
+        rpm = p["rpm"]; res = p["res_hz"] or 45.0
+        ramp = 4.0; r0 = max(300.0, rpm * 0.35); r1 = rpm * 1.6
+        cfg = TorsionalStreamConfig(
+            sample_rate_hz=fs, channels=make_torsional_channels(units=units), block_seconds=0.1,
+            buffer_seconds=ramp + 1, speed_profile="runup", rpm_start=r0, rpm_end=r1, ramp_seconds=ramp,
+            mean_torque=p["mean"], orders=p["orders"], gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"],
+            torsional_res_hz=res, torque_noise_rms_eu=p["noise"], scaling=sc, torque_units=units)
+        src = SimulatedTorsionalSource(cfg); src.start()
+        data = np.concatenate([src.read_block() for _ in range(int(ramp / cfg.block_seconds))], axis=1)
+        ki = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != ki)
+        torque = voltage_to_torque(data[ti], sc); tr, ri = keyphasor_to_rpm(data[ki], fs)
+        if ri.size < 3:
+            return
+        tt = np.arange(torque.size) / fs; rps = np.interp(tt, tr, ri, left=ri[0], right=ri[-1])
+        tracks = order_tracking(torque, fs, rps, orders=(1, 2, 3), n_segments=28)
+        fgr = np.linspace(2, 200, 600); acc = np.zeros_like(fgr)
+        for x in tracks:
+            fa = x.order * x.rpm / 60.0; s = np.argsort(fa)
+            acc += np.interp(fgr, fa[s], x.amplitude[s], left=0, right=0)
+        naturals = []
+        if acc.max() > 0:
+            thr = 0.35 * acc.max()
+            for i in range(1, len(acc) - 1):
+                if acc[i] > thr and acc[i] >= acc[i - 1] and acc[i] > acc[i + 1]:
+                    fv = float(fgr[i])
+                    if not any(abs(fv - y) < 3 for y in naturals):
+                        naturals.append(fv)
+        naturals = naturals or [res]
+        from core.modal.campbell import compute_crossings, SpeedBand
+        rpm_max = r1 * 1.05; band = SpeedBand(rpm, 0.10 * rpm, "Op")
+        crossings = compute_crossings(naturals, 0.0, rpm_max, (1., 2., 3., 4., 6.), bands=[band],
+                                      mode_labels=[f"TNF{i+1}" for i in range(len(naturals))])
+        st["camp"] = {"naturals": naturals, "crossings": crossings, "rpm": rpm, "rpm_max": rpm_max}
+        p_cb.clear()
+        xr = np.linspace(0, rpm_max, 60)
+        for o in (1., 2., 3., 4., 6.):
+            p_cb.plot(xr, o * xr / 60.0, pen=pg.mkPen("#94a3b8", width=1, style=QtCore.Qt.DotLine))
+        for fn in naturals:
+            p_cb.plot([0, rpm_max], [fn, fn], pen=pg.mkPen(GREEN, width=2))
+        p_cb.addItem(pg.InfiniteLine(pos=rpm, angle=90, pen=pg.mkPen(NAVY, width=2, style=QtCore.Qt.DashLine)))
+        _cc = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
+        for c in crossings:
+            p_cb.addItem(pg.ScatterPlotItem([c.crossing_rpm], [c.mode_hz], symbol="x", size=14,
+                                            pen=pg.mkPen(_cc[c.severity], width=3)))
+        _stx = {"coincidence": T("Coincidence", "Coincidencia"), "near": T("Near", "Cercano"),
+                "clear": T("Clear", "Libre")}
+        cb_table.setRowCount(len(crossings))
+        for r, c in enumerate(crossings):
+            for cix, v in enumerate([c.mode_label, f"{c.mode_hz:.1f} Hz", f"{c.order:g}×",
+                                     f"{c.crossing_rpm:.0f}", f"{c.sep_margin_pct:.0f}%", _stx[c.severity]]):
+                cb_table.setItem(r, cix, QtWidgets.QTableWidgetItem(v))
+    btn_cb.clicked.connect(_run_campbell)
+    tabs.addTab(pg_cb, "Campbell")
+
+    # =================================================================
+    # TAB 6 — Fatigue (rainflow ASTM E1049)
+    # =================================================================
+    pg_ft = QtWidgets.QWidget(); ft_l = QtWidgets.QVBoxLayout(pg_ft)
+    ft_l.addWidget(QtWidgets.QLabel(T(
+        "Rainflow cycle counting (ASTM E1049) on a captured torque history — input for shaft fatigue / Goodman.",
+        "Conteo rainflow (ASTM E1049) sobre el historial de par — entrada para fatiga / Goodman del eje.")))
+    btn_ft = QtWidgets.QPushButton(T("▶ Capture & count (rainflow)", "▶ Capturar y contar (rainflow)"))
+    ft_l.addWidget(btn_ft)
+    ft_read = QtWidgets.QLabel("—"); ft_read.setStyleSheet(f"font-weight:800; color:{NAVY};")
+    ft_l.addWidget(ft_read)
+    p_ft = pg.PlotWidget(); p_ft.setBackground("w"); p_ft.showGrid(x=True, y=True, alpha=0.3)
+    p_ft.setLabel("bottom", T("torque range", "rango de par")); p_ft.setLabel("left", T("cycle count", "conteo"))
+    p_ft.setTitle(T("Rainflow histogram", "Histograma rainflow"))
+    ft_l.addWidget(p_ft, 1)
+
+    def _run_fatigue():
+        if not _rebuild_scaling():
+            return
+        p = _preset(); fs = st["fs"]; sc = st["scaling"]; units = sc.units
+        cfg = TorsionalStreamConfig(
+            sample_rate_hz=fs, rpm=p["rpm"], channels=make_torsional_channels(units=units),
+            block_seconds=0.25, buffer_seconds=8, mean_torque=p["mean"], orders=p["orders"],
+            gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"], torsional_res_hz=p["res_hz"],
+            torque_noise_rms_eu=p["noise"], scaling=sc, torque_units=units)
+        src = SimulatedTorsionalSource(cfg); src.start()
+        data = np.concatenate([src.read_block() for _ in range(32)], axis=1)
+        ki = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != ki)
+        torque = voltage_to_torque(data[ti], sc)
+        ranges = fatigue_ranges(torque)
+        u = "N·m" if units == "nm" else "ft-lb"
+        st["fat"] = {"ranges": ranges, "units": u}
+        p_ft.clear()
+        if ranges:
+            rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
+            nb = int(np.clip(len(rr), 8, 24)); edges = np.linspace(0, rr.max() * 1.0001, nb + 1)
+            hist, _ = np.histogram(rr, bins=edges, weights=cc)
+            ctr = 0.5 * (edges[:-1] + edges[1:])
+            p_ft.addItem(pg.BarGraphItem(x=ctr, height=hist, width=(edges[1] - edges[0]) * 0.9, brush=NAVY))
+            ft_read.setText(T(f"Total cycles: {cc.sum():,.0f}  ·  Largest range: {rr.max():,.1f} {u}",
+                              f"Ciclos totales: {cc.sum():,.0f}  ·  Rango máximo: {rr.max():,.1f} {u}"))
+    btn_ft.clicked.connect(_run_fatigue)
+    tabs.addTab(pg_ft, "Fatigue")
+
+    # =================================================================
+    # TAB 7 — Preliminary report (PDF de campo, como el Modal)
+    # =================================================================
+    pg_rp = QtWidgets.QWidget(); rp_l = QtWidgets.QVBoxLayout(pg_rp)
+    rp_l.addWidget(QtWidgets.QLabel(T(
+        "Quick same-day field PDF: metrics + orders + Campbell + fatigue. The full SIGA report is generated on the web.",
+        "PDF de campo del mismo día: métricas + órdenes + Campbell + fatiga. El reporte SIGA completo se genera en la web.")))
+    rform = QtWidgets.QFormLayout()
+    ed_asset = QtWidgets.QLineEdit(); ed_client = QtWidgets.QLineEdit(); ed_prep = QtWidgets.QLineEdit()
+    rform.addRow(T("Asset / Tag", "Activo / Tag"), ed_asset)
+    rform.addRow(T("Client", "Cliente"), ed_client)
+    rform.addRow(T("Prepared by", "Realizado por"), ed_prep)
+    rp_l.addLayout(rform)
+    btn_rp = QtWidgets.QPushButton(T("📄 Generate preliminary report (PDF)", "📄 Generar reporte preliminar (PDF)"))
+    rp_l.addWidget(btn_rp)
+    rp_status = QtWidgets.QLabel(""); rp_status.setWordWrap(True); rp_l.addWidget(rp_status)
+    rp_l.addStretch(1)
+
+    def _grab_png(widget):
+        try:
+            pm = widget.grab()
+            ba = QtCore.QByteArray(); buf = QtCore.QBuffer(ba); buf.open(QtCore.QIODevice.WriteOnly)
+            pm.save(buf, "PNG"); return bytes(ba)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _gen_report():
+        if not _rebuild_scaling():
+            return
+        # asegura que Campbell y Fatiga estén corridos
+        if "camp" not in st:
+            _run_campbell()
+        if "fat" not in st:
+            _run_fatigue()
+        sc = st["scaling"]; u = "N·m" if sc.units == "nm" else "ft-lb"
+        p = _preset(); rpm = p["rpm"]
+        # métricas de una captura estable
+        cfg = TorsionalStreamConfig(sample_rate_hz=st["fs"], rpm=rpm,
+            channels=make_torsional_channels(units=sc.units), block_seconds=0.25, buffer_seconds=6,
+            mean_torque=p["mean"], orders=p["orders"], gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"],
+            torsional_res_hz=p["res_hz"], torque_noise_rms_eu=p["noise"], scaling=sc, torque_units=sc.units)
+        src = SimulatedTorsionalSource(cfg); src.start()
+        data = np.concatenate([src.read_block() for _ in range(24)], axis=1)
+        ki = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != ki)
+        torque = voltage_to_torque(data[ti], sc); mm = torque_metrics(torque)
+        oa = order_amplitudes(torque, st["fs"], rpm, orders=(1, 2, 3, 4, 5))
+        camp = st.get("camp", {}); crossings = camp.get("crossings", [])
+        coincid = [c for c in crossings if c.severity == "coincidence"]
+        worst = min((c.sep_margin_pct for c in crossings), default=float("inf"))
+        ranges = st.get("fat", {}).get("ranges", [])
+        rmax = max((r for r, _ in ranges), default=0.0)
+        _rip = "∞" if mm.ripple_pct == float("inf") else f"{mm.ripple_pct:.1f}%"
+
+        quality = [
+            (T("Signal", "Señal"), "OK", T(f"Mean {mm.mean:,.0f} {u}, pp {mm.peak_to_peak:,.0f} {u}",
+                                           f"Media {mm.mean:,.0f} {u}, pp {mm.peak_to_peak:,.0f} {u}")),
+            (T("Separation margin (API 684)", "Margen de separación (API 684)"),
+             "NO-GO" if coincid else ("REVIEW" if worst < 10 else "GO"),
+             T(f"Worst {worst:.0f}% (target ≥10%)", f"Mínimo {worst:.0f}% (objetivo ≥10%)")),
+        ]
+        analysis = [
+            T(f"Dominant order {max(range(1,6), key=lambda k: oa[float(k)][0])}× at {rpm:,.0f} rpm; ripple {_rip}.",
+              f"Orden dominante {max(range(1,6), key=lambda k: oa[float(k)][0])}× a {rpm:,.0f} rpm; rizado {_rip}."),
+            T(f"Torsional naturals: {', '.join(f'{x:.1f} Hz' for x in camp.get('naturals', [])) or '—'}.",
+              f"Naturales torsionales: {', '.join(f'{x:.1f} Hz' for x in camp.get('naturals', [])) or '—'}."),
+        ]
+        findings = [T(f"{len(coincid)} order coincidence(s) in the operating band (worst margin {worst:.0f}%).",
+                      f"{len(coincid)} coincidencia(s) de orden en la banda de operación (margen mínimo {worst:.0f}%).")
+                    if coincid else T("No coincidences in the operating band.",
+                                      "Sin coincidencias en la banda de operación."),
+                    T(f"Largest rainflow torque range {rmax:,.0f} {u} (ASTM E1049).",
+                      f"Mayor rango rainflow del par {rmax:,.0f} {u} (ASTM E1049).")]
+        recs = [T("Confirm coincidences with an operating amplitude/phase run (API 684).",
+                  "Confirmar coincidencias con corrida de amplitud/fase en operación (API 684)."),
+                T("Evaluate shaft fatigue against the Goodman diagram at the gage location.",
+                  "Evaluar fatiga del eje contra el diagrama de Goodman en la galga.")]
+        ord_rows = [[f"{o}×", f"{o*rpm/60:.2f} Hz", f"{oa[float(o)][0]:.1f} {u}"] for o in range(1, 6)]
+        sections = [
+            {"title": T("Order spectrum", "Espectro de órdenes"),
+             "figures": [(T("Live torque spectrum", "Espectro de par"), _grab_png(p_spec))],
+             "table": {"headers": [T("Order", "Orden"), T("Freq", "Frec"), T("Amplitude", "Amplitud")], "rows": ord_rows}},
+            {"title": T("Campbell / interference (API 684)", "Campbell / interferencia (API 684)"),
+             "figures": [(T("Orders vs torsional naturals", "Órdenes vs naturales"), _grab_png(p_cb))]},
+            {"title": T("Fatigue (rainflow)", "Fatiga (rainflow)"),
+             "figures": [(T("Rainflow histogram", "Histograma rainflow"), _grab_png(p_ft))]},
+        ]
+        meta = {"title": T("Preliminary Torsional Report", "Reporte Torsional Preliminar"),
+                "asset": ed_asset.text() or "—", "client": ed_client.text() or "—",
+                "prep": ed_prep.text() or "—", "rpm": f"{rpm:,.0f}", "equip": "TorqueTrak 10K + NI 9229"}
+        try:
+            from core.modal.preliminary_report import build_preliminary_pdf
+            _es = (_LANG == "es")
+            pdf = build_preliminary_pdf(meta=meta, quality=quality, sections=sections, analysis=analysis,
+                                        findings=findings, recommendations=recs,
+                                        run_id=f"TOR-{ed_asset.text() or 'run'}", lang=("es" if _es else "en"))
+        except Exception as exc:  # noqa: BLE001
+            rp_status.setText(f"❌ {type(exc).__name__}: {exc}"); return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(win, T("Save report", "Guardar reporte"),
+                                                        f"Torsional_{ed_asset.text() or 'run'}.pdf", "PDF (*.pdf)")
+        if not path:
+            return
+        with open(path, "wb") as fh:
+            fh.write(pdf)
+        rp_status.setText(T(f"✅ Saved: {path}", f"✅ Guardado: {path}"))
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+    btn_rp.clicked.connect(_gen_report)
+    tabs.addTab(pg_rp, T("Report", "Reporte"))
+
+    # =================================================================
+    # TAB 8 — Updates (auto-actualización por red, como el Modal)
     # =================================================================
     pg_upd = QtWidgets.QWidget(); ul = QtWidgets.QVBoxLayout(pg_upd)
     _cur = QtWidgets.QLabel(T(f"Installed version: <b>v{__version__}</b>",
