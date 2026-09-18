@@ -609,6 +609,97 @@ elif nav == T_REPORT:
         + "\n".join(f"- {x}" for x in findings).replace("**", "")
         + "\n\nRECOMMENDATIONS\n" + "\n".join(f"- {x}" for x in recs).replace("**", "")
         + "\n\nStandards: API 684 / ISO 22266 / API 617-618-671-674 / ASTM E1049 + Goodman.\n")
-    st.download_button("⬇  Download report (.txt)", report_txt,
-                       file_name="watermelon_torsional_report.txt", mime="text/plain")
-    st.info("Full SIGA PDF report (cover, TOC, plots, sign-off) — next step, mirroring the Modal report engine.", icon="📄")
+    with st.expander("📄  Report metadata (SIGA cover)", expanded=False):
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            r_asset = st.text_input("Machine / asset", value=run.get("name", "Torsional run"))
+            r_client = st.text_input("Client", value="")
+            r_location = st.text_input("Location", value="")
+        with mc2:
+            r_prep = st.text_input("Prepared by", value=str(_user.get("full_name", "") or ""))
+            r_rev = st.text_input("Reviewed by", value="")
+            r_consec = st.text_input("Report No.", value="")
+
+    cta1, cta2 = st.columns([1, 1])
+    with cta1:
+        if st.button("📄  Generate full SIGA report (PDF)", type="primary", key="tors_pdf_gen"):
+            with st.spinner("Rendering figures & building the SIGA PDF…"):
+                from core.torsional.report import build_torsional_pdf, plotly_to_png
+                # --- Figuras para el PDF (mismos plots que en pantalla) ---
+                t = np.arange(min(torque.size, int(fs * 10 * 60 / max(rpm, 1)))) / fs
+                yw = torque[:t.size]
+                f_wave = go.Figure()
+                f_wave.add_trace(go.Scatter(x=t, y=np.full(t.size, m.mean), line=dict(width=0),
+                                            hoverinfo="skip", showlegend=False))
+                f_wave.add_trace(go.Scatter(x=t, y=yw, line=dict(color=BLUE, width=1.8),
+                                            fill="tonexty", fillcolor="rgba(37,99,235,0.10)", name="torque"))
+                _apply(f_wave, xlab="time (s)", ylab=f"torque ({u})")
+
+                freqs, amp = torque_spectrum(torque, fs); mk = freqs <= 600.0
+                f_spec = go.Figure(go.Scatter(x=freqs[mk], y=20 * np.log10(np.maximum(amp[mk], 1e-9)),
+                                              line=dict(color=NAVY, width=1.6), name="spectrum"))
+                for k in range(1, 6):
+                    if k * rpm / 60 <= 600:
+                        f_spec.add_vline(x=k * rpm / 60, line=dict(color=AMBER, dash="dot", width=1))
+                _apply(f_spec, xlab="frequency (Hz)", ylab=f"amplitude (dB re 1 {u})")
+
+                rpm_max = max(ra["rpm_max"] * 1.05, rpm * 1.15)
+                band = SpeedBand(center_rpm=rpm, tol_rpm=0.10 * rpm, label="Operating ±10%")
+                xr = np.linspace(0.0, rpm_max, 80)
+                f_camp = go.Figure()
+                f_camp.add_vrect(x0=band.low, x1=band.high, fillcolor="rgba(245,158,11,0.13)", line_width=0)
+                for o in (1.0, 2.0, 3.0, 4.0, 6.0):
+                    f_camp.add_trace(go.Scatter(x=xr, y=o * xr / 60, mode="lines", name=f"{o:g}×",
+                                                line=dict(color="#94a3b8", width=1, dash="dot")))
+                for i, fn in enumerate(naturals):
+                    f_camp.add_trace(go.Scatter(x=[0, rpm_max], y=[fn, fn], mode="lines",
+                                                name=f"TNF{i+1} {fn:.1f} Hz", line=dict(color=GREEN, width=2.4)))
+                f_camp.add_vline(x=rpm, line=dict(color=NAVY, width=2, dash="dash"))
+                _sc = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
+                for c in crossings:
+                    f_camp.add_trace(go.Scatter(x=[c.crossing_rpm], y=[c.mode_hz], mode="markers",
+                                                showlegend=False, marker=dict(color=_sc[c.severity], size=12,
+                                                symbol="x", line=dict(width=2, color="#7f1d1d"))))
+                _apply(f_camp, xlab="speed (RPM)", ylab="frequency (Hz)")
+
+                f_fat = go.Figure()
+                if ranges:
+                    rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
+                    nb = int(np.clip(len(rr), 8, 24)); edges = np.linspace(0, rr.max() * 1.0001, nb + 1)
+                    hist, _ = np.histogram(rr, bins=edges, weights=cc)
+                    f_fat.add_trace(go.Bar(x=0.5 * (edges[:-1] + edges[1:]), y=hist,
+                                           width=(edges[1] - edges[0]) * 0.92, marker_color=NAVY))
+                    _apply(f_fat, xlab=f"torque range ({u})", ylab="cycle count")
+
+                order_rows = [[f"{o}×", f"{o*rpm/60:.2f} Hz", f"{oa[float(o)][0]:.2f} {u}",
+                               f"{oa[float(o)][1]:+.1f}°",
+                               ("dominante" if oa[float(o)][0] >= 0.5 * max(oa[float(k)][0] for k in range(1, 6))
+                                else "presente" if oa[float(o)][0] >= 0.1 * max(oa[float(k)][0] for k in range(1, 6))
+                                else "traza")] for o in range(1, 6)]
+                _stx = {"coincidence": "Coincidencia", "near": "Cercano", "clear": "Libre"}
+                crossing_rows = [[c.mode_label, f"{c.mode_hz:.1f} Hz", f"{c.order:g}×",
+                                  f"{c.crossing_rpm:.0f} rpm", f"{c.sep_margin_pct:.0f} %",
+                                  _stx[c.severity]] for c in crossings]
+
+                meta = {"report_title": "ANÁLISIS DE VIBRACIÓN TORSIONAL",
+                        "asset": r_asset, "client": r_client, "location": r_location,
+                        "prepared_by": r_prep, "reviewed_by": r_rev, "consecutive": r_consec,
+                        "format_code": "SIGA-FMT-180", "format_version": "1"}
+                ctx = {"name": run.get("name", "run"), "units_label": u, "rpm": rpm, "mean": m.mean,
+                       "pp": m.peak_to_peak, "ripple": ("∞" if m.ripple_pct == float("inf") else f"{m.ripple_pct:.1f}%"),
+                       "rms": m.rms, "fs": fs, "dominant": f"{dom}×"}
+                pdf = build_torsional_pdf(
+                    meta=meta, context=ctx, findings=[x.replace("**", "") for x in findings],
+                    recommendations=recs,
+                    waveform_png=plotly_to_png(f_wave), spectrum_png=plotly_to_png(f_spec),
+                    campbell_png=plotly_to_png(f_camp), fatigue_png=plotly_to_png(f_fat) if ranges else None,
+                    order_rows=order_rows, crossing_rows=crossing_rows, naturals=naturals)
+                st.session_state["_tors_pdf"] = pdf
+            st.success("SIGA report ready.")
+    with cta2:
+        st.download_button("⬇  Quick summary (.txt)", report_txt,
+                           file_name="watermelon_torsional_summary.txt", mime="text/plain")
+    if st.session_state.get("_tors_pdf"):
+        st.download_button("⬇  Download SIGA report (PDF)", st.session_state["_tors_pdf"],
+                           file_name="watermelon_torsional_report.pdf", mime="application/pdf",
+                           type="primary")
