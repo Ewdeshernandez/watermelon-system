@@ -45,7 +45,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -1230,10 +1230,12 @@ def build_app(simulated: bool = True):
     # =================================================================
     pg_rp = QtWidgets.QWidget(); rp_l = QtWidgets.QVBoxLayout(pg_rp)
     rp_l.addWidget(QtWidgets.QLabel(T(
-        "Quick same-day field PDF: metrics + orders + Campbell + fatigue. Uses the machine data from "
-        "the Setup tab — no need to re-enter it. The full SIGA report is generated on the web.",
-        "PDF de campo del mismo día: métricas + órdenes + Campbell + fatiga. Usa los datos de máquina de "
-        "la pestaña Setup — no hay que reingresarlos. El reporte SIGA completo se genera en la web.")))
+        "Full same-day field PDF — everything: torque signal, shunt check, run-up, Campbell and the "
+        "fatigue-life diagnostic (traffic light). Uses the Setup data — no need to re-enter it. "
+        "Just pick the language and generate. The full SIGA report is produced on the web.",
+        "PDF de campo del mismo día — todo: señal de par, verificación shunt, run-up, Campbell y el "
+        "diagnóstico de vida a fatiga (semáforo). Usa los datos del Setup — no hay que reingresarlos. "
+        "Solo elige el idioma y genera. El reporte SIGA completo se genera en la web.")))
     lbl_rp_machine = QtWidgets.QLabel(""); lbl_rp_machine.setStyleSheet(f"color:{NAVY}; font-weight:700;")
     rp_l.addWidget(lbl_rp_machine)
     _rlrow = QtWidgets.QHBoxLayout()
@@ -1266,11 +1268,11 @@ def build_app(simulated: bool = True):
     def _gen_report():
         if not _rebuild_scaling():
             return
-        # asegura que Campbell y Fatiga estén corridos
-        if "camp" not in st:
-            _run_campbell()
-        if "fat" not in st:
-            _run_fatigue()
+        rp_status.setText(T("Running full analysis (torque · shunt · run-up · Campbell · fatigue)…",
+                            "Corriendo análisis completo (par · shunt · run-up · Campbell · fatiga)…"))
+        QtWidgets.QApplication.processEvents()
+        # Corre TODO para que cada gráfico del reporte esté fresco y poblado.
+        _run_runup(); _run_campbell(); _run_fatigue()
         sc = st["scaling"]; u = "N·m" if sc.units == "nm" else "ft-lb"
         p = _preset(); rpm = p["rpm"]
         # métricas de una captura estable
@@ -1283,6 +1285,24 @@ def build_app(simulated: bool = True):
         ki = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != ki)
         torque = voltage_to_torque(data[ti], sc); mm = torque_metrics(torque)
         oa = order_amplitudes(torque, st["fs"], rpm, orders=(1, 2, 3, 4, 5))
+        # Dibuja onda y espectro en la pestaña Live para poder capturarlos al PDF.
+        _tt = np.arange(torque.size) / st["fs"]; curve_t.setData(_tt, torque)
+        _fr, _am = torque_spectrum(torque, st["fs"]); _mk = _fr <= 600.0
+        curve_s.setData(_fr[_mk], _am[_mk])
+        QtWidgets.QApplication.processEvents()
+        # --- Shunt check de ambas referencias (tabla de calibración) ---
+        shunt_rows = []
+        _gage = st.get("gage")
+        if _gage is not None:
+            from core.torsional.shunt_cal import expected_shunt_voltage, full_scale_strain_torque
+            _eps = full_scale_strain_torque(_gage); _rng = np.random.default_rng()
+            for _ref in (REF1_100UE, REF2_500UE):
+                _ev = expected_shunt_voltage(_ref.simulated_ue, _eps, sc.scale_factor_z)
+                _mv = _ev * (1.0 + _rng.normal(0, 0.002)) + _rng.normal(0, 0.003)
+                _chk = verify_shunt(_mv, _ref, _gage, scale_factor_z=sc.scale_factor_z)
+                shunt_rows.append([_ref.name, f"{_ref.simulated_ue:.0f} µε", f"{_chk.expected_v:.4f} V",
+                                   f"{_chk.measured_v:.4f} V", f"{_chk.error_pct:+.2f} %FS",
+                                   (T("PASS", "OK") if _chk.passed else T("OUT OF TOL", "FUERA TOL"))])
         camp = st.get("camp", {}); crossings = camp.get("crossings", [])
         coincid = [c for c in crossings if c.severity == "coincidence"]
         worst = min((c.sep_margin_pct for c in crossings), default=float("inf"))
@@ -1328,14 +1348,40 @@ def build_app(simulated: bool = True):
                 T("Evaluate shaft fatigue against the Goodman diagram at the gage location.",
                   "Evaluar fatiga del eje contra el diagrama de Goodman en la galga.")]
         ord_rows = [[f"{o}×", f"{o*rpm/60:.2f} Hz", f"{oa[float(o)][0]:.1f} {u}"] for o in range(1, 6)]
+        # Tabla del diagnóstico de fatiga (con veredicto del semáforo).
+        _fat_verd = (life.label_es if _LANG == "es" else life.label_en) if life else "—"
+        if life is None:
+            _fat_life = "—"
+        elif life.infinite:
+            _fat_life = T("Infinite", "Infinita")
+        elif life.life_hours < 8760:
+            _fat_life = f"{life.life_hours:,.0f} h"
+        else:
+            _fat_life = f"{life.life_hours/8760:,.1f} " + T("yr", "años")
+        fat_rows = [
+            [T("Traffic light", "Semáforo"), f"{_fat_gostat} — {_fat_verd}"],
+            [T("Safety factor (fatigue)", "Factor de seguridad (fatiga)"), _fat_sf],
+            [T("Alternating shear τar", "Cortante alternante τar"), f"{life.tau_alt_max_psi/1000:.1f} ksi" if life else "—"],
+            [T("Endurance limit Sse", "Límite de fatiga Sse"), f"{life.sse_psi/1000:.1f} ksi" if life else "—"],
+            [T("Estimated life", "Vida estimada"), _fat_life],
+            [T("Largest torque range", "Mayor rango de par"), f"{rmax:,.0f} {u}"],
+        ]
         sections = [
-            {"title": T("Order spectrum", "Espectro de órdenes"),
-             "figures": [(T("Live torque spectrum", "Espectro de par"), _grab_png(p_spec))],
+            {"title": T("Torque signal", "Señal de par"),
+             "figures": [(T("Torque vs time", "Par vs tiempo"), _grab_png(p_time)),
+                         (T("Torque spectrum", "Espectro de par"), _grab_png(p_spec))],
              "table": {"headers": [T("Order", "Orden"), T("Freq", "Frec"), T("Amplitude", "Amplitud")], "rows": ord_rows}},
+            {"title": T("Shunt calibration check", "Verificación de calibración (shunt)"),
+             "table": {"headers": [T("Reference", "Referencia"), "µε", T("Expected", "Esperado"),
+                                   T("Measured", "Medido"), T("Error", "Error"), T("Status", "Estado")],
+                       "rows": shunt_rows or [[T("Not run", "No corrido"), "", "", "", "", ""]]}},
+            {"title": T("Run-up / order tracking", "Run-up / order tracking"),
+             "figures": [(T("Order amplitude vs speed", "Amplitud de orden vs velocidad"), _grab_png(p_camp))]},
             {"title": T("Campbell / interference (API 684)", "Campbell / interferencia (API 684)"),
              "figures": [(T("Orders vs torsional naturals", "Órdenes vs naturales"), _grab_png(p_cb))]},
-            {"title": T("Fatigue (rainflow)", "Fatiga (rainflow)"),
-             "figures": [(T("Rainflow histogram", "Histograma rainflow"), _grab_png(p_ft))]},
+            {"title": T("Shaft fatigue life (Goodman / Miner)", "Vida a fatiga del eje (Goodman / Miner)"),
+             "figures": [(T("Rainflow histogram", "Histograma rainflow"), _grab_png(p_ft))],
+             "table": {"headers": [T("Item", "Ítem"), T("Value", "Valor")], "rows": fat_rows}},
         ]
         _su = st["setup_fn"]() if st.get("setup_fn") else {}
         _asset = _su.get("machine") or _su.get("tag") or "—"
