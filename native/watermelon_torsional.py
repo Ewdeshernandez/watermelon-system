@@ -25,7 +25,7 @@ from typing import Optional
 import numpy as np
 
 try:
-    from PySide6 import QtCore, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
     import pyqtgraph as pg
 except Exception as exc:  # noqa: BLE001
     print("Missing PySide6/pyqtgraph:", exc)
@@ -113,6 +113,73 @@ def _detect_dc_channels():
         return n
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _wl(t):
+    import html
+    return html.escape(str(t or ""))
+
+
+class _UpdateChecker(QtCore.QThread):
+    """Consulta los Releases de GitHub en segundo plano (sin congelar la UI)."""
+    found = QtCore.Signal(object)
+
+    def __init__(self, current_version, parent=None):
+        super().__init__(parent); self._ver = current_version
+
+    def run(self):
+        try:
+            from core.torsional.updater import check_for_update
+            info = check_for_update(self._ver)
+            if info:
+                self.found.emit(info)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _show_update_banner(win, info):
+    """Aviso de actualización + botón para actualizar de una (descarga + instala)."""
+    try:
+        ver = info.get("version", "?")
+        box = QtWidgets.QMessageBox(win)
+        box.setWindowTitle("Watermelon Torsional — update available")
+        box.setIcon(QtWidgets.QMessageBox.Information)
+        box.setText(f"<b>A newer version is available: v{ver}</b>")
+        box.setInformativeText(T(
+            "Update now? The installer will be downloaded and applied over the current "
+            "installation. The app will close to finish the update.",
+            "¿Actualizar ahora? El instalador se descarga y se aplica sobre la instalación "
+            "actual. La app se cerrará para terminar.") + "\n\n" + _wl((info.get("notes", "") or "")[:400]))
+        b_now = box.addButton(T("Update now", "Actualizar ahora"), QtWidgets.QMessageBox.AcceptRole)
+        box.addButton(T("Later", "Después"), QtWidgets.QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is not b_now:
+            return
+        from core.torsional import updater
+        url = info.get("setup_url") or info.get("zip_url")
+        if not url:
+            if info.get("html_url"):
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl(info["html_url"]))
+            return
+        dlg = QtWidgets.QProgressDialog(T("Downloading update…", "Descargando actualización…"),
+                                        "Cancel", 0, 100, win)
+        dlg.setWindowTitle("Updating"); dlg.setModal(True); dlg.setMinimumDuration(0); dlg.show()
+
+        def _prog(fr):
+            dlg.setValue(int(fr * 100)); QtWidgets.QApplication.processEvents()
+        path = updater.download_file(url, on_progress=_prog)
+        dlg.close()
+        if not path:
+            QtWidgets.QMessageBox.warning(win, "Update",
+                T("Could not download the update.", "No se pudo descargar la actualización."))
+            return
+        if path.lower().endswith("setup.exe"):
+            updater.launch_installer(path)
+            QtWidgets.QApplication.quit()      # el instalador reemplaza y relanza
+        else:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def build_app(simulated: bool = True):
@@ -533,6 +600,56 @@ def build_app(simulated: bool = True):
     btn_run.clicked.connect(_run_runup)
     tabs.addTab(pg_ru, T("Run-up", "Runup"))
 
+    # =================================================================
+    # TAB 5 — Updates (auto-actualización por red, como el Modal)
+    # =================================================================
+    pg_upd = QtWidgets.QWidget(); ul = QtWidgets.QVBoxLayout(pg_upd)
+    _cur = QtWidgets.QLabel(T(f"Installed version: <b>v{__version__}</b>",
+                              f"Versión instalada: <b>v{__version__}</b>"))
+    _cur.setTextFormat(QtCore.Qt.RichText)
+    _ustatus = QtWidgets.QLabel(T("Press <b>Check for updates</b> to see if a newer version is available.",
+                                  "Pulsa <b>Buscar actualizaciones</b> para ver si hay una versión más nueva."))
+    _ustatus.setWordWrap(True); _ustatus.setTextFormat(QtCore.Qt.RichText); _ustatus.setStyleSheet("color:#64748b;")
+    _unotes = QtWidgets.QTextBrowser(); _unotes.setMaximumHeight(180); _unotes.hide()
+    _ubrow = QtWidgets.QPushButton(T("🔍  Check for updates", "🔍  Buscar actualizaciones"))
+    _ubgo = QtWidgets.QPushButton(T("⬇  Update now", "⬇  Actualizar ahora"))
+    _ubgo.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
+    _ubgo.hide()
+    urow = QtWidgets.QHBoxLayout(); urow.addWidget(_ubrow); urow.addWidget(_ubgo); urow.addStretch(1)
+    _ufoot = QtWidgets.QLabel(T(
+        "Updates download and install automatically over the network; the app restarts when done. "
+        "No files to send — the field PC just needs internet.",
+        "Las actualizaciones se descargan e instalan automáticamente por red; la app se reinicia al terminar. "
+        "Sin enviar archivos — el PC de campo solo necesita internet."))
+    _ufoot.setWordWrap(True); _ufoot.setStyleSheet("color:#94a3b8;")
+    for w in (_cur, _ustatus, _unotes):
+        ul.addWidget(w)
+    ul.addLayout(urow); ul.addWidget(_ufoot); ul.addStretch(1)
+    st["_pending_update"] = None
+
+    def _upd_check():
+        _ubrow.setEnabled(False); _ubrow.setText(T("🔍  Checking…", "🔍  Buscando…"))
+        QtWidgets.QApplication.processEvents()
+        try:
+            from core.torsional.updater import diagnose
+            info, msg = diagnose(__version__)
+        except Exception as exc:  # noqa: BLE001
+            info, msg = None, f"Error: {type(exc).__name__}: {exc}"
+        _ubrow.setEnabled(True); _ubrow.setText(T("🔍  Check for updates", "🔍  Buscar actualizaciones"))
+        st["_pending_update"] = info
+        if info:
+            _ustatus.setText(T(f"✅ <b style='color:{GREEN}'>New version available: v{info['version']}</b>",
+                               f"✅ <b style='color:{GREEN}'>Nueva versión disponible: v{info['version']}</b>"))
+            _unotes.setPlainText((info.get("notes") or "").strip()); _unotes.show(); _ubgo.show()
+        else:
+            _ustatus.setText(_wl(msg).replace("\n", "<br>")); _unotes.hide(); _ubgo.hide()
+
+    def _upd_go():
+        if st.get("_pending_update"):
+            _show_update_banner(win, st["_pending_update"])
+    _ubrow.clicked.connect(_upd_check); _ubgo.clicked.connect(_upd_go)
+    tabs.addTab(pg_upd, T("Updates", "Actualizaciones"))
+
     _rebuild_scaling()
     return app, win
 
@@ -543,6 +660,14 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         app, win = build_app(simulated=True); win.showMaximized()
+        # Auto-actualizador: al conectar a internet, avisa si hay versión nueva (por red).
+        try:
+            _chk = _UpdateChecker(__version__, win)
+            _chk.found.connect(lambda info: _show_update_banner(win, info))
+            win._update_checker = _chk           # mantener referencia viva
+            QtCore.QTimer.singleShot(3000, _chk.start)
+        except Exception:  # noqa: BLE001
+            pass
         sys.exit(app.exec())
     except Exception:  # noqa: BLE001
         err = traceback.format_exc()
