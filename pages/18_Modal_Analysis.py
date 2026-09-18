@@ -1915,7 +1915,19 @@ if nav == T_REPORT:
                             _frR = np.asarray(_fddR.frequencies_hz, float)
                             _UR = np.asarray(_fddR.mode_shapes_at_freq); _svR = np.asarray(_fddR.singular_values)
                             _f1r = _rpm_r / 60.0
-                            for _ordk in (1, 2):
+                            # Órdenes para el reporte: 1× y 2× SIEMPRE; 3×..10× SOLO si hay respuesta
+                            # significativa (SV1 ≥ 15% del pico en banda) → sin gráficos vacíos.
+                            _sv1b = _svR[0] if _svR.ndim >= 2 else _svR
+                            _svpk = float(np.max(_sv1b)) if np.size(_sv1b) else 1.0
+                            _ords_r = [1, 2]
+                            for _kk in range(3, 11):
+                                _fk = _f1r * _kk
+                                if _fk > _frR.max():
+                                    break
+                                _jk = int(np.argmin(np.abs(_frR - _fk)))
+                                if _svpk > 0 and float(_sv1b[_jk]) >= 0.15 * _svpk:
+                                    _ords_r.append(_kk)
+                            for _ordk in _ords_r:
                                 _f0r = _f1r * _ordk
                                 if _UR.ndim != 3 or _f0r > _frR.max():
                                     continue
