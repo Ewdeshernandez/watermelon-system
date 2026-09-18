@@ -44,7 +44,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -310,6 +310,34 @@ def build_app(simulated: bool = True):
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
 
     # =================================================================
+    # TAB 0 — Setup (identificación de la máquina — alimenta el reporte)
+    # =================================================================
+    pg_set = QtWidgets.QWidget(); set_l = QtWidgets.QVBoxLayout(pg_set)
+    set_l.addWidget(QtWidgets.QLabel(T(
+        "Machine identification — used in the report and in the saved/uploaded run.",
+        "Identificación de la máquina — se usa en el reporte y en la corrida guardada/subida.")))
+    gb_set = QtWidgets.QGroupBox(T("Machine / asset", "Máquina / activo")); fset = QtWidgets.QFormLayout(gb_set)
+    ed_machine = QtWidgets.QLineEdit(); ed_tag = QtWidgets.QLineEdit(); ed_mtype = QtWidgets.QLineEdit()
+    ed_setclient = QtWidgets.QLineEdit(); ed_setloc = QtWidgets.QLineEdit()
+    sb_plate_rpm = QtWidgets.QDoubleSpinBox(); sb_plate_rpm.setRange(0, 30000); sb_plate_rpm.setValue(1800); sb_plate_rpm.setSuffix(" rpm")
+    ed_operator = QtWidgets.QLineEdit()
+    fset.addRow(T("Machine", "Máquina"), ed_machine)
+    fset.addRow(T("Tag", "Tag"), ed_tag)
+    fset.addRow(T("Machine type", "Tipo de máquina"), ed_mtype)
+    fset.addRow(T("Client", "Cliente"), ed_setclient)
+    fset.addRow(T("Location", "Ubicación"), ed_setloc)
+    fset.addRow(T("Nameplate RPM", "RPM de placa"), sb_plate_rpm)
+    fset.addRow(T("Operator", "Operador"), ed_operator)
+    set_l.addWidget(gb_set); set_l.addStretch(1)
+    tabs.addTab(pg_set, "Setup")
+
+    def _setup_dict():
+        return {"machine": ed_machine.text(), "tag": ed_tag.text(), "type": ed_mtype.text(),
+                "client": ed_setclient.text(), "location": ed_setloc.text(),
+                "nameplate_rpm": sb_plate_rpm.value(), "operator": ed_operator.text()}
+    st["setup_fn"] = _setup_dict
+
+    # =================================================================
     # Helpers de escalado
     # =================================================================
     def _current_units():
@@ -460,6 +488,16 @@ def build_app(simulated: bool = True):
     simf.addStretch(1); simf.addWidget(btn_start); simf.addWidget(btn_stop)
     live_l.addWidget(gb_sim)
 
+    # Fila de DATA: guardar cruda en el PC + subir a la nube (como el Modal)
+    datarow = QtWidgets.QHBoxLayout()
+    btn_save = QtWidgets.QPushButton(T("💾 Save run locally (raw)", "💾 Guardar corrida local (cruda)"))
+    btn_upload = QtWidgets.QPushButton(T("☁ Upload to cloud", "☁ Subir a la nube"))
+    btn_upload.setStyleSheet(f"QPushButton{{background:{ACC};color:#08243a;}}QPushButton:hover{{background:#149bcf;}}")
+    lbl_data = QtWidgets.QLabel(""); lbl_data.setStyleSheet("color:#475569;")
+    datarow.addWidget(QtWidgets.QLabel(T("Data:", "Data:"))); datarow.addWidget(btn_save)
+    datarow.addWidget(btn_upload); datarow.addWidget(lbl_data); datarow.addStretch(1)
+    live_l.addLayout(datarow)
+
     def _preset():
         """Parámetros de simulación según el preset (dict con rpm/mean/orders/…).
         Un motor recíprocante tiene firma torsional rica: medio-orden (0.5×) fuerte +
@@ -583,6 +621,7 @@ def build_app(simulated: bool = True):
         st["source"] = src
         maxlen = int(st["buf_secs"] * fs)
         st["buf_torque"] = deque(maxlen=maxlen); st["buf_kph"] = deque(maxlen=maxlen)
+        st["buf_volts"] = deque(maxlen=maxlen)      # data CRUDA (voltios del RX10K)
         st["running"] = True
         btn_start.setEnabled(False); btn_stop.setEnabled(True)
         live_timer.start()
@@ -605,6 +644,7 @@ def build_app(simulated: bool = True):
         torque_eu = voltage_to_torque(block[torque_i], sc)
         st["buf_torque"].extend(torque_eu.tolist())
         st["buf_kph"].extend(block[kph_i].tolist())
+        st.setdefault("buf_volts", deque(maxlen=len(st["buf_torque"]) or 1)).extend(block[torque_i].tolist())
 
         arr = np.asarray(st["buf_torque"]); kph = np.asarray(st["buf_kph"])
         fs = st["fs"]
@@ -633,6 +673,74 @@ def build_app(simulated: bool = True):
     btn_start.clicked.connect(_start_live)
     btn_stop.clicked.connect(_stop_live)
     live_timer.timeout.connect(_tick)
+
+    def _runs_dir():
+        import os
+        d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "runs")
+        os.makedirs(d, exist_ok=True); return d
+
+    def _collect_run():
+        """Arma el dict de la corrida (setup + config + arrays crudos)."""
+        if not st.get("buf_volts") or len(st["buf_volts"]) < 32:
+            return None
+        volts = np.asarray(st["buf_volts"], dtype=np.float32)
+        torque = np.asarray(st["buf_torque"], dtype=np.float32)
+        kph = np.asarray(st["buf_kph"], dtype=np.float32)
+        sc = st.get("scaling")
+        setup = st["setup_fn"]() if st.get("setup_fn") else {}
+        name = setup.get("machine") or setup.get("tag") or "Torsional run"
+        meta = {"setup": setup, "fs": st["fs"], "units": (sc.units if sc else "nm"),
+                "eu_per_volt": (sc.eu_per_volt if sc else None),
+                "n_samples": int(volts.size), "app_version": __version__}
+        return {"name": name, "meta": meta, "volts": volts, "torque": torque, "kph": kph}
+
+    def _save_run_local():
+        run = _collect_run()
+        if run is None:
+            QtWidgets.QMessageBox.warning(win, "Watermelon Torsional",
+                T("No captured data yet. Press Start to capture first.",
+                  "Aún no hay data capturada. Pulsa Start para capturar.")); return None
+        import os, json
+        from datetime import datetime
+        from core.torsional.cloud import _slug
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder = os.path.join(_runs_dir(), f"{_slug(run['name'])}_{ts}")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "run.json"), "w", encoding="utf-8") as f:
+            json.dump(run["meta"], f, ensure_ascii=False, indent=2)
+        # data.npz CRUDA y completa — la web la lee directo ('volts'/'kph'/'fs').
+        np.savez_compressed(os.path.join(folder, "data.npz"),
+                            volts=run["volts"], torque=run["torque"], kph=run["kph"],
+                            fs=np.float32(st["fs"]))
+        lbl_data.setText(T(f"✅ Saved: {folder}", f"✅ Guardado: {folder}"))
+        return folder, run
+
+    def _upload_run():
+        res = _save_run_local()
+        if not res:
+            return
+        folder, run = res
+        lbl_data.setText(T("☁ Uploading…", "☁ Subiendo…")); QtWidgets.QApplication.processEvents()
+        try:
+            from core.torsional import cloud
+            import socket
+            setup = run["meta"]["setup"]
+            rid, tstamp = cloud.new_run_id(run["name"])
+            raw = cloud.upload_raw(rid, run["volts"], st["fs"], channels=["Torque", "KPH"])
+            payload = dict(run["meta"]); payload["raw_ref"] = raw if raw.get("ok") else None
+            r = cloud.save_run(run["name"], payload, run_id=rid, ts=tstamp,
+                               client=setup.get("client", ""), tag=setup.get("tag", ""),
+                               hostname=socket.gethostname())
+        except Exception as exc:  # noqa: BLE001
+            r = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        if r.get("ok"):
+            lbl_data.setText(T(f"☁ Uploaded to cloud (id {r.get('id','')}).",
+                               f"☁ Subida a la nube (id {r.get('id','')})."))
+        else:
+            lbl_data.setText(T(f"⚠ Could not upload ({r.get('reason','offline')}). Saved locally is available.",
+                               f"⚠ No se pudo subir ({r.get('reason','offline')}). El guardado local queda disponible."))
+    btn_save.clicked.connect(_save_run_local)
+    btn_upload.clicked.connect(_upload_run)
     tabs.addTab(pg_live, T("Live torque", "Torque en vivo"))
 
     # =================================================================
@@ -962,9 +1070,13 @@ def build_app(simulated: bool = True):
             {"title": T("Fatigue (rainflow)", "Fatiga (rainflow)"),
              "figures": [(T("Rainflow histogram", "Histograma rainflow"), _grab_png(p_ft))]},
         ]
+        _su = st["setup_fn"]() if st.get("setup_fn") else {}
         meta = {"title": T("Preliminary Torsional Report", "Reporte Torsional Preliminar"),
-                "asset": ed_asset.text() or "—", "client": ed_client.text() or "—",
-                "prep": ed_prep.text() or "—", "rpm": f"{rpm:,.0f}", "equip": "TorqueTrak 10K + NI 9229"}
+                "asset": ed_asset.text() or _su.get("machine") or _su.get("tag") or "—",
+                "client": ed_client.text() or _su.get("client") or "—",
+                "prep": ed_prep.text() or _su.get("operator") or "—",
+                "location": _su.get("location", ""), "type": _su.get("type", ""),
+                "rpm": f"{rpm:,.0f}", "equip": "TorqueTrak 10K + NI 9229"}
         try:
             from core.modal.preliminary_report import build_preliminary_pdf
             _es = (_LANG == "es")
