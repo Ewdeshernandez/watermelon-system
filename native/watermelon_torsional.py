@@ -45,7 +45,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -376,6 +376,9 @@ def build_app(simulated: bool = True):
     ed_setclient = QtWidgets.QLineEdit(); ed_setloc = QtWidgets.QLineEdit()
     sb_plate_rpm = QtWidgets.QDoubleSpinBox(); sb_plate_rpm.setRange(0, 30000); sb_plate_rpm.setValue(1800); sb_plate_rpm.setSuffix(" rpm")
     ed_operator = QtWidgets.QLineEdit()
+    ed_approved = QtWidgets.QLineEdit()
+    ed_approved.setPlaceholderText(T("Reviewing engineer (signs the report)",
+                                     "Ingeniero que revisa (firma el reporte)"))
     fset.addRow(T("Machine", "Máquina"), ed_machine)
     fset.addRow(T("Tag", "Tag"), ed_tag)
     fset.addRow(T("Machine type", "Tipo de máquina"), ed_mtype)
@@ -383,6 +386,7 @@ def build_app(simulated: bool = True):
     fset.addRow(T("Location", "Ubicación"), ed_setloc)
     fset.addRow(T("Nameplate RPM", "RPM de placa"), sb_plate_rpm)
     fset.addRow(T("Operator", "Operador"), ed_operator)
+    fset.addRow(T("Approved by", "Aprobado por"), ed_approved)
     set_l.addWidget(gb_set)      # FIX v0.7.1: se había perdido — sin esto no aparecían los campos
     btn_savesetup = QtWidgets.QPushButton(T("💾 Save setup", "💾 Guardar setup"))
     btn_savesetup.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
@@ -396,7 +400,8 @@ def build_app(simulated: bool = True):
     def _setup_dict():
         return {"machine": ed_machine.text(), "tag": ed_tag.text(), "type": ed_mtype.text(),
                 "client": ed_setclient.text(), "location": ed_setloc.text(),
-                "nameplate_rpm": sb_plate_rpm.value(), "operator": ed_operator.text()}
+                "nameplate_rpm": sb_plate_rpm.value(), "operator": ed_operator.text(),
+                "approved_by": ed_approved.text()}
     st["setup_fn"] = _setup_dict
 
     def _save_setup():
@@ -416,6 +421,7 @@ def build_app(simulated: bool = True):
         except Exception:  # noqa: BLE001
             pass
         ed_operator.setText(str(_SET.value("operator", "") or ""))
+        ed_approved.setText(str(_SET.value("approved_by", "") or ""))
         if ed_machine.text():
             lbl_setsaved.setText(T("Loaded saved setup.", "Setup guardado cargado."))
     btn_savesetup.clicked.connect(_save_setup)
@@ -1341,6 +1347,7 @@ def build_app(simulated: bool = True):
                 "test_type": T("Torsional analysis", "Análisis torsional"),
                 "rpm": f"{rpm:,.0f}",
                 "technician": _su.get("operator") or "—",
+                "reviewer": _su.get("approved_by") or "—",
                 "date": _date.today().isoformat(),
                 "equipment": "TorqueTrak 10K + NI 9229"}
         try:
