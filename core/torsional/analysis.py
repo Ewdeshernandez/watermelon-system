@@ -334,6 +334,7 @@ def shaft_torsional_fatigue(
     window_seconds: float = 8.0,
     derating_kf: float = 0.70,
     design_safety_factor: float = 2.0,
+    endurance_ratio: float = 0.50,
 ) -> FatigueLife:
     """
     Vida a fatiga torsional del eje a partir de los ciclos rainflow del par.
@@ -345,6 +346,8 @@ def shaft_torsional_fatigue(
     window_seconds: duración de la captura (para proyectar vida en horas).
     derating_kf: factor de reducción de campo (superficie/tamaño/confiabilidad).
     design_safety_factor: SF objetivo para "vida infinita" (verde). API/AGMA ~1.5–2.
+    endurance_ratio: Se'/Sut del material. Acero ≈ 0.50; hierro dúctil ≈ 0.45;
+        fundición gris ≈ 0.40 (frágil, sin rodilla clara). Baja el límite de fatiga.
 
     Semáforo:
       VERDE  → SF ≥ design_safety_factor  (bajo el límite de fatiga, margen amplio).
@@ -356,7 +359,7 @@ def shaft_torsional_fatigue(
     # Módulo de sección polar → esfuerzo cortante por par (τ = T / Zp).
     zp = np.pi * (do ** 4 - di ** 4) / (16.0 * do)     # in³  (T en lb·in → τ en psi)
     ssu = 0.67 * sut                                    # resistencia última en cortante
-    sse = 0.577 * 0.5 * sut * float(derating_kf)        # límite de fatiga en cortante corregido
+    sse = 0.577 * float(endurance_ratio) * sut * float(derating_kf)  # límite de fatiga en cortante corregido
     # Punto de 1e3 ciclos en cortante (Basquin): 0.577 · 0.9 · Sut.
     ss1e3 = 0.577 * 0.9 * sut
     # Basquin  Sf = a·N^b  entre (1e3, ss1e3) y (1e6, sse).

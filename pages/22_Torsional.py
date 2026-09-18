@@ -471,19 +471,34 @@ elif nav == T_FAT:
         rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
         rmax = float(rr.max())
         # --- Datos del eje (para el diagnóstico de vida) ---
+        # (nombre, Sut ksi, Se'/Sut) — mismo catálogo que la app de campo.
+        _MATCAT = {
+            "Steel 4140 Q&T": (140.0, 0.50), "Steel 4140 annealed": (95.0, 0.50),
+            "Steel 1045": (90.0, 0.50), "Ductile iron (80-55-06)": (80.0, 0.45),
+            "Gray cast iron (class 40)": (40.0, 0.40), "Stainless (410/17-4)": (95.0, 0.50),
+            "Aluminum (6061-T6)": (45.0, 0.45), "Titanium (Ti-6Al-4V)": (130.0, 0.45),
+            "Custom": (None, 0.50),
+        }
         _shaft = run.get("shaft", {}) if isinstance(run.get("shaft"), dict) else {}
-        c1, c2, c3, c4 = st.columns(4)
-        do_in = c1.number_input("Shaft Ø outer (in)", 0.1, 100.0,
+        c1, c2, c3, c4, c5 = st.columns(5)
+        mat = c1.selectbox("Material", list(_MATCAT), key="tors_fat_mat")
+        _mat_sut, _endr = _MATCAT[mat]
+        do_in = c2.number_input("Shaft Ø outer (in)", 0.1, 100.0,
                                 float(_shaft.get("do", 3.0)), 0.1, key="tors_fat_do")
-        di_in = c2.number_input("Shaft Ø inner (in)", 0.0, 99.0,
+        di_in = c3.number_input("Shaft Ø inner (in)", 0.0, 99.0,
                                 float(_shaft.get("di", 0.0)), 0.1, key="tors_fat_di")
-        sut_ksi = c3.number_input("Ultimate Sut (ksi)", 10.0, 400.0,
-                                  float(_shaft.get("sut", 90.0)), 1.0, key="tors_fat_sut")
-        design_sf = c4.selectbox("Design safety factor", [2.0, 1.5, 3.0], key="tors_fat_sf")
+        if _mat_sut is not None:
+            sut_ksi = float(_mat_sut)
+            c4.metric("Ultimate Sut", f"{sut_ksi:.0f} ksi")
+        else:
+            sut_ksi = c4.number_input("Ultimate Sut (ksi)", 10.0, 400.0,
+                                      float(_shaft.get("sut", 90.0)), 1.0, key="tors_fat_sut")
+        design_sf = c5.selectbox("Design safety factor", [2.0, 1.5, 3.0], key="tors_fat_sf")
         life = shaft_torsional_fatigue(
             rainflow_cycles(torque), outer_diameter_in=do_in, inner_diameter_in=di_in,
             ultimate_strength_psi=sut_ksi * 1000.0, torque_units=run["units"],
-            window_seconds=float(torque.size / fs), design_safety_factor=float(design_sf))
+            window_seconds=float(torque.size / fs), design_safety_factor=float(design_sf),
+            endurance_ratio=float(_endr))
         _bg = {"green": ("#dcfce7", "#166534", GREEN), "yellow": ("#fef9c3", "#854d0e", AMBER),
                "red": ("#fee2e2", "#991b1b", RED)}[life.status]
         _sf_txt = "∞" if life.safety_factor == float("inf") else f"{life.safety_factor:.2f}"

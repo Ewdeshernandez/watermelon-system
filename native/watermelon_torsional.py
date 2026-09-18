@@ -45,7 +45,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -68,15 +68,20 @@ _GAGES = [
 ]
 # Materiales del eje: E en ×10⁶ psi, ν (Poisson). La galga STC 06 está
 # compensada térmicamente para ACERO; otros materiales cambian la compensación.
-# (nombre, E [×10⁶ psi], ν, Sut [ksi]) — Sut típico de eje de máquina por material.
+# (nombre, E [×10⁶ psi], ν, Sut [ksi], Se'/Sut) — eje de máquina típico por material.
+# Se'/Sut: acero ≈0.50 · hierro dúctil ≈0.45 · fundición gris ≈0.40 (frágil).
 _MATERIALS = [
-    ("Steel / Acero", 30.0, 0.30, 90.0),          # acero medio C (AISI 1045)
-    ("Stainless / Inoxidable", 28.0, 0.30, 95.0), # inox de eje (410/17-4)
-    ("Aluminum / Aluminio", 10.0, 0.33, 45.0),    # 6061-T6
-    ("Titanium / Titanio", 16.5, 0.34, 130.0),    # Ti-6Al-4V
-    ("Brass / Bronce", 15.0, 0.34, 50.0),
-    ("Copper / Cobre", 17.0, 0.34, 32.0),
-    ("Custom / Personalizado", None, None, None),
+    ("Steel 4140 Q&T / Acero 4140 templado", 30.0, 0.30, 140.0, 0.50),  # el más común en ejes
+    ("Steel 4140 annealed / 4140 recocido", 30.0, 0.30, 95.0, 0.50),
+    ("Steel 1045 / Acero 1045", 30.0, 0.30, 90.0, 0.50),                # acero medio C
+    ("Ductile iron / Hierro dúctil (80-55-06)", 24.5, 0.28, 80.0, 0.45),
+    ("Gray cast iron / Fundición gris (class 40)", 15.0, 0.26, 40.0, 0.40),
+    ("Stainless / Inoxidable (410/17-4)", 28.0, 0.30, 95.0, 0.50),
+    ("Aluminum / Aluminio (6061-T6)", 10.0, 0.33, 45.0, 0.45),
+    ("Titanium / Titanio (Ti-6Al-4V)", 16.5, 0.34, 130.0, 0.45),
+    ("Brass / Bronce", 15.0, 0.34, 50.0, 0.45),
+    ("Copper / Cobre", 17.0, 0.34, 32.0, 0.45),
+    ("Custom / Personalizado", None, None, None, None),
 ]
 
 
@@ -488,10 +493,11 @@ def build_app(simulated: bool = True):
     form_wrap.addWidget(gb_shaft)
 
     def _on_material(_=0):
-        name, e, nu, sut = _MATERIALS[cb_material.currentIndex()]
+        name, e, nu, sut, endr = _MATERIALS[cb_material.currentIndex()]
         custom = (e is None)
         if not custom:
             sb_e.setValue(e); sb_nu.setValue(nu); sb_sut.setValue(sut)
+        st["endurance_ratio"] = endr if endr is not None else 0.50
         sb_e.setEnabled(custom); sb_nu.setEnabled(custom); sb_sut.setEnabled(custom)
     cb_material.currentIndexChanged.connect(_on_material)
 
@@ -1178,7 +1184,8 @@ def build_app(simulated: bool = True):
         life = shaft_torsional_fatigue(
             cyc, outer_diameter_in=sb_do.value(), inner_diameter_in=sb_di.value(),
             ultimate_strength_psi=sb_sut.value() * 1000.0, torque_units=units,
-            window_seconds=win_s, design_safety_factor=float(cb_ft_sf.currentText()))
+            window_seconds=win_s, design_safety_factor=float(cb_ft_sf.currentText()),
+            endurance_ratio=float(st.get("endurance_ratio", 0.50)))
         st["fat"] = {"ranges": ranges, "units": u, "life": life}
 
         bg, fg = _LIGHT_BG[life.status]
