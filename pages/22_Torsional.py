@@ -95,6 +95,14 @@ def _inject_theme():
         text-transform:uppercase; padding:5px 12px; border-radius:999px; }
       .wm-go { background:#16a34a; color:#fff; } .wm-rev { background:#f59e0b; color:#0f1e3d; }
       .wm-nogo { background:#dc2626; color:#fff; }
+      /* Hero de contexto de la corrida */
+      .wm-hero { background:linear-gradient(110deg,#0F1E3D 0%,#12325a 55%,#16a34a 165%);
+        border-radius:12px; padding:13px 20px; color:#fff; box-shadow:0 6px 18px rgba(15,30,61,.16);
+        display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; margin:6px 0 2px; }
+      .wm-hero h1 { font-size:18px; font-weight:700; margin:0 0 3px; letter-spacing:-.01em; }
+      .wm-hero .meta { color:#cbd5e1; font-size:12px; }
+      /* Badges de tabla */
+      table.wm-modes .pill { padding:3px 11px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
       /* Tabla bonita (mismo estilo que el módulo Modal) */
       table.wm-modes { width:100%; border-collapse:separate; border-spacing:0;
         font-family:'IBM Plex Sans',sans-serif; border:1px solid #e6ecf5; border-radius:14px;
@@ -152,6 +160,22 @@ def _sec(title, hint=""):
     st.markdown(f'<div class="wm-sec">{title} <span>{hint}</span></div>', unsafe_allow_html=True)
 
 
+def _pill(text, color, bg):
+    return f"<span class='pill' style='color:{color};background:{bg}'>{text}</span>"
+
+
+# Paleta de pills (igual que el módulo Modal)
+PILL_GREEN = ("#16a34a", "#eaf7ef"); PILL_AMBER = ("#b45309", "#fef3e2")
+PILL_RED = ("#dc2626", "#fdeaea"); PILL_SLATE = ("#64748b", "#eef2f8")
+
+
+# Nav con bolitas de color (emojis de círculo, como el Modal)
+T_OVR = "🟢  Overview"
+T_SPEC = "🟡  Spectrum & orders"
+T_ORD = "🔵  Order tracking"
+T_FAT = "🔴  Fatigue"
+
+
 # =====================================================================
 # Datasets (demo simulado). Cacheados — el mismo núcleo que la app de campo.
 # =====================================================================
@@ -167,7 +191,8 @@ def _demo_steady(rpm=1800.0, mean=1200.0, a1=70.0, a2=30.0, res_hz=0.0, units="n
     src = SimulatedTorsionalSource(cfg); src.start()
     data = np.concatenate([src.read_block() for _ in range(24)], axis=1)
     kph_i = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != kph_i)
-    return dict(torque=voltage_to_torque(data[ti], sc), kph=data[kph_i], fs=fs, rpm=rpm, units=units)
+    return dict(torque=voltage_to_torque(data[ti], sc), kph=data[kph_i], fs=fs, rpm=rpm,
+                units=units, name="Simulated demo — Motor-Pump shaft", field=False)
 
 
 @st.cache_data(show_spinner=False)
@@ -198,7 +223,8 @@ def _parse_upload(file, sc: TorqueScaling):
     else:
         raise ValueError("El .npz debe tener 'torque' (EU) o 'volts'.")
     kph = np.asarray(z["kph"], float) if "kph" in z else np.zeros_like(torque)
-    return dict(torque=torque, kph=kph, fs=fs, rpm=None, units=sc.units)
+    return dict(torque=torque, kph=kph, fs=fs, rpm=None, units=sc.units,
+                name=getattr(file, "name", "Uploaded run"), field=True)
 
 
 # =====================================================================
@@ -233,18 +259,52 @@ with st.expander("⚙  Data source & scaling", expanded=False):
 
 if run is None:
     run = _demo_steady(units=units_key)
-    st.caption("🔬 Showing a **simulated demo** run — capture in the field app or upload a .npz for real data.")
 
 torque = run["torque"]; kph = run["kph"]; fs = run["fs"]; u = "N·m" if run["units"] == "nm" else "ft-lb"
 _, _rpm_series = keyphasor_to_rpm(kph, fs)
 rpm = float(np.median(_rpm_series)) if _rpm_series.size else (run.get("rpm") or 1800.0)
 
 # =====================================================================
-# Navegación persistente
+# Hero de contexto de la corrida + KPIs persistentes (como el Modal)
 # =====================================================================
-_NAV = ["Overview", "Spectrum & orders", "Order tracking", "Fatigue"]
+m = torque_metrics(torque)
+if m.ripple_pct < 10:
+    _chip, _cls = "TORQUE STABLE", "wm-go"
+elif m.ripple_pct < 25:
+    _chip, _cls = "MODERATE RIPPLE", "wm-rev"
+else:
+    _chip, _cls = "HIGH RIPPLE", "wm-nogo"
+_src = "☁ Field run" if run.get("field") else "⚪ Simulated dataset"
+ripple_txt = "∞" if m.ripple_pct == float("inf") else f"{m.ripple_pct:.1f}%"
+st.markdown(f"""
+<div class="wm-hero">
+  <div>
+    <h1>{run.get('name', 'Torsional run')}</h1>
+    <div class="meta">TorqueTrak 10K · NI 9229 · {u} · fs {fs:,.0f} Hz · {torque.size/fs:.1f} s</div>
+  </div>
+  <div style="text-align:right">
+    <span class="wm-chip {_cls}">● {_chip}</span>
+    <div class="meta" style="margin-top:8px">{_src}</div>
+  </div>
+</div>
+<div class="wm-kpis">
+  <div class="wm-kpi"><div class="v">{m.mean:,.1f}<span style="font-size:13px"> {u}</span></div>
+    <div class="l">Mean torque</div><div class="s">static</div></div>
+  <div class="wm-kpi"><div class="v">{m.peak_to_peak:,.1f}<span style="font-size:13px"> {u}</span></div>
+    <div class="l">Peak-peak</div><div class="s">dynamic</div></div>
+  <div class="wm-kpi"><div class="v">{ripple_txt}</div>
+    <div class="l">Ripple</div><div class="s">pp / mean</div></div>
+  <div class="wm-kpi"><div class="v">{rpm:,.0f}<span style="font-size:13px"> rpm</span></div>
+    <div class="l">Running speed</div><div class="s">1× = {rpm/60:.1f} Hz</div></div>
+</div>
+""", unsafe_allow_html=True)
+
+# =====================================================================
+# Navegación persistente — bolitas de color (segmented control)
+# =====================================================================
+_NAV = [T_OVR, T_SPEC, T_ORD, T_FAT]
 if "tors_nav" not in st.session_state:
-    st.session_state["tors_nav"] = _NAV[0]
+    st.session_state["tors_nav"] = T_OVR
 if hasattr(st, "segmented_control"):
     nav = st.segmented_control("Section", _NAV, key="tors_nav",
                                label_visibility="collapsed") or st.session_state["tors_nav"]
@@ -253,33 +313,19 @@ else:
 
 
 # --------------------------------------------------------------- Overview
-if nav == "Overview":
-    m = torque_metrics(torque)
-    ripple_txt = "∞" if m.ripple_pct == float("inf") else f"{m.ripple_pct:.1f}%"
-    _kpis([
-        (f"{m.mean:,.1f}<span style='font-size:13px'> {u}</span>", "Mean torque", "static"),
-        (f"{m.peak_to_peak:,.1f}<span style='font-size:13px'> {u}</span>", "Peak-peak", "dynamic"),
-        (ripple_txt, "Ripple", "pp / mean"),
-        (f"{rpm:,.0f}<span style='font-size:13px'> rpm</span>", "Running speed", f"1× = {rpm/60:.1f} Hz"),
-    ])
-    if m.ripple_pct < 10:
-        chip, txt = "wm-go", "LOW RIPPLE"
-    elif m.ripple_pct < 25:
-        chip, txt = "wm-rev", "MODERATE RIPPLE"
-    else:
-        chip, txt = "wm-nogo", "HIGH RIPPLE"
-    st.markdown(f'<span class="wm-chip {chip}">● {txt}</span>', unsafe_allow_html=True)
-
+if nav == T_OVR:
     _sec("Torque waveform", "engineering units vs time")
     t = np.arange(torque.size) / fs
     fig = go.Figure(go.Scatter(x=t, y=torque, mode="lines", line=dict(color=BLUE, width=1.3),
                                name="torque"))
     fig.add_hline(y=m.mean, line=dict(color=SLATE, dash="dash"),
                   annotation_text=f"mean {m.mean:,.0f} {u}", annotation_position="top left")
-    _navplot(_apply(fig, height=380, xlab="time (s)", ylab=f"torque ({u})"))
+    _navplot(_apply(fig, height=400, xlab="time (s)", ylab=f"torque ({u})"))
+    st.caption(f"RMS **{m.rms:,.1f} {u}** · crest factor **{m.crest_factor:.2f}** · "
+               f"dynamic peak **{m.peak_to_peak/2:,.1f} {u}**")
 
 # ---------------------------------------------------- Spectrum & orders
-elif nav == "Spectrum & orders":
+elif nav == T_SPEC:
     freqs, amp = torque_spectrum(torque, fs)
     mask = freqs <= 600.0
     f1 = rpm / 60.0
@@ -304,17 +350,26 @@ elif nav == "Spectrum & orders":
     figo.update_layout(hovermode=False)
     _navplot(_apply(figo, height=260, ylab=f"amplitude ({u})"))
 
+    amax = max(oa[float(o)][0] for o in orders) or 1.0
+
+    def _level(a):
+        if a >= 0.5 * amax:
+            return _pill("dominant", *PILL_GREEN)
+        if a >= 0.1 * amax:
+            return _pill("present", *PILL_AMBER)
+        return _pill("trace", *PILL_SLATE)
     rows = "".join(
         f'<tr><td class="idx">{o}×</td><td class="num">{o*f1:.2f}<span class="u"> Hz</span></td>'
         f'<td class="num">{oa[float(o)][0]:.2f}<span class="u"> {u}</span></td>'
-        f'<td class="num">{oa[float(o)][1]:+.1f}<span class="u"> °</span></td></tr>' for o in orders)
+        f'<td class="num">{oa[float(o)][1]:+.1f}<span class="u"> °</span></td>'
+        f'<td>{_level(oa[float(o)][0])}</td></tr>' for o in orders)
     st.markdown(
         '<table class="wm-modes"><thead><tr><th>Order</th><th>Frequency</th>'
-        f'<th>Amplitude</th><th>Phase</th></tr></thead><tbody>{rows}</tbody></table>',
+        f'<th>Amplitude</th><th>Phase</th><th>Level</th></tr></thead><tbody>{rows}</tbody></table>',
         unsafe_allow_html=True)
 
 # ------------------------------------------------------- Order tracking
-elif nav == "Order tracking":
+elif nav == T_ORD:
     _sec("Run-up order tracking", "amplitude of each order vs speed — peaks reveal torsional resonances")
     ru = _demo_runup(units=run["units"])
     rt = ru["torque"]; rkph = ru["kph"]; rfs = ru["fs"]
@@ -336,7 +391,7 @@ elif nav == "Order tracking":
                "torsional natural frequency (30 Hz here → 1× at 1800 rpm, 2× at 900 rpm).")
 
 # -------------------------------------------------------------- Fatigue
-elif nav == "Fatigue":
+elif nav == T_FAT:
     _sec("Rainflow cycle counting", "ASTM E1049 — input for fatigue life / Miner damage on the shaft")
     ranges = fatigue_ranges(torque)
     if not ranges:
