@@ -80,6 +80,8 @@ _TXT = {
                     "Goodman / vida a fatiga."),
         "h_order": ["Orden", "Frecuencia", "Amplitud", "Fase", "Nivel"],
         "h_cross": ["Natural", "Frecuencia", "Orden", "RPM cruce", "Margen", "Estado"],
+        "norms_intro": ("El análisis torsional se rige por el siguiente marco normativo, base de "
+                        "todos los criterios de evaluación aplicados en este informe:"),
     },
     "en": {
         "s_intro": "Introduction and scope",
@@ -112,6 +114,8 @@ _TXT = {
                     "fatigue life."),
         "h_order": ["Order", "Frequency", "Amplitude", "Phase", "Level"],
         "h_cross": ["Natural", "Frequency", "Order", "Crossing", "Margin", "Status"],
+        "norms_intro": ("The torsional analysis is governed by the following framework, the basis "
+                        "for all evaluation criteria applied in this report:"),
     },
 }
 
@@ -204,7 +208,11 @@ def build_torsional_pdf(
     body.append(subsection(L["sub_fat"], styles))
     _fig(fatigue_png, L["cap_fat"])
 
-    body.append(subsection(L["sub_norms"], styles))
+    # 5 · Marco normativo — SECCIÓN de nivel superior (entra al TOC como ítem
+    # propio, igual que "6. Normativa" del reporte Modal). El marco normativo es
+    # la base del análisis y debe listarse aparte, no anidado en Desarrollo.
+    _S(L["sub_norms"])
+    body.append(p(L["norms_intro"], styles))
     body.extend(bullets([str(x) for x in (norms or (DEFAULT_NORMS if lang == "es" else _NORMS_EN))], styles))
 
     return render_report_pdf(meta, body)
