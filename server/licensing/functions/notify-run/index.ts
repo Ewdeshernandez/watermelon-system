@@ -23,12 +23,17 @@ Deno.serve(async (req) => {
     const ip = String(rec.ip ?? "").trim();
     const geo = String(rec.geo ?? "").trim();
     const when = String(rec.created_at ?? rec.updated_at ?? "");
+    // Módulo (Modal / Torsional) — el mismo notify sirve a ambos.
+    const moduleName = String(rec.module ?? "Modal");
+    const isTors = moduleName.toLowerCase().startsWith("tors");
+    const kind = isTors ? "torsional" : "OMA";
+    const webMod = isTors ? "Torsional" : "Modal";
     const rowIp = ip ? `<tr><td style="padding:4px 10px;color:#64748b">IP de conexión</td><td style="padding:4px 10px">${ip}</td></tr>` : "";
     const rowGeo = geo ? `<tr><td style="padding:4px 10px;color:#64748b">Ubicación aprox.</td><td style="padding:4px 10px">${geo}</td></tr>` : "";
     const html = `
       <div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2937">
         <h2 style="color:#0f2a4a">🍉 Nueva corrida de campo en Watermelon System</h2>
-        <p>Llegó una corrida OMA nueva desde el campo. Ábrela en la web → módulo <b>Modal</b> → <b>Data source</b>.</p>
+        <p>Llegó una corrida ${kind} nueva desde el campo. Ábrela en la web → módulo <b>${webMod}</b> → <b>Data source</b>.</p>
         <table style="border-collapse:collapse;font-size:14px">
           <tr><td style="padding:4px 10px;color:#64748b">Corrida</td><td style="padding:4px 10px"><b>${name}</b></td></tr>
           <tr><td style="padding:4px 10px;color:#64748b">Cliente</td><td style="padding:4px 10px">${client}</td></tr>
@@ -43,7 +48,7 @@ Deno.serve(async (req) => {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to, subject: `🔔 Nueva corrida: ${name} (${client})`, html }),
+      body: JSON.stringify({ from, to, subject: `🔔 Nueva corrida ${webMod}: ${name} (${client})`, html }),
     });
     const data = await r.json().catch(() => ({}));
     return new Response(JSON.stringify({ ok: r.ok, data }), { status: r.ok ? 200 : 500 });

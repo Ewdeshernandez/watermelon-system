@@ -44,8 +44,11 @@ def new_run_id(name: str):
 
 
 def save_run(name: str, payload: Dict[str, Any], run_id: str = "", ts: str = "",
-             account: str = "", client: str = "", tag: str = "", hostname: str = "") -> Dict[str, Any]:
-    """Sube una corrida torsional (metadata) a la tabla `torsional_runs`."""
+             account: str = "", client: str = "", tag: str = "", hostname: str = "",
+             ip: str = "", geo: str = "") -> Dict[str, Any]:
+    """Sube una corrida torsional (metadata) a la tabla `torsional_runs`.
+    account = cuenta/licencia · ip/geo = IP pública + ubicación aprox. del PC de
+    campo (trazabilidad para el aviso por correo, como el modal)."""
     c = _client()
     if c is None:
         return {"ok": False, "reason": "offline"}
@@ -53,7 +56,8 @@ def save_run(name: str, payload: Dict[str, Any], run_id: str = "", ts: str = "",
         if not run_id or not ts:
             run_id, ts = new_run_id(name)
         row = {"id": run_id, "name": name or "Torsional run", "metadata": payload, "updated_at": ts,
-               "account": account or "", "client": client or "", "tag": tag or "", "hostname": hostname or ""}
+               "account": account or "", "client": client or "", "tag": tag or "", "hostname": hostname or "",
+               "ip": ip or "", "geo": geo or "", "module": "Torsional"}
         try:
             c.table(_RUNS_TABLE).upsert(row).execute()
         except Exception:  # noqa: BLE001

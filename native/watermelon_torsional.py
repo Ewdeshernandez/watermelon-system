@@ -44,7 +44,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -143,6 +143,54 @@ def _detect_dc_channels():
         return n
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _run_trace_tags():
+    """(account, hostname) para trazabilidad de la corrida subida: quién (cuenta
+    de la licencia) y desde qué PC. Robusto si el módulo de licencia no está."""
+    try:
+        from core.modal import licensing as _lic
+        _acc = str((_lic.local_license_status() or {}).get("account") or "")
+        return _acc, _lic.machine_label()
+    except Exception:  # noqa: BLE001
+        try:
+            import socket as _s, getpass as _g
+            return "", f"{_s.gethostname()} / {_g.getuser()}"
+        except Exception:  # noqa: BLE001
+            return "", ""
+
+
+def _conn_ip_geo():
+    """(ip, geo) PÚBLICOS del PC de campo al subir — trazabilidad (aviso por correo).
+    geo = 'Ciudad, Región, PAÍS' aprox. por IP. Best-effort; si falla → ('', '')."""
+    import json as _j, urllib.request as _u
+    def _ssl():
+        import ssl as _s
+        try:
+            import certifi as _c
+            return _s.create_default_context(cafile=_c.where())
+        except Exception:  # noqa: BLE001
+            try:
+                return _s.create_default_context()
+            except Exception:  # noqa: BLE001
+                return None
+    def _get(url, t=3.5):
+        req = _u.Request(url, headers={"User-Agent": "WatermelonTorsional"})
+        with _u.urlopen(req, timeout=t, context=_ssl()) as r:
+            return _j.loads(r.read().decode("utf-8", "replace"))
+    try:
+        d = _get("https://ipapi.co/json/")
+        ip = str(d.get("ip") or "")
+        parts = [d.get("city"), d.get("region"), d.get("country_name") or d.get("country")]
+        geo = ", ".join(str(p) for p in parts if p)
+        if ip:
+            return ip, geo
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return str(_get("https://api.ipify.org?format=json").get("ip") or ""), ""
+    except Exception:  # noqa: BLE001
+        return "", ""
 
 
 def _wl(t):
@@ -728,9 +776,11 @@ def build_app(simulated: bool = True):
             rid, tstamp = cloud.new_run_id(run["name"])
             raw = cloud.upload_raw(rid, run["volts"], st["fs"], channels=["Torque", "KPH"])
             payload = dict(run["meta"]); payload["raw_ref"] = raw if raw.get("ok") else None
-            r = cloud.save_run(run["name"], payload, run_id=rid, ts=tstamp,
+            _acc, _host = _run_trace_tags()          # cuenta (licencia) + PC
+            _ip, _geo = _conn_ip_geo()               # IP pública + ubicación aprox.
+            r = cloud.save_run(run["name"], payload, run_id=rid, ts=tstamp, account=_acc,
                                client=setup.get("client", ""), tag=setup.get("tag", ""),
-                               hostname=socket.gethostname())
+                               hostname=_host or socket.gethostname(), ip=_ip, geo=_geo)
         except Exception as exc:  # noqa: BLE001
             r = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
         if r.get("ok"):
