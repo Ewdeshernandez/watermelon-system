@@ -44,7 +44,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -376,6 +376,7 @@ def build_app(simulated: bool = True):
     fset.addRow(T("Location", "Ubicación"), ed_setloc)
     fset.addRow(T("Nameplate RPM", "RPM de placa"), sb_plate_rpm)
     fset.addRow(T("Operator", "Operador"), ed_operator)
+    set_l.addWidget(gb_set)      # FIX v0.7.1: se había perdido — sin esto no aparecían los campos
     btn_savesetup = QtWidgets.QPushButton(T("💾 Save setup", "💾 Guardar setup"))
     btn_savesetup.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
     lbl_setsaved = QtWidgets.QLabel(""); lbl_setsaved.setStyleSheet("color:#16a34a; font-weight:700;")
