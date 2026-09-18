@@ -109,6 +109,16 @@ NAV_GROUPS = [
         ],
     },
     {
+        "section": "Torsional Analysis",
+        "items": [
+            # Módulo Torsional (par / vibración torsional) — telemetría Binsfeld
+            # TorqueTrak 10K leída con NI 9229 (voltaje DC). Web = SOLO análisis
+            # (order tracking, Campbell de torque, fatiga rainflow ASTM E1049).
+            # Solo admin/specialist — bloqueado para cliente. Motor en core.torsional.
+            {"label": "🌀  Torsional", "page": "pages/22_Torsional.py"},
+        ],
+    },
+    {
         "section": "Balanceo",
         "items": [
             # Módulo Balanceo (coef. de influencia 1/2 planos) bajo ISO 21940-11/12
@@ -199,6 +209,9 @@ CLIENT_BLOCKED_PAGES = {
     "pages/18_Modal_Analysis.py",
     # Balanceo: herramienta del analista (coef. influencia ISO 21940 / API 684)
     "pages/19_Balanceo.py",
+    # Torsional: herramienta del analista (par TorqueTrak 10K, order tracking,
+    # Campbell de torque, fatiga rainflow). El cliente recibe el reporte final.
+    "pages/22_Torsional.py",
     # FASE J v3.31.221 — Admin licencias Planta es solo SIGA internal
     "pages/20_License_Admin.py",
     # v3.31.492 — Hub de Administración (Clientes/Licencias/Usuarios), solo admin
