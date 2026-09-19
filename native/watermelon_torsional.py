@@ -50,7 +50,7 @@ from core.torsional.ni_source import (
 )
 from core.torsional.monitor import TorsionalMonitor
 
-__version__ = "0.12.3"
+__version__ = "0.12.4"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 

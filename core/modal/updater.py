@@ -105,31 +105,50 @@ def diagnose(current_version: str, timeout: float = 6.0):
     return None, (f"You are up to date (v{current_version}).\nHTTP {code}.")
 
 
-def download_file(url: str, dest: Optional[str] = None, timeout: float = 300.0,
-                  on_progress=None) -> Optional[str]:
-    """Descarga `url` a `dest` (o a temp). Devuelve la ruta local o None."""
+def download_file(url: str, dest: Optional[str] = None, timeout: float = 60.0,
+                  on_progress=None, retries: int = 6) -> Optional[str]:
+    """Descarga `url` RESISTENTE: reanuda (HTTP Range) y reintenta si la red corta.
+    Devuelve la ruta local (verificada por tamaño) o None."""
     if not url:
         return None
     dest = dest or os.path.join(tempfile.gettempdir(), url.split("/")[-1].split("?")[0])
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "WatermelonModal-Updater"})
-        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
-            total = int(r.headers.get("Content-Length", 0) or 0)
-            got = 0
-            with open(dest, "wb") as f:
-                while True:
-                    chunk = r.read(262144)
-                    if not chunk:
-                        break
-                    f.write(chunk); got += len(chunk)
-                    if on_progress and total:
-                        try:
-                            on_progress(got / total)
-                        except Exception:  # noqa: BLE001
-                            pass
-        return dest
-    except Exception:  # noqa: BLE001
-        return None
+    part = dest + ".part"
+    total = 0
+    for _attempt in range(max(1, retries)):
+        got = os.path.getsize(part) if os.path.exists(part) else 0
+        headers = {"User-Agent": "WatermelonModal-Updater"}
+        if got > 0:
+            headers["Range"] = f"bytes={got}-"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
+                code = r.getcode()
+                if got > 0 and code != 206:
+                    got = 0
+                clen = int(r.headers.get("Content-Length", 0) or 0)
+                if code == 206:
+                    cr = r.headers.get("Content-Range", "")
+                    if "/" in cr:
+                        try: total = int(cr.rsplit("/", 1)[1])
+                        except Exception: total = got + clen  # noqa: BLE001
+                else:
+                    total = clen
+                with open(part, "ab" if got > 0 else "wb") as f:
+                    while True:
+                        chunk = r.read(262144)
+                        if not chunk:
+                            break
+                        f.write(chunk); got += len(chunk)
+                        if on_progress and total:
+                            try: on_progress(min(got / total, 1.0))
+                            except Exception: pass  # noqa: BLE001
+            if total and os.path.getsize(part) < total:
+                continue
+            os.replace(part, dest)
+            return dest
+        except Exception:  # noqa: BLE001
+            continue
+    return None
 
 
 def launch_installer(setup_path: str) -> bool:
