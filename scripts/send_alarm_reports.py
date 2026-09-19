@@ -54,6 +54,56 @@ def _has_recipient(inst) -> bool:
     return bool((email and "@" in email) or wa)
 
 
+def _data_age_minutes(iid: str):
+    """Edad (min) del dato MÁS reciente del activo, o None si nunca hubo datos.
+    Sirve para el heartbeat: distinguir 'sin servicio' (None) de 'se calló' (grande)."""
+    from datetime import datetime, timezone
+    try:
+        from core.live_readings import latest_for_instance
+        rows = latest_for_instance(iid) or []
+    except Exception:  # noqa: BLE001
+        return None
+    ts = []
+    for r in rows:
+        c = r.get("captured_at")
+        if not c:
+            continue
+        try:
+            d = datetime.fromisoformat(str(c).replace("Z", "+00:00"))
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+            ts.append(d)
+        except Exception:  # noqa: BLE001
+            pass
+    if not ts:
+        return None
+    return (datetime.now(timezone.utc) - max(ts)).total_seconds() / 60.0
+
+
+def _send_offline_alert(inst, tag: str, age_min: float) -> bool:
+    """Aviso OFFLINE (dead-man-switch) por email: el activo dejó de reportar."""
+    email = (getattr(inst, "client_email", "") or "").strip()
+    tos = [e.strip() for e in email.replace(";", ",").split(",") if "@" in e]
+    if not tos:
+        return False
+    hrs = age_min / 60.0
+    subject = f"⚠ {tag}: SIN DATOS hace {hrs:.1f} h — posible pérdida de comunicación"
+    body = (f"El activo {tag} dejó de reportar al sistema de monitoreo hace "
+            f"{hrs:.1f} h.\n\nPosible causa: enlace/colector detenido, sensor o "
+            f"comunicación caída. El monitoreo en línea NO está recibiendo datos "
+            f"de este equipo.\n\nAcción: revisar el colector y el enlace del sitio.\n\n"
+            f"— Watermelon System (aviso automático)")
+    ok = False
+    try:
+        from core.email_sender import send_email
+        for to in tos:
+            r = send_email(to, subject, body)
+            ok = ok or bool(r and (r.get("ok") if isinstance(r, dict) else r))
+    except Exception as e:  # noqa: BLE001
+        log.error("   %s: fallo enviando aviso offline: %s", tag, e)
+    return ok
+
+
 def process(only_instance: str = "", force: bool = False, dry_run: bool = False) -> int:
     from core.instance_state import list_instances, get_instance, update_instance_header
     from core.live_report_builder import current_severity_level, build_report_for_instance
@@ -86,6 +136,32 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
 
         tag = getattr(inst, "tag", "") or iid
         stored = int(getattr(inst, "alarm_alert_level", 0) or 0)
+
+        # --- Heartbeat / dead-man-switch (nivel centinela 3 = OFFLINE) ---
+        # Si el activo TENÍA datos y se calló > umbral → avisa 1 vez (no re-spam).
+        # None = nunca reportó (sin servicio) → no aplica. Además evita puntuar
+        # severidad sobre data vieja como si fuera en vivo.
+        _off_min = int(os.environ.get("WM_OFFLINE_MINUTES", "60") or 60)
+        _age = _data_age_minutes(iid)
+        if _age is not None and _age > _off_min:
+            if stored != 3:
+                if dry_run:
+                    log.info("   %s: DRY RUN — OFFLINE %.0f min (habría avisado).", tag, _age)
+                elif _send_offline_alert(inst, tag, _age):
+                    update_instance_header(iid, alarm_alert_level=3)
+                    log.warning("⚠ %s OFFLINE (%.0f min sin datos) — aviso enviado.", tag, _age)
+                    sent += 1
+                else:
+                    errors += 1
+            else:
+                skipped += 1
+            continue
+        if stored == 3:                      # reconectó (datos frescos) → re-armar
+            if not dry_run:
+                update_instance_header(iid, alarm_alert_level=0)
+            stored = 0
+            log.info("✓ %s reconectado — datos frescos, alarma re-armada.", tag)
+
         level, status, summary = current_severity_level(iid, inst)
 
         # ¿Hay que avisar? Solo si EMPEORA respecto a lo ya avisado
