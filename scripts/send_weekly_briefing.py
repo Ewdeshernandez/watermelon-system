@@ -62,6 +62,10 @@ def main() -> int:
     ap.add_argument("--instance", default="")
     ap.add_argument("--to", default="")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--auto-send", action="store_true",
+                    help="Aprueba y ENVIA el briefing directo al cliente SIN revision "
+                         "humana (modo autonomo, sin especialista). Firma 'Watermelon "
+                         "System (automatico)'.")
     ap.add_argument("--check-schedule", action="store_true",
                     help="Modo cron HORARIO ('0 * * * *'): solo genera si la "
                          "hora/día actuales coinciden con la programación "
@@ -99,6 +103,30 @@ def main() -> int:
     log.info("Borradores en cola: %d de %d activos.", len(ok), len(results))
     if not ok:
         log.warning("No quedó ningún borrador pendiente.")
+        return 0
+
+    # --- MODO AUTÓNOMO: aprueba y envía directo al cliente, sin especialista ---
+    if args.auto_send:
+        from core.briefing_queue import approve_and_send
+        sent = 0
+        for m in ok:
+            iid = m.get("instance_id")
+            if args.dry_run:
+                log.info("[DRY-RUN] auto-send %s (%s)", m.get("tag", iid), iid)
+                continue
+            r = approve_and_send(
+                iid, prepared_by="Watermelon System",
+                approved_by="Watermelon System (automático)",
+                prepared_role="Motor de monitoreo", approved_role="Envío automático",
+                send=True)
+            deliv = r.get("delivery") or {}
+            if r.get("ok") and deliv.get("any_ok"):
+                sent += 1
+                log.info("AUTO-ENVIADO %s → cliente.", m.get("tag", iid))
+            else:
+                log.error("Auto-send %s falló: %s", iid,
+                          r.get("error") or deliv.get("error") or "sin canal/entrega")
+        log.info("Briefing %s auto-enviado a %d/%d activos.", args.period, sent, len(ok))
         return 0
 
     recipients = _review_recipients(args.to)
