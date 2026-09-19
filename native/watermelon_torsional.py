@@ -50,7 +50,7 @@ from core.torsional.ni_source import (
 )
 from core.torsional.monitor import TorsionalMonitor
 
-__version__ = "0.12.2"
+__version__ = "0.12.3"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -972,8 +972,8 @@ def build_app(simulated: bool = True):
         import os, json
         from datetime import datetime
         from core.torsional.cloud import _slug
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder = os.path.join(_runs_dir(), f"{_slug(run['name'])}_{ts}")
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        folder = os.path.join(_runs_dir(), f"{ts}_{_slug(run['name'])}")
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "run.json"), "w", encoding="utf-8") as f:
             json.dump(run["meta"], f, ensure_ascii=False, indent=2)
@@ -1468,11 +1468,18 @@ def build_app(simulated: bool = True):
     mn_ctrl.addWidget(QtWidgets.QLabel(T("Target duration", "Duración objetivo"))); mn_ctrl.addWidget(sb_mon_h)
     mn_ctrl.addWidget(btn_mon_go); mn_ctrl.addWidget(btn_mon_stop); mn_ctrl.addWidget(btn_mon_resume); mn_ctrl.addStretch(1)
 
-    def _mon_ckpt_path():
+    def _mon_dir():
         import os
         d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "monitors")
         os.makedirs(d, exist_ok=True)
-        return os.path.join(d, "_active_checkpoint.json")
+        return d
+
+    def _mon_ckpt_path():
+        import os
+        # Checkpoint FUERA de la carpeta de campañas → el diálogo de cargar queda limpio.
+        base = os.path.join(os.path.expanduser("~"), "WatermelonTorsional")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "_monitor_checkpoint.json")
 
     def _mon_save_ckpt():
         try:
@@ -1682,9 +1689,10 @@ def build_app(simulated: bool = True):
         try:
             import os, json
             from datetime import datetime
-            d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "monitors")
-            os.makedirs(d, exist_ok=True)
-            fp = os.path.join(d, f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+            # Carpeta por fecha_hora → dentro solo 1 archivo (limpio para cargar).
+            folder = os.path.join(_mon_dir(), datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+            os.makedirs(folder, exist_ok=True)
+            fp = os.path.join(folder, "monitor.json")
             record = dict(mon.to_dict())            # estado completo (hist+residual → recargable)
             record["setup"] = _mon_setup_now(); record["shaft"] = _mon_shaft_now()
             record["app_version"] = __version__
@@ -1731,12 +1739,11 @@ def build_app(simulated: bool = True):
                                 f"⚠ No se pudo subir ({r.get('reason','offline')}). El guardado local queda disponible."))
 
     def _mon_load():
-        """Abre una campaña guardada en el PC → la carga para analizar/subir."""
-        import os, json
-        d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "monitors")
-        os.makedirs(d, exist_ok=True)
+        """Abre una campaña guardada en el PC → la carga para analizar/subir.
+        Arranca en la carpeta de campañas (organizadas por fecha_hora)."""
+        import json
         fp, _ = QtWidgets.QFileDialog.getOpenFileName(win, T("Open saved campaign", "Abrir campaña guardada"),
-                                                      d, "JSON (*.json)")
+                                                      _mon_dir(), "JSON (*.json)")
         if not fp:
             return
         try:
@@ -1780,6 +1787,10 @@ def build_app(simulated: bool = True):
     btn_rp = QtWidgets.QPushButton(T("📄 Generate preliminary report (PDF)", "📄 Generar reporte preliminar (PDF)"))
     btn_rp.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
     rp_l.addWidget(btn_rp)
+    btn_rp_mon = QtWidgets.QPushButton(T("📄 Generate 24h monitor report (PDF)", "📄 Generar reporte de monitoreo 24h (PDF)"))
+    btn_rp_mon.setToolTip(T("Uses the last 24h campaign (run it or load it in the Monitor 24h tab).",
+                            "Usa la última campaña 24h (córrela o cárgala en la pestaña Monitor 24h)."))
+    rp_l.addWidget(btn_rp_mon)
     rp_status = QtWidgets.QLabel(""); rp_status.setWordWrap(True); rp_l.addWidget(rp_status)
     rp_l.addStretch(1)
 
@@ -1945,7 +1956,94 @@ def build_app(simulated: bool = True):
             fh.write(pdf)
         rp_status.setText(T(f"✅ Saved: {path}", f"✅ Guardado: {path}"))
         QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+    def _gen_monitor_report():
+        mon = st.get("_mon")
+        if mon is None or mon.n_samples == 0:
+            rp_status.setText(T("No 24h campaign loaded. Run or load one in the Monitor 24h tab.",
+                                "No hay campaña 24h cargada. Córrela o cárgala en la pestaña Monitor 24h.")); return
+        _es = (cb_rp_lang.currentIndex() == 0)
+        u = "N·m" if mon.units == "nm" else "ft-lb"
+        s = mon.summary(); ranges = s.get("ranges", [])
+        ncyc = sum(c for _, c in ranges); rmax = max((r for r, _ in ranges), default=0.0)
+        dur_h = mon.duration_s / 3600.0
+        _shaft = _mon_shaft_now()
+        try:
+            life = shaft_torsional_fatigue(mon.fatigue_cycles(), _shaft.get("do", 3.0), _shaft.get("di", 0.0),
+                _shaft.get("sut_ksi", 90.0) * 1000.0, mon.units, window_seconds=max(mon.duration_s, 1.0),
+                design_safety_factor=float(cb_ft_sf.currentText()),
+                endurance_ratio=float(st.get("endurance_ratio", 0.50)))
+        except Exception:  # noqa: BLE001
+            life = None
+        _sf = ("∞" if life and life.safety_factor == float("inf") else (f"{life.safety_factor:.2f}" if life else "—"))
+        _gost = {"green": "GO", "yellow": "REVIEW", "red": "NO-GO"}.get(getattr(life, "status", ""), "—")
+        _verd = (life.label_es if _es else life.label_en) if life else "—"
+        _lifet = ("—" if life is None else (T("Infinite", "Infinita") if life.infinite else
+                  (f"{life.life_hours:,.0f} h" if life.life_hours < 8760 else f"{life.life_hours/8760:,.1f} " + T("yr", "años"))))
+        _bad = s.get("bad_seconds", 0.0)
+        quality = [
+            (T("Campaign", "Campaña"), "OK", T(f"{dur_h:.1f} h · {ncyc:,.0f} cycles", f"{dur_h:.1f} h · {ncyc:,.0f} ciclos")),
+            (T("Signal health", "Salud de señal"), "REVIEW" if _bad > 0 else "GO",
+             T(f"Dead time {_bad/3600.0:.2f} h", f"Tiempo muerto {_bad/3600.0:.2f} h")),
+            (T("Shaft fatigue (Goodman/Miner)", "Fatiga del eje (Goodman/Miner)"), _gost,
+             T(f"SF {_sf} — {life.label_en if life else '—'} · {_lifet}", f"FS {_sf} — {_verd} · {_lifet}")),
+        ]
+        analysis = [
+            T(f"{dur_h:.1f} h monitored; mean torque {mon.mean_torque():,.0f} {u}, peak {mon.tmax or 0:,.0f} {u}.",
+              f"{dur_h:.1f} h monitoreadas; par medio {mon.mean_torque():,.0f} {u}, pico {mon.tmax or 0:,.0f} {u}."),
+            T(f"{ncyc:,.0f} rainflow cycles accumulated (ASTM E1049); largest range {rmax:,.0f} {u}.",
+              f"{ncyc:,.0f} ciclos rainflow acumulados (ASTM E1049); mayor rango {rmax:,.0f} {u}."),
+        ]
+        findings = [
+            T(f"Shaft fatigue over {dur_h:.1f} h: safety factor {_sf} — {life.label_en if life else '—'} ({_lifet}).",
+              f"Fatiga del eje en {dur_h:.1f} h: factor de seguridad {_sf} — {_verd} ({_lifet})."),
+            T(f"{len(mon.events)} overload event(s) logged during the campaign.",
+              f"{len(mon.events)} evento(s) de sobrecarga registrados en la campaña."),
+        ]
+        recs = [T("Compare accumulated damage against the shaft S-N / Goodman diagram at the gage.",
+                  "Comparar el daño acumulado contra el diagrama S-N / Goodman del eje en la galga."),
+                T("Investigate overload events (startups / trips / process transients)." if mon.events else
+                  "No overloads; keep the periodic monitoring plan.",
+                  "Investigar los eventos de sobrecarga (arranques / trips / transitorios)." if mon.events else
+                  "Sin sobrecargas; mantener el plan de monitoreo periódico.")]
+        sections = [
+            {"title": T("Torque trend (24h)", "Tendencia de par (24h)"),
+             "figures": [(T("Torque pp vs time", "Par pp vs tiempo"), _grab_png(p_mtr))]},
+            {"title": T("Accumulated fatigue (rainflow)", "Fatiga acumulada (rainflow)"),
+             "figures": [(T("Rainflow histogram", "Histograma rainflow"), _grab_png(p_mh))],
+             "table": {"headers": [T("Item", "Ítem"), T("Value", "Valor")],
+                       "rows": [[T("Traffic light", "Semáforo"), f"{_gost} — {_verd}"],
+                                [T("Safety factor", "Factor de seguridad"), _sf],
+                                [T("Estimated life", "Vida estimada"), _lifet],
+                                [T("Cycles", "Ciclos"), f"{ncyc:,.0f}"],
+                                [T("Largest range", "Mayor rango"), f"{rmax:,.0f} {u}"]]}},
+        ]
+        _su = _mon_setup_now()
+        _asset = _su.get("machine") or _su.get("tag") or "—"
+        from datetime import date as _date
+        meta = {"title": T("24h Torsional Monitoring Report", "Reporte de Monitoreo Torsional 24h"),
+                "asset": _asset, "client": _su.get("client") or "—", "machine_type": _su.get("type") or "—",
+                "location": _su.get("location") or "—", "test_type": T("24h monitoring", "Monitoreo 24h"),
+                "rpm": f"{(mon.trend[-1][4] if mon.trend else 0):,.0f}", "technician": _su.get("operator") or "—",
+                "reviewer": _su.get("approved_by") or "—", "date": _date.today().isoformat(),
+                "equipment": "TorqueTrak 10K + NI 9229"}
+        try:
+            from core.modal.preliminary_report import build_preliminary_pdf
+            pdf = build_preliminary_pdf(meta=meta, quality=quality, sections=sections, analysis=analysis,
+                                        findings=findings, recommendations=recs,
+                                        run_id=f"TOR-MON-{_asset}", lang=("es" if _es else "en"))
+        except Exception as exc:  # noqa: BLE001
+            rp_status.setText(f"❌ {type(exc).__name__}: {exc}"); return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(win, T("Save report", "Guardar reporte"),
+                                                        f"Torsional_Monitor_{_asset}.pdf", "PDF (*.pdf)")
+        if not path:
+            return
+        with open(path, "wb") as fh:
+            fh.write(pdf)
+        rp_status.setText(T(f"✅ Saved: {path}", f"✅ Guardado: {path}"))
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+
     btn_rp.clicked.connect(_gen_report)
+    btn_rp_mon.clicked.connect(_gen_monitor_report)
     tabs.addTab(pg_rp, T("Report", "Reporte"))
 
     # =================================================================
