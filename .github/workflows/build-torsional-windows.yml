@@ -56,15 +56,21 @@ jobs:
             --windowed \
             --contents-directory _internal \
             --paths . \
+            --paths native \
             --collect-submodules core.torsional \
             --collect-submodules core.remote_monitoring \
             --hidden-import core.torsional.scaling \
             --hidden-import core.torsional.sim_source \
             --hidden-import core.torsional.analysis \
             --hidden-import core.torsional.shunt_cal \
+            --hidden-import core.torsional.ni_source \
+            --hidden-import license_gate \
             --hidden-import core.modal.acq_backend \
             --hidden-import core.modal.campbell \
             --hidden-import core.modal.preliminary_report \
+            --hidden-import core.modal.licensing \
+            --collect-submodules nidaqmx \
+            --hidden-import nidaqmx \
             --hidden-import reportlab \
             --collect-submodules reportlab \
             --hidden-import core.remote_monitoring.stream_source \

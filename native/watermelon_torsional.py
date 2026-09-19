@@ -49,7 +49,7 @@ from core.torsional.ni_source import (
     nidaqmx_available, rpm_from_keyphasor,
 )
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -1595,6 +1595,35 @@ def main(argv=None):
     ap.add_argument("--sim", action="store_true", default=True)
     args = ap.parse_args(argv)
     try:
+        # --- Gate de licencia (igual que el Modal de campo) ANTES de construir la UI ---
+        import os as _os
+        global _LANG
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)      # que 'license_gate' sea importable (script y .exe)
+        _LANG = _load_lang()
+        _app0 = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+        try:
+            from license_gate import run_license_gate
+            _brand = ("<span style='color:#fff;font-weight:800;letter-spacing:3px;font-size:22px;'>WATERMELON</span>"
+                      "<span style='color:#1AAEE5;font-weight:800;letter-spacing:3px;font-size:22px;'>&nbsp;TORSIONAL</span>")
+            _ok = run_license_gate(_app0, t=T, navy=NAVY, acc=ACC, brand_html=_brand,
+                                   app_title="Watermelon Torsional")
+        except SystemExit:
+            raise
+        except Exception:  # noqa: BLE001 — fallo de la capa de licencia
+            if _os.environ.get("WM_LICENSING", "1") == "0":
+                _ok = True                 # modo dev: sin gate
+            else:                          # producción: FAIL-CLOSED
+                _e = traceback.format_exc()
+                try:
+                    QtWidgets.QMessageBox.critical(None, "Watermelon Torsional",
+                        "Licensing error — the app cannot start.\n\n" + _e[-800:])
+                except Exception:  # noqa: BLE001
+                    print(_e)
+                sys.exit(1)
+        if not _ok:
+            sys.exit(0)                    # el usuario canceló la activación
         app, win = build_app(simulated=True); win.showMaximized()
         # Auto-actualizador: al conectar a internet, avisa si hay versión nueva (por red).
         try:
