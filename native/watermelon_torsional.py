@@ -48,8 +48,9 @@ from core.torsional.ni_source import (
     KeyphasorSensor, NITorsionalConfig, NITorsionalSource,
     nidaqmx_available, rpm_from_keyphasor,
 )
+from core.torsional.monitor import TorsionalMonitor
 
-__version__ = "0.11.3"
+__version__ = "0.12.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -1407,6 +1408,196 @@ def build_app(simulated: bool = True):
             p_ft.addItem(pg.BarGraphItem(x=ctr, height=hist, width=(edges[1] - edges[0]) * 0.9, brush=_dot))
     btn_ft.clicked.connect(_run_fatigue)
     tabs.addTab(pg_ft, "Fatigue")
+
+    # =================================================================
+    # TAB 6b — Monitor 24h (larga duración: fatiga acumulada + tendencia)
+    # =================================================================
+    pg_mon = QtWidgets.QWidget(); mn_l = QtWidgets.QVBoxLayout(pg_mon)
+    mn_l.addWidget(QtWidgets.QLabel(T(
+        "Long-duration torsional monitoring. Accumulates rainflow fatigue (real Miner damage) + trend "
+        "+ overload events — WITHOUT storing the continuous raw wave (24 h ≈ MB, not GB).",
+        "Monitoreo torsional de larga duración. Acumula fatiga rainflow (daño de Miner real) + tendencia "
+        "+ eventos de sobrecarga — SIN guardar la onda cruda continua (24 h ≈ MB, no GB).")))
+    mn_ctrl = QtWidgets.QHBoxLayout(); mn_l.addLayout(mn_ctrl)
+    sb_mon_h = QtWidgets.QDoubleSpinBox(); sb_mon_h.setRange(0.05, 72.0); sb_mon_h.setValue(24.0); sb_mon_h.setSuffix(" h")
+    btn_mon_go = QtWidgets.QPushButton(T("▶ Start monitoring", "▶ Iniciar monitoreo"))
+    btn_mon_go.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
+    btn_mon_stop = QtWidgets.QPushButton(T("■ Stop", "■ Detener")); btn_mon_stop.setEnabled(False)
+    mn_ctrl.addWidget(QtWidgets.QLabel(T("Target duration", "Duración objetivo"))); mn_ctrl.addWidget(sb_mon_h)
+    mn_ctrl.addWidget(btn_mon_go); mn_ctrl.addWidget(btn_mon_stop); mn_ctrl.addStretch(1)
+
+    mn_light = QtWidgets.QLabel("—"); mn_light.setAlignment(QtCore.Qt.AlignCenter)
+    mn_light.setStyleSheet("background:#e2e8f0;color:#334155;border-radius:12px;padding:12px;font-size:17px;font-weight:800;")
+    mn_l.addWidget(mn_light)
+    mn_kpi = QtWidgets.QHBoxLayout(); mn_l.addLayout(mn_kpi)
+    def _mkpi():
+        w = QtWidgets.QLabel("—"); w.setAlignment(QtCore.Qt.AlignCenter); w.setTextFormat(QtCore.Qt.RichText)
+        w.setStyleSheet("background:white;border:1px solid #e2e8f0;border-radius:10px;padding:8px;"); mn_kpi.addWidget(w); return w
+    k_elapsed, k_cycles, k_events, k_tmax = _mkpi(), _mkpi(), _mkpi(), _mkpi()
+
+    _mpr = QtWidgets.QHBoxLayout(); mn_l.addLayout(_mpr, 1)
+    p_mtr = pg.PlotWidget(); p_mtr.setBackground("w"); p_mtr.showGrid(x=True, y=True, alpha=0.3)
+    p_mtr.setTitle(T("Torque trend (pp) & speed", "Tendencia de par (pp) y velocidad"))
+    p_mtr.setLabel("bottom", T("time", "tiempo"), "s", **_axlbl); p_mtr.addLegend()
+    _mc_pp = p_mtr.plot(pen=pg.mkPen(ACC, width=2), name=T("torque pp", "par pp"))
+    p_mh = pg.PlotWidget(); p_mh.setBackground("w"); p_mh.showGrid(y=True, alpha=0.25)
+    p_mh.setTitle(T("Accumulated rainflow histogram", "Histograma rainflow acumulado"))
+    p_mh.setLabel("bottom", T("torque range", "rango de par"), **_axlbl); p_mh.setLabel("left", T("cycles", "ciclos"), **_axlbl)
+    _mpr.addWidget(p_mtr, 1); _mpr.addWidget(p_mh, 1)
+
+    mn_row = QtWidgets.QHBoxLayout(); mn_l.addLayout(mn_row)
+    btn_mon_save = QtWidgets.QPushButton(T("💾 Save + ☁ Upload summary", "💾 Guardar + ☁ Subir resumen"))
+    mn_status = QtWidgets.QLabel(""); mn_status.setWordWrap(True); mn_status.setStyleSheet("color:#475569;")
+    mn_row.addWidget(btn_mon_save); mn_row.addWidget(mn_status); mn_row.addStretch(1)
+
+    mon_timer = QtCore.QTimer(win); mon_timer.setInterval(250)
+    st["_mon"] = None; st["_mon_src"] = None; st["_mon_ticks"] = 0
+
+    def _mon_make_source():
+        """Fuente para monitoreo (sim o NI 9229), misma config que Live. None si falla."""
+        fs = st["fs"]; sc = st["scaling"]; units = sc.units; p = _preset()
+        if st.get("acq_mode") == "ni":
+            _nc = st.get("ni_cfg", {})
+            ncfg = NITorsionalConfig(device=_nc.get("device", "cDAQ1Mod1"),
+                torque_ai=int(_nc.get("torque_ai", 0)), kph_ai=int(_nc.get("kph_ai", 1)),
+                sample_rate_hz=fs, block_seconds=0.25, voltage_range=10.0,
+                keyphasor=st.get("kph_sensor") or KeyphasorSensor.phototach_reflective())
+            src = NITorsionalSource(ncfg)
+            try:
+                src.start()
+            except RuntimeError as exc:
+                QtWidgets.QMessageBox.critical(win, "Watermelon Torsional",
+                    T(f"NI 9229 failed:\n{exc}", f"Falló NI 9229:\n{exc}")); return None
+            return src
+        cfg = TorsionalStreamConfig(sample_rate_hz=fs, rpm=p["rpm"],
+            channels=make_torsional_channels(units=units), block_seconds=0.25, buffer_seconds=2,
+            mean_torque=p["mean"], orders=p["orders"], gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"],
+            torsional_res_hz=p["res_hz"], torque_noise_rms_eu=p["noise"], scaling=sc, torque_units=units)
+        src = SimulatedTorsionalSource(cfg); src.start(); return src
+
+    def _mon_tick():
+        src = st.get("_mon_src"); mon = st.get("_mon"); sc = st.get("scaling")
+        if src is None or mon is None or sc is None:
+            return
+        block = src.read_block(); cfg = src.config
+        ki = cfg.keyphasor_index(); ti = next(i for i in range(cfg.n_channels) if i != ki)
+        torque = voltage_to_torque(block[ti], sc)
+        _sensor = st.get("kph_sensor") or KeyphasorSensor.simulated()
+        _, rpm = rpm_from_keyphasor(block[ki], st["fs"], _sensor)
+        rpm_now = float(np.median(rpm)) if rpm.size else _preset()["rpm"]
+        mon.add_block(torque, rpm_now, st["fs"])
+        st["_mon_ticks"] += 1
+        if mon.duration_s >= sb_mon_h.value() * 3600.0:      # alcanzó la duración objetivo
+            _mon_stop(); return
+        if st["_mon_ticks"] % 4 == 0:                        # refresca UI ~1 Hz
+            _mon_refresh()
+
+    def _mon_refresh():
+        mon = st.get("_mon")
+        if mon is None:
+            return
+        u = "N·m" if mon.units == "nm" else "ft-lb"
+        _h = mon.duration_s / 3600.0
+        _set_kpi(k_elapsed, T("Elapsed", "Transcurrido"), (f"{_h:.2f} h" if _h >= 1 else f"{mon.duration_s:,.0f} s"))
+        ranges = mon.rf.ranges(drain=True, tail=mon._carry)
+        _ncyc = sum(c for _, c in ranges)
+        _set_kpi(k_cycles, T("Cycles", "Ciclos"), f"{_ncyc:,.0f}")
+        _set_kpi(k_events, T("Events", "Eventos"), f"{len(mon.events)}", RED if mon.events else NAVY)
+        _set_kpi(k_tmax, T("Max torque", "Par máx"), f"{(mon.tmax or 0):,.0f}<br><span style='font-size:11px'>{u}</span>")
+        # tendencia
+        if mon.trend:
+            tt = [r[0] for r in mon.trend]; pp = [r[2] for r in mon.trend]
+            _mc_pp.setData(tt, pp)
+        # histograma
+        p_mh.clear()
+        if ranges:
+            rr = np.array([r for r, _ in ranges]); cc = np.array([c for _, c in ranges])
+            nb = int(np.clip(len(rr), 8, 30)); edg = np.linspace(0, rr.max() * 1.0001, nb + 1)
+            hh, _ = np.histogram(rr, bins=edg, weights=cc)
+            p_mh.addItem(pg.BarGraphItem(x=0.5 * (edg[:-1] + edg[1:]), height=hh, width=(edg[1] - edg[0]) * 0.9, brush=NAVY))
+        # veredicto de fatiga acumulada
+        try:
+            life = shaft_torsional_fatigue(mon.fatigue_cycles(), sb_do.value(), sb_di.value(),
+                sb_sut.value() * 1000.0, mon.units, window_seconds=max(mon.duration_s, 1.0),
+                design_safety_factor=float(cb_ft_sf.currentText()),
+                endurance_ratio=float(st.get("endurance_ratio", 0.50)))
+            bg, fg = _LIGHT_BG[life.status]; lab = life.label_es if _LANG == "es" else life.label_en
+            _sf = "∞" if life.safety_factor == float("inf") else f"{life.safety_factor:.2f}"
+            _lifetxt = (T("infinite", "infinita") if life.infinite else
+                        (f"{life.life_hours:,.0f} h" if life.life_hours < 8760 else f"{life.life_hours/8760:,.1f} " + T("yr", "años")))
+            mn_light.setStyleSheet(f"background:{bg};color:{fg};border-radius:12px;padding:12px;font-size:17px;font-weight:800;")
+            mn_light.setText(f"● {lab} · SF {_sf} · {_lifetxt}")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _mon_start():
+        if not _rebuild_scaling():
+            return
+        if not _preflight():
+            return
+        src = _mon_make_source()
+        if src is None:
+            return
+        _p = _preset()
+        st["_mon"] = TorsionalMonitor(units=st["scaling"].units, trend_dt=2.0,
+                                      event_pp=max(3.0 * _p["mean"], 1.0))   # umbral evento = 3× par medio
+        st["_mon_src"] = src; st["_mon_ticks"] = 0
+        btn_mon_go.setEnabled(False); btn_mon_stop.setEnabled(True); sb_mon_h.setEnabled(False)
+        mn_status.setText(T("Monitoring… (leave running)", "Monitoreando… (déjalo corriendo)"))
+        mon_timer.start(); _refresh_hw_banner()
+
+    def _mon_stop():
+        mon_timer.stop()
+        if st.get("_mon_src") is not None:
+            try: st["_mon_src"].stop()
+            except Exception: pass  # noqa: BLE001
+        btn_mon_go.setEnabled(True); btn_mon_stop.setEnabled(False); sb_mon_h.setEnabled(True)
+        _mon_refresh()
+        if st.get("_mon"):
+            mn_status.setText(T(f"Stopped at {st['_mon'].duration_s/3600.0:.2f} h. Save/upload the summary.",
+                                f"Detenido en {st['_mon'].duration_s/3600.0:.2f} h. Guarda/sube el resumen."))
+        _refresh_hw_banner()
+
+    def _mon_save():
+        mon = st.get("_mon")
+        if mon is None or mon.n_samples == 0:
+            mn_status.setText(T("Nothing to save yet.", "Nada que guardar aún.")); return
+        setup = st["setup_fn"]() if st.get("setup_fn") else {}
+        payload = mon.summary()
+        payload["setup"] = setup
+        payload["shaft"] = {"do": sb_do.value(), "di": sb_di.value(), "sut_ksi": sb_sut.value()}
+        payload["app_version"] = __version__
+        name = (setup.get("machine") or setup.get("tag") or "Torsional monitor") + " · 24h"
+        # local
+        try:
+            import os, json
+            d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "monitors")
+            os.makedirs(d, exist_ok=True)
+            from datetime import datetime
+            fp = os.path.join(d, f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+            with open(fp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False)
+        except Exception as e:  # noqa: BLE001
+            fp = f"(local save failed: {e})"
+        # nube (solo el resumen liviano — sin cruda)
+        try:
+            from core.torsional import cloud
+            import socket
+            _acc, _host = _run_trace_tags(); _ip, _geo = _conn_ip_geo()
+            r = cloud.save_run(name, payload, account=_acc, client=setup.get("client", ""),
+                               tag=setup.get("tag", ""), hostname=_host or socket.gethostname(), ip=_ip, geo=_geo)
+        except Exception as e:  # noqa: BLE001
+            r = {"ok": False, "reason": str(e)}
+        if r.get("ok"):
+            mn_status.setText(T(f"💾 {fp}  ·  ☁ Uploaded (id {r.get('id','')}).",
+                                f"💾 {fp}  ·  ☁ Subido (id {r.get('id','')})."))
+        else:
+            mn_status.setText(T(f"💾 Saved locally: {fp}  ·  ⚠ upload {r.get('reason','offline')}.",
+                                f"💾 Guardado local: {fp}  ·  ⚠ subida {r.get('reason','offline')}."))
+
+    btn_mon_go.clicked.connect(_mon_start); btn_mon_stop.clicked.connect(_mon_stop)
+    btn_mon_save.clicked.connect(_mon_save); mon_timer.timeout.connect(_mon_tick)
+    tabs.addTab(pg_mon, T("Monitor 24h", "Monitor 24h"))
 
     # =================================================================
     # TAB 7 — Preliminary report (PDF de campo, como el Modal)
