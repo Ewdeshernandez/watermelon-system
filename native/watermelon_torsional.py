@@ -50,7 +50,7 @@ from core.torsional.ni_source import (
 )
 from core.torsional.monitor import TorsionalMonitor
 
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -1423,8 +1423,23 @@ def build_app(simulated: bool = True):
     btn_mon_go = QtWidgets.QPushButton(T("▶ Start monitoring", "▶ Iniciar monitoreo"))
     btn_mon_go.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
     btn_mon_stop = QtWidgets.QPushButton(T("■ Stop", "■ Detener")); btn_mon_stop.setEnabled(False)
+    btn_mon_resume = QtWidgets.QPushButton(T("↺ Resume last", "↺ Reanudar última"))
     mn_ctrl.addWidget(QtWidgets.QLabel(T("Target duration", "Duración objetivo"))); mn_ctrl.addWidget(sb_mon_h)
-    mn_ctrl.addWidget(btn_mon_go); mn_ctrl.addWidget(btn_mon_stop); mn_ctrl.addStretch(1)
+    mn_ctrl.addWidget(btn_mon_go); mn_ctrl.addWidget(btn_mon_stop); mn_ctrl.addWidget(btn_mon_resume); mn_ctrl.addStretch(1)
+
+    def _mon_ckpt_path():
+        import os
+        d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "monitors")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, "_active_checkpoint.json")
+
+    def _mon_save_ckpt():
+        try:
+            import json
+            with open(_mon_ckpt_path(), "w", encoding="utf-8") as fh:
+                json.dump(st["_mon"].to_dict(), fh)
+        except Exception:  # noqa: BLE001
+            pass
 
     mn_light = QtWidgets.QLabel("—"); mn_light.setAlignment(QtCore.Qt.AlignCenter)
     mn_light.setStyleSheet("background:#e2e8f0;color:#334155;border-radius:12px;padding:12px;font-size:17px;font-weight:800;")
@@ -1491,6 +1506,8 @@ def build_app(simulated: bool = True):
             _mon_stop(); return
         if st["_mon_ticks"] % 4 == 0:                        # refresca UI ~1 Hz
             _mon_refresh()
+        if st["_mon_ticks"] % 240 == 0:                      # autosave checkpoint ~cada 60 s
+            _mon_save_ckpt()
 
     def _mon_refresh():
         mon = st.get("_mon")
@@ -1529,6 +1546,15 @@ def build_app(simulated: bool = True):
             mn_light.setText(f"● {lab} · SF {_sf} · {_lifetxt}")
         except Exception:  # noqa: BLE001
             pass
+        # Watchdog de señal: alarma si la señal está muerta (batería TX10K / cable).
+        if not mon.signal_ok:
+            mn_status.setText(T(f"⚠ SIGNAL LOST (std {mon.last_std:.2f}) — check TX10K 9V battery / cable. "
+                                f"Dead time: {mon.bad_seconds:,.0f} s.",
+                                f"⚠ SEÑAL PERDIDA (std {mon.last_std:.2f}) — revisa batería 9V del TX10K / cable. "
+                                f"Tiempo muerto: {mon.bad_seconds:,.0f} s."))
+            mn_status.setStyleSheet("color:#b91c1c; font-weight:700;")
+        elif st.get("running_mon"):
+            mn_status.setStyleSheet("color:#475569;")
 
     def _mon_start():
         if not _rebuild_scaling():
@@ -1541,16 +1567,43 @@ def build_app(simulated: bool = True):
         _p = _preset()
         st["_mon"] = TorsionalMonitor(units=st["scaling"].units, trend_dt=2.0,
                                       event_pp=max(3.0 * _p["mean"], 1.0))   # umbral evento = 3× par medio
-        st["_mon_src"] = src; st["_mon_ticks"] = 0
+        st["_mon_src"] = src; st["_mon_ticks"] = 0; st["running_mon"] = True
         btn_mon_go.setEnabled(False); btn_mon_stop.setEnabled(True); sb_mon_h.setEnabled(False)
-        mn_status.setText(T("Monitoring… (leave running)", "Monitoreando… (déjalo corriendo)"))
+        mn_status.setStyleSheet("color:#475569;")
+        mn_status.setText(T("Monitoring… (leave running; autosaves every 60 s)",
+                            "Monitoreando… (déjalo corriendo; autoguarda cada 60 s)"))
         mon_timer.start(); _refresh_hw_banner()
 
+    def _mon_resume():
+        """Reanuda la última campaña tras un corte de energía / cierre del PC."""
+        import os, json
+        cp = _mon_ckpt_path()
+        if not os.path.exists(cp):
+            mn_status.setText(T("No saved campaign to resume.", "No hay campaña guardada para reanudar.")); return
+        if not _rebuild_scaling() or not _preflight():
+            return
+        try:
+            with open(cp, "r", encoding="utf-8") as fh:
+                st["_mon"] = TorsionalMonitor.from_dict(json.load(fh))
+        except Exception as e:  # noqa: BLE001
+            mn_status.setText(T(f"Could not load checkpoint: {e}", f"No se pudo cargar el checkpoint: {e}")); return
+        src = _mon_make_source()
+        if src is None:
+            return
+        st["_mon_src"] = src; st["_mon_ticks"] = 0; st["running_mon"] = True
+        btn_mon_go.setEnabled(False); btn_mon_stop.setEnabled(True); sb_mon_h.setEnabled(False)
+        mn_status.setStyleSheet("color:#475569;")
+        mn_status.setText(T(f"Resumed at {st['_mon'].duration_s/3600.0:.2f} h.",
+                            f"Reanudado en {st['_mon'].duration_s/3600.0:.2f} h."))
+        mon_timer.start(); _mon_refresh(); _refresh_hw_banner()
+
     def _mon_stop():
-        mon_timer.stop()
+        mon_timer.stop(); st["running_mon"] = False
         if st.get("_mon_src") is not None:
             try: st["_mon_src"].stop()
             except Exception: pass  # noqa: BLE001
+        if st.get("_mon"):
+            _mon_save_ckpt()                     # checkpoint final (por si cierran sin guardar)
         btn_mon_go.setEnabled(True); btn_mon_stop.setEnabled(False); sb_mon_h.setEnabled(True)
         _mon_refresh()
         if st.get("_mon"):
@@ -1589,6 +1642,13 @@ def build_app(simulated: bool = True):
         except Exception as e:  # noqa: BLE001
             r = {"ok": False, "reason": str(e)}
         if r.get("ok"):
+            try:
+                import os
+                _cp = _mon_ckpt_path()
+                if os.path.exists(_cp):
+                    os.remove(_cp)               # campaña cerrada → checkpoint ya no hace falta
+            except Exception:  # noqa: BLE001
+                pass
             mn_status.setText(T(f"💾 {fp}  ·  ☁ Uploaded (id {r.get('id','')}).",
                                 f"💾 {fp}  ·  ☁ Subido (id {r.get('id','')})."))
         else:
@@ -1596,6 +1656,7 @@ def build_app(simulated: bool = True):
                                 f"💾 Guardado local: {fp}  ·  ⚠ subida {r.get('reason','offline')}."))
 
     btn_mon_go.clicked.connect(_mon_start); btn_mon_stop.clicked.connect(_mon_stop)
+    btn_mon_resume.clicked.connect(_mon_resume)
     btn_mon_save.clicked.connect(_mon_save); mon_timer.timeout.connect(_mon_tick)
     tabs.addTab(pg_mon, T("Monitor 24h", "Monitor 24h"))
 

@@ -118,6 +118,7 @@ class TorsionalMonitor:
     units: str = "nm"
     trend_dt: float = 1.0             # cada cuánto se guarda una fila de tendencia [s]
     event_pp: Optional[float] = None  # umbral de pico-pico para marcar evento [EU]
+    flat_std_eu: float = 0.5          # std por debajo de esto = señal MUERTA (batería/cable)
 
     def __post_init__(self) -> None:
         self.rf = StreamingRainflow()
@@ -128,6 +129,9 @@ class TorsionalMonitor:
         self.tmin: Optional[float] = None
         self.trend: List[Tuple[float, float, float, float, float, float]] = []
         self.events: List[MonitorEvent] = []
+        self.bad_seconds = 0.0        # tiempo con señal muerta (para trazabilidad/salud)
+        self.signal_ok = True         # estado de la última ventana
+        self.last_std = 0.0
         self._carry: Optional[float] = None
         self._cdir: float = 0.0
         self._win: List[np.ndarray] = []
@@ -145,6 +149,7 @@ class TorsionalMonitor:
         bmn, bmx = float(x.min()), float(x.max())
         self.tmin = bmn if self.tmin is None else min(self.tmin, bmn)
         self.tmax = bmx if self.tmax is None else max(self.tmax, bmx)
+        # Señal plana → NO tiene reversals → no aporta fatiga; igual la marcamos.
         revs, self._carry, self._cdir = _block_reversals(x, self._carry, self._cdir)
         if revs.size:
             self.rf.feed(revs)
@@ -152,11 +157,40 @@ class TorsionalMonitor:
         if self._acc >= self.trend_dt:
             allx = np.concatenate(self._win)
             mean = float(allx.mean()); pp = float(allx.max() - allx.min())
+            self.last_std = float(allx.std())
+            self.signal_ok = self.last_std >= self.flat_std_eu       # watchdog de señal
+            if not self.signal_ok:
+                self.bad_seconds += self._acc
             ripple = (pp / abs(mean) * 100.0) if abs(mean) > 1e-9 else float("inf")
             self.trend.append((round(self.t, 3), mean, pp, ripple, self._win_rpm, float(allx.max())))
             if self.event_pp is not None and pp > self.event_pp:
                 self.events.append(MonitorEvent(round(self.t, 3), float(allx.max()), self._win_rpm))
             self._win = []; self._acc = 0.0
+
+    # --- Checkpoint (sobrevive a corte de energía / cierre del PC) ---
+    def to_dict(self) -> Dict:
+        return {
+            "units": self.units, "trend_dt": self.trend_dt, "event_pp": self.event_pp,
+            "flat_std_eu": self.flat_std_eu, "t": self.t, "n_samples": self.n_samples,
+            "sum_t": self.sum_t, "tmax": self.tmax, "tmin": self.tmin,
+            "hist": {str(k): v for k, v in self.rf.hist.items()},
+            "residual": list(self.rf._pts), "carry": self._carry, "cdir": self._cdir,
+            "trend": self.trend, "events": [e.__dict__ for e in self.events],
+            "bad_seconds": self.bad_seconds,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict) -> "TorsionalMonitor":
+        m = cls(units=d.get("units", "nm"), trend_dt=d.get("trend_dt", 1.0),
+                event_pp=d.get("event_pp"), flat_std_eu=d.get("flat_std_eu", 0.5))
+        m.t = d.get("t", 0.0); m.n_samples = d.get("n_samples", 0); m.sum_t = d.get("sum_t", 0.0)
+        m.tmax = d.get("tmax"); m.tmin = d.get("tmin"); m.bad_seconds = d.get("bad_seconds", 0.0)
+        m.rf.hist = {float(k): float(v) for k, v in (d.get("hist") or {}).items()}
+        m.rf._pts = deque(float(v) for v in (d.get("residual") or []))
+        m._carry = d.get("carry"); m._cdir = d.get("cdir", 0.0)
+        m.trend = [tuple(r) for r in (d.get("trend") or [])]
+        m.events = [MonitorEvent(**e) for e in (d.get("events") or [])]
+        return m
 
     @property
     def duration_s(self) -> float:
@@ -181,4 +215,5 @@ class TorsionalMonitor:
             "ranges": self.rf.ranges(drain=True, tail=self._carry),
             "trend": self.trend,
             "events": [e.__dict__ for e in self.events],
+            "bad_seconds": round(self.bad_seconds, 1), "signal_ok": self.signal_ok,
         }

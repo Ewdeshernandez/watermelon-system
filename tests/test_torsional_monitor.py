@@ -79,3 +79,38 @@ def test_summary_is_compact():
     assert s["kind"] == "monitor"
     assert "ranges" in s and "trend" in s and "events" in s
     assert "torque" not in s and "raw" not in s          # nada de onda cruda
+
+
+def test_checkpoint_roundtrip_preserves_state():
+    """to_dict → from_dict conserva histograma/tendencia/totales (sobrevive corte)."""
+    from core.torsional.monitor import TorsionalMonitor
+    fs = 2000.0; t = np.arange(0, 1.0, 1 / fs)
+    m = TorsionalMonitor(units="ftlb", trend_dt=1.0)
+    for _ in range(5):
+        m.add_block(4000 + 2000 * np.sin(2 * np.pi * 30 * t), rpm=1800, fs=fs)
+    d = m.to_dict()
+    import json
+    d2 = json.loads(json.dumps(d))                 # simula ir a disco y volver
+    m2 = TorsionalMonitor.from_dict(d2)
+    assert abs(m2.t - m.t) < 1e-6
+    assert m2.n_samples == m.n_samples
+    a = dict(m.rf.ranges(drain=True, tail=m._carry))
+    b = dict(m2.rf.ranges(drain=True, tail=m2._carry))
+    assert set(a) == set(b)
+    # y puede CONTINUAR acumulando tras reanudar
+    m2.add_block(4000 + 2000 * np.sin(2 * np.pi * 30 * t), rpm=1800, fs=fs)
+    assert m2.t > m.t
+
+
+def test_signal_watchdog_flags_dead_signal():
+    """Señal plana (batería muerta) marca signal_ok=False y suma bad_seconds; sin ciclos falsos."""
+    from core.torsional.monitor import TorsionalMonitor
+    fs = 2000.0; t = np.arange(0, 1.0, 1 / fs)
+    m = TorsionalMonitor(units="ftlb", trend_dt=1.0, flat_std_eu=0.5)
+    m.add_block(4000 + 2000 * np.sin(2 * np.pi * 30 * t), rpm=1800, fs=fs)   # viva
+    assert m.signal_ok
+    n_cyc_before = sum(c for _, c in m.rf.ranges(drain=True, tail=m._carry))
+    m.add_block(np.full(t.size, 4000.0), rpm=1800, fs=fs)                    # plana (muerta)
+    assert not m.signal_ok and m.bad_seconds > 0
+    n_cyc_after = sum(c for _, c in m.rf.ranges(drain=True, tail=m._carry))
+    assert abs(n_cyc_after - n_cyc_before) < 1.0                             # señal plana no mete ciclos

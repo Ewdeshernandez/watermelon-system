@@ -421,6 +421,10 @@ if isinstance(run, dict) and run.get("kind") == "monitor":
         (f"{len(events_m)}", "Overload events", "> 3× mean pp"),
         (f"{tmaxm:,.0f}<span style='font-size:13px'> {um}</span>", "Max torque", "peak seen"),
     ])
+    _bad = float(pay.get("bad_seconds", 0.0))
+    if _bad > 0:
+        st.warning(f"⚠ Signal was dead for ~{_bad/3600.0:.2f} h of the campaign "
+                   "(TX10K battery/cable). Fatigue reflects only the live-signal periods.")
     # tendencia (par pp vs tiempo)
     if trend_m:
         tt = [row[0] / 3600.0 for row in trend_m]; pp = [row[2] for row in trend_m]
