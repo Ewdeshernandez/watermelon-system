@@ -129,21 +129,32 @@ def order_amplitudes(torque: np.ndarray, fs: float, rpm: float,
 # Keyphasor (tacómetro) → rpm instantánea
 # -----------------------------------------------------------------
 def keyphasor_to_rpm(keyphasor: np.ndarray, fs: float,
-                     threshold: float = -1.0, pulses_per_rev: int = 1
+                     threshold: float = -1.0, pulses_per_rev: int = 1,
+                     edge: str = "falling"
                      ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Velocidad instantánea desde el canal keyphasor (pulsos negativos once-per-rev).
+    Velocidad instantánea desde el canal keyphasor.
 
-    Detecta flancos de bajada (cruce descendente de `threshold`) y calcula
+    Detecta el cruce de `threshold` por el flanco indicado y calcula
     rpm = 60 / (Δt · pulses_per_rev) entre pulsos sucesivos.
+
+    edge:
+        "falling" — cruce DESCENDENTE (sonda de proximidad Bently: el keyway da
+            un pulso negativo; threshold negativo). Es el valor por defecto.
+        "rising"  — cruce ASCENDENTE (foto-tacómetro con cinta reflectiva: pulso
+            positivo; threshold positivo).
 
     Returns:
         (t_rev [s], rpm) — un valor por intervalo entre pulsos (len = nº pulsos−1).
         Arrays vacíos si hay menos de 2 pulsos.
     """
     k = np.asarray(keyphasor, dtype=float)
-    below = k < threshold
-    edges = np.where(below[1:] & ~below[:-1])[0] + 1   # índices de flanco de bajada
+    if edge == "rising":
+        above = k > threshold
+        edges = np.where(above[1:] & ~above[:-1])[0] + 1   # cruce ascendente
+    else:
+        below = k < threshold
+        edges = np.where(below[1:] & ~below[:-1])[0] + 1   # cruce descendente
     if edges.size < 2:
         return np.array([]), np.array([])
     t_edges = edges / fs

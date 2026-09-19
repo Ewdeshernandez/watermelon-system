@@ -44,8 +44,12 @@ from core.torsional.analysis import (
     rainflow_cycles, shaft_torsional_fatigue,
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
+from core.torsional.ni_source import (
+    KeyphasorSensor, NITorsionalConfig, NITorsionalSource,
+    nidaqmx_available, rpm_from_keyphasor,
+)
 
-__version__ = "0.9.5"
+__version__ = "0.10.0"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -295,6 +299,9 @@ def build_app(simulated: bool = True):
         "buf_kph": deque(maxlen=1),
         "buf_secs": 6.0,
         "running": False,
+        "acq_mode": "sim",                # "sim" | "ni" (NI 9229 hardware)
+        "kph_sensor": KeyphasorSensor.simulated(),
+        "ni_cfg": {"device": "cDAQ1Mod1", "torque_ai": 0, "kph_ai": 1},
     }
 
     # ---- Toolbar: marca + versión + idioma + banner de hardware ----
@@ -350,13 +357,26 @@ def build_app(simulated: bool = True):
     tb.addWidget(mode_lbl)
 
     def _refresh_hw_banner():
-        n = _detect_dc_channels()
-        if n > 0:
-            mode_lbl.setText(f"● LIVE — {DAQ_NAME} · {n} ch   ")
-            mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
+        # Banner HONESTO: refleja el MODO elegido y la fuente realmente activa,
+        # no solo si hay una tarjeta presente.
+        mode = st.get("acq_mode", "sim")
+        running_ni = st.get("running") and isinstance(st.get("source"), NITorsionalSource)
+        if mode == "ni":
+            n = _detect_dc_channels()
+            if running_ni:
+                mode_lbl.setText(f"● LIVE — {DAQ_NAME} (NI 9229)   ")
+                mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
+            elif n > 0:
+                mode_lbl.setText(T(f"● NI 9229 READY — {n} ch detected   ",
+                                   f"● NI 9229 LISTA — {n} ch detectados   "))
+                mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
+            else:
+                mode_lbl.setText(T("● NI 9229 selected — no module detected   ",
+                                   "● NI 9229 elegida — sin módulo detectado   "))
+                mode_lbl.setStyleSheet("color:#fbbf24; font-weight:700;")
         else:
-            mode_lbl.setText(T("● SIMULATED — no DAQ connected   ",
-                               "● SIMULADO — sin DAQ conectado   "))
+            mode_lbl.setText(T("● SIMULATED — simulated signal   ",
+                               "● SIMULADO — señal simulada   "))
             mode_lbl.setStyleSheet("color:#fbbf24; font-weight:700;")
     _refresh_hw_banner()
     _hw_timer = QtCore.QTimer(win); _hw_timer.setInterval(5000)
@@ -530,6 +550,62 @@ def build_app(simulated: bool = True):
     f2.addRow(T("Units", "Unidades"), cb_units)
     form_wrap.addWidget(gb_gage)
 
+    # --- Adquisición + sensor de keyphasor (P1: NI 9229 real) ---
+    gb_acq = QtWidgets.QGroupBox(T("Acquisition", "Adquisición")); f3 = QtWidgets.QFormLayout(gb_acq)
+    cb_acq_mode = QtWidgets.QComboBox()
+    cb_acq_mode.addItems([T("Simulated signal", "Señal simulada"), "NI 9229 (hardware)"])
+    ed_ni_device = QtWidgets.QLineEdit("cDAQ1Mod1")
+    ed_ni_device.setToolTip(T("NI-DAQmx module name of the 9229 (e.g. cDAQ1Mod1).",
+                              "Nombre del módulo 9229 en NI-DAQmx (p.ej. cDAQ1Mod1)."))
+    sb_torque_ai = QtWidgets.QSpinBox(); sb_torque_ai.setRange(0, 3); sb_torque_ai.setValue(0)
+    sb_kph_ai = QtWidgets.QSpinBox(); sb_kph_ai.setRange(0, 3); sb_kph_ai.setValue(1)
+    cb_kph_sensor = QtWidgets.QComboBox()
+    cb_kph_sensor.addItems([T("Simulated keyphasor", "Keyphasor simulado"),
+                            "Bently 3300 XL 8mm + Proximitor",
+                            T("Photo-tach (reflective tape)", "Foto-tacómetro (cinta reflectiva)")])
+    sb_ppr = QtWidgets.QSpinBox(); sb_ppr.setRange(1, 60); sb_ppr.setValue(1)
+    sb_ppr.setToolTip(T("Keyways (proximity) or reflective strips (photo-tach) per revolution.",
+                        "Keyways (proximidad) o cintas reflectivas (foto-tacómetro) por vuelta."))
+    lbl_kph = QtWidgets.QLabel(""); lbl_kph.setWordWrap(True); lbl_kph.setStyleSheet("color:#475569; font-size:11px;")
+    _ai_row = QtWidgets.QWidget(); _ail = QtWidgets.QHBoxLayout(_ai_row)
+    _ail.setContentsMargins(0, 0, 0, 0); _ail.addWidget(sb_torque_ai); _ail.addWidget(sb_kph_ai); _ail.addStretch(1)
+    f3.addRow(T("Mode", "Modo"), cb_acq_mode)
+    f3.addRow("NI 9229 device", ed_ni_device)
+    f3.addRow(T("Torque AI / Keyphasor AI", "AI par / AI keyphasor"), _ai_row)
+    f3.addRow(T("Keyphasor sensor", "Sensor keyphasor"), cb_kph_sensor)
+    f3.addRow(T("Pulses per rev", "Pulsos por vuelta"), sb_ppr)
+    f3.addRow("", lbl_kph)
+    form_wrap.addWidget(gb_acq)
+
+    def _kph_sensor():
+        """Construye el KeyphasorSensor elegido (+ ppr) y lo guarda en el estado."""
+        idx = cb_kph_sensor.currentIndex(); ppr = sb_ppr.value()
+        if idx == 1:
+            s = KeyphasorSensor.bently_3300xl_8mm(keyways=ppr)
+        elif idx == 2:
+            s = KeyphasorSensor.phototach_reflective(strips=ppr)
+        else:
+            s = KeyphasorSensor.simulated()
+        st["kph_sensor"] = s
+        lbl_kph.setText(f"{s.label} · edge={s.edge} · {s.pulses_per_rev}/rev<br>{s.note}")
+        return s
+
+    def _on_acq_mode(_=0):
+        st["acq_mode"] = "ni" if cb_acq_mode.currentIndex() == 1 else "sim"
+        _is_ni = st["acq_mode"] == "ni"
+        for _w in (ed_ni_device, sb_torque_ai, sb_kph_ai):
+            _w.setEnabled(_is_ni)
+        st["ni_cfg"] = {"device": ed_ni_device.text() or "cDAQ1Mod1",
+                        "torque_ai": sb_torque_ai.value(), "kph_ai": sb_kph_ai.value()}
+        _refresh_hw_banner()
+    cb_acq_mode.currentIndexChanged.connect(_on_acq_mode)
+    cb_kph_sensor.currentIndexChanged.connect(lambda _=0: _kph_sensor())
+    sb_ppr.valueChanged.connect(lambda _=0: _kph_sensor())
+    ed_ni_device.editingFinished.connect(_on_acq_mode)
+    sb_torque_ai.valueChanged.connect(lambda _=0: _on_acq_mode())
+    sb_kph_ai.valueChanged.connect(lambda _=0: _on_acq_mode())
+    _kph_sensor(); _on_acq_mode()      # estado inicial (sim; NI deshabilitado)
+
     def _on_gage(_=0):
         idx = cb_gage.currentIndex()
         if idx >= len(_GAGES):     # Custom
@@ -573,6 +649,12 @@ def build_app(simulated: bool = True):
         _CFG.setValue("units", cb_units.currentIndex())
         _CFG.setValue("material", cb_material.currentIndex())
         _CFG.setValue("gage", cb_gage.currentIndex())
+        _CFG.setValue("acq_mode", cb_acq_mode.currentIndex())
+        _CFG.setValue("ni_device", ed_ni_device.text())
+        _CFG.setValue("torque_ai", sb_torque_ai.value())
+        _CFG.setValue("kph_ai", sb_kph_ai.value())
+        _CFG.setValue("kph_sensor", cb_kph_sensor.currentIndex())
+        _CFG.setValue("ppr", sb_ppr.value())
         lbl_cfgsaved.setText(T("✅ Configuration saved.", "✅ Configuración guardada."))
 
     def _load_config():
@@ -587,6 +669,13 @@ def build_app(simulated: bool = True):
             cb_gxmt.setCurrentText(str(_CFG.value("gxmt", "4000")))
             cb_bridge.setCurrentIndex(int(_CFG.value("bridge", 0)))
             cb_units.setCurrentIndex(int(_CFG.value("units", 0)))
+            ed_ni_device.setText(str(_CFG.value("ni_device", "cDAQ1Mod1") or "cDAQ1Mod1"))
+            sb_torque_ai.setValue(int(_CFG.value("torque_ai", 0)))
+            sb_kph_ai.setValue(int(_CFG.value("kph_ai", 1)))
+            cb_kph_sensor.setCurrentIndex(int(_CFG.value("kph_sensor", 0)))
+            sb_ppr.setValue(int(_CFG.value("ppr", 1)))
+            cb_acq_mode.setCurrentIndex(int(_CFG.value("acq_mode", 0)))
+            _kph_sensor(); _on_acq_mode()
             lbl_cfgsaved.setText(T("Loaded saved configuration.", "Configuración guardada cargada."))
         except Exception:  # noqa: BLE001
             pass
@@ -739,29 +828,48 @@ def build_app(simulated: bool = True):
         fs = st["fs"]
         units = st["scaling"].units
         p = _preset()
-        cfg = TorsionalStreamConfig(
-            sample_rate_hz=fs, rpm=p["rpm"],
-            channels=make_torsional_channels(units=units),
-            block_seconds=0.1, buffer_seconds=st["buf_secs"],
-            mean_torque=p["mean"], orders=p["orders"],
-            gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"],
-            torsional_res_hz=p["res_hz"], torque_noise_rms_eu=p["noise"],
-            scaling=st["scaling"], torque_units=units,
-        )
-        src = SimulatedTorsionalSource(cfg); src.start()
+        if st.get("acq_mode") == "ni":
+            # Adquisición REAL NI 9229. NUNCA cae a simulado en silencio: si el
+            # driver/hardware no está, avisa y aborta.
+            _nc = st.get("ni_cfg", {})
+            ncfg = NITorsionalConfig(
+                device=_nc.get("device", "cDAQ1Mod1"),
+                torque_ai=int(_nc.get("torque_ai", 0)), kph_ai=int(_nc.get("kph_ai", 1)),
+                sample_rate_hz=fs, block_seconds=0.1, voltage_range=10.0,
+                keyphasor=st.get("kph_sensor") or KeyphasorSensor.phototach_reflective())
+            src = NITorsionalSource(ncfg)
+            try:
+                src.start()
+            except RuntimeError as exc:
+                QtWidgets.QMessageBox.critical(win, "Watermelon Torsional",
+                    T(f"NI 9229 acquisition failed:\n{exc}\n\nSwitch to Simulated mode or connect the DAQ.",
+                      f"Falló la adquisición NI 9229:\n{exc}\n\nCambia a modo Simulado o conecta la tarjeta."))
+                return
+        else:
+            cfg = TorsionalStreamConfig(
+                sample_rate_hz=fs, rpm=p["rpm"],
+                channels=make_torsional_channels(units=units),
+                block_seconds=0.1, buffer_seconds=st["buf_secs"],
+                mean_torque=p["mean"], orders=p["orders"],
+                gear_teeth=p["gear_teeth"], gear_amp_eu=p["gear_amp"],
+                torsional_res_hz=p["res_hz"], torque_noise_rms_eu=p["noise"],
+                scaling=st["scaling"], torque_units=units,
+            )
+            src = SimulatedTorsionalSource(cfg); src.start()
         st["source"] = src
         maxlen = int(st["buf_secs"] * fs)
         st["buf_torque"] = deque(maxlen=maxlen); st["buf_kph"] = deque(maxlen=maxlen)
         st["buf_volts"] = deque(maxlen=maxlen)      # data CRUDA (voltios del RX10K)
         st["running"] = True
         btn_start.setEnabled(False); btn_stop.setEnabled(True)
-        live_timer.start()
+        live_timer.start(); _refresh_hw_banner()
 
     def _stop_live():
         live_timer.stop(); st["running"] = False
         if st["source"] is not None:
             st["source"].stop()
         btn_start.setEnabled(True); btn_stop.setEnabled(False)
+        _refresh_hw_banner()
 
     def _tick():
         src = st["source"]; sc = st["scaling"]
@@ -794,8 +902,9 @@ def build_app(simulated: bool = True):
         mask = freqs <= 600.0                      # techo de banda del equipo (500 Hz)
         curve_s.setData(freqs[mask], amp[mask])
 
-        # RPM del keyphasor
-        _, rpm = keyphasor_to_rpm(kph, fs)
+        # RPM del keyphasor (flanco/umbral/ppr del sensor elegido: proximidad o foto-tacómetro)
+        _sensor = st.get("kph_sensor") or KeyphasorSensor.simulated()
+        _, rpm = rpm_from_keyphasor(kph, fs, _sensor)
         rpm_now = float(np.median(rpm)) if rpm.size else sb_rpm.value()
         v_rpm.setText(f"{rpm_now:,.0f}")
         oa = order_amplitudes(arr, fs, rpm_now, orders=(1, 2, 3, 4, 5))
