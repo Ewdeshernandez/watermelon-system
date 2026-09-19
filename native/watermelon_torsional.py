@@ -50,7 +50,7 @@ from core.torsional.ni_source import (
 )
 from core.torsional.monitor import TorsionalMonitor
 
-__version__ = "0.12.1"
+__version__ = "0.12.2"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -712,11 +712,12 @@ def build_app(simulated: bool = True):
     # Fila de DATA: guardar cruda en el PC + subir a la nube (como el Modal)
     datarow = QtWidgets.QHBoxLayout()
     btn_save = QtWidgets.QPushButton(T("💾 Save run locally (raw)", "💾 Guardar corrida local (cruda)"))
-    btn_upload = QtWidgets.QPushButton(T("☁ Upload to cloud", "☁ Subir a la nube"))
+    btn_upload = QtWidgets.QPushButton(T("☁ Upload current to cloud", "☁ Subir actual a la nube"))
     btn_upload.setStyleSheet(f"QPushButton{{background:{ACC};color:#08243a;}}QPushButton:hover{{background:#149bcf;}}")
+    btn_loadup = QtWidgets.QPushButton(T("📂 Upload a saved run", "📂 Subir un guardado"))
     lbl_data = QtWidgets.QLabel(""); lbl_data.setStyleSheet("color:#475569;")
     datarow.addWidget(QtWidgets.QLabel(T("Data:", "Data:"))); datarow.addWidget(btn_save)
-    datarow.addWidget(btn_upload); datarow.addWidget(lbl_data); datarow.addStretch(1)
+    datarow.addWidget(btn_upload); datarow.addWidget(btn_loadup); datarow.addWidget(lbl_data); datarow.addStretch(1)
     live_l.addLayout(datarow)
 
     def _preset():
@@ -1012,8 +1013,48 @@ def build_app(simulated: bool = True):
         else:
             lbl_data.setText(T(f"⚠ Could not upload ({r.get('reason','offline')}). Saved locally is available.",
                                f"⚠ No se pudo subir ({r.get('reason','offline')}). El guardado local queda disponible."))
+    def _upload_saved_run():
+        """Offline-first: sube una corrida YA guardada en el PC (data.npz + run.json)."""
+        import os, json, socket
+        fp, _ = QtWidgets.QFileDialog.getOpenFileName(
+            win, T("Open saved run (data.npz)", "Abrir corrida guardada (data.npz)"),
+            _runs_dir(), "NPZ (*.npz)")
+        if not fp:
+            return
+        lbl_data.setText(T("☁ Uploading saved run…", "☁ Subiendo corrida guardada…")); QtWidgets.QApplication.processEvents()
+        try:
+            z = np.load(fp)
+            volts = np.asarray(z["volts"], dtype=np.float32) if "volts" in z else np.asarray(z["torque"], np.float32)
+            kph = np.asarray(z["kph"], dtype=np.float32) if "kph" in z else np.zeros_like(volts)
+            fs = float(z["fs"]) if "fs" in z else st["fs"]
+            meta = {}
+            _mj = os.path.join(os.path.dirname(fp), "run.json")
+            if os.path.exists(_mj):
+                with open(_mj, "r", encoding="utf-8") as fh:
+                    meta = json.load(fh)
+            setup = meta.get("setup", {}) if isinstance(meta.get("setup"), dict) else {}
+            name = setup.get("machine") or setup.get("tag") or "Torsional run"
+            from core.torsional import cloud
+            rid, tstamp = cloud.new_run_id(name)
+            raw2 = np.column_stack([volts, kph]).astype(np.float32)
+            raw = cloud.upload_raw(rid, raw2, fs, channels=["Torque_V", "KPH"])
+            payload = dict(meta); payload["raw_ref"] = raw if raw.get("ok") else None
+            _acc, _host = _run_trace_tags(); _ip, _geo = _conn_ip_geo()
+            r = cloud.save_run(name, payload, run_id=rid, ts=tstamp, account=_acc,
+                               client=setup.get("client", ""), tag=setup.get("tag", ""),
+                               hostname=_host or socket.gethostname(), ip=_ip, geo=_geo)
+        except Exception as exc:  # noqa: BLE001
+            r = {"ok": False, "reason": f"{type(exc).__name__}: {exc}"}
+        if r.get("ok"):
+            lbl_data.setText(T(f"☁ Uploaded saved run (id {r.get('id','')}).",
+                               f"☁ Corrida guardada subida (id {r.get('id','')})."))
+        else:
+            lbl_data.setText(T(f"⚠ Upload failed ({r.get('reason','offline')}).",
+                               f"⚠ Falló la subida ({r.get('reason','offline')})."))
+
     btn_save.clicked.connect(_save_run_local)
     btn_upload.clicked.connect(_upload_run)
+    btn_loadup.clicked.connect(_upload_saved_run)
     tabs.addTab(pg_live, T("Live torque", "Torque en vivo"))
 
     # =================================================================
@@ -1461,9 +1502,12 @@ def build_app(simulated: bool = True):
     _mpr.addWidget(p_mtr, 1); _mpr.addWidget(p_mh, 1)
 
     mn_row = QtWidgets.QHBoxLayout(); mn_l.addLayout(mn_row)
-    btn_mon_save = QtWidgets.QPushButton(T("💾 Save + ☁ Upload summary", "💾 Guardar + ☁ Subir resumen"))
+    btn_mon_savelocal = QtWidgets.QPushButton(T("💾 Save locally", "💾 Guardar local"))
+    btn_mon_upload = QtWidgets.QPushButton(T("☁ Upload to cloud", "☁ Subir a la nube"))
+    btn_mon_load = QtWidgets.QPushButton(T("📂 Load a saved campaign", "📂 Cargar campaña guardada"))
+    mn_row.addWidget(btn_mon_savelocal); mn_row.addWidget(btn_mon_upload); mn_row.addWidget(btn_mon_load); mn_row.addStretch(1)
     mn_status = QtWidgets.QLabel(""); mn_status.setWordWrap(True); mn_status.setStyleSheet("color:#475569;")
-    mn_row.addWidget(btn_mon_save); mn_row.addWidget(mn_status); mn_row.addStretch(1)
+    mn_l.addWidget(mn_status)
 
     mon_timer = QtCore.QTimer(win); mon_timer.setInterval(250)
     st["_mon"] = None; st["_mon_src"] = None; st["_mon_ticks"] = 0
@@ -1567,6 +1611,7 @@ def build_app(simulated: bool = True):
         _p = _preset()
         st["_mon"] = TorsionalMonitor(units=st["scaling"].units, trend_dt=2.0,
                                       event_pp=max(3.0 * _p["mean"], 1.0))   # umbral evento = 3× par medio
+        st["_mon_setup"] = None; st["_mon_shaft"] = None    # campaña nueva → usa setup/eje en vivo
         st["_mon_src"] = src; st["_mon_ticks"] = 0; st["running_mon"] = True
         btn_mon_go.setEnabled(False); btn_mon_stop.setEnabled(True); sb_mon_h.setEnabled(False)
         mn_status.setStyleSheet("color:#475569;")
@@ -1611,28 +1656,56 @@ def build_app(simulated: bool = True):
                                 f"Detenido en {st['_mon'].duration_s/3600.0:.2f} h. Guarda/sube el resumen."))
         _refresh_hw_banner()
 
-    def _mon_save():
+    def _mon_setup_now():
+        return st.get("_mon_setup") or (st["setup_fn"]() if st.get("setup_fn") else {})
+
+    def _mon_shaft_now():
+        return st.get("_mon_shaft") or {"do": sb_do.value(), "di": sb_di.value(), "sut_ksi": sb_sut.value()}
+
+    def _mon_payload():
+        """Payload para SUBIR (resumen liviano + setup + eje)."""
+        mon = st.get("_mon")
+        if mon is None or mon.n_samples == 0:
+            return None, None
+        setup = _mon_setup_now()
+        payload = mon.summary()
+        payload["setup"] = setup
+        payload["shaft"] = _mon_shaft_now()
+        payload["app_version"] = __version__
+        return payload, setup
+
+    def _mon_save_local():
+        """Guarda el estado COMPLETO en el PC (offline-first, recargable). No requiere red."""
         mon = st.get("_mon")
         if mon is None or mon.n_samples == 0:
             mn_status.setText(T("Nothing to save yet.", "Nada que guardar aún.")); return
-        setup = st["setup_fn"]() if st.get("setup_fn") else {}
-        payload = mon.summary()
-        payload["setup"] = setup
-        payload["shaft"] = {"do": sb_do.value(), "di": sb_di.value(), "sut_ksi": sb_sut.value()}
-        payload["app_version"] = __version__
-        name = (setup.get("machine") or setup.get("tag") or "Torsional monitor") + " · 24h"
-        # local
         try:
             import os, json
+            from datetime import datetime
             d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "monitors")
             os.makedirs(d, exist_ok=True)
-            from datetime import datetime
             fp = os.path.join(d, f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+            record = dict(mon.to_dict())            # estado completo (hist+residual → recargable)
+            record["setup"] = _mon_setup_now(); record["shaft"] = _mon_shaft_now()
+            record["app_version"] = __version__
             with open(fp, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, ensure_ascii=False)
+                json.dump(record, fh, ensure_ascii=False)
+            st["_mon_last_local"] = fp
+            mn_status.setStyleSheet("color:#16a34a; font-weight:600;")
+            mn_status.setText(T(f"💾 Saved locally: {fp}  (upload later when you have internet).",
+                                f"💾 Guardado local: {fp}  (súbelo luego cuando tengas internet)."))
         except Exception as e:  # noqa: BLE001
-            fp = f"(local save failed: {e})"
-        # nube (solo el resumen liviano — sin cruda)
+            mn_status.setText(T(f"⚠ Local save failed: {e}", f"⚠ Falló el guardado local: {e}"))
+
+    def _mon_upload():
+        """Sube a la nube el monitor actualmente cargado (recién corrido o cargado de disco)."""
+        payload, setup = _mon_payload()
+        if payload is None:
+            mn_status.setText(T("Load or run a campaign first.", "Carga o corre una campaña primero.")); return
+        setup = setup or {}
+        name = (setup.get("machine") or setup.get("tag") or "Torsional monitor") + " · 24h"
+        mn_status.setStyleSheet("color:#475569;")
+        mn_status.setText(T("☁ Uploading…", "☁ Subiendo…")); QtWidgets.QApplication.processEvents()
         try:
             from core.torsional import cloud
             import socket
@@ -1649,15 +1722,40 @@ def build_app(simulated: bool = True):
                     os.remove(_cp)               # campaña cerrada → checkpoint ya no hace falta
             except Exception:  # noqa: BLE001
                 pass
-            mn_status.setText(T(f"💾 {fp}  ·  ☁ Uploaded (id {r.get('id','')}).",
-                                f"💾 {fp}  ·  ☁ Subido (id {r.get('id','')})."))
+            mn_status.setStyleSheet("color:#16a34a; font-weight:600;")
+            mn_status.setText(T(f"☁ Uploaded to cloud (id {r.get('id','')}).",
+                                f"☁ Subido a la nube (id {r.get('id','')})."))
         else:
-            mn_status.setText(T(f"💾 Saved locally: {fp}  ·  ⚠ upload {r.get('reason','offline')}.",
-                                f"💾 Guardado local: {fp}  ·  ⚠ subida {r.get('reason','offline')}."))
+            mn_status.setStyleSheet("color:#b45309; font-weight:600;")
+            mn_status.setText(T(f"⚠ Could not upload ({r.get('reason','offline')}). Saved-local stays available.",
+                                f"⚠ No se pudo subir ({r.get('reason','offline')}). El guardado local queda disponible."))
+
+    def _mon_load():
+        """Abre una campaña guardada en el PC → la carga para analizar/subir."""
+        import os, json
+        d = os.path.join(os.path.expanduser("~"), "WatermelonTorsional", "monitors")
+        os.makedirs(d, exist_ok=True)
+        fp, _ = QtWidgets.QFileDialog.getOpenFileName(win, T("Open saved campaign", "Abrir campaña guardada"),
+                                                      d, "JSON (*.json)")
+        if not fp:
+            return
+        try:
+            with open(fp, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            st["_mon"] = TorsionalMonitor.from_dict(data)   # estado completo (hist/residual)
+            st["_mon_setup"] = data.get("setup") or {}       # usa el setup guardado al subir
+            st["_mon_shaft"] = data.get("shaft") or {}
+        except Exception as e:  # noqa: BLE001
+            mn_status.setText(T(f"⚠ Could not open: {e}", f"⚠ No se pudo abrir: {e}")); return
+        _mon_refresh()
+        mn_status.setStyleSheet("color:#475569;")
+        mn_status.setText(T(f"📂 Loaded {os.path.basename(fp)} — analyze, then Upload to cloud.",
+                            f"📂 Cargado {os.path.basename(fp)} — analiza y luego Sube a la nube."))
 
     btn_mon_go.clicked.connect(_mon_start); btn_mon_stop.clicked.connect(_mon_stop)
     btn_mon_resume.clicked.connect(_mon_resume)
-    btn_mon_save.clicked.connect(_mon_save); mon_timer.timeout.connect(_mon_tick)
+    btn_mon_savelocal.clicked.connect(_mon_save_local); btn_mon_upload.clicked.connect(_mon_upload)
+    btn_mon_load.clicked.connect(_mon_load); mon_timer.timeout.connect(_mon_tick)
     tabs.addTab(pg_mon, T("Monitor 24h", "Monitor 24h"))
 
     # =================================================================
