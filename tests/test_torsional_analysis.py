@@ -188,3 +188,98 @@ def test_fatigue_life_monotonic_in_amplitude():
         tq = 4000 + amp * np.sin(2 * np.pi * 30 * t)
         sfs.append(shaft_torsional_fatigue(rainflow_cycles(tq), 3.0, 0.0, 90000, "ftlb", 8.0).safety_factor)
     assert sfs[0] > sfs[1] > sfs[2]
+
+
+# ---------------------------------------------------------------
+# Vida a fatiga — cobertura de blindaje (P4)
+# ---------------------------------------------------------------
+def _amp_cycles(mean, amp, f=30.0, fs=2000.0, secs=8.0):
+    from core.torsional.analysis import rainflow_cycles
+    t = np.arange(0, secs, 1 / fs)
+    return rainflow_cycles(mean + amp * np.sin(2 * np.pi * f * t))
+
+
+def test_fatigue_yellow_branch():
+    """SF entre 1.0 y el factor de diseño → amarillo (vigilar)."""
+    from core.torsional.analysis import shaft_torsional_fatigue
+    # barre amplitud hasta caer en la banda amarilla (1.0 ≤ SF < design_sf=2.0)
+    hit = None
+    for amp in range(1000, 6000, 100):
+        r = shaft_torsional_fatigue(_amp_cycles(4000, amp), 3.0, 0.0, 90000, "ftlb", 8.0,
+                                    design_safety_factor=2.0)
+        if r.status == "yellow":
+            hit = r; break
+    assert hit is not None, "no se alcanzó la banda amarilla"
+    assert 1.0 <= hit.safety_factor < 2.0
+    # Amarillo = SF≥1.0: bajo el límite de fatiga (vida infinita) pero con margen < diseño.
+    assert hit.status == "yellow"
+
+
+def test_fatigue_units_nm_vs_ftlb_consistent():
+    """El mismo par físico en N·m y ft-lb da el mismo diagnóstico."""
+    from core.torsional.analysis import shaft_torsional_fatigue
+    NM_PER_FTLB = 1.3558179483
+    r_ft = shaft_torsional_fatigue(_amp_cycles(4000, 3000), 3.0, 0.0, 90000, "ftlb", 8.0)
+    r_nm = shaft_torsional_fatigue(_amp_cycles(4000 * NM_PER_FTLB, 3000 * NM_PER_FTLB),
+                                   3.0, 0.0, 90000, "nm", 8.0)
+    assert r_ft.status == r_nm.status
+    assert abs(r_ft.safety_factor - r_nm.safety_factor) / r_ft.safety_factor < 0.01
+    assert abs(r_ft.tau_alt_max_psi - r_nm.tau_alt_max_psi) / r_ft.tau_alt_max_psi < 0.01
+
+
+def test_fatigue_hollow_shaft_weaker_than_solid():
+    """Un eje hueco (menor Zp) sufre más esfuerzo → menor SF que el sólido."""
+    from core.torsional.analysis import shaft_torsional_fatigue
+    cyc = _amp_cycles(4000, 2000)
+    solid = shaft_torsional_fatigue(cyc, 3.0, 0.0, 90000, "ftlb", 8.0)
+    hollow = shaft_torsional_fatigue(cyc, 3.0, 2.0, 90000, "ftlb", 8.0)
+    assert hollow.safety_factor < solid.safety_factor
+
+
+def test_fatigue_shear_stress_magnitude():
+    """τ del par medio debe coincidir con 16·T·Do/(π(Do⁴−Di⁴)) a mano."""
+    from core.torsional.analysis import shaft_torsional_fatigue
+    # par constante-ish con pequeño rizado; τ medio = 16·T·Do/(π Do⁴)
+    T_ftlb = 4000.0; Do = 3.0
+    r = shaft_torsional_fatigue(_amp_cycles(T_ftlb, 50), Do, 0.0, 90000, "ftlb", 8.0)
+    T_lbin = T_ftlb * 12.0
+    tau_expected = 16.0 * T_lbin * Do / (np.pi * Do ** 4)   # psi
+    assert abs(r.tau_mean_psi - tau_expected) / tau_expected < 0.02
+
+
+def test_fatigue_invalid_geometry_raises():
+    """Geometría no diagnosticable → ValueError (no un número falso)."""
+    import pytest
+    from core.torsional.analysis import shaft_torsional_fatigue
+    cyc = _amp_cycles(4000, 1000)
+    with pytest.raises(ValueError):
+        shaft_torsional_fatigue(cyc, 0.0, 0.0, 90000, "ftlb", 8.0)      # Do=0
+    with pytest.raises(ValueError):
+        shaft_torsional_fatigue(cyc, 3.0, 3.0, 90000, "ftlb", 8.0)      # Di>=Do
+
+
+def test_fatigue_degenerate_endurance_ratio_no_inversion():
+    """endurance_ratio·kf alto NO debe invertir la curva S-N (b<0 garantizado)."""
+    from core.torsional.analysis import shaft_torsional_fatigue
+    # ratio=1.0, kf=1.0 → sse crudo ≥ ss1e3; el clamp lo debe evitar
+    r = shaft_torsional_fatigue(_amp_cycles(4000, 8000), 3.0, 0.0, 90000, "ftlb", 8.0,
+                                derating_kf=1.0, endurance_ratio=1.0)
+    assert np.isfinite(r.safety_factor)            # no división por cero ni curva invertida
+    assert r.sse_psi > 0 and not np.isnan(r.life_hours)
+
+
+def test_fatigue_empty_cycles_is_safe():
+    """Sin ciclos → sin daño, vida infinita (no crash)."""
+    from core.torsional.analysis import shaft_torsional_fatigue
+    r = shaft_torsional_fatigue([], 3.0, 0.0, 90000, "ftlb", 8.0)
+    assert r.infinite and r.damage_window == 0.0
+
+
+def test_spectrum_and_order_empty_input_no_nan():
+    """Espectro/orden con arrays vacíos o de 1 muestra → 0, no NaN."""
+    from core.torsional.analysis import torque_spectrum, order_amplitude
+    for arr in ([], [1.0]):
+        f, a = torque_spectrum(np.asarray(arr, float), 2000.0)
+        assert a.size == 0 or np.all(np.isfinite(a))
+        amp, ph = order_amplitude(np.asarray(arr, float), 2000.0, 1800.0, 1.0)
+        assert np.isfinite(amp) and amp == 0.0

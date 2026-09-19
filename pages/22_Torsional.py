@@ -494,11 +494,15 @@ elif nav == T_FAT:
             sut_ksi = c4.number_input("Ultimate Sut (ksi)", 10.0, 400.0,
                                       float(_shaft.get("sut", 90.0)), 1.0, key="tors_fat_sut")
         design_sf = c5.selectbox("Design safety factor", [2.0, 1.5, 3.0], key="tors_fat_sf")
-        life = shaft_torsional_fatigue(
-            rainflow_cycles(torque), outer_diameter_in=do_in, inner_diameter_in=di_in,
-            ultimate_strength_psi=sut_ksi * 1000.0, torque_units=run["units"],
-            window_seconds=float(torque.size / fs), design_safety_factor=float(design_sf),
-            endurance_ratio=float(_endr))
+        try:
+            life = shaft_torsional_fatigue(
+                rainflow_cycles(torque), outer_diameter_in=do_in, inner_diameter_in=di_in,
+                ultimate_strength_psi=sut_ksi * 1000.0, torque_units=run["units"],
+                window_seconds=float(torque.size / fs), design_safety_factor=float(design_sf),
+                endurance_ratio=float(_endr))
+        except ValueError as exc:      # geometría no diagnosticable
+            st.warning(f"Check shaft geometry — {exc}")
+            st.stop()
         _bg = {"green": ("#dcfce7", "#166534", GREEN), "yellow": ("#fef9c3", "#854d0e", AMBER),
                "red": ("#fee2e2", "#991b1b", RED)}[life.status]
         _sf_txt = "∞" if life.safety_factor == float("inf") else f"{life.safety_factor:.2f}"

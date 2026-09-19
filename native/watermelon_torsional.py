@@ -45,7 +45,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -1187,11 +1187,17 @@ def build_app(simulated: bool = True):
         cyc = rainflow_cycles(torque)
         ranges = fatigue_ranges(torque)
         # --- diagnóstico de vida a fatiga (Goodman + Miner) ---
-        life = shaft_torsional_fatigue(
-            cyc, outer_diameter_in=sb_do.value(), inner_diameter_in=sb_di.value(),
-            ultimate_strength_psi=sb_sut.value() * 1000.0, torque_units=units,
-            window_seconds=win_s, design_safety_factor=float(cb_ft_sf.currentText()),
-            endurance_ratio=float(st.get("endurance_ratio", 0.50)))
+        try:
+            life = shaft_torsional_fatigue(
+                cyc, outer_diameter_in=sb_do.value(), inner_diameter_in=sb_di.value(),
+                ultimate_strength_psi=sb_sut.value() * 1000.0, torque_units=units,
+                window_seconds=win_s, design_safety_factor=float(cb_ft_sf.currentText()),
+                endurance_ratio=float(st.get("endurance_ratio", 0.50)))
+        except ValueError as exc:      # geometría no diagnosticable → aviso claro, sin crash
+            ft_light.setStyleSheet("background:#fee2e2; color:#991b1b; border-radius:12px; "
+                                   "padding:14px; font-size:16px; font-weight:800;")
+            ft_light.setText(T(f"Check shaft geometry: {exc}", f"Revisa la geometría del eje: {exc}"))
+            return
         st["fat"] = {"ranges": ranges, "units": u, "life": life}
 
         bg, fg = _LIGHT_BG[life.status]

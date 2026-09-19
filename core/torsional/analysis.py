@@ -74,12 +74,15 @@ def torque_spectrum(torque: np.ndarray, fs: float,
         (freqs [Hz], amp [EU pico]) — amp de un tono A·sin ≈ A.
     """
     x = np.asarray(torque, dtype=float)
+    if x.size < 2:                       # sin datos suficientes → espectro vacío (no NaN)
+        return np.zeros(0), np.zeros(0)
     if remove_dc:
         x = x - np.mean(x)
     n = x.size
     win = np.hanning(n)
+    sw = np.sum(win)
     spec = np.fft.rfft(x * win)
-    amp = np.abs(spec) / np.sum(win) * 2.0
+    amp = np.abs(spec) / sw * 2.0 if sw > 0 else np.zeros(spec.size)
     freqs = np.fft.rfftfreq(n, 1.0 / fs)
     return freqs, amp
 
@@ -99,13 +102,18 @@ def order_amplitude(torque: np.ndarray, fs: float, rpm: float,
         (amplitud [EU pico], fase [grados]).
     """
     x = np.asarray(torque, dtype=float)
+    if x.size < 2:                       # sin datos suficientes → amplitud 0 (no NaN)
+        return 0.0, 0.0
     x = x - np.mean(x)
     n = x.size
     t = np.arange(n) / fs
     f = order * rpm / 60.0
     win = np.hanning(n)
+    sw = np.sum(win)
+    if sw <= 0:
+        return 0.0, 0.0
     proj = np.sum(x * win * np.exp(-1j * 2.0 * np.pi * f * t))
-    amp = 2.0 * np.abs(proj) / np.sum(win)
+    amp = 2.0 * np.abs(proj) / sw
     phase = np.degrees(np.angle(proj))
     return float(amp), float(phase)
 
@@ -301,7 +309,6 @@ def fatigue_ranges(torque: Sequence[float]) -> List[Tuple[float, float]]:
 
 _NM_TO_LBIN = 8.8507457676   # 1 N·m  = 8.8507 lb·in
 _FTLB_TO_LBIN = 12.0         # 1 ft-lb = 12 lb·in
-_PSI_TO_MPA = 1.0 / 145.0377
 
 
 @dataclass
@@ -353,16 +360,28 @@ def shaft_torsional_fatigue(
       VERDE  → SF ≥ design_safety_factor  (bajo el límite de fatiga, margen amplio).
       AMARILLO → 1.0 ≤ SF < design_safety_factor (vida finita larga; vigilar).
       ROJO   → SF < 1.0 (acumula daño; se estima vida en horas).
+
+    Raises:
+        ValueError: geometría no diagnosticable (Do ≤ 0, o Di fuera de [0, Do)).
     """
     do = float(outer_diameter_in); di = float(inner_diameter_in)
+    # Geometría INVÁLIDA no se puede diagnosticar → error claro (no un número falso).
+    if do <= 0.0:
+        raise ValueError("outer_diameter_in debe ser > 0")
+    if di < 0.0 or di >= do:
+        raise ValueError("inner_diameter_in debe estar en [0, outer_diameter_in)")
     sut = max(float(ultimate_strength_psi), 1.0)
     # Módulo de sección polar → esfuerzo cortante por par (τ = T / Zp).
     zp = np.pi * (do ** 4 - di ** 4) / (16.0 * do)     # in³  (T en lb·in → τ en psi)
     ssu = 0.67 * sut                                    # resistencia última en cortante
-    sse = 0.577 * float(endurance_ratio) * sut * float(derating_kf)  # límite de fatiga en cortante corregido
     # Punto de 1e3 ciclos en cortante (Basquin): 0.577 · 0.9 · Sut.
     ss1e3 = 0.577 * 0.9 * sut
-    # Basquin  Sf = a·N^b  entre (1e3, ss1e3) y (1e6, sse).
+    # Límite de fatiga en cortante corregido. Se acota SIEMPRE por debajo del punto
+    # de 1e3 ciclos: con endurance_ratio·kf altos (p.ej. entrada rara ≥0.9) la curva
+    # S-N se invertiría (b≥0) o dividiría por cero — el clamp lo garantiza físico.
+    sse = 0.577 * float(endurance_ratio) * sut * float(derating_kf)
+    sse = min(sse, 0.85 * ss1e3)
+    # Basquin  Sf = a·N^b  entre (1e3, ss1e3) y (1e6, sse), con b < 0 garantizado.
     b = -(np.log10(ss1e3 / sse)) / 3.0                  # pendiente (negativa)
     a = ss1e3 / (1e3 ** b)
 
@@ -375,7 +394,7 @@ def shaft_torsional_fatigue(
         t_amp = _torque_to_lbin(c.range, torque_units) * 0.5   # amplitud de par
         t_mean = _torque_to_lbin(c.mean, torque_units)
         tau_a = abs(t_amp) / zp
-        tau_m = abs(t_mean) / zp
+        tau_m = abs(t_mean) / zp        # |media|: conservador (una media negativa se trata como dañina)
         if tau_a <= 0.0:
             continue
         # Goodman: alternante equivalente totalmente reversible.
@@ -394,7 +413,6 @@ def shaft_torsional_fatigue(
     if infinite:
         life_h = float("inf")
     else:
-        cps = n_total / max(window_seconds, 1e-6)        # ciclos por segundo
         d_rate = damage / max(window_seconds, 1e-6)      # daño por segundo
         life_h = (1.0 / d_rate) / 3600.0 if d_rate > 0 else float("inf")
 
@@ -403,7 +421,7 @@ def shaft_torsional_fatigue(
         label_es = "Vida infinita — eje seguro"; label_en = "Infinite life — shaft safe"
     elif sf >= 1.0:
         status = "yellow"
-        label_es = "Vida finita larga — vigilar"; label_en = "Long finite life — monitor"
+        label_es = "Margen bajo — vigilar"; label_en = "Low safety margin — monitor"
     else:
         status = "red"
         label_es = "Riesgo de fatiga — vida limitada"; label_en = "Fatigue risk — limited life"
