@@ -41,7 +41,7 @@ from core.torsional.sim_source import (
 from core.torsional.analysis import (
     torque_metrics, torque_spectrum, order_amplitudes,
     keyphasor_to_rpm, order_tracking, fatigue_ranges,
-    rainflow_cycles, shaft_torsional_fatigue,
+    rainflow_cycles, shaft_torsional_fatigue, RainflowCycle,
 )
 from core.modal.campbell import compute_crossings, SpeedBand, separation_margin_pct
 
@@ -310,6 +310,11 @@ def _load_cloud_run(run_id):
     meta = cloud.load_run(run_id)
     if not meta:
         return None
+    if meta.get("kind") == "monitor":          # corrida de MONITOREO 24h: histograma, no onda
+        setup = meta.get("setup", {}) if isinstance(meta.get("setup"), dict) else {}
+        name = setup.get("machine") or setup.get("tag") or "Torsional monitor"
+        return dict(kind="monitor", payload=meta, units=meta.get("units", "nm"),
+                    name=name, field=True, setup=setup)
     dl = cloud.download_raw(meta.get("raw_ref")) if meta.get("raw_ref") else None
     if dl is None:
         return None
@@ -372,6 +377,124 @@ with st.expander("⚙  Data source & scaling", expanded=False):
 
 if run is None:
     run = _demo_steady(units=units_key)
+
+# ============================================================ MONITOR 24h
+# Corrida de monitoreo de larga duración: histograma acumulado (no onda). Reporte propio.
+if isinstance(run, dict) and run.get("kind") == "monitor":
+    pay = run["payload"]
+    um = "N·m" if pay.get("units", "nm") == "nm" else "ft-lb"
+    ranges_m = [(float(r), float(c)) for r, c in pay.get("ranges", [])]
+    trend_m = pay.get("trend", [])
+    events_m = pay.get("events", [])
+    dur_h = float(pay.get("duration_s", 0.0)) / 3600.0
+    meanm = float(pay.get("mean", 0.0)); tmaxm = float(pay.get("tmax") or 0.0)
+    shaft = pay.get("shaft", {}) if isinstance(pay.get("shaft"), dict) else {}
+    ncyc = sum(c for _, c in ranges_m)
+    rmax_m = max((r for r, _ in ranges_m), default=0.0)
+
+    _sec("24-hour torsional monitor", "Accumulated rainflow fatigue (real Miner damage) · trend · overload events")
+    _mm1, _mm2, _mm3 = st.columns(3)
+    do_m = _mm1.number_input("Shaft Ø outer (in)", 0.1, 100.0, float(shaft.get("do", 3.0)), 0.1, key="mon_do")
+    di_m = _mm2.number_input("Shaft Ø inner (in)", 0.0, 99.0, float(shaft.get("di", 0.0)), 0.1, key="mon_di")
+    sut_m = _mm3.number_input("Ultimate Sut (ksi)", 10.0, 400.0, float(shaft.get("sut_ksi", 90.0)), 1.0, key="mon_sut")
+    cyc_m = [RainflowCycle(range=r, mean=meanm, count=c) for r, c in ranges_m if r > 0]
+    life_m = None
+    if cyc_m:
+        try:
+            life_m = shaft_torsional_fatigue(cyc_m, do_m, di_m, sut_m * 1000.0, pay.get("units", "nm"),
+                                             window_seconds=max(float(pay.get("duration_s", 1.0)), 1.0))
+        except ValueError as exc:
+            st.warning(f"Check shaft geometry — {exc}")
+    if life_m is not None:
+        _bg = {"green": ("#dcfce7", "#166534"), "yellow": ("#fef9c3", "#854d0e"),
+               "red": ("#fee2e2", "#991b1b")}[life_m.status]
+        _sf = "∞" if life_m.safety_factor == float("inf") else f"{life_m.safety_factor:.2f}"
+        _lf = ("Infinite life" if life_m.infinite else
+               (f"~{life_m.life_hours:,.0f} h" if life_m.life_hours < 8760 else f"~{life_m.life_hours/8760:,.1f} yr"))
+        st.markdown(f"<div style='background:{_bg[0]};color:{_bg[1]};border-radius:12px;padding:14px 18px;"
+                    f"font-size:18px;font-weight:800;margin:6px 0'>● {life_m.label_en} "
+                    f"<span style='font-weight:600;font-size:14px'>· SF {_sf} · {_lf} · over {dur_h:.1f} h monitored</span></div>",
+                    unsafe_allow_html=True)
+    _kpis([
+        (f"{dur_h:,.1f}<span style='font-size:13px'> h</span>", "Duration", "monitored"),
+        (f"{ncyc:,.0f}", "Total cycles", "rainflow"),
+        (f"{len(events_m)}", "Overload events", "> 3× mean pp"),
+        (f"{tmaxm:,.0f}<span style='font-size:13px'> {um}</span>", "Max torque", "peak seen"),
+    ])
+    # tendencia (par pp vs tiempo)
+    if trend_m:
+        tt = [row[0] / 3600.0 for row in trend_m]; pp = [row[2] for row in trend_m]
+        fig_t = go.Figure(go.Scatter(x=tt, y=pp, mode="lines", line=dict(color=BLUE, width=1.6), name="torque pp"))
+        _navplot(_apply(fig_t, height=300, xlab="time (h)", ylab=f"torque pp ({um})"))
+    # histograma acumulado
+    if ranges_m:
+        rr = np.array([r for r, _ in ranges_m]); cc = np.array([c for _, c in ranges_m])
+        nb = int(np.clip(len(rr), 8, 30)); edg = np.linspace(0, rr.max() * 1.0001, nb + 1)
+        hh, _ = np.histogram(rr, bins=edg, weights=cc)
+        fig_h = go.Figure(go.Bar(x=0.5 * (edg[:-1] + edg[1:]), y=hh, width=(edg[1] - edg[0]) * 0.92, marker_color=NAVY))
+        _navplot(_apply(fig_h, height=300, xlab=f"torque range ({um})", ylab="cycle count"))
+    # eventos
+    if events_m:
+        _erows = "".join(f"<tr><td class='num'>{e.get('t',0)/3600.0:.2f}<span class='u'> h</span></td>"
+                         f"<td class='num'>{e.get('peak',0):,.0f}<span class='u'> {um}</span></td>"
+                         f"<td class='num'>{e.get('rpm',0):,.0f}<span class='u'> rpm</span></td></tr>" for e in events_m[:50])
+        st.markdown("<table class='wm-modes'><thead><tr><th>Time</th><th>Peak torque</th><th>Speed</th></tr></thead>"
+                    f"<tbody>{_erows}</tbody></table>", unsafe_allow_html=True)
+    else:
+        st.success("No overload events during the campaign.")
+
+    # --- PDF de monitoreo 24h ---
+    _mlang = st.radio("Language", ["Español", "English"], horizontal=True, key="mon_rep_lang")
+    _mes = (_mlang == "Español")
+    if st.button(("📄 Generar reporte de monitoreo 24h (PDF)" if _mes else "📄 Generate 24h monitor report (PDF)"),
+                 type="primary", key="mon_pdf"):
+        with st.spinner("…"):
+            from core.torsional.report import build_torsional_pdf, plotly_to_png
+            f_tr = go.Figure()
+            if trend_m:
+                f_tr.add_trace(go.Scatter(x=[r[0] / 3600.0 for r in trend_m], y=[r[2] for r in trend_m],
+                                          line=dict(color=BLUE, width=1.6)))
+                _apply(f_tr, xlab="time (h)", ylab=f"torque pp ({um})")
+            f_hi = go.Figure()
+            if ranges_m:
+                f_hi.add_trace(go.Bar(x=0.5 * (edg[:-1] + edg[1:]), y=hh, width=(edg[1] - edg[0]) * 0.92, marker_color=NAVY))
+                _apply(f_hi, xlab=f"torque range ({um})", ylab="cycle count")
+            _sfx = ("∞" if (life_m and life_m.safety_factor == float("inf")) else (f"{life_m.safety_factor:.2f}" if life_m else "—"))
+            _verd = (life_m.label_es if _mes else life_m.label_en) if life_m else "—"
+            find = ([f"Campaña de monitoreo torsional de {dur_h:.1f} h; {ncyc:,.0f} ciclos rainflow acumulados (ASTM E1049).",
+                     f"Par medio {meanm:,.0f} {um}; par máximo observado {tmaxm:,.0f} {um}; mayor rango {rmax_m:,.0f} {um}.",
+                     f"Vida a fatiga (Goodman/Miner): factor de seguridad {_sfx} — {_verd}.",
+                     f"{len(events_m)} evento(s) de sobrecarga registrados durante la campaña."] if _mes else
+                    [f"{dur_h:.1f} h torsional monitoring campaign; {ncyc:,.0f} accumulated rainflow cycles (ASTM E1049).",
+                     f"Mean torque {meanm:,.0f} {um}; peak torque {tmaxm:,.0f} {um}; largest range {rmax_m:,.0f} {um}.",
+                     f"Fatigue life (Goodman/Miner): safety factor {_sfx} — {_verd}.",
+                     f"{len(events_m)} overload event(s) logged during the campaign."])
+            recs = (["Comparar el daño acumulado contra el diagrama S-N/Goodman del eje en la galga.",
+                     "Investigar los eventos de sobrecarga (arranques/trips/transitorios de proceso)." if events_m else
+                     "Sin sobrecargas; mantener el plan de monitoreo periódico."] if _mes else
+                    ["Compare accumulated damage against the shaft S-N/Goodman diagram at the gage.",
+                     "Investigate the overload events (startups/trips/process transients)." if events_m else
+                     "No overloads; keep the periodic monitoring plan."])
+            _setup = pay.get("setup", {})
+            meta = {"report_title": ("MONITOREO TORSIONAL 24 H" if _mes else "24-HOUR TORSIONAL MONITORING"),
+                    "asset": _setup.get("machine", run.get("name", "")), "client": _setup.get("client", ""),
+                    "location": _setup.get("location", ""), "prepared_by": _setup.get("operator", ""),
+                    "prepared_role": "Especialista", "reviewed_by": _setup.get("approved_by", ""), "reviewed_role": "Gerente",
+                    "consecutive": f"TOR-MON-{run.get('name','')[:12]}", "report_date": "", "date": "",
+                    "format_code": "SIGA-FMT-181", "format_version": "1"}
+            ctx = {"name": run.get("name", "monitor"), "units_label": um, "rpm": (trend_m[-1][4] if trend_m else 0),
+                   "mean": meanm, "pp": rmax_m, "ripple": "—", "rms": 0.0, "fs": 0.0, "dominant": "—"}
+            pdf = build_torsional_pdf(meta=meta, context=ctx, findings=find, recommendations=recs,
+                                      waveform_png=plotly_to_png(f_tr), spectrum_png=None,
+                                      campbell_png=None, fatigue_png=plotly_to_png(f_hi),
+                                      order_rows=[], crossing_rows=[], naturals=[], lang=("es" if _mes else "en"))
+            st.session_state["_mon_pdf"] = pdf
+        st.success("Reporte listo." if _mes else "Report ready.")
+    if st.session_state.get("_mon_pdf"):
+        st.download_button(("⬇ Descargar reporte 24h (PDF)" if _mes else "⬇ Download 24h report (PDF)"),
+                           st.session_state["_mon_pdf"], file_name="watermelon_torsional_monitor_24h.pdf",
+                           mime="application/pdf", type="primary")
+    st.stop()
 
 torque = run["torque"]; kph = run["kph"]; fs = run["fs"]; u = "N·m" if run["units"] == "nm" else "ft-lb"
 _, _rpm_series = keyphasor_to_rpm(kph, fs)
