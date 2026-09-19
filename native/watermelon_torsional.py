@@ -45,7 +45,7 @@ from core.torsional.analysis import (
 )
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 
-__version__ = "0.9.4"
+__version__ = "0.9.5"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -857,7 +857,10 @@ def build_app(simulated: bool = True):
             import socket
             setup = run["meta"]["setup"]
             rid, tstamp = cloud.new_run_id(run["name"])
-            raw = cloud.upload_raw(rid, run["volts"], st["fs"], channels=["Torque", "KPH"])
+            # Sube AMBOS canales (voltaje de par + keyphasor) → la web puede hacer
+            # todo, incluido run-up/Campbell desde la nube.
+            _raw2 = np.column_stack([run["volts"], run["kph"]]).astype(np.float32)
+            raw = cloud.upload_raw(rid, _raw2, st["fs"], channels=["Torque_V", "KPH"])
             payload = dict(run["meta"]); payload["raw_ref"] = raw if raw.get("ok") else None
             _acc, _host = _run_trace_tags()          # cuenta (licencia) + PC
             _ip, _geo = _conn_ip_geo()               # IP pública + ubicación aprox.

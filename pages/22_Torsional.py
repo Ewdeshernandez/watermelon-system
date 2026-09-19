@@ -292,6 +292,41 @@ def _parse_upload(file, sc: TorqueScaling):
                 name=getattr(file, "name", "Uploaded run"), field=True)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _cloud_run_list():
+    """Lista las corridas de campo subidas a la nube (cacheada 60 s)."""
+    try:
+        from core.torsional import cloud
+        return cloud.list_runs()
+    except Exception:  # noqa: BLE001
+        return []
+
+
+@st.cache_data(show_spinner=False)
+def _load_cloud_run(run_id):
+    """Baja metadata + cruda de una corrida de nube y arma el dict de corrida.
+    La cruda trae [Torque_V, KPH]; el par se reconstruye con eu_per_volt del campo."""
+    from core.torsional import cloud
+    meta = cloud.load_run(run_id)
+    if not meta:
+        return None
+    dl = cloud.download_raw(meta.get("raw_ref")) if meta.get("raw_ref") else None
+    if dl is None:
+        return None
+    data, fs_dl = dl
+    data = np.asarray(data, float)
+    if data.ndim == 1:
+        data = data[:, None]
+    eupv = float(meta.get("eu_per_volt") or 1.0)
+    torque = data[:, 0] * eupv
+    kph = data[:, 1] if data.shape[1] > 1 else np.zeros_like(torque)
+    fs = float(meta.get("fs") or fs_dl or 2560.0)
+    setup = meta.get("setup", {}) if isinstance(meta.get("setup"), dict) else {}
+    name = setup.get("machine") or setup.get("tag") or "Cloud run"
+    return dict(torque=torque, kph=kph, fs=fs, rpm=None, units=meta.get("units", "nm"),
+                name=name, field=True, setup=setup)
+
+
 # =====================================================================
 # Encabezado + tema
 # =====================================================================
@@ -302,7 +337,8 @@ _inject_theme()
 with st.expander("⚙  Data source & scaling", expanded=False):
     c1, c2 = st.columns([1, 1])
     with c1:
-        source = st.radio("Source", ["Simulated demo", "Upload run (.npz)"], horizontal=True)
+        source = st.radio("Source", ["Cloud runs (field)", "Simulated demo", "Upload run (.npz)"],
+                          horizontal=True)
         units = st.radio("Units", ["N·m", "ft-lb"], horizontal=True)
         units_key = "nm" if units == "N·m" else "ftlb"
     with c2:
@@ -314,7 +350,19 @@ with st.expander("⚙  Data source & scaling", expanded=False):
     st.caption(f"Full-scale torque (10 V): **{sc.full_scale_torque:,.1f} {units}** · "
                f"**{sc.eu_per_volt:,.2f} {units}/V**")
     run = None
-    if source == "Upload run (.npz)":
+    if source == "Cloud runs (field)":
+        _runs = _cloud_run_list()
+        if not _runs:
+            st.info("No cloud runs yet (or offline). Field uploads from the .exe appear here automatically.")
+        else:
+            _opts = {f"{r.get('name','run')}  ·  {r.get('client') or '—'}  ·  "
+                     f"{str(r.get('updated_at',''))[:16]}  ·  {r.get('hostname','')}": r["id"]
+                     for r in _runs}
+            _pick = st.selectbox(f"Field run  ({len(_runs)} available)", list(_opts))
+            run = _load_cloud_run(_opts[_pick])
+            if run is None:
+                st.warning("Could not load the raw data for this run (missing raw or service key).")
+    elif source == "Upload run (.npz)":
         up = st.file_uploader("Run file (.npz with 'torque' or 'volts', 'kph', 'fs')", type=["npz"])
         if up is not None:
             try:

@@ -97,3 +97,49 @@ def upload_raw(run_id: str, data, fs: float, channels=None) -> Dict[str, Any]:
                 "channels": list(channels or []), "size_bytes": len(raw)}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+
+def download_raw(ref: Dict[str, Any]):
+    """Descarga la data cruda referida por `raw_ref` (la web, con service key).
+    Devuelve (data[N,ch], fs) o None. El bucket no tiene SELECT anónimo a propósito."""
+    if not ref or not ref.get("path"):
+        return None
+    c = _client()
+    if c is None:
+        return None
+    try:
+        import io, gzip
+        import numpy as np
+        store = c.storage.from_(ref.get("bucket", _RAW_BUCKET))
+        raw = store.download(ref["path"])
+        data = np.load(io.BytesIO(gzip.decompress(raw)))
+        return data, float(ref.get("fs", 0.0))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def list_runs() -> List[Dict[str, Any]]:
+    """Lista las corridas torsionales subidas por el campo (para elegir en la web)."""
+    c = _client()
+    if c is None:
+        return []
+    try:
+        r = c.table(_RUNS_TABLE).select(
+            "id, name, updated_at, account, client, tag, hostname, ip, geo").execute()
+        return sorted(r.data or [], key=lambda x: x.get("updated_at", ""), reverse=True)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def load_run(run_id: str) -> Optional[Dict[str, Any]]:
+    """Descarga el payload (metadata) de una corrida torsional por su id."""
+    c = _client()
+    if c is None:
+        return None
+    try:
+        r = c.table(_RUNS_TABLE).select("metadata").eq("id", run_id).single().execute()
+        if r.data and r.data.get("metadata"):
+            return r.data["metadata"]
+    except Exception:  # noqa: BLE001
+        return None
+    return None

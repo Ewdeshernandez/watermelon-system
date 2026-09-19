@@ -16,8 +16,17 @@ create table if not exists public.torsional_runs (
   account    text default '',
   client     text default '',
   tag        text default '',
-  hostname   text default ''
+  hostname   text default '',
+  ip         text default '',
+  geo        text default '',
+  module     text default 'Torsional',
+  created_at timestamptz default now()
 );
+-- Idempotente para tablas ya creadas antes de estas columnas:
+alter table if exists public.torsional_runs add column if not exists ip         text default '';
+alter table if exists public.torsional_runs add column if not exists geo        text default '';
+alter table if exists public.torsional_runs add column if not exists module     text default 'Torsional';
+alter table if exists public.torsional_runs add column if not exists created_at timestamptz default now();
 
 alter table if exists public.torsional_runs enable row level security;
 drop policy if exists "anon read torsional_runs"   on public.torsional_runs;
