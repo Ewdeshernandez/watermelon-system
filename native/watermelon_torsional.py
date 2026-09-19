@@ -49,7 +49,7 @@ from core.torsional.ni_source import (
     nidaqmx_available, rpm_from_keyphasor,
 )
 
-__version__ = "0.11.2"
+__version__ = "0.11.3"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -765,7 +765,7 @@ def build_app(simulated: bool = True):
     curve_t = p_time.plot(pen=pg.mkPen(ACC, width=2))
     p_spec = pg.PlotWidget(); p_spec.setBackground("w"); p_spec.showGrid(x=True, y=True, alpha=0.3)
     p_spec.setLabel("bottom", T("frequency", "frecuencia"), "Hz", **_axlbl)
-    p_spec.setLabel("left", T("amplitude (0-pk)", "amplitud (0-pk)"), "N·m", **_axlbl)
+    p_spec.setLabel("left", T("torque (pp)", "par (pp)"), "N·m", **_axlbl)   # pp por norma (API 670/ISO 7919)
     p_spec.setTitle(T("Torque spectrum", "Espectro de par"))
     curve_s = p_spec.plot(pen=pg.mkPen(NAVY, width=2))
     plots_row.addWidget(p_time, 1); plots_row.addWidget(p_spec, 1)
@@ -776,7 +776,7 @@ def build_app(simulated: bool = True):
     p_ord.setTitle(T("Order amplitudes (× running speed) — torque per harmonic",
                      "Amplitud por orden (× velocidad) — par por armónico"))
     p_ord.showGrid(y=True, alpha=0.25)
-    p_ord.setLabel("left", T("amplitude", "amplitud"), "N·m", **_axlbl)
+    p_ord.setLabel("left", T("torque (pp)", "par (pp)"), "N·m", **_axlbl)
     _ord_colors = ["#1AAEE5", "#16a34a", "#f59e0b", "#a855f7", "#ef4444"]
     bar_ord = pg.BarGraphItem(x=[1, 2, 3, 4, 5], height=[0] * 5, width=0.62,
                               brushes=[pg.mkBrush(c) for c in _ord_colors], pen=pg.mkPen("#0b1220", width=0.4))
@@ -919,9 +919,9 @@ def build_app(simulated: bool = True):
 
         freqs, amp = torque_spectrum(arr, fs)
         mask = freqs <= 600.0                      # techo de banda del equipo (500 Hz)
-        curve_s.setData(freqs[mask], amp[mask])
+        curve_s.setData(freqs[mask], amp[mask] * 2.0)   # 0-pk → pico-pico (norma)
         p_spec.setXRange(0.0, 600.0, padding=0.0)  # frecuencia arranca en 0
-        p_spec.setLabel("left", T("amplitude (0-pk)", "amplitud (0-pk)"), u, **_axlbl)
+        p_spec.setLabel("left", T("torque (pp)", "par (pp)"), u, **_axlbl)
 
         # RPM del keyphasor (flanco/umbral/ppr del sensor elegido: proximidad o foto-tacómetro)
         _sensor = st.get("kph_sensor") or KeyphasorSensor.simulated()
@@ -929,9 +929,9 @@ def build_app(simulated: bool = True):
         rpm_now = float(np.median(rpm)) if rpm.size else sb_rpm.value()
         v_rpm.setText(f"{rpm_now:,.0f}")
         oa = order_amplitudes(arr, fs, rpm_now, orders=(1, 2, 3, 4, 5))
-        _oh = [oa[float(o)][0] for o in range(1, 6)]
+        _oh = [oa[float(o)][0] * 2.0 for o in range(1, 6)]     # 0-pk → pp (norma)
         bar_ord.setOpts(height=_oh)
-        p_ord.setLabel("left", T("amplitude", "amplitud"), u, **_axlbl)
+        p_ord.setLabel("left", T("torque (pp)", "par (pp)"), u, **_axlbl)
         _omax = max(_oh) or 1.0
         for _i, _v in enumerate(_oh):            # etiqueta de valor encima de cada barra
             _ord_labels[_i].setText(f"{_v:,.0f}")
