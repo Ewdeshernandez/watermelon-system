@@ -49,7 +49,7 @@ from core.torsional.ni_source import (
     nidaqmx_available, rpm_from_keyphasor,
 )
 
-__version__ = "0.11.1"
+__version__ = "0.11.2"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -756,20 +756,36 @@ def build_app(simulated: bool = True):
     for b in (b1, b2, b3, b4):
         read_row.addWidget(b)
 
+    _axlbl = {"color": "#334155", "font-size": "10pt"}      # estilo de etiqueta de eje
     plots_row = QtWidgets.QHBoxLayout(); live_l.addLayout(plots_row, 1)
     p_time = pg.PlotWidget(); p_time.setBackground("w"); p_time.showGrid(x=True, y=True, alpha=0.3)
-    p_time.setLabel("bottom", T("time", "tiempo"), "s"); p_time.setTitle(T("Torque vs time", "Par vs tiempo"))
+    p_time.setLabel("bottom", T("time", "tiempo"), "s", **_axlbl)
+    p_time.setLabel("left", T("torque", "par"), "N·m", **_axlbl)   # unidad se actualiza en vivo
+    p_time.setTitle(T("Torque vs time", "Par vs tiempo"))
     curve_t = p_time.plot(pen=pg.mkPen(ACC, width=2))
     p_spec = pg.PlotWidget(); p_spec.setBackground("w"); p_spec.showGrid(x=True, y=True, alpha=0.3)
-    p_spec.setLabel("bottom", T("frequency", "frecuencia"), "Hz"); p_spec.setTitle(T("Torque spectrum", "Espectro de par"))
+    p_spec.setLabel("bottom", T("frequency", "frecuencia"), "Hz", **_axlbl)
+    p_spec.setLabel("left", T("amplitude (0-pk)", "amplitud (0-pk)"), "N·m", **_axlbl)
+    p_spec.setTitle(T("Torque spectrum", "Espectro de par"))
     curve_s = p_spec.plot(pen=pg.mkPen(NAVY, width=2))
     plots_row.addWidget(p_time, 1); plots_row.addWidget(p_spec, 1)
 
-    # Barras de órdenes
-    p_ord = pg.PlotWidget(); p_ord.setBackground("w"); p_ord.setMaximumHeight(150)
-    p_ord.setTitle(T("Orders (× running speed)", "Órdenes (× velocidad)")); p_ord.showGrid(y=True, alpha=0.3)
-    bar_ord = pg.BarGraphItem(x=[1, 2, 3, 4, 5], height=[0] * 5, width=0.6, brush=ACC)
-    p_ord.addItem(bar_ord); p_ord.getAxis("bottom").setTicks([[(i, f"{i}×") for i in range(1, 6)]])
+    # Barras de órdenes — cada orden = armónico de la velocidad (1× desbalance/torsión,
+    # 2× desalineación, 3×+ engrane/álabes). Muestra qué armónico domina el rizado del par.
+    p_ord = pg.PlotWidget(); p_ord.setBackground("w"); p_ord.setMaximumHeight(170)
+    p_ord.setTitle(T("Order amplitudes (× running speed) — torque per harmonic",
+                     "Amplitud por orden (× velocidad) — par por armónico"))
+    p_ord.showGrid(y=True, alpha=0.25)
+    p_ord.setLabel("left", T("amplitude", "amplitud"), "N·m", **_axlbl)
+    _ord_colors = ["#1AAEE5", "#16a34a", "#f59e0b", "#a855f7", "#ef4444"]
+    bar_ord = pg.BarGraphItem(x=[1, 2, 3, 4, 5], height=[0] * 5, width=0.62,
+                              brushes=[pg.mkBrush(c) for c in _ord_colors], pen=pg.mkPen("#0b1220", width=0.4))
+    p_ord.addItem(bar_ord)
+    p_ord.getAxis("bottom").setTicks([[(i, f"{i}×") for i in range(1, 6)]])
+    p_ord.getViewBox().setLimits(yMin=0)          # amplitud nunca negativa
+    _ord_labels = []                               # etiquetas de valor encima de cada barra
+    for _i in range(5):
+        _tx = pg.TextItem("", color="#334155", anchor=(0.5, 1.0)); p_ord.addItem(_tx); _ord_labels.append(_tx)
     live_l.addWidget(p_ord)
 
     live_timer = QtCore.QTimer(win); live_timer.setInterval(120)
@@ -894,6 +910,9 @@ def build_app(simulated: bool = True):
 
         m = torque_metrics(arr)
         u = "N·m" if sc.units == "nm" else "ft-lb"
+        # Eje X arranca en 0; unidad del eje Y = unidad de par actual.
+        p_time.setXRange(0.0, float(t[-1]) if t.size else 1.0, padding=0.0)
+        p_time.setLabel("left", T("torque", "par"), u, **_axlbl)
         v_mean.setText(f"{m.mean:,.1f} {u}")
         v_pp.setText(f"{m.peak_to_peak:,.1f} {u}")
         v_ripple.setText("∞" if m.ripple_pct == float("inf") else f"{m.ripple_pct:.1f} %")
@@ -901,6 +920,8 @@ def build_app(simulated: bool = True):
         freqs, amp = torque_spectrum(arr, fs)
         mask = freqs <= 600.0                      # techo de banda del equipo (500 Hz)
         curve_s.setData(freqs[mask], amp[mask])
+        p_spec.setXRange(0.0, 600.0, padding=0.0)  # frecuencia arranca en 0
+        p_spec.setLabel("left", T("amplitude (0-pk)", "amplitud (0-pk)"), u, **_axlbl)
 
         # RPM del keyphasor (flanco/umbral/ppr del sensor elegido: proximidad o foto-tacómetro)
         _sensor = st.get("kph_sensor") or KeyphasorSensor.simulated()
@@ -908,7 +929,13 @@ def build_app(simulated: bool = True):
         rpm_now = float(np.median(rpm)) if rpm.size else sb_rpm.value()
         v_rpm.setText(f"{rpm_now:,.0f}")
         oa = order_amplitudes(arr, fs, rpm_now, orders=(1, 2, 3, 4, 5))
-        bar_ord.setOpts(height=[oa[float(o)][0] for o in range(1, 6)])
+        _oh = [oa[float(o)][0] for o in range(1, 6)]
+        bar_ord.setOpts(height=_oh)
+        p_ord.setLabel("left", T("amplitude", "amplitud"), u, **_axlbl)
+        _omax = max(_oh) or 1.0
+        for _i, _v in enumerate(_oh):            # etiqueta de valor encima de cada barra
+            _ord_labels[_i].setText(f"{_v:,.0f}")
+            _ord_labels[_i].setPos(_i + 1, _v + 0.03 * _omax)
 
     btn_start.clicked.connect(_start_live)
     btn_stop.clicked.connect(_stop_live)
@@ -997,18 +1024,22 @@ def build_app(simulated: bool = True):
         "expected voltage and checks the reading against it (field cal, TorqueTrak 10K step 12).",
         "Activa un shunt de referencia en el TX10K-S con el control RM10K. Watermelon calcula el "
         "voltaje esperado y contrasta la lectura (cal de campo, TorqueTrak 10K paso 12)."))
-    sh_intro.setWordWrap(True); sh_l.addWidget(sh_intro)
+    sh_intro.setWordWrap(True); sh_intro.setStyleSheet("color:#475569;")
+    sh_l.addWidget(sh_intro)
 
     sh_btns = QtWidgets.QHBoxLayout(); sh_l.addLayout(sh_btns)
     btn_both = QtWidgets.QPushButton(T("▶ Verify both (Ref 1 + Ref 2)", "▶ Verificar ambas (Ref 1 + Ref 2)"))
+    btn_both.setStyleSheet(f"QPushButton{{background:{NAVY};color:white;padding:9px 16px;border-radius:9px;font-weight:700;}}"
+                           "QPushButton:hover{background:#12325a;}")
     btn_ref1 = QtWidgets.QPushButton(T("Only Ref 1 (100 µε)", "Solo Ref 1 (100 µε)"))
     btn_ref2 = QtWidgets.QPushButton(T("Only Ref 2 (500 µε)", "Solo Ref 2 (500 µε)"))
     sh_btns.addWidget(btn_both); sh_btns.addWidget(btn_ref1); sh_btns.addWidget(btn_ref2); sh_btns.addStretch(1)
-    sh_result = QtWidgets.QTextBrowser(); sh_result.setMaximumHeight(260); sh_l.addWidget(sh_result)
-    sh_l.addStretch(1)
+    sh_result = QtWidgets.QTextBrowser()
+    sh_result.setStyleSheet("QTextBrowser{border:none;background:#f4f8fc;}")
+    sh_l.addWidget(sh_result, 1)
 
     def _shunt_html(ref) -> str:
-        """Bloque HTML del resultado de UNA referencia (para mostrar 1 o las 2)."""
+        """Tarjeta HTML del resultado de UNA referencia (para mostrar 1 o las 2)."""
         sc = st["scaling"]; gage = st["gage"]
         # En simulado: el RX10K reproduce el shunt con un pequeño error realista.
         from core.torsional.shunt_cal import expected_shunt_voltage, full_scale_strain_torque
@@ -1017,17 +1048,34 @@ def build_app(simulated: bool = True):
         rng = np.random.default_rng()
         measured = expected * (1.0 + rng.normal(0, 0.002)) + rng.normal(0, 0.003)
         chk = verify_shunt(measured, ref, gage, scale_factor_z=sc.scale_factor_z)
-        color = GREEN if chk.passed else AMBER
-        status = T("PASS", "OK") if chk.passed else T("OUT OF TOL", "FUERA DE TOL")
+        _pass = chk.passed
+        pill_bg = "#dcfce7" if _pass else "#fef9c3"
+        pill_fg = "#166534" if _pass else "#854d0e"
+        err_col = "#16a34a" if _pass else "#b45309"
+        status = T("PASS", "OK") if _pass else T("OUT OF TOL", "FUERA DE TOL")
+        def _cell(lbl, val, col="#0f2a4a"):
+            return (f"<td width='33%' style='padding:6px 8px'>"
+                    f"<div style='color:#94a3b8;font-size:11px'>{lbl}</div>"
+                    f"<div style='color:{col};font-size:17px;font-weight:800'>{val}</div></td>")
         return (
-            f"<div style='font-size:13px; margin-bottom:10px'>"
-            f"<b>{ref.name}</b> — {ref.simulated_ue:.0f} µε<br>"
-            f"{T('Expected','Esperado')}: <b>{chk.expected_v:.4f} V</b> &nbsp; · &nbsp; "
-            f"{T('Measured','Medido')}: <b>{chk.measured_v:.4f} V</b><br>"
-            f"{T('Error','Error')}: <b>{chk.error_pct:+.3f} %FS</b> &nbsp; "
-            f"<span style='color:{color}; font-weight:800'>● {status}</span><br>"
-            f"{T('Effective Z revealed by shunt','Z efectivo del shunt')}: <b>{chk.suggested_z:.4f}</b> "
-            f"({T('current','actual')}: {sc.scale_factor_z:.4f})</div>")
+            "<table width='100%' cellspacing='0' cellpadding='0' style='margin:0 0 14px 0'><tr>"
+            "<td style='background:white;border:1px solid #e6ecf5;border-radius:12px'>"
+            "<table width='100%' cellpadding='8' cellspacing='0'>"
+            "<tr>"
+            f"<td style='font-size:15px;color:#0f2a4a'><b>{ref.name}</b> "
+            f"<span style='color:#94a3b8'>· {ref.simulated_ue:.0f} µε</span></td>"
+            f"<td align='right'><span style='background:{pill_bg};color:{pill_fg};"
+            f"padding:5px 14px;border-radius:14px;font-weight:800'>● {status}</span></td>"
+            "</tr>"
+            "<tr><td colspan='2'><table width='100%' cellspacing='0'><tr>"
+            + _cell(T('Expected', 'Esperado'), f"{chk.expected_v:.4f} V")
+            + _cell(T('Measured', 'Medido'), f"{chk.measured_v:.4f} V")
+            + _cell(T('Error', 'Error'), f"{chk.error_pct:+.3f} %FS", err_col)
+            + "</tr></table>"
+            f"<div style='color:#64748b;font-size:11px;padding:2px 8px 8px 8px'>"
+            f"{T('Effective Z revealed by shunt', 'Z efectivo del shunt')}: <b>{chk.suggested_z:.4f}</b> "
+            f"({T('current', 'actual')}: {sc.scale_factor_z:.4f})</div>"
+            "</td></tr></table></td></tr></table>")
 
     def _run_shunt(refs):
         if not _rebuild_scaling() or st["gage"] is None:
@@ -1148,9 +1196,12 @@ def build_app(simulated: bool = True):
             sb_cb_rpm.setValue(float(np.median(ri)))
     btn_cb_plate.clicked.connect(_cb_from_plate)
     btn_cb_kph.clicked.connect(_cb_from_keyphasor)
+    _cbax = {"color": "#334155", "font-size": "10pt"}
     p_cb = pg.PlotWidget(); p_cb.setBackground("w"); p_cb.showGrid(x=True, y=True, alpha=0.3)
-    p_cb.setLabel("bottom", "RPM"); p_cb.setLabel("left", T("frequency (Hz)", "frecuencia (Hz)"))
+    p_cb.setLabel("bottom", T("speed", "velocidad"), "RPM", **_cbax)
+    p_cb.setLabel("left", T("frequency", "frecuencia"), "Hz", **_cbax)
     p_cb.setTitle(T("Campbell / interference diagram", "Diagrama de Campbell / interferencia"))
+    p_cb.getViewBox().setLimits(xMin=0, yMin=0)      # ejes nunca negativos
     cb_l.addWidget(p_cb, 1)
     cb_table = QtWidgets.QTableWidget(0, 6)
     cb_table.setHorizontalHeaderLabels([T("Natural", "Natural"), T("Freq", "Frec"), T("Order", "Orden"),
@@ -1196,7 +1247,8 @@ def build_app(simulated: bool = True):
         rpm_max = max(r1, rpm2 * 1.6) * 1.05
         band = SpeedBand(rpm, _mrg * rpm, "Op")
         bands = [band] + ([SpeedBand(rpm2, _mrg * rpm2, "Op2")] if rpm2 > 0 else [])
-        crossings = compute_crossings(naturals, 0.0, rpm_max, (1., 2., 3., 4., 6.), bands=bands,
+        _ORDERS = tuple(float(k) for k in range(1, 11))       # armónicos 1×…10×
+        crossings = compute_crossings(naturals, 0.0, rpm_max, _ORDERS, bands=bands,
                                       mode_labels=[f"TNF{i+1}" for i in range(len(naturals))])
         st["camp"] = {"naturals": naturals, "crossings": crossings, "rpm": rpm, "rpm_max": rpm_max,
                       "margin": _mrg}
@@ -1216,11 +1268,24 @@ def build_app(simulated: bool = True):
             _reg2.setZValue(-10); p_cb.addItem(_reg2)
             p_cb.addItem(pg.InfiniteLine(pos=rpm2, angle=90, pen=pg.mkPen("#2563eb", width=2, style=QtCore.Qt.DashLine)))
         xr = np.linspace(0, rpm_max, 60)
-        for o in (1., 2., 3., 4., 6.):
-            p_cb.plot(xr, o * xr / 60.0, pen=pg.mkPen("#94a3b8", width=1, style=QtCore.Qt.DotLine))
-        for fn in naturals:
+        _yv = _ymax                                           # techo visible (para recortar etiquetas)
+        for o in _ORDERS:                                     # líneas de orden 1×…10× + etiqueta suave
+            p_cb.plot(xr, o * xr / 60.0, pen=pg.mkPen("#b6c2d4", width=1, style=QtCore.Qt.DotLine))
+            _lx = rpm_max * 0.985; _ly = o * _lx / 60.0
+            if _ly > _yv:                                     # si sale por arriba, rotula sobre el eje X
+                _lx = _yv * 60.0 / o; _ly = _yv
+            _ot = pg.TextItem(f"{o:g}×", color="#9aa7bd", anchor=(1, 0))
+            _ot.setPos(_lx, _ly); p_cb.addItem(_ot)
+        def _ordn(i):
+            _en = {1: "1st", 2: "2nd", 3: "3rd"}.get(i, f"{i}th")
+            return T(f"{_en} torsional", f"{i}ª torsional")
+        for _idx, fn in enumerate(naturals):                  # naturales torsionales rotuladas
             p_cb.plot([0, rpm_max], [fn, fn], pen=pg.mkPen(GREEN, width=2))
+            _nt = pg.TextItem(f"{_ordn(_idx+1)} · {fn:.1f} Hz", color="#0f7a34", anchor=(0, 1))
+            _nt.setPos(rpm_max * 0.02, fn); p_cb.addItem(_nt)
         p_cb.addItem(pg.InfiniteLine(pos=rpm, angle=90, pen=pg.mkPen(NAVY, width=2, style=QtCore.Qt.DashLine)))
+        p_cb.setXRange(0.0, rpm_max, padding=0.0)             # X arranca en 0
+        p_cb.setYRange(0.0, _ymax, padding=0.0)
         _cc = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
         for c in crossings:
             p_cb.addItem(pg.ScatterPlotItem([c.crossing_rpm], [c.mode_hz], symbol="x", size=14,
@@ -1540,8 +1605,8 @@ def build_app(simulated: bool = True):
     ul.setContentsMargins(28, 24, 28, 24)
     _card = QtWidgets.QFrame()
     _card.setStyleSheet("QFrame{background:white;border:1px solid #e6ecf5;border-radius:16px;}")
-    _card.setMaximumWidth(680)
-    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(34, 30, 34, 30); _cl.setSpacing(14)
+    _card.setMinimumWidth(600); _card.setMaximumWidth(780)
+    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(34, 30, 34, 34); _cl.setSpacing(14)
 
     def _mkfont(pt, bold=False):
         f = QtGui.QFont(); f.setPointSize(pt); f.setBold(bold); return f
