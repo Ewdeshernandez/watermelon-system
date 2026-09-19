@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.90"
+__version__ = "0.9.91"
 
 
 def _run_trace_tags():
@@ -3768,8 +3768,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ul.setContentsMargins(28, 24, 28, 24)
     _card = QtWidgets.QFrame()
     _card.setStyleSheet("QFrame{background:white;border:1px solid #e6ecf5;border-radius:16px;}")
-    _card.setMaximumWidth(680)
-    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(34, 30, 34, 30); _cl.setSpacing(14)
+    _card.setMinimumWidth(600); _card.setMaximumWidth(780)
+    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(34, 30, 34, 34); _cl.setSpacing(14)
 
     def _mkfont(pt, bold=False):
         f = QtGui.QFont(); f.setPointSize(pt); f.setBold(bold); return f
