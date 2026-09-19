@@ -49,7 +49,7 @@ from core.torsional.ni_source import (
     nidaqmx_available, rpm_from_keyphasor,
 )
 
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -1537,27 +1537,112 @@ def build_app(simulated: bool = True):
     # TAB 8 — Updates (auto-actualización por red, como el Modal)
     # =================================================================
     pg_upd = QtWidgets.QWidget(); ul = QtWidgets.QVBoxLayout(pg_upd)
-    _cur = QtWidgets.QLabel(T(f"Installed version: <b>v{__version__}</b>",
-                              f"Versión instalada: <b>v{__version__}</b>"))
-    _cur.setTextFormat(QtCore.Qt.RichText)
+    ul.setContentsMargins(28, 24, 28, 24)
+    _card = QtWidgets.QFrame()
+    _card.setStyleSheet("QFrame{background:white;border:1px solid #e6ecf5;border-radius:16px;}")
+    _card.setMaximumWidth(680)
+    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(34, 30, 34, 30); _cl.setSpacing(14)
+
+    def _mkfont(pt, bold=False):
+        f = QtGui.QFont(); f.setPointSize(pt); f.setBold(bold); return f
+
+    _uh = QtWidgets.QLabel("🍉  Watermelon Torsional")
+    _uh.setFont(_mkfont(16, True)); _uh.setStyleSheet(f"color:{NAVY};border:none;")
+    _cur = QtWidgets.QLabel(T(f"Installed version:  v{__version__}", f"Versión instalada:  v{__version__}"))
+    _cur.setFont(_mkfont(11)); _cur.setStyleSheet("color:#475569;border:none;")
+
+    # --- Panel de licencia (cuenta + estado + equipo) — igual que el Modal ---
+    _lic_lbl = QtWidgets.QLabel(""); _lic_lbl.setFont(_mkfont(10)); _lic_lbl.setWordWrap(True)
+    _lic_lbl.setTextFormat(QtCore.Qt.RichText); _lic_lbl.setStyleSheet("color:#475569;border:none;")
+    _lic_ok = False
+    try:
+        from core.modal import licensing as _lic
+        _ls = _lic.local_license_status()
+        _exp = _ls.get("exp")
+        import datetime as _dt2
+        _expd = _dt2.date.fromtimestamp(float(_exp)).isoformat() if _exp else "—"
+        _stt = (f"<span style='color:#10b981'>● {T('Licensed','Con licencia')}</span>"
+                if _ls.get("valid") else f"<span style='color:#ef4444'>● {T('Not activated','Sin activar')}</span>")
+        _lic_lbl.setText(
+            f"<b>{T('License','Licencia')}:</b> {_stt}<br>"
+            f"{T('Account','Cuenta')}: {_ls.get('account') or '—'} · {T('Expires','Vence')}: {_expd}<br>"
+            f"<b>{T('This computer','Este equipo')}:</b> {_lic.machine_label()}<br>"
+            f"<span style='color:#94a3b8'>Machine ID: {_ls.get('fingerprint','')[:24]}…</span>")
+        _lic_ok = bool(_ls.get("valid"))
+    except Exception:  # noqa: BLE001
+        _lic_lbl.setText("")
+
+    _deact = QtWidgets.QPushButton(T("Deactivate this computer", "Desactivar este equipo"))
+    _deact.setCursor(QtCore.Qt.PointingHandCursor); _deact.setFont(_mkfont(9))
+    _deact.setStyleSheet("QPushButton{background:transparent;color:#ef4444;border:1px solid #f2c4c4;"
+                         "border-radius:8px;padding:6px 14px;} QPushButton:hover{background:#fef2f2;}"
+                         "QPushButton:disabled{color:#cbd5e1;border-color:#eef2f8;}")
+    _deact.setEnabled(_lic_ok)
+    _deact_row = QtWidgets.QHBoxLayout(); _deact_row.addWidget(_deact); _deact_row.addStretch(1)
+
+    def _do_deactivate():
+        m = QtWidgets.QMessageBox(_card)
+        m.setIcon(QtWidgets.QMessageBox.Warning)
+        m.setWindowTitle(T("Deactivate this computer", "Desactivar este equipo"))
+        m.setText(T("Release this license from this computer?", "¿Liberar esta licencia de este equipo?"))
+        m.setInformativeText(T("The app will require a license key again on next start. "
+                               "You can then activate the license on another computer.",
+                               "La app volverá a pedir la clave al iniciar. Luego podrás activar "
+                               "la licencia en otro equipo."))
+        m.setStandardButtons(QtWidgets.QMessageBox.Cancel | QtWidgets.QMessageBox.Yes)
+        m.setDefaultButton(QtWidgets.QMessageBox.Cancel)
+        if m.exec() != QtWidgets.QMessageBox.Yes:
+            return
+        _deact.setEnabled(False); _deact.setText(T("Deactivating…", "Desactivando…"))
+        QtWidgets.QApplication.processEvents()
+        try:
+            from core.modal import licensing as _lic2
+            r = _lic2.deactivate_machine()
+        except Exception as e:  # noqa: BLE001
+            r = {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+        if r.get("ok"):
+            done = QtWidgets.QMessageBox(_card)
+            done.setIcon(QtWidgets.QMessageBox.Information)
+            done.setWindowTitle("Watermelon Torsional")
+            done.setText(T("This computer was deactivated.", "Este equipo fue desactivado."))
+            done.setInformativeText(T("The app will now close. Reopen it to activate a license.",
+                                      "La app se cerrará. Ábrela de nuevo para activar una licencia."))
+            done.exec()
+            QtWidgets.QApplication.quit()
+        else:
+            _deact.setEnabled(True); _deact.setText(T("Deactivate this computer", "Desactivar este equipo"))
+            QtWidgets.QMessageBox.warning(_card, "Watermelon Torsional",
+                T("Could not deactivate: ", "No se pudo desactivar: ") + str(r.get("reason", "")))
+    _deact.clicked.connect(_do_deactivate)
+
     _ustatus = QtWidgets.QLabel(T("Press <b>Check for updates</b> to see if a newer version is available.",
                                   "Pulsa <b>Buscar actualizaciones</b> para ver si hay una versión más nueva."))
-    _ustatus.setWordWrap(True); _ustatus.setTextFormat(QtCore.Qt.RichText); _ustatus.setStyleSheet("color:#64748b;")
-    _unotes = QtWidgets.QTextBrowser(); _unotes.setMaximumHeight(180); _unotes.hide()
-    _ubrow = QtWidgets.QPushButton(T("🔍  Check for updates", "🔍  Buscar actualizaciones"))
-    _ubgo = QtWidgets.QPushButton(T("⬇  Update now", "⬇  Actualizar ahora"))
-    _ubgo.setStyleSheet(f"QPushButton{{background:{GREEN};}}QPushButton:hover{{background:#12833a;}}")
-    _ubgo.hide()
-    urow = QtWidgets.QHBoxLayout(); urow.addWidget(_ubrow); urow.addWidget(_ubgo); urow.addStretch(1)
+    _ustatus.setFont(_mkfont(10)); _ustatus.setStyleSheet("color:#64748b;border:none;")
+    _ustatus.setWordWrap(True); _ustatus.setTextFormat(QtCore.Qt.RichText)
+    _unotes = QtWidgets.QTextBrowser(); _unotes.setFont(_mkfont(9))
+    _unotes.setStyleSheet("QTextBrowser{border:1px solid #eef2f8;border-radius:10px;background:#fbfcfe;"
+                          "color:#334155;padding:8px;}")
+    _unotes.setMaximumHeight(200); _unotes.hide()
+    _ubrow = QtWidgets.QPushButton(T("🔍  Check for updates", "🔍  Buscar actualizaciones")); _ubrow.setFont(_mkfont(11, True))
+    _ubrow.setStyleSheet(f"QPushButton{{background:{NAVY};color:white;padding:10px 20px;"
+                         "border-radius:9px;}QPushButton:hover{background:#12325a;}")
+    _ubgo = QtWidgets.QPushButton(T("⬇  Update now", "⬇  Actualizar ahora")); _ubgo.setFont(_mkfont(11, True))
+    _ubgo.setStyleSheet(f"QPushButton{{background:{GREEN};color:white;padding:10px 20px;"
+                        "border-radius:9px;}QPushButton:hover{background:#12833a;}")
+    _ubgo.hide(); _ubrow.setMinimumHeight(42); _ubgo.setMinimumHeight(42)
+    urow = QtWidgets.QHBoxLayout(); urow.setSpacing(12)
+    urow.addWidget(_ubrow); urow.addWidget(_ubgo); urow.addStretch(1)
     _ufoot = QtWidgets.QLabel(T(
         "Updates download and install automatically over the network; the app restarts when done. "
         "No files to send — the field PC just needs internet.",
         "Las actualizaciones se descargan e instalan automáticamente por red; la app se reinicia al terminar. "
         "Sin enviar archivos — el PC de campo solo necesita internet."))
-    _ufoot.setWordWrap(True); _ufoot.setStyleSheet("color:#94a3b8;")
-    for w in (_cur, _ustatus, _unotes):
-        ul.addWidget(w)
-    ul.addLayout(urow); ul.addWidget(_ufoot); ul.addStretch(1)
+    _ufoot.setFont(_mkfont(9)); _ufoot.setWordWrap(True); _ufoot.setStyleSheet("color:#94a3b8;border:none;")
+    _cl.addWidget(_uh); _cl.addSpacing(2); _cl.addWidget(_cur)
+    _cl.addWidget(_lic_lbl); _cl.addLayout(_deact_row); _cl.addSpacing(4); _cl.addWidget(_ustatus)
+    _cl.addWidget(_unotes); _cl.addSpacing(8); _cl.addLayout(urow)
+    _cl.addSpacing(6); _cl.addWidget(_ufoot)
+    ul.addWidget(_card, 0, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop); ul.addStretch(1)
     st["_pending_update"] = None
 
     def _upd_check():
