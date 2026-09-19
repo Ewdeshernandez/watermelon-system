@@ -217,21 +217,32 @@ def _demo_runup(r0=600.0, r1=3600.0, res_hz=30.0, units="nm"):
     return dict(torque=voltage_to_torque(data[ti], sc), kph=data[kph_i], fs=fs, res_hz=res_hz, units=units)
 
 
+def _is_runup(kph_arr, fs_v):
+    """¿La corrida es un run-up/coast-down (barrido real de rpm)? Solo entonces
+    se pueden MEDIR las naturales torsionales — una captura estacionaria no las
+    revela. Devuelve (es_runup, rpm_min, rpm_max)."""
+    _, rpm_inst = keyphasor_to_rpm(np.asarray(kph_arr, float), fs_v)
+    if rpm_inst.size < 5:
+        return False, 0.0, 0.0
+    lo, hi = float(np.min(rpm_inst)), float(np.max(rpm_inst))
+    mid = 0.5 * (lo + hi)
+    return (mid > 0 and (hi - lo) / mid > 0.20), lo, hi
+
+
 @st.cache_data(show_spinner=False)
-def _runup_analysis(units="nm"):
-    """Corre el runup, hace order tracking y detecta las naturales torsionales
-    (rpm de pico de cada orden → fn = orden·rpm/60). Compartido por Order
-    tracking, Campbell y Report."""
-    ru = _demo_runup(units=units)
-    rt = ru["torque"]; rkph = ru["kph"]; rfs = ru["fs"]
-    t_rev, rpm_inst = keyphasor_to_rpm(rkph, rfs)
-    tt = np.arange(rt.size) / rfs
+def _detect_naturals(torque_arr, kph_arr, fs_v):
+    """Order tracking + detección de naturales sobre CUALQUIER traza (real o demo).
+    Naturales por ESPECTRO DE RESONANCIA SUMADO POR ÓRDENES: cada orden se mapea a
+    fn = orden·rpm/60 y se acumula en una grilla común. La natural real la cruzan
+    TODAS las órdenes (a distinta rpm) → se refuerza; bumps de una sola orden no se
+    alinean → se suprimen. Robusto vs argmax."""
+    rt = np.asarray(torque_arr, float); rkph = np.asarray(kph_arr, float)
+    t_rev, rpm_inst = keyphasor_to_rpm(rkph, fs_v)
+    if rpm_inst.size < 3:
+        return dict(tracks=[], naturals=[], rpm_min=0.0, rpm_max=0.0)
+    tt = np.arange(rt.size) / fs_v
     rpm_ps = np.interp(tt, t_rev, rpm_inst, left=rpm_inst[0], right=rpm_inst[-1])
-    tracks = order_tracking(rt, rfs, rpm_ps, orders=(1, 2, 3), n_segments=30)
-    # Naturales torsionales por ESPECTRO DE RESONANCIA SUMADO POR ÓRDENES:
-    # cada orden se mapea a fn = orden·rpm/60 y se acumula en una grilla común.
-    # La natural real la cruzan TODAS las órdenes (a distinta rpm) → se refuerza;
-    # las bumps de una sola orden no se alinean → se suprimen. Robusto vs argmax.
+    tracks = order_tracking(rt, fs_v, rpm_ps, orders=(1, 2, 3), n_segments=30)
     fgrid = np.linspace(2.0, 200.0, 600)
     acc = np.zeros_like(fgrid)
     for tr in tracks:
@@ -248,7 +259,23 @@ def _runup_analysis(units="nm"):
                     naturals.append(f)
     return dict(tracks=[(float(t.order), t.rpm, t.amplitude) for t in tracks],
                 naturals=sorted(naturals), rpm_min=float(rpm_ps.min()),
-                rpm_max=float(rpm_ps.max()), res_hz=ru["res_hz"])
+                rpm_max=float(rpm_ps.max()))
+
+
+def _runup_source(torque_arr, kph_arr, fs_v, is_field, units="nm"):
+    """Fuente del análisis de resonancia, con HONESTIDAD de datos:
+    - Si la corrida subida es un run-up real → analiza la DATA REAL (measured=True).
+    - Si es estacionaria o simulada → usa el demo simulado (measured=False) para
+      ILUSTRAR el método; las naturales NO son medidas de esta corrida."""
+    sweeping, _lo, _hi = _is_runup(kph_arr, fs_v)
+    if is_field and sweeping:
+        d = _detect_naturals(torque_arr, kph_arr, fs_v)
+        d["measured"] = True; d["res_hz"] = 0.0
+        return d
+    demo = _demo_runup(units=units)
+    d = _detect_naturals(demo["torque"], demo["kph"], demo["fs"])
+    d["measured"] = False; d["res_hz"] = demo["res_hz"]
+    return d
 
 
 def _parse_upload(file, sc: TorqueScaling):
@@ -441,24 +468,26 @@ elif nav == T_SPEC:
 # ------------------------------------------------------- Order tracking
 elif nav == T_ORD:
     _sec("Run-up order tracking", "amplitude of each order vs speed — peaks reveal torsional resonances")
-    ru = _demo_runup(units=run["units"])
-    rt = ru["torque"]; rkph = ru["kph"]; rfs = ru["fs"]
-    t_rev, rpm_inst = keyphasor_to_rpm(rkph, rfs)
-    tt = np.arange(rt.size) / rfs
-    rpm_ps = np.interp(tt, t_rev, rpm_inst, left=rpm_inst[0], right=rpm_inst[-1])
-    tracks = order_tracking(rt, rfs, rpm_ps, orders=(1, 2, 3), n_segments=30)
+    src = _runup_source(torque, kph, fs, bool(run.get("field")), units=run["units"])
+    if src["measured"]:
+        st.success(f"● Measured from this run-up ({src['rpm_min']:,.0f} → {src['rpm_max']:,.0f} rpm). "
+                   f"Detected torsional natural(s): {', '.join(f'{x:.1f} Hz' for x in src['naturals']) or '—'}.")
+    else:
+        st.warning("● Simulated run-up demo — this run is **not** a run-up, so torsional naturals "
+                   "cannot be measured from it. A run-up / coast-down capture is required. "
+                   "The curves below illustrate the method only.")
     fig = go.Figure()
-    for tr, col in zip(tracks, (BLUE, GREEN, AMBER)):
-        fig.add_trace(go.Scatter(x=tr.rpm, y=tr.amplitude, mode="lines+markers",
+    for (o, rpm_arr, amp_arr), col in zip(src["tracks"], (BLUE, GREEN, AMBER)):
+        fig.add_trace(go.Scatter(x=rpm_arr, y=amp_arr, mode="lines+markers",
                                  line=dict(color=col, width=2.2), marker=dict(size=4),
-                                 name=f"{int(tr.order)}×"))
-    if ru["res_hz"] > 0:
-        fig.add_vline(x=ru["res_hz"] * 60.0, line=dict(color=RED, dash="dash"),
-                      annotation_text=f"torsional natural {ru['res_hz']:.0f} Hz",
+                                 name=f"{int(o)}×"))
+    for fn in src["naturals"]:
+        fig.add_vline(x=fn * 60.0, line=dict(color=RED, dash="dash"),
+                      annotation_text=f"natural {fn:.1f} Hz",
                       annotation_position="top", annotation_font=dict(color=RED, size=11))
     _navplot(_apply(fig, height=440, xlab="RPM", ylab=f"order amplitude ({u})"))
-    st.caption("Simulated run-up demo. Each order peaks where k × running speed crosses the "
-               "torsional natural frequency (30 Hz here → 1× at 1800 rpm, 2× at 900 rpm).")
+    st.caption("Each order peaks where k × running speed crosses a torsional natural frequency. "
+               "Naturals are detected only from a real run-up / coast-down, never from a steady capture.")
 
 # -------------------------------------------------------------- Fatigue
 elif nav == T_FAT:
@@ -540,8 +569,14 @@ elif nav == T_FAT:
 elif nav == T_CAMP:
     _sec("Campbell / interference diagram",
          "API 684 — excitation orders k×RPM vs torsional natural frequencies")
-    ra = _runup_analysis(units=run["units"])
-    naturals = ra["naturals"] or [ra["res_hz"]]
+    ra = _runup_source(torque, kph, fs, bool(run.get("field")), units=run["units"])
+    naturals = ra["naturals"] or ([ra["res_hz"]] if not ra["measured"] else [])
+    if ra["measured"]:
+        st.success(f"● Natural(s) measured from this run-up: "
+                   f"{', '.join(f'{x:.1f} Hz' for x in naturals) or '—'}.")
+    else:
+        st.warning("● Illustrative Campbell — torsional naturals were **not** measured from this "
+                   "run (no run-up). Shown for method demonstration; not a diagnosis of this asset.")
     rpm_max = max(ra["rpm_max"] * 1.05, rpm * 1.15)
     orders_c = (1.0, 2.0, 3.0, 4.0, 6.0)          # 6× cubre VFD/engrane
     band = SpeedBand(center_rpm=rpm, tol_rpm=0.10 * rpm, label="Operating ±10%")
@@ -599,12 +634,22 @@ elif nav == T_CAMP:
 # ---------------------------------------------------------------- Report
 elif nav == T_REPORT:
     _sec("Executive report", "SIGA torsional analysis — auto-generated · API 684 / ISO 22266")
-    ra = _runup_analysis(units=run["units"])
-    naturals = ra["naturals"] or [ra["res_hz"]]
+    ra = _runup_source(torque, kph, fs, bool(run.get("field")), units=run["units"])
+    measured = ra["measured"]     # ¿las naturales salen de un run-up REAL de esta corrida?
+    naturals = ra["naturals"] or ([ra["res_hz"]] if not measured else [])
     band = SpeedBand(center_rpm=rpm, tol_rpm=0.10 * rpm, label="Operating ±10%")
     crossings = compute_crossings(naturals, 0.0, max(ra["rpm_max"] * 1.05, rpm * 1.15),
                                   (1.0, 2.0, 3.0, 4.0, 6.0), bands=[band],
                                   mode_labels=[f"TNF{i+1}" for i in range(len(naturals))])
+    if not measured:
+        st.warning("⚠ Esta corrida no es un run-up: las frecuencias naturales torsionales NO se "
+                   "midieron aquí. El Campbell y las conclusiones de resonancia del reporte son "
+                   "ilustrativos, no un diagnóstico de resonancia de este activo. Sube una corrida "
+                   "de run-up / coast-down para el veredicto API 684."
+                   if st.session_state.get("tors_rep_lang", "Español") == "Español" else
+                   "⚠ This run is not a run-up: torsional naturals were NOT measured here. The "
+                   "report's Campbell and resonance conclusions are illustrative, not a resonance "
+                   "diagnosis of this asset. Upload a run-up / coast-down for the API 684 verdict.")
     coincid = [c for c in crossings if c.severity == "coincidence"]
     worst = min((c.sep_margin_pct for c in crossings), default=float("inf"))
     oa = order_amplitudes(torque, fs, rpm, orders=(1, 2, 3, 4, 5))
@@ -612,7 +657,9 @@ elif nav == T_REPORT:
     ranges = fatigue_ranges(torque)
     rmax = max((r for r, _ in ranges), default=0.0)
 
-    if coincid:
+    if not measured:
+        verdict, vcls = ("SIN VEREDICTO DE RESONANCIA — falta un run-up para medir las naturales", "wm-rev")
+    elif coincid:
         verdict, vcls = ("ATENCIÓN — coincidencia de orden en la banda de operación", "wm-nogo")
     elif worst < 10.0:
         verdict, vcls = ("REVISAR — margen de separación menor a 10%", "wm-rev")
@@ -629,16 +676,22 @@ elif nav == T_REPORT:
         if es:
             f.append(f"Par medio {m.mean:,.0f} {u}, pico-pico dinámico {m.peak_to_peak:,.0f} {u} (rizado {_rip}) a {rpm:,.0f} rpm.")
             f.append(f"Orden de excitación dominante: {dom}× ({oa[float(dom)][0]:.1f} {u}).")
-            f.append(f"Frecuencias naturales torsionales identificadas: {_nats}.")
-            f.append(f"{len(coincid)} coincidencia(s) de orden dentro de la banda de operación — margen mínimo {worst:.0f}% (objetivo API 684 ≥ 10%)." if coincid
-                     else f"Sin coincidencias en la banda de operación; margen de separación mínimo {worst:.0f}%.")
+            if measured:
+                f.append(f"Frecuencias naturales torsionales MEDIDAS en el run-up ({ra['rpm_min']:,.0f}→{ra['rpm_max']:,.0f} rpm): {_nats}.")
+                f.append(f"{len(coincid)} coincidencia(s) de orden dentro de la banda de operación — margen mínimo {worst:.0f}% (objetivo API 684 ≥ 10%)." if coincid
+                         else f"Sin coincidencias en la banda de operación; margen de separación mínimo {worst:.0f}%.")
+            else:
+                f.append("No se capturó run-up en esta corrida — las frecuencias naturales torsionales NO se midieron; se requiere un run-up / coast-down para evaluar resonancias (API 684). El Campbell mostrado es ilustrativo.")
             f.append(f"Fatiga: mayor rango rainflow del par {rmax:,.0f} {u} (ASTM E1049) — entrada para esfuerzo/Goodman del eje.")
         else:
             f.append(f"Mean torque {m.mean:,.0f} {u}, dynamic peak-peak {m.peak_to_peak:,.0f} {u} (ripple {_rip}) at {rpm:,.0f} rpm.")
             f.append(f"Dominant excitation order: {dom}× ({oa[float(dom)][0]:.1f} {u}).")
-            f.append(f"Torsional natural frequencies identified: {_nats}.")
-            f.append(f"{len(coincid)} order coincidence(s) inside the operating band — worst separation margin {worst:.0f}% (API 684 target ≥ 10%)." if coincid
-                     else f"No coincidences in the operating band; worst separation margin {worst:.0f}%.")
+            if measured:
+                f.append(f"Torsional natural frequencies MEASURED in the run-up ({ra['rpm_min']:,.0f}→{ra['rpm_max']:,.0f} rpm): {_nats}.")
+                f.append(f"{len(coincid)} order coincidence(s) inside the operating band — worst separation margin {worst:.0f}% (API 684 target ≥ 10%)." if coincid
+                         else f"No coincidences in the operating band; worst separation margin {worst:.0f}%.")
+            else:
+                f.append("No run-up captured in this run — torsional natural frequencies were NOT measured; a run-up / coast-down is required to assess resonances (API 684). The Campbell shown is illustrative.")
             f.append(f"Fatigue: largest rainflow torque range {rmax:,.0f} {u} (ASTM E1049) — input for shaft stress / Goodman.")
         return f
 
@@ -657,12 +710,19 @@ elif nav == T_REPORT:
         return r
 
     # Auto-diagnóstico (banner azul, como el Modal)
-    if _es:
-        _nar = (f"Se identificaron órdenes de excitación 1×–5× a {rpm:,.0f} rpm con natural(es) torsional(es) en {_nats}. "
+    if not measured:
+        _nar = (f"Órdenes de excitación 1×–5× a {rpm:,.0f} rpm. Esta corrida NO es un run-up, así que "
+                "las frecuencias naturales torsionales no se midieron: no hay veredicto de resonancia. "
+                "Sube un run-up / coast-down para evaluar coincidencias (API 684)." if _es else
+                f"Excitation orders 1×–5× at {rpm:,.0f} rpm. This run is NOT a run-up, so torsional "
+                "natural frequencies were not measured: no resonance verdict. Upload a run-up / "
+                "coast-down to assess coincidences (API 684).")
+    elif _es:
+        _nar = (f"Se MIDIERON las naturales torsionales en el run-up ({ra['rpm_min']:,.0f}→{ra['rpm_max']:,.0f} rpm): {_nats}. "
                 + (f"⚠ Coincidencia {coincid[0].order:g}× dentro de la banda de operación (margen {worst:.0f}%, API 684) — riesgo de resonancia torsional; correlacionar con amplitud/fase."
                    if coincid else f"Sin coincidencias dentro de la banda de operación (margen mínimo {worst:.0f}%)."))
     else:
-        _nar = (f"Excitation orders 1×–5× at {rpm:,.0f} rpm with torsional natural(s) at {_nats}. "
+        _nar = (f"Torsional naturals MEASURED in the run-up ({ra['rpm_min']:,.0f}→{ra['rpm_max']:,.0f} rpm): {_nats}. "
                 + (f"⚠ {coincid[0].order:g}× coincidence within the operating band (margin {worst:.0f}%, API 684) — torsional resonance risk; correlate with amplitude/phase."
                    if coincid else f"No coincidences within the operating band (worst margin {worst:.0f}%)."))
     st.markdown(f"<div style='background:#eef6ff;border-left:4px solid {BLUE};border-radius:8px;"
