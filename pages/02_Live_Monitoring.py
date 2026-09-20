@@ -462,6 +462,92 @@ def phasor_svg(amp: Optional[float], phase: Optional[float], max_amp: float, col
     )
 
 
+def phasor_glyph_oriented(
+    amp: Optional[float], phase: Optional[float], max_amp: float,
+    beta_deg: float, rot_cw: bool, color: str = "#1e40af", size: int = 40,
+) -> str:
+    """Glifo polar 1X orientado FÍSICAMENTE (convención Bently Nevada / API 670).
+
+    - 0° = TDC (arriba). Ángulos crecen en sentido HORARIO desde TDC (como Bently
+      cuenta la posición de sonda: X≈45°R, Y≈45°L = 315°).
+    - La sonda se dibuja en su ángulo de montaje `beta_deg` (desde TDC, horario).
+    - La FASE es lag y corre EN CONTRA del giro → el vector apunta al high spot:
+        φ_vector = beta + s·phase,  s = +1 si giro CCW, −1 si CW.
+      (Idéntico a la órbita/polar 1X del análisis avanzado.)
+    """
+    cx = cy = size / 2
+    R = size / 2 - 4
+
+    def _xy(phi_deg: float, r: float):
+        # phi medido HORARIO desde TDC (arriba): x=+sin, y=-cos
+        a = math.radians(phi_deg)
+        return (cx + r * math.sin(a), cy - r * math.cos(a))
+
+    # Grid + TDC + marca de sonda
+    parts = [
+        f'<circle cx="{cx}" cy="{cy}" r="{R}" fill="white" stroke="#cbd5e1" stroke-width="1"/>',
+        f'<line x1="{cx}" y1="{cy-R}" x2="{cx}" y2="{cy+R}" stroke="#eef2f7" stroke-width="0.6"/>',
+        f'<line x1="{cx-R}" y1="{cy}" x2="{cx+R}" y2="{cy}" stroke="#eef2f7" stroke-width="0.6"/>',
+    ]
+    # marca de la sonda (triangulito en su beta)
+    try:
+        pbx, pby = _xy(beta_deg, R)
+        parts.append(f'<circle cx="{pbx:.1f}" cy="{pby:.1f}" r="1.8" fill="#0f172a"/>')
+    except Exception:  # noqa: BLE001
+        pass
+
+    ok = amp is not None and phase is not None and max_amp > 0
+    try:
+        ok = ok and float(amp) >= 1e-4
+    except (TypeError, ValueError):
+        ok = False
+
+    if ok:
+        s = 1.0 if not rot_cw else -1.0
+        phi = beta_deg + s * float(phase)
+        ratio = min(max(float(amp) / max_amp, 0.0), 1.0)
+        ex, ey = _xy(phi, ratio * (R - 3))
+        parts.append(
+            f'<line x1="{cx}" y1="{cy}" x2="{ex:.1f}" y2="{ey:.1f}" '
+            f'stroke="{color}" stroke-width="2" stroke-linecap="round"/>'
+            f'<circle cx="{ex:.1f}" cy="{ey:.1f}" r="2.4" fill="{color}"/>'
+        )
+    else:
+        parts.append(f'<circle cx="{cx}" cy="{cy}" r="1.6" fill="#cbd5e1"/>')
+
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
+        f'style="display:block;margin:0 auto;">' + "".join(parts) + '</svg>'
+    )
+
+
+def _channel_probe_beta(sensor_label: str, instance_obj: Any) -> float:
+    """Ángulo de montaje de la sonda desde TDC (horario). X≈45 (R), Y≈315 (L=−45).
+    Usa la orientación configurada del activo si está; si no, el default Bently."""
+    is_x = "X" in (sensor_label or "").upper()
+    default = 45.0 if is_x else 315.0
+    if instance_obj is None:
+        return default
+    val = getattr(instance_obj, "probe_x_orientation_deg" if is_x else "probe_y_orientation_deg", 0.0)
+    try:
+        val = float(val or 0.0)
+    except (TypeError, ValueError):
+        val = 0.0
+    return (val % 360.0) if abs(val) > 1e-6 else default
+
+
+def _channel_rot_cw(sensor_label: str, instance_obj: Any) -> bool:
+    """Sentido de giro del canal: cojinetes 1/2 = driver, 3-6 = driven.
+    Default CCW (rot_cw=False) si no está configurado."""
+    if instance_obj is None:
+        return False
+    lbl = (sensor_label or "").strip()
+    n0 = lbl[0] if lbl and lbl[0].isdigit() else ""
+    side = "driver" if n0 in ("1", "2") else "driven"
+    rot = getattr(instance_obj, f"rotation_{side}", "") or ""
+    return rot.upper().strip() == "CW"
+
+
 # ============================================================
 # Hero — Live Sensor Map vía Asset Library 2D (Ciclo 23.13)
 # ============================================================
@@ -2727,49 +2813,99 @@ def detect_severity_events(
     return events[:max_events]
 
 
-def render_event_timeline(events: List[Dict[str, Any]]) -> None:
-    """Franja cronológica de eventos de severidad — estilo System1 Event List."""
-    if not events:
+_RANK_EVT = {"Normal": 0, "Alarma": 1, "Danger": 2}
+_EVT_COLORS = {
+    "Normal": ("#166534", "#dcfce7"),
+    "Alarma": ("#92400e", "#fef3c7"),
+    "Danger": ("#991b1b", "#fee2e2"),
+}
+_EVT_EN = {"Normal": "Normal", "Alarma": "Alarm", "Danger": "Danger"}
+
+
+def _evt_pill(status: str) -> str:
+    fg, bg = _EVT_COLORS.get(status, ("#475569", "#f1f5f9"))
+    return (f'<span style="padding:1px 8px;border-radius:11px;background:{bg};color:{fg};'
+            f'font-weight:800;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;">'
+            f'{_EVT_EN.get(status, status)}</span>')
+
+
+def render_event_timeline(instance_id: str, user_email: Optional[str] = None) -> None:
+    """Event log PERSISTENTE (tabla severity_events) — estilo System1 Event List:
+    historial de cruces con duración en estado, evento vigente resaltado y ack."""
+    from core.severity_events import list_recent, ack_event
+    evs = list_recent(instance_id, limit=40)
+    if not evs:
         st.markdown(
             '<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;'
             'background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;'
             'margin:4px 0 12px 0;font-size:12px;color:#166534;">'
             '<span style="font-size:15px;">✓</span>'
-            'No alarm events in the recent window — stable operation.'
+            'No threshold crossings recorded — stable operation.'
             '</div>',
             unsafe_allow_html=True,
         )
         return
+
     rows = []
-    for e in events:
-        age = _format_age(e.get("captured_at", ""))
-        arrow = "↑" if e["rising"] else "↓"
-        arrow_color = "#dc2626" if e["rising"] else "#16a34a"
-        to_label = e["to"]
+    for e in evs:
+        frm = e.get("from_status") or "Normal"
+        to = e.get("to_status") or "Normal"
+        rising = _RANK_EVT.get(to, 0) > _RANK_EVT.get(frm, 0)
+        arrow = "▲" if rising else "▼"
+        acol = "#dc2626" if rising else "#16a34a"
         try:
-            val_txt = f"{float(e['value']):,.3f} {e['unit']}"
+            val_txt = f"{float(e.get('value')):,.3f} {e.get('unit') or ''}"
         except Exception:
             val_txt = "—"
+        active = bool(e.get("_active"))
+        dur = e.get("_duration", "—")
+        dur_txt = (f'<b style="color:{acol};">in {_EVT_EN.get(to, to)} · {dur}</b>'
+                   if active else f'{dur} in {_EVT_EN.get(to, to)}')
+        if e.get("ack_by"):
+            ack_txt = (f'<span style="color:#16a34a;font-size:10px;">✓ ack '
+                       f'{str(e.get("ack_by")).split("@")[0]}</span>')
+        elif active:
+            ack_txt = '<span style="color:#b45309;font-size:10px;font-weight:700;">● unacked</span>'
+        else:
+            ack_txt = ''
+        left_bar = f'border-left:3px solid {acol};' if active else 'border-left:3px solid transparent;'
         rows.append(
-            f'<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;'
-            f'border-bottom:1px solid #f1f5f9;font-size:12px;">'
-            f'<span style="font-size:14px;color:{arrow_color};font-weight:800;width:14px;">{arrow}</span>'
-            f'<span style="font-family:monospace;font-weight:700;color:#0f172a;min-width:52px;">{e["sensor_label"]}</span>'
-            f'<span style="padding:2px 9px;border-radius:12px;background:{e["bg"]};color:{e["fg"]};'
-            f'font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;">{to_label}</span>'
-            f'<span style="color:#475569;font-family:monospace;">{val_txt}</span>'
-            f'<span style="margin-left:auto;color:#94a3b8;font-size:11px;">{age} ago</span>'
+            f'<div style="display:flex;align-items:center;gap:10px;padding:8px 12px 8px 10px;'
+            f'{left_bar}border-bottom:1px solid #f1f5f9;font-size:12px;'
+            f'{"background:#fffbeb;" if active else ""}">'
+            f'<span style="font-size:11px;color:{acol};font-weight:800;width:12px;">{arrow}</span>'
+            f'<span style="font-family:ui-monospace,monospace;font-weight:700;color:#0f172a;min-width:56px;">{e.get("sensor_label","—")}</span>'
+            f'{_evt_pill(frm)}<span style="color:#cbd5e1;">→</span>{_evt_pill(to)}'
+            f'<span style="color:#475569;font-family:ui-monospace,monospace;min-width:110px;">{val_txt}</span>'
+            f'<span style="color:#475569;">{dur_txt}</span>'
+            f'<span style="margin-left:auto;display:flex;gap:10px;align-items:center;">'
+            f'{ack_txt}<span style="color:#94a3b8;font-size:11px;">{e.get("_age","—")} ago</span></span>'
             f'</div>'
         )
+    n_active = sum(1 for e in evs if e.get("_active"))
+    hdr = f"Event log · {len(evs)} crossings"
+    if n_active:
+        hdr += f" · {n_active} active"
     st.markdown(
         '<div style="background:#fff;border:1px solid #e5edf7;border-radius:12px;'
-        'overflow:hidden;margin:4px 0 12px 0;">'
-        '<div style="padding:9px 14px;background:#f8fafc;'
+        'overflow:hidden;margin:4px 0 10px 0;">'
+        f'<div style="padding:9px 14px;background:#f8fafc;'
         'border-bottom:1px solid #e5edf7;font-size:10px;font-weight:700;color:#475569;'
-        'text-transform:uppercase;letter-spacing:0.08em;">Event log · latest threshold crossings</div>'
+        f'text-transform:uppercase;letter-spacing:.08em;">{hdr}</div>'
         + "".join(rows) + '</div>',
         unsafe_allow_html=True,
     )
+    # Acknowledge de eventos vigentes sin reconocer
+    actives = [e for e in evs if e.get("_active") and not e.get("ack_by") and e.get("id") is not None]
+    if actives and user_email:
+        st.caption("Acknowledge active events:")
+        cols = st.columns(min(len(actives), 4))
+        for i, e in enumerate(actives):
+            with cols[i % len(cols)]:
+                if st.button(f"✓ {e.get('sensor_label')} {_EVT_EN.get(e.get('to_status'), '')}",
+                             key=f"ack_{e.get('id')}", use_container_width=True):
+                    if ack_event(e.get("id"), user_email):
+                        st.rerun()
 
 
 def compute_rendered_rows(
@@ -2886,6 +3022,7 @@ def render_api670_table(
     rendered_rows: List[Dict[str, Any]],
     latest: List[Dict[str, Any]],
     spark_data: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    instance_obj: Any = None,
 ) -> None:
     """Tabla densa API 670: por canal, Overall + tendencia + descomposición
     1X/2X (amplitud ∠ fase). 1X = desbalance, 2X = desalineamiento —
@@ -2991,11 +3128,14 @@ def render_api670_table(
                   f'border-radius:5px;background:{z_color}22;color:{z_color};font-weight:800;'
                   f'font-family:ui-monospace,monospace;font-size:11px;">{z_letter}</span>')
         pbar = _pct_bar(r.get("value"), r.get("alarm_used"), r.get("danger_used"))
-        # Glifo polar 1X (mini vector amplitud∠fase) — puro System1/AMS
+        # Glifo polar 1X orientado FÍSICAMENTE (Bently/API 670): 0°=TDC, sonda en
+        # su ángulo de montaje, fase (lag) contra el giro → apunta al high spot.
         _a1 = v.get("1X_Ampl")
         _p1 = v.get("1X_Phase")
-        glyph = (phasor_svg(_a1, _p1, max_amp=_max1x, color="#1e40af", size=38)
-                 if (_a1 is not None and _isnum(_a1) and float(_a1) >= 1e-4) else "—")
+        _beta = _channel_probe_beta(sl, instance_obj)
+        _rcw = _channel_rot_cw(sl, instance_obj)
+        glyph = phasor_glyph_oriented(_a1, _p1, _max1x, _beta, _rcw,
+                                      color="#1e40af", size=40)
         body.append(
             f'<tr class="{row_class}">'
             f'<td>{status_pill_html(r["status"], r["fg"], r["bg"])}</td>'
@@ -3031,8 +3171,10 @@ def render_api670_table(
     st.caption(
         "Zone = ISO 20816 (A new · B acceptable · C alarm · D danger) · "
         "% alarm = Overall vs alarm setpoint (mark = alarm on the bar) · "
-        "1X glyph = synchronous vector (amplitude ∠ phase) · "
-        "1X = unbalance · 2X = misalignment / looseness · API 670."
+        "1X glyph = synchronous vector physically oriented (Bently / API 670): "
+        "0° = TDC, probe at its mounting angle, phase (lag) grows against "
+        "rotation → the vector points to the high spot · "
+        "1X = unbalance · 2X = misalignment / looseness."
     )
 
 
@@ -4180,14 +4322,18 @@ def main() -> None:
         if not _can_send:
             st.caption("Configure the recipient in Machinery Library.")
 
-    # Ciclo 23.142 — Event List estilo System1: registro cronológico de
-    # cruces de umbral (Normal→Alarma→Danger) por canal en la ventana
-    # reciente. Da contexto temporal: no solo "está en alarma" sino
-    # "entró en alarma hace 12 min".
+    # Ciclo 23.173 — Event List estilo System1, ahora PERSISTENTE: registra los
+    # cruces (Normal→Alarma→Danger→Normal) en la tabla severity_events y muestra
+    # el historial con duración en estado + evento vigente + acknowledge.
     try:
-        events = detect_severity_events(spark_data, sensor_lookup, instance_obj)
+        from core.severity_events import record_events as _rec_events
+        _rec_events(instance_id, rendered_rows)   # idempotente: solo inserta cambios
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.warning("record_events failed: %s", e)
+    try:
         with st.expander("Event log — threshold crossings", expanded=False):
-            render_event_timeline(events)
+            render_event_timeline(instance_id, _current_email)
     except Exception as e:
         import logging
         logging.warning("event timeline (overview) failed: %s", e)
@@ -4199,39 +4345,18 @@ def main() -> None:
         import logging
         logging.warning("render_history_chart (overview) failed: %s", e)
 
-    # Ciclo 23.140 — Tabla API 670: Overall + 1X/2X por canal. Vista de
-    # analista (desbalance vs desalineamiento) que pelea con System1/AMS.
+    # Tabla API 670 — "Tabular List" (nombre System1). Vista de analista:
+    # estado + zona ISO + %alarm + tendencia + vector 1X orientado + 1X/2X.
     try:
-        with st.expander("Channels — Overall + 1X / 2X vectors (API 670)", expanded=False):
-            render_api670_table(rendered_rows, latest, spark_data)
+        with st.expander("Tabular List — Overall + 1X / 2X vectors (API 670)", expanded=False):
+            render_api670_table(rendered_rows, latest, spark_data, instance_obj)
     except Exception as e:
         import logging
         logging.warning("render_api670_table (overview) failed: %s", e)
 
-    # Ciclo 23.148 — Análisis avanzado (Forma de onda · Espectro · Órbita)
-    # dentro de un desplegable colapsado por defecto, para mantener el
-    # overview limpio y minimalista. (Se quitó "Tabular List" por ser
-    # redundante con la tabla de Canales API 670, y la sección de
-    # HISTÓRICO/ZIP/Enviar al cliente por no aportar — el envío al cliente
-    # se hará desde el reporte ejecutivo PDF.)
-    # Ciclo 23.156 — Botón minimalista 🍉 que lleva a la página dedicada
-    # de Análisis Avanzado (selector Espectro / Onda / Órbita). Reemplaza
-    # el expander con todo apilado inline (pedido Ewdes: clase mundial).
-    try:
-        _c_an1, _c_an2, _c_an3 = st.columns([2, 3, 2])
-        with _c_an2:
-            if st.button(
-                "Advanced analysis",
-                key="wm_open_live_analysis",
-                use_container_width=True,
-                help="Spectrum · Waveform · Orbit of the latest snapshot",
-            ):
-                st.session_state["_live_analysis_instance"] = instance_id
-                st.switch_page("pages/_live_analysis.py")
-    except Exception as e:
-        # Falla silenciosa — la sección es opcional, no debe romper la página
-        import logging
-        logging.warning("live analysis button failed: %s", e)
+    # Ciclo 23.172 — El botón "Advanced analysis" se retiró de aquí: ahora es
+    # una PESTAÑA propia (pages/03_Advanced_Analysis.py) en la navegación.
+    # Toma el activo del selector de Live Monitoring (session_state live_asset_v3).
 
     # Ciclo 23.171 — "Detailed analysis — by sensor" ELIMINADO por redundante:
     # · Overall trend (multi-canal overlay + Tiles + botonera de rango) ya cubre

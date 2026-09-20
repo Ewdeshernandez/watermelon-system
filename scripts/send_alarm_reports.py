@@ -178,6 +178,23 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
             stored = 0
             log.info("✓ %s reconectado — datos frescos, alarma re-armada.", tag)
 
+        # Event log persistente: registra cruces de umbral por canal (aunque
+        # nadie esté viendo la web). Idempotente — solo inserta cambios.
+        if not dry_run:
+            try:
+                from core.live_readings import latest_for_instance as _lfi
+                from core.live_report_builder import (
+                    _build_sensor_lookup as _bsl, _compute_rendered_rows as _crr)
+                from core.severity_events import record_events as _rec
+                _lt = _lfi(iid) or []
+                if _lt:
+                    _rows, _ = _crr(_lt, _bsl(inst), inst)
+                    _nrec = _rec(iid, _rows)
+                    if _nrec:
+                        log.info("   %s: %d evento(s) de umbral registrados.", tag, _nrec)
+            except Exception as e:  # noqa: BLE001
+                log.warning("   %s: record_events falló: %s", tag, e)
+
         level, status, summary = current_severity_level(iid, inst)
 
         # ¿Hay que avisar? Solo si EMPEORA respecto a lo ya avisado

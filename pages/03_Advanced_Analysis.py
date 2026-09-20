@@ -56,7 +56,8 @@ instance_id = (
     or st.session_state.get("live_asset_v3")
 )
 if not instance_id:
-    st.info("Enter from **Live Monitoring** using the 🍉 Advanced Analysis button.")
+    st.info("Pick an asset in **Live Monitoring** first — this view analyzes its "
+            "latest snapshot (Spectrum · Waveform · Orbit).")
     st.stop()
 
 _tag = str(instance_id).upper()
