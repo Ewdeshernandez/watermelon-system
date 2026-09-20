@@ -34,7 +34,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -848,8 +848,37 @@ def build_app(simulated: bool = True):
     cb_planes.currentIndexChanged.connect(_apply_planes)
     tabs.currentChanged.connect(lambda i: (_refresh_suggest() if i in (IDX_1P, IDX_2P) else None))
 
+    # ---------- Flujo guiado: guardar para avanzar al siguiente paso ----------
+    IDX_CFG, IDX_TW, IDX_1, IDX_2, IDX_RP = 1, 2, 3, 4, 5
+
+    def _after_setup_saved():
+        tabs.setTabEnabled(IDX_CFG, True); tabs.setCurrentIndex(IDX_CFG)
+
+    def _after_config_saved():
+        for _i in (IDX_TW, IDX_1, IDX_2, IDX_RP):
+            tabs.setTabEnabled(_i, True)
+        _apply_planes(); _refresh_suggest()
+        tabs.setCurrentIndex(IDX_1 if cb_planes.currentIndex() == 0 else IDX_2)
+    btn_saveset.clicked.connect(_after_setup_saved)
+    btn_savecfg.clicked.connect(_after_config_saved)
+
     _on_sensor(); _load_setup(); _on_sensor()
     _load_config(); _on_mode(); _kph_sensor(); _apply_planes(); _refresh_suggest()
+
+    # Bloqueo inicial del flujo (se desbloquea al guardar). Si ya hay setup/config
+    # guardados de antes, arranca desbloqueado.
+    for _i in (IDX_CFG, IDX_TW, IDX_1, IDX_2, IDX_RP):
+        tabs.setTabEnabled(_i, False)
+    if _SET.value("machine") not in (None, ""):
+        tabs.setTabEnabled(IDX_CFG, True)
+    if _CFG.value("mode") is not None:
+        for _i in (IDX_TW, IDX_1, IDX_2, IDX_RP):
+            tabs.setTabEnabled(_i, True)
+    _apply_planes()
+
+    # Limpieza visual: quita las flechas ↑↓ de todos los spinboxes (más limpio).
+    for _sp in win.findChildren(QtWidgets.QAbstractSpinBox):
+        _sp.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
     return app, win
 
 
