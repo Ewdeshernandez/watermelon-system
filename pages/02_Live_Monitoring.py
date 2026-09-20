@@ -3485,13 +3485,25 @@ def main() -> None:
         except Exception:
             pass
 
+    # Activos REALES (cliente paga servicio). Hoy: Parex SGT300A/B. Todo lo demás
+    # es VITRINA (demo) — se muestra al equipo interno para un mapa lleno, pero un
+    # cliente (role=client) solo ve los suyos vía filter_instances_for_email, así
+    # que las demo nunca le aparecen. Editar aquí al sumar clientes reales.
+    _REAL_ASSET_HINTS = ("sgt300",)
+
+    def _is_demo_asset(iid: str, meta: Dict[str, Any]) -> bool:
+        hay = f"{iid} {meta.get('tag', '')}".lower()
+        return not any(h in hay for h in _REAL_ASSET_HINTS)
+
     def _fmt_option(iid: str) -> str:
         meta = inst_meta.get(iid, {})
         tag = meta.get("tag", "") or iid.upper()
         client = meta.get("client", "")
-        if client:
-            return f"{tag}  ·  {client}"
-        return tag
+        base = f"{tag}  ·  {client}" if client else tag
+        # Marca DEMO solo para el equipo interno (admin/specialist)
+        if _current_role in ("admin", "specialist") and _is_demo_asset(iid, meta):
+            base += "   ·   DEMO"
+        return base
 
     # Top bar — selector de activo + auto-refresh con look industrial
     # estilo SCADA / control room (Ciclo 23.17). Sin etiqueta arriba del
