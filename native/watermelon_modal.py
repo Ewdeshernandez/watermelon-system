@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.92"
+__version__ = "0.9.93"
 
 
 def _run_trace_tags():
@@ -702,6 +702,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     global _LANG
     _LANG = _load_lang()                                   # idioma guardado (EN/ES)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    QtCore.QLocale.setDefault(QtCore.QLocale(QtCore.QLocale.C))   # punto decimal SIEMPRE
     app.setStyleSheet(_stylesheet())
     pg.setConfigOptions(antialias=True)
     win = QtWidgets.QMainWindow()
@@ -3956,6 +3957,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
             ev.accept()
     win.closeEvent = _close_event
 
+    # Punto decimal SIEMPRE: locale C + coma tecleada → punto al vuelo.
+    _cloc = QtCore.QLocale(QtCore.QLocale.C)
+    for _sp in win.findChildren(QtWidgets.QAbstractSpinBox):
+        _sp.setLocale(_cloc)
+        _le = _sp.lineEdit()
+        if _le is not None:
+            def _mk(le):
+                def _f(txt):
+                    if "," in txt:
+                        pos = le.cursorPosition(); le.setText(txt.replace(",", ".")); le.setCursorPosition(pos)
+                return _f
+            _le.textEdited.connect(_mk(_le))
     return app, win
 
 

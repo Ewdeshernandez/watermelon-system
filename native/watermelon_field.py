@@ -246,6 +246,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         pass
     app = QtWidgets.QApplication(sys.argv)
+    QtCore.QLocale.setDefault(QtCore.QLocale(QtCore.QLocale.C))   # punto decimal SIEMPRE
 
     # --- Auto-ajuste a la pantalla: deriva una escala de UI del tamaño de pantalla ---
     ui_scale = {"v": 1.0}
@@ -2673,6 +2674,18 @@ def main() -> int:
         if pending.get("path"):
             args.machine_file = pending["path"]; pending["path"] = None
         _w = _build_window()
+        # Punto decimal SIEMPRE: locale C + coma tecleada → punto al vuelo.
+        _cloc = QtCore.QLocale(QtCore.QLocale.C)
+        for _sp in _w.findChildren(QtWidgets.QAbstractSpinBox):
+            _sp.setLocale(_cloc)
+            _le = _sp.lineEdit()
+            if _le is not None:
+                def _mk(le):
+                    def _f(txt):
+                        if "," in txt:
+                            pos = le.cursorPosition(); le.setText(txt.replace(",", ".")); le.setCursorPosition(pos)
+                    return _f
+                _le.textEdited.connect(_mk(_le))
         _w.showMaximized()
         _old = cur["win"]; cur["win"] = _w
         if _old is not None:
