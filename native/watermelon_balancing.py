@@ -34,7 +34,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -89,6 +89,7 @@ def build_app(simulated: bool = True):
     global _LANG
     _LANG = _load_lang()
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    QtCore.QLocale.setDefault(QtCore.QLocale(QtCore.QLocale.C))   # punto decimal SIEMPRE
     app.setStyleSheet(_stylesheet())
     win = QtWidgets.QMainWindow()
     win.setWindowTitle(f"Watermelon Balancing v{__version__}")
@@ -935,9 +936,21 @@ def build_app(simulated: bool = True):
             tabs.setTabEnabled(_i, True)
     _apply_planes()
 
-    # Limpieza visual: quita las flechas ↑↓ de todos los spinboxes (más limpio).
+    # Limpieza visual + punto decimal SIEMPRE (nunca coma): quita flechas, fija
+    # locale C (separador "."), y si el operador teclea "," la vuelve "." al vuelo.
+    _cloc = QtCore.QLocale(QtCore.QLocale.C)
     for _sp in win.findChildren(QtWidgets.QAbstractSpinBox):
         _sp.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        _sp.setLocale(_cloc)
+        _le = _sp.lineEdit()
+        if _le is not None:
+            def _mk(le):
+                def _f(txt):
+                    if "," in txt:
+                        pos = le.cursorPosition()
+                        le.setText(txt.replace(",", ".")); le.setCursorPosition(pos)
+                return _f
+            _le.textEdited.connect(_mk(_le))
     return app, win
 
 
