@@ -3375,18 +3375,11 @@ def render_history_chart(
             "La agregación de largo plazo está temporalmente no disponible."
         )
 
-    # KPIs combinados — Mín/Máx usan el pico REAL de cada balde (no se pierden
-    # al promediar); Σ = total de lecturas crudas agregadas.
-    _mins = pd.concat([pd.to_numeric(sd["df"]["min_val"], errors="coerce") for sd in sensor_data])
+    # y_max del gráfico usa el pico REAL de cada balde (no se pierde al promediar).
+    # Los KPIs Min/Max/Avg/Σ se quitaron: en vibración no aportan (el analista lee
+    # la tendencia y los umbrales, no un promedio global de 30 días).
     _maxs = pd.concat([pd.to_numeric(sd["df"]["max_val"], errors="coerce") for sd in sensor_data])
-    _avgs = pd.concat([sd["df"]["value"] for sd in sensor_data])
-    total_readings = int(sum(pd.to_numeric(sd["df"]["n"], errors="coerce").fillna(0).sum() for sd in sensor_data))
-    all_values = _maxs  # usado abajo para el y_max del gráfico
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("Min (real)", f"{_mins.min():.3f}")
-    with c2: st.metric("Max (real)", f"{_maxs.max():.3f}")
-    with c3: st.metric("Average", f"{_avgs.mean():.3f}")
-    with c4: st.metric("Σ Readings", f"{total_readings:,}")
+    all_values = _maxs
 
     # ---- Modo TILES: un panel por sensor (estilo tablero System1/AMS) ----
     if view_mode == "Tiles":
@@ -3494,9 +3487,10 @@ def render_history_chart(
             ),
             hovermode="x unified",
         )
+        # Sin barra de herramientas (cámara/lupa/casa) — tapaba la leyenda y se
+        # veía sucia sobre el gráfico. Limpio, tipo tablero industrial.
         st.plotly_chart(fig, use_container_width=True,
-                        config={"displaylogo": False, "displayModeBar": "hover",
-                                "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]})
+                        config={"displaylogo": False, "displayModeBar": False})
 
         # Caption si bands omitidas
         if not show_bands and len(sensor_data) > 1:
