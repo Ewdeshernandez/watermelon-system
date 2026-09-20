@@ -3114,6 +3114,82 @@ def render_diagnostic_table(latest: List[Dict[str, Any]]) -> None:
 # Tendencia con bandas de severidad
 # ============================================================
 
+def _render_trend_tiles(sensor_data: List[Dict[str, Any]], range_choice: str) -> None:
+    """Mosaico de paneles — un sensor por tile, cada uno con su umbral
+    alarma/danger, línea de tendencia y valor actual grande. Estilo tablero
+    industrial (System1/AMS): 2 columnas, denso, monospace, corporativo."""
+    import plotly.graph_objects as go
+
+    _SEV = {"Normal": "#16a34a", "Alarma": "#d97706", "Danger": "#dc2626"}
+    n = len(sensor_data)
+    cols_per_row = 2 if n > 1 else 1
+    for row_start in range(0, n, cols_per_row):
+        cols = st.columns(cols_per_row, gap="small")
+        for ci in range(cols_per_row):
+            si = row_start + ci
+            if si >= n:
+                break
+            sd = sensor_data[si]
+            df = sd["df"]
+            alarm = sd.get("alarm") or 0
+            danger = sd.get("danger") or 0
+            unit = sd.get("unit", "")
+            cur = float(df["value"].iloc[-1]) if len(df) else 0.0
+            # severidad del valor actual (para el color del número + línea)
+            status = "Danger" if (danger and cur >= danger) else (
+                "Alarma" if (alarm and cur >= alarm) else "Normal")
+            scol = _SEV[status]
+
+            with cols[ci]:
+                # Cabecera del tile: etiqueta + valor actual grande (color severidad)
+                st.markdown(
+                    f"""<div style="display:flex;justify-content:space-between;
+                    align-items:baseline;border-left:3px solid {scol};
+                    padding:2px 0 2px 10px;margin-bottom:-6px;">
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;
+                    color:#334155;font-weight:600;letter-spacing:.02em;">{sd['label']}
+                    <span style="color:#94a3b8;font-weight:400;"> · {sd['var']}</span></span>
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:20px;
+                    font-weight:700;color:{scol};">{cur:.2f}<span style="font-size:11px;
+                    color:#94a3b8;font-weight:400;"> {unit}</span></span></div>""",
+                    unsafe_allow_html=True,
+                )
+                fig = go.Figure()
+                ymax = max(float(df["value"].max()), danger * 1.08 if danger else 0)
+                ymax = ymax if ymax > 0 else float(df["value"].max() or 1)
+                if danger:
+                    fig.add_hrect(y0=danger, y1=ymax * 1.05, fillcolor="#ef4444",
+                                  opacity=0.05, line_width=0, layer="below")
+                    fig.add_hline(y=danger, line=dict(color="#dc2626", width=1, dash="dash"))
+                if alarm:
+                    fig.add_hline(y=alarm, line=dict(color="#d97706", width=1, dash="dash"))
+                fig.add_trace(go.Scatter(
+                    x=df["captured_at"], y=df["value"], mode="lines",
+                    line=dict(color="#1e40af", width=1.5, shape="spline", smoothing=0.5),
+                    fill="tozeroy", fillcolor="rgba(30,64,175,0.06)",
+                    hovertemplate="%{x|%Y-%m-%d %H:%M}<br>%{y:.3f} " + unit + "<extra></extra>",
+                ))
+                # punto del valor actual (marcador de severidad al final de la traza)
+                fig.add_trace(go.Scatter(
+                    x=[df["captured_at"].iloc[-1]], y=[cur], mode="markers",
+                    marker=dict(color=scol, size=7, line=dict(color="white", width=1.2)),
+                    hoverinfo="skip", showlegend=False,
+                ))
+                fig.update_layout(
+                    height=170, margin=dict(l=44, r=10, t=6, b=18),
+                    plot_bgcolor="white", paper_bgcolor="white", showlegend=False,
+                    font=dict(family="ui-monospace,Menlo,monospace", size=9, color="#64748b"),
+                    xaxis=dict(showgrid=False, showline=True, linecolor="#e5edf7",
+                               zeroline=False, tickfont=dict(size=8)),
+                    yaxis=dict(showgrid=True, gridcolor="#f1f5f9", zeroline=False,
+                               showline=False, tickfont=dict(size=8),
+                               range=[0, ymax * 1.05]),
+                )
+                st.plotly_chart(fig, use_container_width=True,
+                                key=f"tile_{sd['label']}_{sd['var']}_{range_choice}",
+                                config={"displaylogo": False, "displayModeBar": False})
+
+
 def render_history_chart(
     instance_id: str,
     latest: List[Dict[str, Any]],
@@ -3158,42 +3234,65 @@ def render_history_chart(
         best = max(by_unit.values(), key=len) if by_unit else labels[:1]
         return best[:4] if best else labels[:1]
 
-    col_var, col_range = st.columns([3, 1])
+    # CSS industrial (una vez) — selector de canales estilo acero (no rojo),
+    # botonera de rango tipo consola. Corporativo, clase System1/AMS.
+    st.markdown("""
+    <style>
+    /* Chips del selector de canales → acero mono, no rojo default */
+    .stMultiSelect [data-baseweb="tag"]{
+        background:#1e293b !important; color:#e2e8f0 !important;
+        border:1px solid #334155 !important; border-radius:4px !important;
+        font-family:ui-monospace,SFMono-Regular,Menlo,monospace !important;
+        font-size:11px !important; letter-spacing:.02em;
+    }
+    .stMultiSelect [data-baseweb="tag"] svg{ fill:#94a3b8 !important; }
+    .stMultiSelect [data-baseweb="tag"]:hover{ border-color:#64748b !important; }
+    /* Botonera de rango: monospace, denso, industrial */
+    div[data-testid="stSegmentedControl"] button{
+        font-family:ui-monospace,Menlo,monospace !important;
+        font-weight:600 !important; letter-spacing:.03em;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col_var, col_view = st.columns([3, 1])
     with col_var:
         chosen_labels = st.multiselect(
-            "📈 Sensors to plot (1 or several — overlay)",
+            "Channels — overlay one or several",
             labels,
             default=_default_labels(),
             key="live_history_vars_multi",
-            help="Select one or several sensors. Useful to compare 1YA vs 2YA, "
-                 "or to see cross-sensor patterns of a load event. By default "
-                 "the channels sharing a unit are shown for comparable overlay.",
+            help="Compare 1YA vs 2YA, or watch cross-channel patterns of a load "
+                 "event. By default the channels sharing a unit are shown.",
         )
-    with col_range:
-        range_choice = st.selectbox(
-            "Range", ["Last hour", "6 hours", "24 hours", "7 days", "30 days", "1 year"],
-            index=1, key="live_history_range",
-            help="Supabase history, downsampled server-side by intervals (scales to 1 year)",
+    with col_view:
+        view_mode = st.segmented_control(
+            "View", ["Overlay", "Tiles"], default="Overlay",
+            key="live_history_view",
+            help="Overlay = todas las señales en un eje. Tiles = un panel por "
+                 "sensor con su umbral y valor actual (estilo tablero).",
         )
 
-    if not chosen_labels:
-        st.info("Select at least 1 sensor to see the trend.")
-        return
-
-    # Downsampling server-side (Ciclo 23.146) — cada rango usa un balde de
-    # tiempo (avg/min/max por intervalo) vía la función SQL trend_bucketed.
-    # Esto escala a 1 año sin chocar con el cap de 1000 filas de PostgREST ni
-    # colgar el browser. Devuelve ~120–365 puntos por sensor sin importar el
-    # rango. Min/Máx muestran el pico REAL del balde (no se pierden picos).
+    # Botonera de RANGO — segmentada, estilo consola (1H · 6H · 24H · 7D · 30D · 1Y)
     from datetime import timedelta as _td, datetime as _dtmod, timezone as _tzmod
     range_cfg = {
-        "Last hour": (_td(hours=1),  "30 seconds"),
-        "6 hours":   (_td(hours=6),  "2 minutes"),
-        "24 hours":  (_td(hours=24), "10 minutes"),
-        "7 days":    (_td(days=7),   "1 hour"),
-        "30 days":   (_td(days=30),  "6 hours"),
-        "1 year":    (_td(days=365), "1 day"),
+        "1H":  (_td(hours=1),  "30 seconds"),
+        "6H":  (_td(hours=6),  "2 minutes"),
+        "24H": (_td(hours=24), "10 minutes"),
+        "7D":  (_td(days=7),   "1 hour"),
+        "30D": (_td(days=30),  "6 hours"),
+        "1Y":  (_td(days=365), "1 day"),
     }
+    range_choice = st.segmented_control(
+        "Range", list(range_cfg.keys()), default="6H",
+        key="live_history_range",
+        help="Ventana de tendencia. Agregado server-side; escala a 1 año.",
+    ) or "6H"
+
+    if not chosen_labels:
+        st.info("Select at least 1 channel to see the trend.")
+        return
+
     _delta, _bucket = range_cfg.get(range_choice, (_td(hours=6), "2 minutes"))
     _from_iso = (_dtmod.now(_tzmod.utc) - _delta).isoformat()
 
@@ -3273,6 +3372,11 @@ def render_history_chart(
     with c2: st.metric("Max (real)", f"{_maxs.max():.3f}")
     with c3: st.metric("Average", f"{_avgs.mean():.3f}")
     with c4: st.metric("Σ Readings", f"{total_readings:,}")
+
+    # ---- Modo TILES: un panel por sensor (estilo tablero System1/AMS) ----
+    if view_mode == "Tiles":
+        _render_trend_tiles(sensor_data, range_choice)
+        return
 
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
