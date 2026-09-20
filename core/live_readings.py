@@ -314,7 +314,7 @@ def history_bucketed(
     if client is None:
         return []
     try:
-        resp = client.rpc("trend_bucketed", {
+        resp = client.rpc("trend_bucketed_v2", {
             "p_instance": instance_id,
             "p_variable": variable,
             "p_metric": metric,

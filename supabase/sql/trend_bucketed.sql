@@ -1,28 +1,30 @@
 -- =====================================================================
--- trend_bucketed — tendencia downsampled server-side para Live Monitoring
+-- trend_bucketed_v2 — tendencia downsampled server-side (Live Monitoring)
 -- =====================================================================
 -- FIX (2026-09-20): el rango "30 días / 1 año" hacía statement timeout
--- (código 57014) porque faltaba un índice compuesto → seq scan de toda la
--- tabla live_readings. La app caía en silencio al crudo de 1000 filas y
--- mostraba solo ~3 h aunque el usuario pidiera 30 días. Error visible al
--- cliente.
+-- (57014) por falta de índice → seq scan de toda live_readings. La app caía
+-- en silencio al crudo de 1000 filas y mostraba solo ~3 h aunque el usuario
+-- pidiera 30 días. Error visible al cliente.
 --
--- Aplicar TODO este archivo en Supabase → SQL Editor → Run.
--- El CREATE INDEX CONCURRENTLY debe ir SOLO (no dentro de una transacción);
--- si el editor lo envuelve en BEGIN/COMMIT, córrelo aparte.
+-- Estado APLICADO en producción (watermelon-prod):
+--   1) índice idx_live_readings_trend            → creado
+--   2) función trend_bucketed_v2 (p_bucket text) → creada, la app la usa
+--      (core/live_readings.history_bucketed → rpc "trend_bucketed_v2")
+--
+-- NOTA: la función vieja `trend_bucketed` quedó con DOS overloads
+-- (p_bucket interval + text) → PostgREST no podía resolver cuál usar
+-- (PGRST203). Por eso la app apunta a trend_bucketed_v2 (nombre único, sin
+-- ambigüedad). Limpieza opcional al final (requiere DROP manual).
 -- =====================================================================
 
--- 1) Índice compuesto: convierte el filtro (instance, variable, metric,
---    captured_at >= from) en un index range scan. Sin esto, 30 d agrega
---    millones de filas por seq scan y revienta el timeout.
+-- 1) Índice compuesto — corre SOLO (CONCURRENTLY no va dentro de la
+--    transacción que envuelve el SQL Editor; si falla por 25001, quita
+--    CONCURRENTLY y córrelo así, plano):
 create index concurrently if not exists idx_live_readings_trend
     on live_readings (instance_id, variable, metric, captured_at);
 
--- 2) Función optimizada (misma firma y mismas columnas que consume la app:
---    bucket, avg_val, min_val, max_val, n). date_bin agrupa por balde de
---    tiempo (p_bucket = '6 hours', '1 day', etc.). statement_timeout propio
---    de 30 s como red de seguridad para el rango de 1 año.
-create or replace function trend_bucketed(
+-- 2) Función (nombre único v2 → sin ambigüedad de overload).
+create or replace function trend_bucketed_v2(
     p_instance text,
     p_variable text,
     p_metric   text,
@@ -55,6 +57,10 @@ as $$
     order by 1
 $$;
 
--- 3) Permisos (la app usa service_key, pero dejamos anon/auth por si acaso).
-grant execute on function trend_bucketed(text, text, text, timestamptz, text)
+grant execute on function trend_bucketed_v2(text, text, text, timestamptz, text)
     to anon, authenticated, service_role;
+
+-- 3) LIMPIEZA OPCIONAL — eliminar los overloads viejos y ambiguos de
+--    trend_bucketed (ya nadie los llama). Correr manualmente si se desea:
+-- drop function if exists trend_bucketed(text, text, text, timestamptz, interval);
+-- drop function if exists trend_bucketed(text, text, text, timestamptz, text);
