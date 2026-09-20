@@ -147,6 +147,31 @@ Si proteges estas cuentas, **nunca pierdes el proyecto** aunque pierdas todos lo
 
 ---
 
+## 8b) Live Monitoring — reportes AUTOMÁTICOS (trabaja solo, sin especialista)
+
+El módulo Live Monitoring manda avisos/reportes solo. Los dispara **GitHub Actions**
+(no Render), workflow `.github/workflows/live_auto_reports.yml`:
+
+| Cron (UTC) | Qué | Script |
+|---|---|---|
+| `*/15 * * * *` | **Alarma/Danger** — avisa al entrar/escalar (anti-spam 1×/episodio) + **heartbeat OFFLINE** (activo sin datos > `WM_OFFLINE_MINUTES`, def 60) | `scripts/send_alarm_reports.py` |
+| `0 * * * *` | **Diario/programado** — envía a los activos cuya hora/día programados coinciden | `scripts/send_scheduled_reports.py` |
+| `0 12 * * 1` | **Semanal** (lunes 07:00 COL) — briefing por activo **auto-enviado** al cliente sin firma humana | `scripts/send_weekly_briefing.py --auto-send` |
+
+**Secret requerido (una vez):** `STREAMLIT_SECRETS_TOML` en GitHub → Settings → Secrets →
+Actions = contenido COMPLETO de `.streamlit/secrets.toml` (`[supabase]`, `[email]`,
+`[whatsapp]`). El workflow lo reescribe en el runner. **Sin este secret los crons
+corren pero NO envían nada (skip elegante).**
+
+**Para que un activo reciba avisos:** en Machinery Library debe tener destinatario
+(email/WhatsApp) y `alarm_send_enabled` / `report_send_enabled` en ON. Activo sin
+destinatario = salteado (no se monitorea).
+
+**Probar sin enviar:** Actions → "Live Monitoring — reportes automáticos" → Run
+workflow → job `all`, dry-run ✔.
+
+---
+
 ## 9) Cómo ROTAR la llave de licencias (si se filtra/pierde la privada)
 
 1. Genera par nuevo (en Mac):
