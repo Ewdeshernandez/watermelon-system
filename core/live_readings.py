@@ -327,6 +327,34 @@ def history_bucketed(
         return []
 
 
+def history_rollup(
+    instance_id: str,
+    variable: str,
+    metric: str,
+    from_iso: str,
+    bucket: str,
+) -> List[Dict[str, Any]]:
+    """Tendencia de LARGO PLAZO desde la tabla horaria pre-agregada
+    (trend_rollup). Instantáneo para 7d/30d/1a (lee ~cientos de filas, no
+    cientos de miles). Mismas columnas que history_bucketed: bucket, avg_val,
+    min_val, max_val, n. Devuelve [] si la función/tabla no existe aún."""
+    client = _get_supabase_client()
+    if client is None:
+        return []
+    try:
+        resp = client.rpc("trend_rollup", {
+            "p_instance": instance_id,
+            "p_variable": variable,
+            "p_metric": metric,
+            "p_from": from_iso,
+            "p_bucket": bucket,
+        }).execute()
+        return list(getattr(resp, "data", []) or [])
+    except Exception as e:  # noqa: BLE001
+        log.warning("history_rollup failed (¿falta rollup_hourly.sql?): %s", e)
+        return []
+
+
 def recent_history_all_direct(
     instance_id: str,
     n_per_sensor: int = 30,

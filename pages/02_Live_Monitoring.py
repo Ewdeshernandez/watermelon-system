@@ -3297,7 +3297,14 @@ def render_history_chart(
     _from_iso = (_dtmod.now(_tzmod.utc) - _delta).isoformat()
 
     from core.live_readings import history_bucketed as _hbk
+    from core.live_readings import history_rollup as _hru
     from concurrent.futures import ThreadPoolExecutor
+
+    # Rangos LARGOS (7D/30D/1Y) → tabla horaria pre-agregada (trend_rollup):
+    # instantáneo, clase System1. Rangos cortos (1H/6H/24H) → crudo v2
+    # (sub-hora, alta resolución). Fallback a crudo si el rollup aún no tiene
+    # datos (p.ej. antes del primer backfill).
+    _use_rollup = range_choice in ("7D", "30D", "1Y")
 
     # Prefetch en PARALELO (cada canal = 1 RPC I/O). Antes secuencial: 4 canales
     # × ~10 s en 30 d = ~40 s. En paralelo baja a ~1× el más lento.
@@ -3305,6 +3312,10 @@ def render_history_chart(
         _i = labels.index(chosen)
         _lbl, _var = options[_i]
         try:
+            if _use_rollup:
+                _r = _hru(instance_id, _var, "Direct", _from_iso, _bucket)
+                if _r:
+                    return chosen, _r
             return chosen, _hbk(instance_id, _var, "Direct", _from_iso, _bucket)
         except Exception:  # noqa: BLE001
             return chosen, []
