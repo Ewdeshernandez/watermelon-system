@@ -25,9 +25,11 @@ Deno.serve(async (req) => {
     const when = String(rec.created_at ?? rec.updated_at ?? "");
     // Módulo (Modal / Torsional) — el mismo notify sirve a ambos.
     const moduleName = String(rec.module ?? "Modal");
-    const isTors = moduleName.toLowerCase().startsWith("tors");
-    const kind = isTors ? "torsional" : "OMA";
-    const webMod = isTors ? "Torsional" : "Modal";
+    const _ml = moduleName.toLowerCase();
+    const isTors = _ml.startsWith("tors");
+    const isBal = _ml.startsWith("bal");
+    const kind = isTors ? "torsional" : isBal ? "de balanceo" : "OMA";
+    const webMod = isTors ? "Torsional" : isBal ? "Balancing" : "Modal";
     const rowIp = ip ? `<tr><td style="padding:4px 10px;color:#64748b">IP de conexión</td><td style="padding:4px 10px">${ip}</td></tr>` : "";
     const rowGeo = geo ? `<tr><td style="padding:4px 10px;color:#64748b">Ubicación aprox.</td><td style="padding:4px 10px">${geo}</td></tr>` : "";
     const html = `
