@@ -4354,9 +4354,22 @@ def main() -> None:
         import logging
         logging.warning("render_api670_table (overview) failed: %s", e)
 
-    # Ciclo 23.172 — El botón "Advanced analysis" se retiró de aquí: ahora es
-    # una PESTAÑA propia (pages/03_Advanced_Analysis.py) en la navegación.
-    # Toma el activo del selector de Live Monitoring (session_state live_asset_v3).
+    # Advanced analysis — DENTRO de Live Monitoring, una sección más abajo
+    # (botón que abre la página dedicada Espectro/Onda/Órbita del snapshot).
+    try:
+        _c_an1, _c_an2, _c_an3 = st.columns([2, 3, 2])
+        with _c_an2:
+            if st.button(
+                "Advanced analysis",
+                key="wm_open_live_analysis",
+                use_container_width=True,
+                help="Spectrum · Waveform · Orbit of the latest snapshot",
+            ):
+                st.session_state["_live_analysis_instance"] = instance_id
+                st.switch_page("pages/_live_analysis.py")
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.warning("live analysis button failed: %s", e)
 
     # Ciclo 23.171 — "Detailed analysis — by sensor" ELIMINADO por redundante:
     # · Overall trend (multi-canal overlay + Tiles + botonera de rango) ya cubre
