@@ -55,13 +55,22 @@ def _now_local() -> datetime:
         return datetime.now()
 
 
-def _is_due(inst, now: datetime) -> bool:
-    """¿Coincide AHORA con algún día Y alguna hora programados del activo?
+def _online_slots(inst) -> list:
+    """Pares (weekday, hour) en que el activo EN LÍNEA envía su reporte.
 
-    Soporta múltiples días y horas (report_send_days / report_send_hours).
-    Si esas listas están vacías, cae a los campos single (back-compat)."""
-    if not getattr(inst, "report_send_enabled", False):
-        return False
+    Preferido: report_send_slots = [[dow, hour], …] — permite Lunes 07:00 +
+    Sábado 21:00 sin la explosión de la grilla días×horas. Back-compat: si no
+    hay slots, arma la grilla desde report_send_days × report_send_hours (o los
+    campos single). weekday(): Lunes=0 … Domingo=6."""
+    slots = getattr(inst, "report_send_slots", None) or []
+    pairs = []
+    for s in slots:
+        try:
+            pairs.append((int(s[0]), int(s[1])))
+        except Exception:
+            continue
+    if pairs:
+        return pairs
     try:
         days = [int(x) for x in (getattr(inst, "report_send_days", None) or [])]
         if not days:
@@ -70,9 +79,15 @@ def _is_due(inst, now: datetime) -> bool:
         if not hours:
             hours = [int(getattr(inst, "report_send_hour", 6) or 6)]
     except Exception:
+        return []
+    return [(d, h) for d in days for h in hours]
+
+
+def _is_due(inst, now: datetime) -> bool:
+    """¿AHORA coincide con algún slot (día,hora) EN LÍNEA del activo?"""
+    if not getattr(inst, "report_send_enabled", False):
         return False
-    # weekday(): Lunes=0 … Domingo=6 (coincide con nuestra convención)
-    return now.weekday() in days and now.hour in hours
+    return (now.weekday(), now.hour) in _online_slots(inst)
 
 
 def _data_age_minutes(iid: str):
@@ -132,7 +147,25 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
             log.warning("Activo %s no existe — salteado.", iid)
             continue
 
-        due = force or _is_due(inst, now)
+        tag = getattr(inst, "tag", "") or iid
+        if not getattr(inst, "report_send_enabled", False):
+            skipped += 1
+            continue
+
+        # Compuerta por estado de datos:
+        #  · CON datos frescos  → reporte normal en sus slots (ej. Lun 07:00 + Sáb 21:00).
+        #  · SIN datos (offline)→ reporte FUERA DE LÍNEA una vez por semana en el
+        #    slot offline (default Lunes 09:00). Config vía env. Nunca duplica.
+        _off_min = int(os.environ.get("WM_OFFLINE_MINUTES", "60") or 60)
+        _off_dow = int(os.environ.get("WM_OFFLINE_REPORT_DOW", "0") or 0)
+        _off_hour = int(os.environ.get("WM_OFFLINE_REPORT_HOUR", "9") or 9)
+        _age = _data_age_minutes(iid)
+        _is_offline = (_age is None) or (_age > _off_min)
+
+        if _is_offline:
+            due = force or (now.weekday() == _off_dow and now.hour == _off_hour)
+        else:
+            due = force or _is_due(inst, now)
         if not due:
             skipped += 1
             continue
@@ -140,24 +173,6 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
             log.warning("Activo %s programado pero SIN email/WhatsApp — salteado.", iid)
             skipped += 1
             continue
-
-        tag = getattr(inst, "tag", "") or iid
-
-        # Compuerta por estado de datos:
-        #  · CON datos frescos  → reporte normal en las horas normales (no la offline).
-        #  · SIN datos (offline)→ reporte FUERA DE LÍNEA solo en la hora offline
-        #    (default 09:00), evitando doble envío. Config vía env.
-        _off_min = int(os.environ.get("WM_OFFLINE_MINUTES", "60") or 60)
-        _off_hour = int(os.environ.get("WM_OFFLINE_REPORT_HOUR", "9") or 9)
-        _age = _data_age_minutes(iid)
-        _is_offline = (_age is None) or (_age > _off_min)
-        if not force:
-            if _is_offline and now.hour != _off_hour:
-                skipped += 1
-                continue
-            if (not _is_offline) and now.hour == _off_hour:
-                skipped += 1
-                continue
 
         log.info("→ Generando reporte de %s (%s)… [%s]", tag, iid,
                  "OFFLINE" if _is_offline else "en línea")

@@ -186,6 +186,11 @@ class Instance:
     # El envío sale en cada combinación (cualquier day ∈ days y hour ∈ hours).
     report_send_days: List[int] = field(default_factory=list)   # ej. [0, 3]
     report_send_hours: List[int] = field(default_factory=list)  # ej. [6, 18]
+    # Ciclo 23.170 — slots explícitos (weekday, hour) para el reporte EN LÍNEA.
+    # Permite Lunes 07:00 + Sábado 21:00 sin la explosión días×horas de la
+    # grilla. Si está vacío, se cae a days×hours (back-compat). El activo
+    # offline usa su propio slot semanal (env WM_OFFLINE_REPORT_DOW/HOUR).
+    report_send_slots: List[List[int]] = field(default_factory=list)  # ej. [[0,7],[5,21]]
 
     # Ciclo 23.151 — Envío automático POR ALARMA (Fase 3). Cuando un canal
     # cruza a Alarma/Danger, se manda el reporte. alarm_alert_level guarda el
@@ -273,6 +278,9 @@ class Instance:
             report_send_hour=int(_f("report_send_hour", 6) or 6),
             report_send_days=[int(x) for x in (data.get("report_send_days") or [])],
             report_send_hours=[int(x) for x in (data.get("report_send_hours") or [])],
+            report_send_slots=[[int(s[0]), int(s[1])]
+                               for s in (data.get("report_send_slots") or [])
+                               if isinstance(s, (list, tuple)) and len(s) >= 2],
             alarm_send_enabled=bool(_f("alarm_send_enabled", False)),
             alarm_alert_level=int(_f("alarm_alert_level", 0) or 0),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
@@ -443,7 +451,7 @@ def update_instance_header(
         # Ciclo 23.150 — envío automático del reporte
         "client_email", "whatsapp_number", "report_send_enabled",
         "report_send_day", "report_send_hour",
-        "report_send_days", "report_send_hours",
+        "report_send_days", "report_send_hours", "report_send_slots",
         # Ciclo 23.151 — envío por alarma
         "alarm_send_enabled", "alarm_alert_level",
     }
