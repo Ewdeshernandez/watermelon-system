@@ -50,7 +50,7 @@ from core.torsional.ni_source import (
 )
 from core.torsional.monitor import TorsionalMonitor
 
-__version__ = "0.12.4"
+__version__ = "0.12.5"
 DAQ_NAME = "Watermelon DAQ"
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -303,6 +303,7 @@ def build_app(simulated: bool = True):
         "acq_mode": "sim",                # "sim" | "ni" (NI 9229 hardware)
         "kph_sensor": KeyphasorSensor.simulated(),
         "ni_cfg": {"device": "cDAQ1Mod1", "torque_ai": 0, "kph_ai": 1},
+        "_sim_widgets": [],               # se ocultan en modo NI (par real de la tarjeta)
     }
 
     # ---- Toolbar: marca + versión + idioma + banner de hardware ----
@@ -598,6 +599,11 @@ def build_app(simulated: bool = True):
             _w.setEnabled(_is_ni)
         st["ni_cfg"] = {"device": ed_ni_device.text() or "cDAQ1Mod1",
                         "torque_ai": sb_torque_ai.value(), "kph_ai": sb_kph_ai.value()}
+        # En modo NI el par y las RPM vienen de la tarjeta → oculta los campos del
+        # simulador (menos manos del operador = menos fallas).
+        for _w in st.get("_sim_widgets", []):
+            try: _w.setVisible(not _is_ni)
+            except Exception: pass  # noqa: BLE001
         _refresh_hw_banner()
     cb_acq_mode.currentIndexChanged.connect(_on_acq_mode)
     cb_kph_sensor.currentIndexChanged.connect(lambda _=0: _kph_sensor())
@@ -708,6 +714,7 @@ def build_app(simulated: bool = True):
     btn_stop = QtWidgets.QPushButton(T("■ Stop", "■ Detener")); btn_stop.setEnabled(False)
     simf.addStretch(1); simf.addWidget(btn_start); simf.addWidget(btn_stop)
     live_l.addWidget(gb_sim)
+    st["_sim_widgets"].append(gb_sim)      # panel de señal simulada → oculto con NI 9229
 
     # Fila de DATA: guardar cruda en el PC + subir a la nube (como el Modal)
     datarow = QtWidgets.QHBoxLayout()
@@ -1145,9 +1152,12 @@ def build_app(simulated: bool = True):
     sb_r0 = QtWidgets.QDoubleSpinBox(); sb_r0.setRange(60, 12000); sb_r0.setValue(600); sb_r0.setSuffix(" rpm")
     sb_r1 = QtWidgets.QDoubleSpinBox(); sb_r1.setRange(60, 12000); sb_r1.setValue(3600); sb_r1.setSuffix(" rpm")
     sb_res = QtWidgets.QDoubleSpinBox(); sb_res.setRange(0, 500); sb_res.setValue(30); sb_res.setSuffix(" Hz")
+    # Campos SOLO del simulador (inicio/fin/natural inyectada) → contenedor ocultable.
+    ru_simbox = QtWidgets.QWidget(); _rusim = QtWidgets.QHBoxLayout(ru_simbox); _rusim.setContentsMargins(0, 0, 0, 0)
     for lbl, w in [(T("Start", "Inicio"), sb_r0), (T("End", "Fin"), sb_r1),
                    (T("Torsional natural (sim)", "Natural torsional (sim)"), sb_res)]:
-        ru_ctrl.addWidget(QtWidgets.QLabel(lbl)); ru_ctrl.addWidget(w)
+        _rusim.addWidget(QtWidgets.QLabel(lbl)); _rusim.addWidget(w)
+    ru_ctrl.addWidget(ru_simbox); st["_sim_widgets"].append(ru_simbox)
     btn_run = QtWidgets.QPushButton(T("▶ Run simulated run-up", "▶ Correr runup simulado"))
     ru_ctrl.addStretch(1); ru_ctrl.addWidget(btn_run)
     p_camp = pg.PlotWidget(); p_camp.setBackground("w"); p_camp.showGrid(x=True, y=True, alpha=0.3)
