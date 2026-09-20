@@ -3305,6 +3305,17 @@ def render_history_chart(
     # (sub-hora, alta resolución). Fallback a crudo si el rollup aún no tiene
     # datos (p.ej. antes del primer backfill).
     _use_rollup = range_choice in ("7D", "30D", "1Y")
+    _from_ts = pd.to_datetime(_from_iso, utc=True)
+
+    def _rollup_covers(rows) -> bool:
+        # El rollup solo sirve si su balde más viejo alcanza el inicio pedido
+        # (± 1 día). Si el backfill aún no llenó el histórico, cae a crudo para
+        # no mostrar una tendencia truncada.
+        try:
+            first = pd.to_datetime(rows[0]["bucket"], utc=True)
+            return (first - _from_ts) <= pd.Timedelta(days=1)
+        except Exception:  # noqa: BLE001
+            return False
 
     # Prefetch en PARALELO (cada canal = 1 RPC I/O). Antes secuencial: 4 canales
     # × ~10 s en 30 d = ~40 s. En paralelo baja a ~1× el más lento.
@@ -3314,7 +3325,7 @@ def render_history_chart(
         try:
             if _use_rollup:
                 _r = _hru(instance_id, _var, "Direct", _from_iso, _bucket)
-                if _r:
+                if _r and _rollup_covers(_r):
                     return chosen, _r
             return chosen, _hbk(instance_id, _var, "Direct", _from_iso, _bucket)
         except Exception:  # noqa: BLE001
