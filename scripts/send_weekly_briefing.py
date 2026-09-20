@@ -66,12 +66,35 @@ def main() -> int:
                     help="Aprueba y ENVIA el briefing directo al cliente SIN revision "
                          "humana (modo autonomo, sin especialista). Firma 'Watermelon "
                          "System (automatico)'.")
+    ap.add_argument("--on-weekday", type=int, default=None,
+                    help="Solo ejecuta si hoy (America/Bogota) == este dia (0=Lun..6=Dom). "
+                         "Permite disparar el semanal desde un cron HORARIO sin crear otro servicio.")
+    ap.add_argument("--on-hour", type=int, default=None,
+                    help="Solo ejecuta si la hora local (America/Bogota) == esta (0-23).")
     ap.add_argument("--check-schedule", action="store_true",
                     help="Modo cron HORARIO ('0 * * * *'): solo genera si la "
                          "hora/día actuales coinciden con la programación "
                          "configurada en la app (briefing_schedule). El día, "
                          "la hora y el periodo salen de esa config.")
     args = ap.parse_args()
+
+    # Gate por día/hora local (para dispararlo desde un cron HORARIO): si hoy no
+    # coincide con on-weekday/on-hour (America/Bogota), no hace nada.
+    if args.on_weekday is not None or args.on_hour is not None:
+        from datetime import datetime
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo("America/Bogota"))
+        except Exception:  # noqa: BLE001
+            now = datetime.utcnow()  # fallback (peor caso: UTC)
+        if args.on_weekday is not None and now.weekday() != args.on_weekday:
+            log.info("No es el día programado (hoy=%d, on-weekday=%d) — nada que hacer.",
+                     now.weekday(), args.on_weekday)
+            return 0
+        if args.on_hour is not None and now.hour != args.on_hour:
+            log.info("No es la hora programada (hora=%d, on-hour=%d) — nada que hacer.",
+                     now.hour, args.on_hour)
+            return 0
 
     from core.briefing_builder import build_asset_draft, build_all_drafts
 
