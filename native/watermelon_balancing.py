@@ -34,7 +34,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -94,7 +94,7 @@ def build_app(simulated: bool = True):
     win.setWindowTitle(f"Watermelon Balancing v{__version__}")
     win.resize(1180, 820)
 
-    st = {"unit": "µm pk-pk", "r1p": None, "r2p": None, "iso": None,
+    st = {"unit": "mils pk-pk", "r1p": None, "r2p": None, "iso": None,
           "setup_fn": None,
           "acq": {"mode": "sim", "vib_kind": "accel_9234",
                   "kph": KeyphasorSensor.phototach_reflective(),
@@ -142,6 +142,11 @@ def build_app(simulated: bool = True):
 
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
 
+    def _scroll(inner):
+        """Envuelve una página en scroll → nunca se pierde información en pantallas pequeñas."""
+        sa = QtWidgets.QScrollArea(); sa.setWidgetResizable(True); sa.setFrameShape(QtWidgets.QFrame.NoFrame)
+        sa.setWidget(inner); return sa
+
     # =================================================================
     # TAB 0 — Setup
     # =================================================================
@@ -154,7 +159,7 @@ def build_app(simulated: bool = True):
     sb_rpm = _dsb(0, 30000, 1800, 0, " rpm")
     cb_sensor = QtWidgets.QComboBox()
     cb_sensor.addItems([T("Casing (accelerometer → velocity, mm/s RMS)", "Carcasa (acelerómetro → velocidad, mm/s RMS)"),
-                        T("Shaft (proximity, µm pk-pk)", "Eje (proximidad, µm pk-pk)")])
+                        T("Shaft (proximity, mils pk-pk)", "Eje (proximidad, mils pk-pk)")])
     for lbl, w in [(T("Machine", "Máquina"), ed_machine), (T("Tag", "Tag"), ed_tag),
                    (T("Client", "Cliente"), ed_client), (T("Location", "Ubicación"), ed_loc),
                    (T("Nameplate RPM", "RPM de placa"), sb_rpm),
@@ -169,12 +174,12 @@ def build_app(simulated: bool = True):
     _setmsg = QtWidgets.QLabel(""); _setmsg.setStyleSheet("color:#16a34a;font-weight:700;")
     _sr = QtWidgets.QHBoxLayout(); _sr.addWidget(btn_saveset); _sr.addWidget(_setmsg); _sr.addStretch(1)
     sl.addLayout(_sr); sl.addStretch(1)
-    tabs.addTab(pg_set, "Setup")
+    tabs.addTab(_scroll(pg_set), "Setup")
 
     _SET = QtCore.QSettings("WatermelonSystem", "BalancingSetup")
 
     def _unit():
-        return "mm/s RMS" if cb_sensor.currentIndex() == 0 else "µm pk-pk"
+        return "mm/s RMS" if cb_sensor.currentIndex() == 0 else "mils pk-pk"
 
     def _on_sensor(_=0):
         st["unit"] = _unit()
@@ -241,12 +246,31 @@ def build_app(simulated: bool = True):
     fa.addRow(T("Sensitivity", "Sensibilidad"), sb_sens)
     fa.addRow("", lbl_pow)
     cl.addWidget(gb_acq)
+
+    # --- Datos del rotor / balanceo (todo lo que necesita el cálculo) ---
+    gb_rotor = QtWidgets.QGroupBox(T("Rotor / balance data", "Datos del rotor / balanceo")); fr = QtWidgets.QFormLayout(gb_rotor)
+    iso_w = _dsb(0.01, 1e5, 500.0, 2, " kg")     # masa del rotor
+    tw_w = _dsb(0.01, 1e5, 250.0, 2, " kg")      # carga por plano (≈ masa/2)
+    tw_r = _dsb(1, 5000, 150.0, 1, " mm")        # radio de balanceo
+    tw_k = _dsb(0.2, 2.0, 1.25, 2)               # factor peso de prueba
+    iso_g = QtWidgets.QComboBox(); iso_g.addItems(["0.4", "1.0", "2.5", "6.3", "16.0"]); iso_g.setCurrentText("2.5")
+    fr.addRow(T("Rotor mass", "Masa del rotor"), iso_w)
+    fr.addRow(T("Load per plane", "Carga por plano"), tw_w)
+    fr.addRow(T("Balance radius", "Radio de balanceo"), tw_r)
+    fr.addRow(T("Trial factor k", "Factor de prueba k"), tw_k)
+    fr.addRow(T("ISO grade G", "Grado ISO G"), iso_g)
+    cl.addWidget(gb_rotor)
+
+    def _autoload(_=0):
+        tw_w.setValue(iso_w.value() / 2.0)       # carga por plano ≈ mitad del rotor (entre 2 cojinetes)
+    iso_w.valueChanged.connect(_autoload)
+
     btn_savecfg = QtWidgets.QPushButton(T("💾 Save configuration", "💾 Guardar configuración"))
     btn_savecfg.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     _cfgmsg = QtWidgets.QLabel(""); _cfgmsg.setStyleSheet("color:#16a34a;font-weight:700;")
     _cr = QtWidgets.QHBoxLayout(); _cr.addWidget(btn_savecfg); _cr.addWidget(_cfgmsg); _cr.addStretch(1)
     cl.addLayout(_cr); cl.addStretch(1)
-    tabs.addTab(pg_cfg, "Configuration")
+    tabs.addTab(_scroll(pg_cfg), "Configuration")
 
     _CFG = QtCore.QSettings("WatermelonSystem", "BalancingConfig")
 
@@ -255,6 +279,8 @@ def build_app(simulated: bool = True):
         _CFG.setValue("kph", cb_kph.currentIndex()); _CFG.setValue("ppr", sb_ppr.value())
         _CFG.setValue("kphdev", ed_kphdev.text()); _CFG.setValue("vibdev", ed_vibdev.text())
         _CFG.setValue("sens", sb_sens.value())
+        _CFG.setValue("mass", iso_w.value()); _CFG.setValue("load", tw_w.value())
+        _CFG.setValue("radius", tw_r.value()); _CFG.setValue("k", tw_k.value()); _CFG.setValue("G", iso_g.currentIndex())
         _cfgmsg.setText(T("✅ Configuration saved.", "✅ Configuración guardada."))
 
     def _load_config():
@@ -267,6 +293,9 @@ def build_app(simulated: bool = True):
             ed_kphdev.setText(str(_CFG.value("kphdev", "cDAQ1Mod1") or "cDAQ1Mod1"))
             ed_vibdev.setText(str(_CFG.value("vibdev", "cDAQ1Mod2") or "cDAQ1Mod2"))
             sb_sens.setValue(float(_CFG.value("sens", 100.0) or 100.0))
+            iso_w.setValue(float(_CFG.value("mass", 500.0) or 500.0)); tw_w.setValue(float(_CFG.value("load", 250.0) or 250.0))
+            tw_r.setValue(float(_CFG.value("radius", 150.0) or 150.0)); tw_k.setValue(float(_CFG.value("k", 1.25) or 1.25))
+            iso_g.setCurrentIndex(int(_CFG.value("G", 2)))
         except Exception:  # noqa: BLE001
             pass
     btn_savecfg.clicked.connect(_save_config)
@@ -288,7 +317,7 @@ def build_app(simulated: bool = True):
         st["acq"]["sens"] = sb_sens.value()
         # la unidad de balanceo la fija el sensor (prox µm / accel→velocidad mm/s)
         if i == 2:
-            st["unit"] = "µm pk-pk"; cb_sensor.setCurrentIndex(1)
+            st["unit"] = "mils pk-pk"; cb_sensor.setCurrentIndex(1)
         elif i == 3:
             st["unit"] = "mm/s RMS"; cb_sensor.setCurrentIndex(0)
     for _w in (cb_kph, sb_ppr):
@@ -328,7 +357,7 @@ def build_app(simulated: bool = True):
             if is_prox:
                 # canal de voltaje → desplazamiento µm pp (sens en mV/µm). Verificar en campo.
                 um0pk = amp0 * 1000.0 / max(acq["sens"], 1e-6)
-                out.append((um0pk * 2.0, ph))          # µm pk-pk
+                out.append((um0pk * 2.0, ph))          # mils pk-pk
             else:
                 # nidaqmx accel chan devuelve g → m/s² → velocidad 1× RMS (mm/s).
                 vamp0pk, vph = one_x_accel_to_velocity(amp0 * 9.80665, ph, rpm)
@@ -357,34 +386,29 @@ def build_app(simulated: bool = True):
     # TAB 1 — Trial weight (API 684) + ISO
     # =================================================================
     pg_tw = QtWidgets.QWidget(); twl = QtWidgets.QVBoxLayout(pg_tw)
+    twl.addWidget(QtWidgets.QLabel(T("Uses the rotor data from Configuration (mass, load, radius, k, G) + RPM from Setup.",
+                                     "Usa los datos del rotor de Configuration (masa, carga, radio, k, G) + RPM del Setup.")))
     gb_tw = QtWidgets.QGroupBox(T("Trial weight (API 684)", "Peso de prueba (API 684)")); ftw = QtWidgets.QFormLayout(gb_tw)
-    tw_w = _dsb(0.01, 1e5, 500.0, 2, " kg"); tw_rpm = _dsb(1, 30000, 1800, 0, " rpm")
-    tw_r = _dsb(1, 5000, 150.0, 1, " mm"); tw_k = _dsb(0.2, 2.0, 1.25, 2)
-    ftw.addRow(T("Load on this plane W", "Carga en este plano W"), tw_w)
-    ftw.addRow("RPM", tw_rpm); ftw.addRow(T("Radius", "Radio"), tw_r); ftw.addRow("k", tw_k)
-    btn_tw = QtWidgets.QPushButton(T("Suggest trial weight", "Sugerir peso de prueba"))
+    btn_tw = QtWidgets.QPushButton(T("Compute suggested trial weight", "Calcular peso de prueba sugerido"))
     ftw.addRow("", btn_tw)
     tw_out = QtWidgets.QLabel("—"); tw_out.setStyleSheet(f"color:{NAVY};font-weight:800;font-size:15px;"); ftw.addRow("", tw_out)
     twl.addWidget(gb_tw)
 
     def _do_tw():
-        Wt, Ut = recommend_trial_weight_g(tw_w.value(), tw_rpm.value(), tw_r.value(), tw_k.value())
+        Wt, Ut = recommend_trial_weight_g(tw_w.value(), sb_rpm.value(), tw_r.value(), tw_k.value())
         tw_out.setText(T(f"→ {Wt:,.2f} g  (U_trial {Ut:,.0f} g·mm)  @ {tw_r.value():.0f} mm",
                          f"→ {Wt:,.2f} g  (U_prueba {Ut:,.0f} g·mm)  @ {tw_r.value():.0f} mm"))
     btn_tw.clicked.connect(_do_tw)
 
     gb_iso = QtWidgets.QGroupBox(T("ISO 21940 quality check", "Chequeo de calidad ISO 21940")); fiso = QtWidgets.QFormLayout(gb_iso)
-    iso_w = _dsb(0.01, 1e5, 500.0, 2, " kg"); iso_rpm = _dsb(1, 30000, 1800, 0, " rpm")
     iso_ures = _dsb(0, 1e7, 0.0, 1, " g·mm")
-    iso_g = QtWidgets.QComboBox(); iso_g.addItems(["0.4", "1.0", "2.5", "6.3", "16.0"]); iso_g.setCurrentText("2.5")
-    fiso.addRow(T("Rotor mass", "Masa del rotor"), iso_w); fiso.addRow("RPM", iso_rpm)
-    fiso.addRow(T("Residual U_res", "Residual U_res"), iso_ures); fiso.addRow(T("Grade G", "Grado G"), iso_g)
+    fiso.addRow(T("Residual U_res (measured)", "Residual U_res (medido)"), iso_ures)
     btn_iso = QtWidgets.QPushButton(T("Evaluate ISO", "Evaluar ISO")); fiso.addRow("", btn_iso)
     iso_out = QtWidgets.QLabel("—"); iso_out.setWordWrap(True); iso_out.setStyleSheet("font-weight:700;"); fiso.addRow("", iso_out)
     twl.addWidget(gb_iso); twl.addStretch(1)
 
     def _do_iso():
-        res = evaluate_iso_grades(iso_w.value(), iso_rpm.value(), iso_ures.value())
+        res = evaluate_iso_grades(iso_w.value(), sb_rpm.value(), iso_ures.value())
         st["iso"] = res
         g = float(iso_g.currentText())
         per = next((x for x in res["results"] if abs(x["G"] - g) < 1e-9), None)
@@ -397,7 +421,7 @@ def build_app(simulated: bool = True):
             + (T("PASS", "CUMPLE") if ok else T("FAIL", "NO CUMPLE") if ok is not None else "—")
             + f"</span><br><span style='color:#64748b'>{res.get('summary_label','')}</span>")
     btn_iso.clicked.connect(_do_iso)
-    tabs.addTab(pg_tw, T("Trial + ISO", "Prueba + ISO"))
+    tabs.addTab(_scroll(pg_tw), T("Trial + ISO", "Prueba + ISO"))
 
     # =================================================================
     # TAB 2 — 1 plano
@@ -468,7 +492,7 @@ def build_app(simulated: bool = True):
         v0m.setValue(8.60); v0a.setValue(63.0); twm.setValue(10.0); twa.setValue(0.0)
         vtm.setValue(6.50); vta.setValue(206.0); _solve1()
     btn1.clicked.connect(_solve1); btn1_demo.clicked.connect(_demo1)
-    tabs.addTab(pg1, T("1 plane", "1 plano"))
+    tabs.addTab(_scroll(pg1), T("1 plane", "1 plano"))
 
     # =================================================================
     # TAB 3 — 2 planos
@@ -561,7 +585,7 @@ def build_app(simulated: bool = True):
         a2m.setValue(am); a2a.setValue(aa); b2m.setValue(bm); b2a.setValue(bb)
         _solve2()
     btn2_demo.clicked.connect(_demo2)
-    tabs.addTab(pg2, T("2 planes", "2 planos"))
+    tabs.addTab(_scroll(pg2), T("2 planes", "2 planos"))
 
     # =================================================================
     # TAB 4 — Report + save/cloud
@@ -660,7 +684,7 @@ def build_app(simulated: bool = True):
                             f"⚠ Falló la subida ({r.get('reason','offline')}). El guardado local queda disponible."))
 
     btn_pdf.clicked.connect(_gen_pdf); btn_savelocal.clicked.connect(_save_local); btn_upload.clicked.connect(_upload)
-    tabs.addTab(pg_rp, T("Report", "Reporte"))
+    tabs.addTab(_scroll(pg_rp), T("Report", "Reporte"))
 
     # =================================================================
     # TAB 5 — Updates
@@ -789,7 +813,7 @@ def build_app(simulated: bool = True):
 
     def _suggest_g():
         try:
-            Wt, _u = recommend_trial_weight_g(tw_w.value(), tw_rpm.value() or sb_rpm.value(), tw_r.value(), tw_k.value())
+            Wt, _u = recommend_trial_weight_g(tw_w.value(), sb_rpm.value(), tw_r.value(), tw_k.value())
             return float(Wt)
         except Exception:  # noqa: BLE001
             return 0.0
@@ -819,7 +843,7 @@ def build_app(simulated: bool = True):
     twm.editingFinished.connect(_warn_edit(twm, lbl_sugg1))
     wam.editingFinished.connect(_warn_edit(wam, lbl_sugg2))
     wbm.editingFinished.connect(_warn_edit(wbm, lbl_sugg2))
-    for _w in (tw_w, tw_rpm, tw_r, tw_k):
+    for _w in (tw_w, tw_r, tw_k, sb_rpm):
         _w.valueChanged.connect(lambda _=0: _refresh_suggest())
     cb_planes.currentIndexChanged.connect(_apply_planes)
     tabs.currentChanged.connect(lambda i: (_refresh_suggest() if i in (IDX_1P, IDX_2P) else None))
