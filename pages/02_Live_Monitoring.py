@@ -1672,7 +1672,7 @@ def render_sensor_zoom_panel(
                 "🔍 Spectrum (coming soon)",
                 "🌊 Waveform (coming soon)",
                 "🌀 Orbit (coming soon)",
-                "📊 Cascade / Waterfall (coming soon)",
+                "Cascade / Waterfall (coming soon)",
                 "📍 Shaft Centerline → see dedicated module",
             ],
             index=0,
@@ -2036,7 +2036,7 @@ def render_sensor_zoom_panel(
         st.info(
             "**Shaft Centerline Plot** is built from uploaded CSV files "
             "— not from live readings. Go to the dedicated module:\n\n"
-            "🛰 **Time Domain → Shaft Centerline** (sidebar)\n\n"
+            "**Time Domain → Shaft Centerline** (sidebar)\n\n"
             "There you upload the analysis CSV and get the full plot with "
             "Cat IV clearance boundary, eccentricity rings, attitude "
             "angle, eccentricity ratio, and comparison across dates."
@@ -3518,6 +3518,81 @@ def main() -> None:
             border-color: #3b82f6;
             box-shadow: 0 4px 14px rgba(59,130,246,0.15);
         }
+
+        /* ============================================================
+           CAPA PREMIUM — sala de control corporativa (nivel cliente)
+           ============================================================ */
+        /* Fondo con atmósfera + retícula tenue (profundidad, no plano) */
+        [data-testid="stAppViewContainer"] > .main {
+            background:
+              radial-gradient(1100px 460px at 82% -8%, rgba(37,99,235,.07), transparent 60%),
+              radial-gradient(900px 380px at 0% 8%, rgba(13,148,136,.05), transparent 55%),
+              linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
+        }
+        .main .block-container { max-width: 1180px; }
+
+        /* Botones — instrumento premium */
+        div[data-testid="stButton"] > button,
+        div[data-testid="stDownloadButton"] > button {
+            border-radius: 11px !important;
+            border: 1px solid #dbe4f0 !important;
+            background: #ffffff !important;
+            color: #0f2a4a !important;
+            font-weight: 700 !important; letter-spacing: .01em;
+            box-shadow: 0 1px 2px rgba(15,42,74,.05);
+            transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+        }
+        div[data-testid="stButton"] > button:hover,
+        div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #93c5fd !important;
+            box-shadow: 0 10px 24px rgba(37,99,235,.16);
+            transform: translateY(-1px);
+        }
+        div[data-testid="stDownloadButton"] > button {
+            background: linear-gradient(135deg,#0f2a4a,#1e3a5f) !important;
+            color: #eaf2ff !important; border-color: transparent !important;
+        }
+
+        /* Expanders = tarjetas premium con hairline y elevación al hover */
+        div[data-testid="stExpander"] {
+            border: 1px solid #e5edf7 !important;
+            border-radius: 14px !important;
+            background: rgba(255,255,255,.72);
+            backdrop-filter: blur(6px);
+            box-shadow: 0 1px 2px rgba(15,42,74,.04);
+            overflow: hidden;
+            transition: box-shadow .18s ease, border-color .18s ease;
+            margin-bottom: 10px;
+        }
+        div[data-testid="stExpander"]:hover {
+            box-shadow: 0 12px 28px rgba(15,42,74,.09);
+            border-color: #d9e8fb !important;
+        }
+        div[data-testid="stExpander"] summary { font-weight: 700; color: #0f2a4a; letter-spacing:.005em; }
+        div[data-testid="stExpander"] summary:hover { color: #1e3a5f; }
+
+        /* Picker header — badge de señal (dot vivo, sin emoji) */
+        .wm-picker-header-icon {
+            width: 42px !important; height: 42px !important; border-radius: 13px !important;
+            background: linear-gradient(135deg,#0f2a4a,#20406b) !important;
+            box-shadow: 0 8px 18px rgba(15,42,74,.24);
+            display: flex !important; align-items: center; justify-content: center;
+            font-size: 0 !important; position: relative;
+        }
+        .wm-picker-header-icon::after {
+            content: ""; width: 13px; height: 13px; border-radius: 50%;
+            background: #22c55e; box-shadow: 0 0 0 5px rgba(34,197,94,.18);
+            animation: wm-live-pulse 1.8s infinite;
+        }
+        .wm-picker-header-title { font-weight: 800; color:#0f172a; letter-spacing:-.01em; }
+        .wm-picker-header-sub { color:#64748b; font-size:12px; letter-spacing:.02em; }
+
+        /* Legend refinada */
+        .wm-legend, .wm-legend-row { border:1px solid #e5edf7 !important; border-radius:12px !important;
+            background: rgba(255,255,255,.72); box-shadow: 0 1px 2px rgba(15,42,74,.04); }
+
+        /* Divisor de sección con respiración */
+        hr { border-color: #e2e8f0 !important; opacity:.7; }
         </style>
         """).strip(),
         unsafe_allow_html=True,
@@ -3529,7 +3604,7 @@ def main() -> None:
     st.markdown(
         textwrap.dedent("""
         <div class="wm-picker-header">
-            <div class="wm-picker-header-icon">🛰</div>
+            <div class="wm-picker-header-icon"></div>
             <div class="wm-picker-header-text">
                 <div class="wm-picker-header-title">Monitored asset</div>
                 <div class="wm-picker-header-sub">Real-time · ISO 20816 / API 670</div>
@@ -3771,7 +3846,7 @@ def main() -> None:
     # que pelea contra los reportes rígidos de Emerson/Bently.
     col_rep, col_send, _sp = st.columns([1.4, 1.4, 3])
     with col_rep:
-        if st.button("📄 Download PDF report", use_container_width=True,
+        if st.button("Download PDF report", use_container_width=True,
                      key=f"live_pdf_{instance_id}",
                      help="1-page executive report with the current asset status"):
             with st.spinner("Generating executive report…"):
@@ -3782,7 +3857,7 @@ def main() -> None:
             if pdf_bytes:
                 _stamp = datetime.now().strftime("%Y%m%d_%H%M")
                 st.download_button(
-                    "Download ready PDF ✓",
+                    "Download ready PDF",
                     data=pdf_bytes,
                     file_name=f"Reporte_{instance_id}_{_stamp}.pdf",
                     mime="application/pdf",
@@ -3804,7 +3879,7 @@ def main() -> None:
         except Exception:
             _avail = {"email": False, "whatsapp": False}
         _can_send = _avail.get("email") or _avail.get("whatsapp")
-        if st.button("📨 Send to client", use_container_width=True,
+        if st.button("Send to client", use_container_width=True,
                      key=f"live_send_{instance_id}", disabled=not _can_send,
                      help=("Sends the report by email and/or WhatsApp to the recipient "
                            "configured in Machinery Library." if _can_send else
@@ -3835,7 +3910,7 @@ def main() -> None:
                     if not res.get("any_ok") and _em is None and _wa is None:
                         st.warning(res.get("error", "Not sent through any channel."))
         if not _can_send:
-            st.caption("⚙ Configure the recipient in Machinery Library.")
+            st.caption("Configure the recipient in Machinery Library.")
 
     # Ciclo 23.142 — Event List estilo System1: registro cronológico de
     # cruces de umbral (Normal→Alarma→Danger) por canal en la ventana
@@ -3878,7 +3953,7 @@ def main() -> None:
         _c_an1, _c_an2, _c_an3 = st.columns([2, 3, 2])
         with _c_an2:
             if st.button(
-                "🍉 Advanced analysis",
+                "Advanced analysis",
                 key="wm_open_live_analysis",
                 use_container_width=True,
                 help="Spectrum · Waveform · Orbit of the latest snapshot",
