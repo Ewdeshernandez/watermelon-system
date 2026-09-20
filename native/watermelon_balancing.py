@@ -28,8 +28,13 @@ from core.balance.engine import (
     solve_1plane, solve_2plane, recommend_trial_weight_g,
     evaluate_iso_grades, to_complex, to_polar, calc_U_trial, calc_U_res_auto,
 )
+from core.balance.ni_balance import (
+    extract_1x, one_x_accel_to_velocity, VibChannel, NIBalanceConfig, NIBalanceSource,
+    keyphasor_power_note,
+)
+from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -90,7 +95,17 @@ def build_app(simulated: bool = True):
     win.resize(1180, 820)
 
     st = {"unit": "µm pk-pk", "r1p": None, "r2p": None, "iso": None,
-          "setup_fn": None}
+          "setup_fn": None,
+          "acq": {"mode": "sim", "vib_kind": "accel_9234",
+                  "kph": KeyphasorSensor.phototach_reflective(),
+                  "kph_device": "cDAQ1Mod1", "vib_device": "cDAQ1Mod2",
+                  "sens": 100.0, "fs": 5120.0},
+          # Simulador de rotor (para practicar el lazo completo sin equipo):
+          # V_medida = alpha·(U_desbalance + pesos puestos).
+          "sim": {"a1": to_complex(0.45, 35.0), "u1": to_complex(9.0, 110.0),
+                  "aA1": to_complex(0.42, 20.0), "aA2": to_complex(0.14, 200.0),
+                  "aB1": to_complex(0.11, 165.0), "aB2": to_complex(0.5, -25.0),
+                  "uA": to_complex(7.0, 60.0), "uB": to_complex(5.0, 290.0)}}
 
     # ---- Toolbar: marca + versión + idioma ----
     tb = win.addToolBar("main"); tb.setMovable(False)
@@ -195,6 +210,111 @@ def build_app(simulated: bool = True):
         except Exception: pass  # noqa: BLE001
     btn_saveset.clicked.connect(_save_setup)
 
+    # =================================================================
+    # TAB — Configuration (adquisición: manual / simulado / NI)
+    # =================================================================
+    pg_cfg = QtWidgets.QWidget(); cl = QtWidgets.QVBoxLayout(pg_cfg)
+    cl.addWidget(QtWidgets.QLabel(T(
+        "Data source for the 1× vibration. Manual = the client gives you the 1× (amplitude+phase) "
+        "from another instrument. Simulated = practice the full loop. NI = capture live from the card.",
+        "Fuente del 1× de vibración. Manual = el cliente te da el 1× (amplitud+fase) de otro equipo. "
+        "Simulado = practicar el lazo completo. NI = capturar en vivo de la tarjeta.")))
+    gb_acq = QtWidgets.QGroupBox(T("Acquisition", "Adquisición")); fa = QtWidgets.QFormLayout(gb_acq)
+    cb_mode = QtWidgets.QComboBox()
+    cb_mode.addItems([T("Manual (typed)", "Manual (escrito)"), T("Simulated", "Simulado"),
+                      "NI 9229 (proximity µm)", "NI 9234 (accel → velocity mm/s)"])
+    cb_mode.setCurrentIndex(1)
+    cb_kph = QtWidgets.QComboBox()
+    cb_kph.addItems([T("Photo-tach (reflective tape)", "Foto-tacómetro (cinta reflectiva)"),
+                     "Bently 3300 XL 8mm + Proximitor"])
+    sb_ppr = QtWidgets.QSpinBox(); sb_ppr.setRange(1, 60); sb_ppr.setValue(1)
+    ed_kphdev = QtWidgets.QLineEdit("cDAQ1Mod1"); ed_vibdev = QtWidgets.QLineEdit("cDAQ1Mod2")
+    sb_sens = _dsb(1, 5000, 100.0, 1, " mV/unit")
+    lbl_pow = QtWidgets.QLabel(""); lbl_pow.setWordWrap(True); lbl_pow.setStyleSheet("color:#b45309;font-size:11px;")
+    fa.addRow(T("Mode", "Modo"), cb_mode)
+    fa.addRow(T("Keyphasor sensor (always channel 0)", "Sensor keyphasor (siempre canal 0)"), cb_kph)
+    fa.addRow(T("Pulses per rev", "Pulsos por vuelta"), sb_ppr)
+    fa.addRow(T("Keyphasor device", "Device keyphasor"), ed_kphdev)
+    fa.addRow(T("Vibration device", "Device vibración"), ed_vibdev)
+    fa.addRow(T("Sensitivity", "Sensibilidad"), sb_sens)
+    fa.addRow("", lbl_pow)
+    cl.addWidget(gb_acq); cl.addStretch(1)
+    tabs.addTab(pg_cfg, "Configuration")
+
+    def _kph_sensor():
+        idx = cb_kph.currentIndex(); ppr = sb_ppr.value()
+        s = (KeyphasorSensor.bently_3300xl_8mm(keyways=ppr) if idx == 1
+             else KeyphasorSensor.phototach_reflective(strips=ppr))
+        st["acq"]["kph"] = s
+        lbl_pow.setText("⚡ " + keyphasor_power_note(s))
+        return s
+
+    def _on_mode(_=0):
+        i = cb_mode.currentIndex()
+        st["acq"]["mode"] = ["manual", "sim", "ni_prox", "ni_accel"][i]
+        st["acq"]["vib_kind"] = "proximity_9229" if i == 2 else "accel_9234"
+        st["acq"]["kph_device"] = ed_kphdev.text() or "cDAQ1Mod1"
+        st["acq"]["vib_device"] = ed_vibdev.text() or "cDAQ1Mod2"
+        st["acq"]["sens"] = sb_sens.value()
+        # la unidad de balanceo la fija el sensor (prox µm / accel→velocidad mm/s)
+        if i == 2:
+            st["unit"] = "µm pk-pk"; cb_sensor.setCurrentIndex(1)
+        elif i == 3:
+            st["unit"] = "mm/s RMS"; cb_sensor.setCurrentIndex(0)
+    for _w in (cb_kph, sb_ppr):
+        _w.currentIndexChanged.connect(lambda _=0: _kph_sensor()) if hasattr(_w, "currentIndexChanged") else \
+            _w.valueChanged.connect(lambda _=0: _kph_sensor())
+    sb_ppr.valueChanged.connect(lambda _=0: _kph_sensor())
+    cb_mode.currentIndexChanged.connect(_on_mode)
+    ed_kphdev.editingFinished.connect(_on_mode); ed_vibdev.editingFinished.connect(_on_mode)
+    sb_sens.valueChanged.connect(lambda _=0: _on_mode())
+    _kph_sensor(); _on_mode()
+
+    # ---------- captura del 1× (simulado o NI) ----------
+    def _ni_capture(n_vib):
+        """Snapshot de NI: lee ~2 s, devuelve lista [(mag,ang)] por canal de vibración + rpm.
+        None si falla (sin driver/hardware) — nunca simula en silencio."""
+        acq = st["acq"]; fs = acq["fs"]
+        chans = [VibChannel(f"V{i}", kind=acq["vib_kind"], device=acq["vib_device"], ai=i,
+                            sensitivity_mv_per_unit=acq["sens"]) for i in range(n_vib)]
+        cfg = NIBalanceConfig(keyphasor=acq["kph"], kph_device=acq["kph_device"], kph_ai=0,
+                              vib_channels=chans, sample_rate_hz=fs, block_seconds=0.5)
+        src = NIBalanceSource(cfg)
+        try:
+            src.start()
+        except RuntimeError as exc:
+            QtWidgets.QMessageBox.critical(win, "Watermelon Balancing",
+                T(f"NI capture failed:\n{exc}", f"Falló la captura NI:\n{exc}")); return None
+        import numpy as np
+        try:
+            data = np.concatenate([src.read_block() for _ in range(4)], axis=1)   # ~2 s
+        finally:
+            src.stop()
+        kph = data[0]; out = []
+        is_prox = acq["vib_kind"] == "proximity_9229"
+        for i in range(n_vib):
+            # extract_1x en 0-pico de la señal cruda del canal.
+            amp0, ph, rpm = extract_1x(data[1 + i], kph, fs, acq["kph"], to_pp=False)
+            if is_prox:
+                # canal de voltaje → desplazamiento µm pp (sens en mV/µm). Verificar en campo.
+                um0pk = amp0 * 1000.0 / max(acq["sens"], 1e-6)
+                out.append((um0pk * 2.0, ph))          # µm pk-pk
+            else:
+                # nidaqmx accel chan devuelve g → m/s² → velocidad 1× RMS (mm/s).
+                vamp0pk, vph = one_x_accel_to_velocity(amp0 * 9.80665, ph, rpm)
+                out.append((vamp0pk / (2.0 ** 0.5), vph))   # mm/s RMS
+        return out
+
+    def _sim_measure_1p(w_complex):
+        s = st["sim"]; z = s["a1"] * (s["u1"] + w_complex)
+        return to_polar(z)
+
+    def _sim_measure_2p(w1, w2):
+        s = st["sim"]
+        za = s["aA1"] * (s["uA"] + w1) + s["aA2"] * (s["uB"] + w2)
+        zb = s["aB1"] * (s["uA"] + w1) + s["aB2"] * (s["uB"] + w2)
+        return to_polar(za), to_polar(zb)
+
     # ---------- helper: par de campos (magnitud ∠ ángulo) ----------
     def _vec_row(form, label, magmax=1e6, magdef=0.0, unit_suffix=""):
         mag = _dsb(0, magmax, magdef, 3); ang = _dsb(0, 360, 0.0, 1, "°")
@@ -263,11 +383,34 @@ def build_app(simulated: bool = True):
     vtm, vta = _vec_row(f1, T("Vt — with trial weight", "Vt — con peso de prueba"))
     vfm, vfa = _vec_row(f1, T("Vf — final (optional)", "Vf — final (opcional)"))
     l1.addWidget(gb1)
+    _cap1r = QtWidgets.QHBoxLayout()
+    btn1_cref = QtWidgets.QPushButton(T("📷 Capture reference (V0)", "📷 Capturar referencia (V0)"))
+    btn1_ctrial = QtWidgets.QPushButton(T("📷 Capture with trial (Vt)", "📷 Capturar con prueba (Vt)"))
+    _cap1r.addWidget(btn1_cref); _cap1r.addWidget(btn1_ctrial); _cap1r.addStretch(1); l1.addLayout(_cap1r)
     _row1 = QtWidgets.QHBoxLayout()
     btn1 = QtWidgets.QPushButton(T("▶ Solve 1-plane", "▶ Resolver 1 plano"))
     btn1.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn1_demo = QtWidgets.QPushButton(T("Simulated example", "Ejemplo simulado"))
     _row1.addWidget(btn1); _row1.addWidget(btn1_demo); _row1.addStretch(1); l1.addLayout(_row1)
+
+    def _cap1(with_trial):
+        mode = st["acq"]["mode"]
+        if mode == "manual":
+            out1.setText(T("Manual mode — type the vectors, or switch mode in Configuration.",
+                           "Modo manual — escribe los vectores, o cambia el modo en Configuration.")); return
+        if mode.startswith("ni"):
+            r = _ni_capture(1)
+            if not r:
+                return
+            mag, ang = r[0]
+        else:
+            w = to_complex(twm.value(), twa.value()) if with_trial else 0 + 0j
+            mag, ang = _sim_measure_1p(w)
+        if with_trial:
+            vtm.setValue(mag); vta.setValue(ang)
+        else:
+            v0m.setValue(mag); v0a.setValue(ang)
+    btn1_cref.clicked.connect(lambda: _cap1(False)); btn1_ctrial.clicked.connect(lambda: _cap1(True))
     out1 = QtWidgets.QLabel("—"); out1.setWordWrap(True)
     out1.setStyleSheet("background:white;border:1px solid #dbe4f0;border-radius:10px;padding:12px;font-size:14px;")
     l1.addWidget(out1); l1.addStretch(1)
@@ -310,9 +453,37 @@ def build_app(simulated: bool = True):
     wbm, wba = _vec_row(f2, T("Trial B (g ∠°)", "Prueba B (g ∠°)"), 1e5, 10.0)
     a2m, a2a = _vec_row(f2, "A2 — A (trial B)"); b2m, b2a = _vec_row(f2, "B2 — B (trial B)")
     l2.addWidget(gb2)
+    _cap2r = QtWidgets.QHBoxLayout()
+    b2_ref = QtWidgets.QPushButton(T("📷 Reference", "📷 Referencia"))
+    b2_ta = QtWidgets.QPushButton(T("📷 Trial A", "📷 Prueba A"))
+    b2_tb = QtWidgets.QPushButton(T("📷 Trial B", "📷 Prueba B"))
+    _cap2r.addWidget(b2_ref); _cap2r.addWidget(b2_ta); _cap2r.addWidget(b2_tb); _cap2r.addStretch(1)
+    l2.addLayout(_cap2r)
     btn2 = QtWidgets.QPushButton(T("▶ Solve 2-plane", "▶ Resolver 2 planos"))
     btn2.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     l2.addWidget(btn2)
+
+    def _cap2(run):
+        mode = st["acq"]["mode"]
+        if mode == "manual":
+            out2.setText(T("Manual mode — type the vectors.", "Modo manual — escribe los vectores.")); return
+        if mode.startswith("ni"):
+            r = _ni_capture(2)
+            if not r:
+                return
+            (amag, aang), (bmag, bang) = r[0], r[1]
+        else:
+            w1 = to_complex(wam.value(), waa.value()) if run == "trialA" else 0 + 0j
+            w2 = to_complex(wbm.value(), wba.value()) if run == "trialB" else 0 + 0j
+            (amag, aang), (bmag, bang) = _sim_measure_2p(w1, w2)
+        if run == "ref":
+            a0m.setValue(amag); a0a.setValue(aang); b0m.setValue(bmag); b0a.setValue(bang)
+        elif run == "trialA":
+            a1m.setValue(amag); a1a.setValue(aang); b1m.setValue(bmag); b1a.setValue(bang)
+        else:
+            a2m.setValue(amag); a2a.setValue(aang); b2m.setValue(bmag); b2a.setValue(bang)
+    b2_ref.clicked.connect(lambda: _cap2("ref")); b2_ta.clicked.connect(lambda: _cap2("trialA"))
+    b2_tb.clicked.connect(lambda: _cap2("trialB"))
     out2 = QtWidgets.QLabel("—"); out2.setWordWrap(True)
     out2.setStyleSheet("background:white;border:1px solid #dbe4f0;border-radius:10px;padding:12px;font-size:14px;")
     l2.addWidget(out2); l2.addStretch(1)
