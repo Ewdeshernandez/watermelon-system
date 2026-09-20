@@ -57,6 +57,7 @@ def generate_live_report_pdf(
     trend_png: Optional[bytes] = None,
     trend_title: str = "Tendencia overall",
     schematic_png: Optional[bytes] = None,
+    train_drawing: Any = None,
 ) -> bytes:
     """Genera el PDF ejecutivo de 1 página. Devuelve bytes.
 
@@ -199,7 +200,7 @@ def generate_live_report_pdf(
                  "Aún no exige parada, pero no debe ignorarse.")
     else:
         _band = "OPERACIÓN NORMAL"
-        _diag = (f"El activo opera dentro de parámetros normales (ISO 20816, Zona {zone}). "
+        _diag = (f"El activo opera dentro de parámetros normales (ISO 20816, {zone}). "
                  "Sin acciones requeridas; continuar el monitoreo en línea.")
     st_band = ParagraphStyle("bd", fontName="Helvetica-Bold", fontSize=12.5,
                              textColor=colors.HexColor(_fg), leading=15)
@@ -221,7 +222,20 @@ def generate_live_report_pdf(
     story.append(Spacer(1, 10))
 
     # ---------- Esquemático del tren (HÉROE) — sensores por severidad ----------
-    if schematic_png:
+    # Preferimos el DIAGRAMA LIVE (vector, siluetas realistas + barras de umbral,
+    # vía svglib) — el mismo de la web. Fallback: PNG matplotlib.
+    if train_drawing is not None:
+        try:
+            story.append(Paragraph("Estado del tren — sensores por severidad", st_section))
+            try:
+                train_drawing.hAlign = "CENTER"
+            except Exception:  # noqa: BLE001
+                pass
+            story.append(train_drawing)
+            story.append(Spacer(1, 10))
+        except Exception:  # noqa: BLE001
+            pass
+    elif schematic_png:
         try:
             from reportlab.lib.utils import ImageReader
             _ir = ImageReader(BytesIO(schematic_png))

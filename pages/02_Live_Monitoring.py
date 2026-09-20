@@ -2221,14 +2221,24 @@ def _build_live_report_pdf(
         trend_png = None
 
     try:
-        try:
-            from core.briefing_builder import _render_sensor_map
-            _schem_png = _render_sensor_map(instance_obj, channels)
+        _train = None
+        try:                                   # DIAGRAMA LIVE (vector, preferido)
+            from core.train_svg import build_train_svg, svg_to_train_drawing
+            _slk = _build_sensor_lookup(instance_obj)
+            _svg = build_train_svg(instance_obj, latest, _slk)
+            _train = svg_to_train_drawing(_svg) if _svg else None
         except Exception:  # noqa: BLE001
-            _schem_png = None
+            _train = None
+        _schem_png = None
+        if _train is None:                     # fallback: PNG matplotlib
+            try:
+                from core.briefing_builder import _render_sensor_map
+                _schem_png = _render_sensor_map(instance_obj, channels)
+            except Exception:  # noqa: BLE001
+                _schem_png = None
         pdf_bytes = generate_live_report_pdf(instance_id, instance_obj, health, kpis,
                                              channels, events, trend_png,
-                                             schematic_png=_schem_png)
+                                             schematic_png=_schem_png, train_drawing=_train)
         return pdf_bytes, meta
     except Exception:
         return None, {}
