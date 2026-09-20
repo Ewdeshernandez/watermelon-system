@@ -2915,6 +2915,63 @@ def render_api670_table(
         except Exception:
             return "—"
 
+    def _isnum(x):
+        try:
+            float(x)
+            return True
+        except (TypeError, ValueError):
+            return False
+
+    # --- Zona ISO 20816 (A/B/C/D) por canal, desde value vs alarm/danger ---
+    def _zone(value, alarm, danger):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return ("—", "#94a3b8")
+        a = float(alarm or 0)
+        d = float(danger or 0)
+        if d > 0 and v >= d:
+            return ("D", "#dc2626")          # daño
+        if a > 0 and v >= a:
+            return ("C", "#d97706")          # inaceptable a largo plazo
+        if a > 0 and v >= 0.5 * a:
+            return ("B", "#ca8a04")          # aceptable, acercándose
+        return ("A", "#16a34a")              # máquina nueva / buena
+
+    # --- Barra "% del alarm": llenado vs danger, marca en el alarm ---
+    def _pct_bar(value, alarm, danger):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return "—"
+        a = float(alarm or 0)
+        d = float(danger or 0)
+        ref = d if d > 0 else a               # escala a danger (o alarm si no hay)
+        if ref <= 0:
+            return "—"
+        fill = max(0.0, min(v / ref, 1.0)) * 100.0
+        col = "#dc2626" if (d > 0 and v >= d) else ("#d97706" if (a > 0 and v >= a) else "#16a34a")
+        mark = (a / ref * 100.0) if (a > 0 and ref > 0) else -1
+        pct_txt = f"{v / a * 100:.0f}%" if a > 0 else "—"
+        mark_html = (f'<span style="position:absolute;left:{mark:.0f}%;top:-1px;'
+                     f'width:1px;height:12px;background:#94a3b8;"></span>') if 0 <= mark <= 100 else ""
+        return (
+            f'<div style="display:flex;align-items:center;gap:6px;">'
+            f'<div style="position:relative;flex:1;min-width:46px;height:8px;'
+            f'background:#eef2f7;border-radius:4px;overflow:visible;">'
+            f'<div style="width:{fill:.0f}%;height:8px;background:{col};border-radius:4px;"></div>'
+            f'{mark_html}</div>'
+            f'<span style="font-family:ui-monospace,monospace;font-size:10px;color:#475569;'
+            f'min-width:30px;text-align:right;">{pct_txt}</span></div>'
+        )
+
+    # Escala común para el glifo polar 1X (amplitud máxima entre canales)
+    _amps1x = [vec.get(r["sensor_label"], {}).get("1X_Ampl") for r in rendered_rows]
+    _amps1x = [float(a) for a in _amps1x if a not in (None, "") and _isnum(a)]
+    _max1x = (max(_amps1x) * 1.1) if _amps1x else 1.0
+    if _max1x <= 0:
+        _max1x = 1.0
+
     body = []
     for r in rendered_rows:
         sl = r["sensor_label"]
@@ -2929,6 +2986,16 @@ def render_api670_table(
         svals = [h.get("value") for h in hist if h.get("value") is not None]
         scolor = "#ef4444" if r["status"] == "Danger" else ("#f59e0b" if r["status"] == "Alarma" else "#3b82f6")
         spark = sparkline_svg(svals, color=scolor, width=70, height=20) if len(svals) >= 2 else "—"
+        z_letter, z_color = _zone(r.get("value"), r.get("alarm_used"), r.get("danger_used"))
+        z_html = (f'<span style="display:inline-block;width:20px;height:20px;line-height:20px;'
+                  f'border-radius:5px;background:{z_color}22;color:{z_color};font-weight:800;'
+                  f'font-family:ui-monospace,monospace;font-size:11px;">{z_letter}</span>')
+        pbar = _pct_bar(r.get("value"), r.get("alarm_used"), r.get("danger_used"))
+        # Glifo polar 1X (mini vector amplitud∠fase) — puro System1/AMS
+        _a1 = v.get("1X_Ampl")
+        _p1 = v.get("1X_Phase")
+        glyph = (phasor_svg(_a1, _p1, max_amp=_max1x, color="#1e40af", size=38)
+                 if (_a1 is not None and _isnum(_a1) and float(_a1) >= 1e-4) else "—")
         body.append(
             f'<tr class="{row_class}">'
             f'<td>{status_pill_html(r["status"], r["fg"], r["bg"])}</td>'
@@ -2936,7 +3003,10 @@ def render_api670_table(
             f'<td class="col-mono">{r.get("plane_label") or "—"}</td>'
             f'<td class="col-num">{val}</td>'
             f'<td class="col-mono">{r["unit"]}</td>'
+            f'<td style="text-align:center;">{z_html}</td>'
+            f'<td style="min-width:90px;">{pbar}</td>'
             f'<td>{spark}</td>'
+            f'<td style="text-align:center;">{glyph}</td>'
             f'<td class="col-num">{_amp(v.get("1X_Ampl"))}</td>'
             f'<td class="col-mono">{_ph(v.get("1X_Ampl"), v.get("1X_Phase"))}</td>'
             f'<td class="col-num">{_amp(v.get("2X_Ampl"))}</td>'
@@ -2947,17 +3017,22 @@ def render_api670_table(
         st.info("No channels to show.")
         return
     table_html = (
+        '<div style="overflow-x:auto;">'
         '<table class="wm-live-table"><thead><tr>'
         '<th>Status</th><th>Channel</th><th>Location</th>'
-        '<th style="text-align:right;">Overall</th><th>Unit</th><th>Trend</th>'
+        '<th style="text-align:right;">Overall</th><th>Unit</th>'
+        '<th style="text-align:center;">Zone</th><th>% alarm</th><th>Trend</th>'
+        '<th style="text-align:center;">1X</th>'
         '<th style="text-align:right;">1X ampl</th><th>1X phase</th>'
         '<th style="text-align:right;">2X ampl</th><th>2X phase</th>'
-        '</tr></thead><tbody>' + "\n".join(body) + '</tbody></table>'
+        '</tr></thead><tbody>' + "\n".join(body) + '</tbody></table></div>'
     )
     st.markdown(table_html, unsafe_allow_html=True)
     st.caption(
-        "1X = synchronous component (unbalance) · 2X = second harmonic "
-        "(misalignment / looseness) · API 670 convention."
+        "Zone = ISO 20816 (A new · B acceptable · C alarm · D danger) · "
+        "% alarm = Overall vs alarm setpoint (mark = alarm on the bar) · "
+        "1X glyph = synchronous vector (amplitude ∠ phase) · "
+        "1X = unbalance · 2X = misalignment / looseness · API 670."
     )
 
 
@@ -4158,54 +4233,13 @@ def main() -> None:
         import logging
         logging.warning("live analysis button failed: %s", e)
 
-    # Sensor selection (Ciclo 23.33) — selectbox discreto debajo del
-    # diagrama. Razón técnica para no usar click directo en SVG:
-    # Streamlit + browser full-reload pierde session_state → auth falla
-    # → redirect a login. El selectbox usa st.rerun() interno que
-    # mantiene el websocket de la sesión vivo.
-    direct_labels = sorted({
-        r.get("sensor_label") for r in latest
-        if r.get("metric") == "Direct" and r.get("sensor_label")
-    })
-    selected_sensor = st.query_params.get("sensor")
-
-    if direct_labels:
-        # Expander idéntico a los demás (Registro de eventos, Tendencia,
-        # Canales, Análisis avanzado). Se abre solo si ya hay un sensor
-        # seleccionado vía query param; adentro va el picker + el zoom panel.
-        with st.expander("Detailed analysis — by sensor",
-                         expanded=bool(selected_sensor)):
-            sel_options = ["Choose a sensor…"] + direct_labels
-            try:
-                sel_idx = sel_options.index(selected_sensor) if selected_sensor in direct_labels else 0
-            except ValueError:
-                sel_idx = 0
-            new_sel = st.selectbox(
-                "drilldown_select",
-                options=sel_options,
-                index=sel_idx,
-                key="live_sensor_drilldown",
-                format_func=lambda x: x.replace("_", "") if x in direct_labels else x,
-                label_visibility="collapsed",
-            )
-            new_value = new_sel if new_sel != "Choose a sensor…" else None
-            if new_value != selected_sensor:
-                if new_value:
-                    st.query_params["sensor"] = new_value
-                else:
-                    st.query_params.clear()
-                st.rerun()
-            selected_sensor = new_value
-
-            # Zoom panel inline — trend chart + selector de tipo de gráfico.
-            if selected_sensor:
-                render_sensor_zoom_panel(
-                    selected_sensor=selected_sensor,
-                    latest=latest,
-                    sensor_lookup=sensor_lookup,
-                    instance_obj=instance_obj,
-                    spark_data=spark_data,
-                )
+    # Ciclo 23.171 — "Detailed analysis — by sensor" ELIMINADO por redundante:
+    # · Overall trend (multi-canal overlay + Tiles + botonera de rango) ya cubre
+    #   la tendencia por sensor, mejor.
+    # · Advanced analysis (página dedicada) cubre espectro/onda/órbita por sensor.
+    # · La tabla API 670 muestra sparkline por canal.
+    # El drilldown per-sensor no aportaba nada único. render_sensor_zoom_panel
+    # queda sin uso (se conserva por si se reintroduce vía acción de fila).
 
     if not has_map and instance_obj is not None and instance_obj.schematic_png:
         # Tiene schematic pero sin posiciones — render sin overlay
