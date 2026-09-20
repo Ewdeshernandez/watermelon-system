@@ -569,39 +569,64 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     value=bool(getattr(inst, "report_send_enabled", False)),
                     help="If enabled, the system sends the report only on the chosen days and times.",
                 )
-                # Defaults: usar listas nuevas si existen, sino el campo single (back-compat)
-                _def_days = [int(x) for x in (getattr(inst, "report_send_days", None) or [])] \
-                    or [int(getattr(inst, "report_send_day", 0) or 0)]
-                _def_hours = [int(x) for x in (getattr(inst, "report_send_hours", None) or [])] \
-                    or [int(getattr(inst, "report_send_hour", 6) or 6)]
-
-                # Días como CHECKBOXES (no st.multiselect: dentro de st.form +
-                # st.tabs el multiselect tiene un bug de Streamlit que resetea
-                # la pestaña al seleccionar). Las casillas funcionan estable.
-                st.markdown("**Delivery days** (check one or more)")
+                # Slots explícitos (día + hora) — reemplaza la grilla días×horas.
+                # Permite p.ej. "Mon 07:00, Sat 21:00" sin disparar los 4 cruces
+                # de la grilla. Texto (estable dentro de st.form + st.tabs).
                 _abbr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-                _dcols = st.columns(7)
-                new_report_days = []
-                for _i in range(7):
-                    with _dcols[_i]:
-                        if st.checkbox(_abbr[_i], value=(_i in _def_days),
-                                       key=f"rsday_{instance_id}_{_i}"):
-                            new_report_days.append(_i)
+                _abbr2dow = {a.lower(): i for i, a in enumerate(_abbr)}
+                _abbr2dow.update({d.lower(): i for i, d in enumerate(_DOW)})  # nombre completo
 
-                new_report_hours_raw = st.text_input(
-                    "Delivery hours (0-23, local time — one or more, separated by comma)",
-                    value=", ".join(str(h) for h in _def_hours),
-                    help="e.g. 6, 18  → sends at 06:00 and 18:00.",
+                def _slots_to_text(slots):
+                    out = []
+                    for s in slots:
+                        try:
+                            out.append(f"{_abbr[int(s[0]) % 7]} {int(s[1]):02d}:00")
+                        except Exception:
+                            continue
+                    return ", ".join(out)
+
+                # Default: slots guardados → sino derivar de la grilla vieja (back-compat)
+                _def_slots = [list(s) for s in (getattr(inst, "report_send_slots", None) or [])]
+                if not _def_slots:
+                    _gd = [int(x) for x in (getattr(inst, "report_send_days", None) or [])] \
+                        or [int(getattr(inst, "report_send_day", 0) or 0)]
+                    _gh = [int(x) for x in (getattr(inst, "report_send_hours", None) or [])] \
+                        or [int(getattr(inst, "report_send_hour", 6) or 6)]
+                    _def_slots = [[d, h] for d in _gd for h in _gh]
+
+                st.markdown("**Delivery schedule** — day + time slots")
+                new_report_slots_raw = st.text_input(
+                    "Slots (e.g. Mon 07:00, Sat 21:00)",
+                    value=_slots_to_text(_def_slots),
+                    help="Each slot = one weekday + one hour. Comma-separated. "
+                         "Days: Mon Tue Wed Thu Fri Sat Sun. e.g. 'Mon 07:00, Sat 21:00' "
+                         "sends Monday 7am and Saturday 9pm. Recommended: 2/week, spread. "
+                         "Offline assets get their own weekly slot (Mon 09:00 by default).",
                 )
-                new_report_hours = []
-                for _tok in new_report_hours_raw.replace(";", " ").replace(",", " ").split():
-                    try:
-                        _hv = int(_tok)
-                        if 0 <= _hv <= 23:
-                            new_report_hours.append(_hv)
-                    except ValueError:
-                        pass
-                new_report_hours = sorted(set(new_report_hours))
+                # Parseo: "Mon 07:00" / "mon 7" / "saturday 21" → (dow, hour)
+                new_report_slots = []
+                import re as _re
+                for _chunk in new_report_slots_raw.split(","):
+                    _c = _chunk.strip()
+                    if not _c:
+                        continue
+                    _m = _re.match(r"([A-Za-z]+)\s+(\d{1,2})", _c)
+                    if not _m:
+                        continue
+                    _dow = _abbr2dow.get(_m.group(1).lower())
+                    _hv = int(_m.group(2))
+                    if _dow is not None and 0 <= _hv <= 23:
+                        new_report_slots.append([_dow, _hv])
+                # dedup preservando orden
+                _seen = set()
+                new_report_slots = [s for s in new_report_slots
+                                    if not (tuple(s) in _seen or _seen.add(tuple(s)))]
+                # Derivar grilla (back-compat para consumidores viejos / display)
+                new_report_days = sorted({s[0] for s in new_report_slots})
+                new_report_hours = sorted({s[1] for s in new_report_slots})
+                if new_report_slots:
+                    st.caption("→ " + "  ·  ".join(
+                        f"{_DOW[s[0]]} {s[1]:02d}:00" for s in new_report_slots))
                 st.divider()
                 new_alarm_enabled = st.checkbox(
                     "Auto-notify on alarm / danger",
@@ -622,6 +647,9 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     client_email=new_client_email.strip(),
                     whatsapp_number=new_whatsapp_number.strip().replace("+", "").replace(" ", ""),
                     report_send_enabled=bool(new_report_enabled),
+                    # Slots (día,hora) = fuente de verdad del envío en línea.
+                    report_send_slots=[[int(s[0]), int(s[1])] for s in new_report_slots],
+                    # Grilla derivada (back-compat / display).
                     report_send_days=sorted(int(d) for d in new_report_days),
                     report_send_hours=sorted(int(h) for h in new_report_hours),
                     # back-compat: el primer día/hora también en los campos single
