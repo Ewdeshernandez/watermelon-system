@@ -34,7 +34,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -220,6 +220,8 @@ def build_app(simulated: bool = True):
         "Fuente del 1× de vibración. Manual = el cliente te da el 1× (amplitud+fase) de otro equipo. "
         "Simulado = practicar el lazo completo. NI = capturar en vivo de la tarjeta.")))
     gb_acq = QtWidgets.QGroupBox(T("Acquisition", "Adquisición")); fa = QtWidgets.QFormLayout(gb_acq)
+    cb_planes = QtWidgets.QComboBox(); cb_planes.addItems([T("1 plane", "1 plano"), T("2 planes", "2 planos")])
+    fa.addRow(T("Balancing planes", "Planos de balanceo"), cb_planes)
     cb_mode = QtWidgets.QComboBox()
     cb_mode.addItems([T("Manual (typed)", "Manual (escrito)"), T("Simulated", "Simulado"),
                       "NI 9229 (proximity µm)", "NI 9234 (accel → velocity mm/s)"])
@@ -238,8 +240,36 @@ def build_app(simulated: bool = True):
     fa.addRow(T("Vibration device", "Device vibración"), ed_vibdev)
     fa.addRow(T("Sensitivity", "Sensibilidad"), sb_sens)
     fa.addRow("", lbl_pow)
-    cl.addWidget(gb_acq); cl.addStretch(1)
+    cl.addWidget(gb_acq)
+    btn_savecfg = QtWidgets.QPushButton(T("💾 Save configuration", "💾 Guardar configuración"))
+    btn_savecfg.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    _cfgmsg = QtWidgets.QLabel(""); _cfgmsg.setStyleSheet("color:#16a34a;font-weight:700;")
+    _cr = QtWidgets.QHBoxLayout(); _cr.addWidget(btn_savecfg); _cr.addWidget(_cfgmsg); _cr.addStretch(1)
+    cl.addLayout(_cr); cl.addStretch(1)
     tabs.addTab(pg_cfg, "Configuration")
+
+    _CFG = QtCore.QSettings("WatermelonSystem", "BalancingConfig")
+
+    def _save_config():
+        _CFG.setValue("planes", cb_planes.currentIndex()); _CFG.setValue("mode", cb_mode.currentIndex())
+        _CFG.setValue("kph", cb_kph.currentIndex()); _CFG.setValue("ppr", sb_ppr.value())
+        _CFG.setValue("kphdev", ed_kphdev.text()); _CFG.setValue("vibdev", ed_vibdev.text())
+        _CFG.setValue("sens", sb_sens.value())
+        _cfgmsg.setText(T("✅ Configuration saved.", "✅ Configuración guardada."))
+
+    def _load_config():
+        if _CFG.value("mode") is None:
+            return
+        try:
+            cb_planes.setCurrentIndex(int(_CFG.value("planes", 0)))
+            cb_mode.setCurrentIndex(int(_CFG.value("mode", 1)))
+            cb_kph.setCurrentIndex(int(_CFG.value("kph", 0))); sb_ppr.setValue(int(_CFG.value("ppr", 1)))
+            ed_kphdev.setText(str(_CFG.value("kphdev", "cDAQ1Mod1") or "cDAQ1Mod1"))
+            ed_vibdev.setText(str(_CFG.value("vibdev", "cDAQ1Mod2") or "cDAQ1Mod2"))
+            sb_sens.setValue(float(_CFG.value("sens", 100.0) or 100.0))
+        except Exception:  # noqa: BLE001
+            pass
+    btn_savecfg.clicked.connect(_save_config)
 
     def _kph_sensor():
         idx = cb_kph.currentIndex(); ppr = sb_ppr.value()
@@ -383,6 +413,8 @@ def build_app(simulated: bool = True):
     vtm, vta = _vec_row(f1, T("Vt — with trial weight", "Vt — con peso de prueba"))
     vfm, vfa = _vec_row(f1, T("Vf — final (optional)", "Vf — final (opcional)"))
     l1.addWidget(gb1)
+    lbl_sugg1 = QtWidgets.QLabel(""); lbl_sugg1.setWordWrap(True); lbl_sugg1.setStyleSheet("color:#0f2a4a;font-size:12px;")
+    l1.addWidget(lbl_sugg1)
     _cap1r = QtWidgets.QHBoxLayout()
     btn1_cref = QtWidgets.QPushButton(T("📷 Capture reference (V0)", "📷 Capturar referencia (V0)"))
     btn1_ctrial = QtWidgets.QPushButton(T("📷 Capture with trial (Vt)", "📷 Capturar con prueba (Vt)"))
@@ -459,6 +491,11 @@ def build_app(simulated: bool = True):
     b2_tb = QtWidgets.QPushButton(T("📷 Trial B", "📷 Prueba B"))
     _cap2r.addWidget(b2_ref); _cap2r.addWidget(b2_ta); _cap2r.addWidget(b2_tb); _cap2r.addStretch(1)
     l2.addLayout(_cap2r)
+    lbl_sugg2 = QtWidgets.QLabel(""); lbl_sugg2.setWordWrap(True); lbl_sugg2.setStyleSheet("color:#0f2a4a;font-size:12px;")
+    l2.addWidget(lbl_sugg2)
+    _srow2 = QtWidgets.QHBoxLayout()
+    btn2_demo = QtWidgets.QPushButton(T("Simulated example", "Ejemplo simulado"))
+    _srow2.addWidget(btn2_demo); _srow2.addStretch(1); l2.addLayout(_srow2)
     btn2 = QtWidgets.QPushButton(T("▶ Solve 2-plane", "▶ Resolver 2 planos"))
     btn2.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     l2.addWidget(btn2)
@@ -512,6 +549,18 @@ def build_app(simulated: bool = True):
             f"<b>Corrección plano B:</b> {wcb_m:,.2f} g ∠ {wcb_a:.1f}°<br>"
             f"Residual predicho: A {aa_m:.3f} · B {ba_m:.3f} {u} · modelo {r['quality']}"))
     btn2.clicked.connect(_solve2)
+
+    def _demo2():
+        wt = to_complex(wam.value() or 10.0, waa.value()); wt2 = to_complex(wbm.value() or 10.0, wba.value())
+        wam.setValue(to_polar(wt)[0]); wbm.setValue(to_polar(wt2)[0])
+        (am, aa), (bm, bb) = _sim_measure_2p(0, 0)
+        a0m.setValue(am); a0a.setValue(aa); b0m.setValue(bm); b0a.setValue(bb)
+        (am, aa), (bm, bb) = _sim_measure_2p(wt, 0)
+        a1m.setValue(am); a1a.setValue(aa); b1m.setValue(bm); b1a.setValue(bb)
+        (am, aa), (bm, bb) = _sim_measure_2p(0, wt2)
+        a2m.setValue(am); a2a.setValue(aa); b2m.setValue(bm); b2a.setValue(bb)
+        _solve2()
+    btn2_demo.clicked.connect(_demo2)
     tabs.addTab(pg2, T("2 planes", "2 planos"))
 
     # =================================================================
@@ -616,23 +665,167 @@ def build_app(simulated: bool = True):
     # =================================================================
     # TAB 5 — Updates
     # =================================================================
-    pg_up = QtWidgets.QWidget(); ul = QtWidgets.QVBoxLayout(pg_up)
-    _cur = QtWidgets.QLabel(T(f"Installed version: v{__version__}", f"Versión instalada: v{__version__}"))
-    _ust = QtWidgets.QLabel(T("Press Check for updates.", "Pulsa Buscar actualizaciones.")); _ust.setWordWrap(True)
-    _ub = QtWidgets.QPushButton(T("🔍 Check for updates", "🔍 Buscar actualizaciones"))
-    ul.addWidget(_cur); ul.addWidget(_ust); ul.addWidget(_ub); ul.addStretch(1)
+    pg_up = QtWidgets.QWidget(); ul = QtWidgets.QVBoxLayout(pg_up); ul.setContentsMargins(28, 24, 28, 24)
+    _card = QtWidgets.QFrame()
+    _card.setStyleSheet("QFrame{background:white;border:1px solid #e6ecf5;border-radius:16px;}")
+    _card.setMinimumWidth(600); _card.setMaximumWidth(780)
+    _cl2 = QtWidgets.QVBoxLayout(_card); _cl2.setContentsMargins(34, 30, 34, 34); _cl2.setSpacing(14)
+
+    def _mkfont(pt, bold=False):
+        fnt = QtGui.QFont(); fnt.setPointSize(pt); fnt.setBold(bold); return fnt
+
+    _uh = QtWidgets.QLabel("🍉  Watermelon Balancing"); _uh.setFont(_mkfont(16, True)); _uh.setStyleSheet(f"color:{NAVY};border:none;")
+    _cur = QtWidgets.QLabel(T(f"Installed version:  v{__version__}", f"Versión instalada:  v{__version__}"))
+    _cur.setFont(_mkfont(11)); _cur.setStyleSheet("color:#475569;border:none;")
+    _lic_lbl = QtWidgets.QLabel(""); _lic_lbl.setFont(_mkfont(10)); _lic_lbl.setWordWrap(True)
+    _lic_lbl.setTextFormat(QtCore.Qt.RichText); _lic_lbl.setStyleSheet("color:#475569;border:none;")
+    _lic_ok = False
+    try:
+        from core.modal import licensing as _lic
+        _ls = _lic.local_license_status()
+        import datetime as _dt2
+        _expd = _dt2.date.fromtimestamp(float(_ls.get("exp"))).isoformat() if _ls.get("exp") else "—"
+        _stt = (f"<span style='color:#10b981'>● {T('Licensed','Con licencia')}</span>" if _ls.get("valid")
+                else f"<span style='color:#ef4444'>● {T('Not activated','Sin activar')}</span>")
+        _lic_lbl.setText(f"<b>{T('License','Licencia')}:</b> {_stt}<br>"
+                         f"{T('Account','Cuenta')}: {_ls.get('account') or '—'} · {T('Expires','Vence')}: {_expd}<br>"
+                         f"<b>{T('This computer','Este equipo')}:</b> {_lic.machine_label()}<br>"
+                         f"<span style='color:#94a3b8'>Machine ID: {_ls.get('fingerprint','')[:24]}…</span>")
+        _lic_ok = bool(_ls.get("valid"))
+    except Exception:  # noqa: BLE001
+        _lic_lbl.setText("")
+    _deact = QtWidgets.QPushButton(T("Deactivate this computer", "Desactivar este equipo")); _deact.setFont(_mkfont(9))
+    _deact.setStyleSheet("QPushButton{background:transparent;color:#ef4444;border:1px solid #f2c4c4;border-radius:8px;padding:6px 14px;}"
+                         "QPushButton:hover{background:#fef2f2;} QPushButton:disabled{color:#cbd5e1;border-color:#eef2f8;}")
+    _deact.setEnabled(_lic_ok)
+    _deact_row = QtWidgets.QHBoxLayout(); _deact_row.addWidget(_deact); _deact_row.addStretch(1)
+
+    def _do_deact():
+        m = QtWidgets.QMessageBox(_card); m.setIcon(QtWidgets.QMessageBox.Warning)
+        m.setWindowTitle(T("Deactivate this computer", "Desactivar este equipo"))
+        m.setText(T("Release this license from this computer?", "¿Liberar esta licencia de este equipo?"))
+        m.setStandardButtons(QtWidgets.QMessageBox.Cancel | QtWidgets.QMessageBox.Yes)
+        m.setDefaultButton(QtWidgets.QMessageBox.Cancel)
+        if m.exec() != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            from core.modal import licensing as _lic2
+            r = _lic2.deactivate_machine()
+        except Exception as e:  # noqa: BLE001
+            r = {"ok": False, "reason": str(e)}
+        if r.get("ok"):
+            QtWidgets.QMessageBox.information(_card, "Watermelon Balancing",
+                T("Deactivated. The app will close.", "Desactivado. La app se cerrará.")); QtWidgets.QApplication.quit()
+        else:
+            QtWidgets.QMessageBox.warning(_card, "Watermelon Balancing",
+                T("Could not deactivate: ", "No se pudo desactivar: ") + str(r.get("reason", "")))
+    _deact.clicked.connect(_do_deact)
+
+    _ust = QtWidgets.QLabel(T("Press <b>Check for updates</b> to see if a newer version is available.",
+                              "Pulsa <b>Buscar actualizaciones</b> para ver si hay una versión más nueva."))
+    _ust.setFont(_mkfont(10)); _ust.setWordWrap(True); _ust.setTextFormat(QtCore.Qt.RichText); _ust.setStyleSheet("color:#64748b;border:none;")
+    _unotes = QtWidgets.QTextBrowser(); _unotes.setFont(_mkfont(9)); _unotes.setMaximumHeight(200); _unotes.hide()
+    _unotes.setStyleSheet("QTextBrowser{border:1px solid #eef2f8;border-radius:10px;background:#fbfcfe;color:#334155;padding:8px;}")
+    _ub = QtWidgets.QPushButton(T("🔍  Check for updates", "🔍  Buscar actualizaciones")); _ub.setFont(_mkfont(11, True)); _ub.setMinimumHeight(42)
+    _ub.setStyleSheet(f"QPushButton{{background:{NAVY};color:white;padding:10px 20px;border-radius:9px;}}QPushButton:hover{{background:#12325a;}}")
+    _ubgo = QtWidgets.QPushButton(T("⬇  Update now", "⬇  Actualizar ahora")); _ubgo.setFont(_mkfont(11, True)); _ubgo.setMinimumHeight(42); _ubgo.hide()
+    _ubgo.setStyleSheet(f"QPushButton{{background:{GREEN};color:white;padding:10px 20px;border-radius:9px;}}QPushButton:hover{{background:#12833a;}}")
+    _urow = QtWidgets.QHBoxLayout(); _urow.setSpacing(12); _urow.addWidget(_ub); _urow.addWidget(_ubgo); _urow.addStretch(1)
+    _foot = QtWidgets.QLabel(T("Updates download and install automatically over the network; the app restarts when done.",
+                              "Las actualizaciones se descargan e instalan automáticamente por red; la app se reinicia al terminar."))
+    _foot.setFont(_mkfont(9)); _foot.setWordWrap(True); _foot.setStyleSheet("color:#94a3b8;border:none;")
+    _cl2.addWidget(_uh); _cl2.addWidget(_cur); _cl2.addWidget(_lic_lbl); _cl2.addLayout(_deact_row)
+    _cl2.addSpacing(4); _cl2.addWidget(_ust); _cl2.addWidget(_unotes); _cl2.addSpacing(6); _cl2.addLayout(_urow)
+    _cl2.addSpacing(6); _cl2.addWidget(_foot)
+    ul.addWidget(_card, 0, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop); ul.addStretch(1)
+    st["_pending"] = None
 
     def _chk():
+        _ub.setEnabled(False); _ub.setText(T("🔍  Checking…", "🔍  Buscando…")); QtWidgets.QApplication.processEvents()
         try:
             from core.balance.updater import diagnose
             info, msg = diagnose(__version__)
         except Exception as e:  # noqa: BLE001
             info, msg = None, f"Error: {e}"
-        _ust.setText(msg)
-    _ub.clicked.connect(_chk)
+        _ub.setEnabled(True); _ub.setText(T("🔍  Check for updates", "🔍  Buscar actualizaciones"))
+        st["_pending"] = info
+        if info:
+            _ust.setText(T(f"✅ <b style='color:{GREEN}'>New version available: v{info['version']}</b>",
+                           f"✅ <b style='color:{GREEN}'>Nueva versión disponible: v{info['version']}</b>"))
+            _unotes.setPlainText((info.get("notes") or "").strip()); _unotes.show(); _ubgo.show()
+        else:
+            _ust.setText(str(msg).replace("\n", "<br>")); _unotes.hide(); _ubgo.hide()
+
+    def _go():
+        info = st.get("_pending")
+        if not info:
+            return
+        from core.balance import updater
+        url = info.get("setup_url") or info.get("zip_url")
+        if not url:
+            if info.get("html_url"):
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl(info["html_url"]))
+            return
+        dlg = QtWidgets.QProgressDialog(T("Downloading update…", "Descargando actualización…"), "Cancel", 0, 100, win)
+        dlg.setWindowTitle("Updating"); dlg.setModal(True); dlg.setMinimumDuration(0); dlg.show()
+        path = updater.download_file(url, on_progress=lambda fr: (dlg.setValue(int(fr * 100)), QtWidgets.QApplication.processEvents()))
+        dlg.close()
+        if path and path.lower().endswith("setup.exe"):
+            updater.launch_installer(path); QtWidgets.QApplication.quit()
+        elif path:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+        else:
+            QtWidgets.QMessageBox.warning(win, "Update", T("Could not download the update.", "No se pudo descargar la actualización."))
+    _ub.clicked.connect(_chk); _ubgo.clicked.connect(_go)
     tabs.addTab(pg_up, T("Updates", "Actualizaciones"))
 
+    # ---------- planos según configuración (#3) + peso sugerido (#4) ----------
+    IDX_1P, IDX_2P = 3, 4       # índices de las pestañas 1 plano / 2 planos
+
+    def _apply_planes(_=0):
+        two = cb_planes.currentIndex() == 1
+        tabs.setTabVisible(IDX_1P, not two)
+        tabs.setTabVisible(IDX_2P, two)
+
+    def _suggest_g():
+        try:
+            Wt, _u = recommend_trial_weight_g(tw_w.value(), tw_rpm.value() or sb_rpm.value(), tw_r.value(), tw_k.value())
+            return float(Wt)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    def _refresh_suggest():
+        g = _suggest_g()
+        if g <= 0:
+            return
+        _txt = T(f"Suggested trial weight (API 684): <b>{g:,.2f} g</b> @ {tw_r.value():.0f} mm. "
+                 "Edit it if you must — it is the field analyst's responsibility.",
+                 f"Peso de prueba sugerido (API 684): <b>{g:,.2f} g</b> @ {tw_r.value():.0f} mm. "
+                 "Cámbialo si lo requieres — es responsabilidad del analista de campo.")
+        lbl_sugg1.setText(_txt); lbl_sugg2.setText(_txt)
+        # prefill si el campo sigue en el default (10 g)
+        for _m in (twm, wam, wbm):
+            if abs(_m.value() - 10.0) < 1e-6 or _m.value() == 0.0:
+                _m.setValue(g)
+
+    def _warn_edit(field, base_label):
+        def _f():
+            g = _suggest_g()
+            if g > 0 and abs(field.value() - g) / g > 0.05:
+                base_label.setText(base_label.text() +
+                    T("  ⚠ Modified from suggested — analyst's responsibility.",
+                      "  ⚠ Modificado del sugerido — responsabilidad del analista."))
+        return _f
+    twm.editingFinished.connect(_warn_edit(twm, lbl_sugg1))
+    wam.editingFinished.connect(_warn_edit(wam, lbl_sugg2))
+    wbm.editingFinished.connect(_warn_edit(wbm, lbl_sugg2))
+    for _w in (tw_w, tw_rpm, tw_r, tw_k):
+        _w.valueChanged.connect(lambda _=0: _refresh_suggest())
+    cb_planes.currentIndexChanged.connect(_apply_planes)
+    tabs.currentChanged.connect(lambda i: (_refresh_suggest() if i in (IDX_1P, IDX_2P) else None))
+
     _on_sensor(); _load_setup(); _on_sensor()
+    _load_config(); _on_mode(); _kph_sensor(); _apply_planes(); _refresh_suggest()
     return app, win
 
 
