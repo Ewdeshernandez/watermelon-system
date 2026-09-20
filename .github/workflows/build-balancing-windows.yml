@@ -1,0 +1,133 @@
+name: build-balancing-windows
+
+# Compila native/watermelon_balancing.py a .exe Windows (onedir) + instalador Inno.
+# Disparar:  git tag balance-vX.Y.Z && git push origin balance-vX.Y.Z
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'balance-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias + PyInstaller
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx nitypes hightime supabase reportlab pillow certifi cryptography pyinstaller
+
+      - name: Embeber credenciales de nube (desde GitHub Secrets)
+        shell: bash
+        env:
+          SB_URL: ${{ secrets.SUPABASE_URL }}
+          SB_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          printf 'SUPABASE_URL = "%s"\nSUPABASE_KEY = "%s"\n' "$SB_URL" "$SB_KEY" \
+            > core/remote_monitoring/_cloud_config.py
+
+      - name: Compilar WatermelonBalancing.exe (onedir)
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean \
+            --name WatermelonBalancing \
+            --windowed \
+            --contents-directory _internal \
+            --paths . \
+            --paths native \
+            --collect-submodules core.balance \
+            --collect-submodules core.remote_monitoring \
+            --hidden-import core.balance.engine \
+            --hidden-import core.balance.report \
+            --hidden-import core.balance.cloud \
+            --hidden-import core.balance.updater \
+            --hidden-import license_gate \
+            --hidden-import core.modal.licensing \
+            --collect-submodules nidaqmx \
+            --hidden-import nidaqmx \
+            --copy-metadata nidaqmx \
+            --collect-all nitypes \
+            --copy-metadata nitypes \
+            --copy-metadata hightime \
+            --hidden-import reportlab \
+            --collect-submodules reportlab \
+            --hidden-import core.remote_monitoring._cloud_config \
+            --collect-all cryptography \
+            --hidden-import cryptography \
+            --hidden-import certifi \
+            --copy-metadata certifi \
+            --collect-data certifi \
+            --hidden-import PIL \
+            --add-data "assets/watermelon_logo.png;assets" \
+            --icon "assets/watermelon.ico" \
+            --collect-submodules scipy \
+            --collect-all supabase \
+            --copy-metadata supabase \
+            --hidden-import deprecation \
+            --exclude-module streamlit \
+            --exclude-module matplotlib \
+            --exclude-module pandas \
+            native/watermelon_balancing.py
+
+      - name: Empaquetar binario + lanzador
+        shell: bash
+        run: |
+          mkdir -p out_balancing
+          cp -r dist/WatermelonBalancing/. out_balancing/
+          printf '@echo off\r\n"%%~dp0WatermelonBalancing.exe" --sim\r\npause\r\n' \
+            > out_balancing/0_SIMULADOR_balancing.bat
+          cat > out_balancing/LEEME.txt <<'TXT'
+          Watermelon Balancing - balanceo de campo (1 y 2 planos)
+          =======================================================
+          Coeficientes de influencia (ISO 21940-12) + peso de prueba API 684.
+          Datos manuales (1X amplitud+fase de otro equipo) o simulado.
+          TXT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WatermelonBalancing-windows
+          path: out_balancing/
+          retention-days: 30
+
+      - name: Instalar Inno Setup
+        if: startsWith(github.ref, 'refs/tags/balance-v')
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Compilar instalador
+        if: startsWith(github.ref, 'refs/tags/balance-v')
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME -replace '^balance-v',''
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-ChildItem "C:\Program Files (x86)","C:\Program Files" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $iscc) { "ISCC.exe NOT FOUND" | Tee-Object installer_log.txt; exit 0 }
+          & $iscc "/DMyAppVersion=$ver" "native/installer/watermelon_balancing.iss" 2>&1 | Tee-Object installer_log.txt
+
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/balance-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          ASSETS=""
+          [ -f WatermelonBalancing-Setup.exe ] && ASSETS="WatermelonBalancing-Setup.exe"
+          [ -f installer_log.txt ] && ASSETS="$ASSETS installer_log.txt"
+          gh release create "${GITHUB_REF_NAME}" $ASSETS \
+            --title "Watermelon Balancing ${GITHUB_REF_NAME}" \
+            --notes "Watermelon Balancing — balanceo de campo (Windows). Instalador: WatermelonBalancing-Setup.exe. Sin firmar aun -> SmartScreen puede pedir confirmacion." \
+          || for a in $ASSETS; do gh release upload "${GITHUB_REF_NAME}" "$a" --clobber; done
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest || true
