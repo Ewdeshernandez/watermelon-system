@@ -190,7 +190,23 @@ def generate_live_report_pdf(
     _sl = _status.lower()
     _fg, _bg = _sev_colors(_status)
     _alarms = kpis.get("alarms", 0) or 0
-    if "crít" in _sl or "crit" in _sl:
+    _offline = bool(kpis.get("offline"))
+    if _offline:
+        # FUERA DE LÍNEA — banner gris, honesto. Muestra los ÚLTIMOS datos
+        # medidos (no simula condición actual). Para activos con servicio
+        # contratado que están parados o sin enlace.
+        _fg, _bg = "#475569", "#f1f5f9"
+        _since = kpis.get("offline_since") or ""
+        _age = kpis.get("offline_age") or ""
+        _band = "FUERA DE LÍNEA — SIN COMUNICACIÓN"
+        _diag = ("Equipo sin reportar al monitoreo en línea"
+                 + (f" desde {_since}" if _since else "")
+                 + (f" ({_age})" if _age else "")
+                 + ". A continuación se muestran los ÚLTIMOS datos válidos "
+                 "medidos; NO representan la condición actual del equipo. "
+                 "Acción: verificar operación del equipo, el colector y el "
+                 "enlace del sitio.")
+    elif "crít" in _sl or "crit" in _sl:
         _band = "CONDICIÓN CRÍTICA — ACCIÓN INMEDIATA"
         _diag = (f"{_alarms} punto(s) en nivel de PELIGRO. Requiere atención inmediata: "
                  "inspeccionar el equipo y evaluar parada según criticidad y contexto operativo.")
@@ -224,9 +240,11 @@ def generate_live_report_pdf(
     # ---------- Esquemático del tren (HÉROE) — sensores por severidad ----------
     # Preferimos el DIAGRAMA LIVE (vector, siluetas realistas + barras de umbral,
     # vía svglib) — el mismo de la web. Fallback: PNG matplotlib.
+    _train_title = ("Estado del tren — ÚLTIMO estado conocido" if _offline
+                    else "Estado del tren — sensores por severidad")
     if train_drawing is not None:
         try:
-            story.append(Paragraph("Estado del tren — sensores por severidad", st_section))
+            story.append(Paragraph(_train_title, st_section))
             try:
                 train_drawing.hAlign = "CENTER"
             except Exception:  # noqa: BLE001

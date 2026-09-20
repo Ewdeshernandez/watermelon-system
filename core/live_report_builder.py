@@ -119,6 +119,18 @@ def _seconds_since(captured_at: Any) -> float:
     return (datetime.now(timezone.utc) - captured).total_seconds()
 
 
+def _local_dt_str(captured_at: Any) -> str:
+    """captured_at (UTC) → 'YYYY-MM-DD HH:MM' en hora local del cliente."""
+    captured = _parse_captured_at(captured_at)
+    if captured is None:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        return captured.astimezone(ZoneInfo("America/Bogota")).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return captured.strftime("%Y-%m-%d %H:%M")
+
+
 # =============================================================
 # Severidad / lookup / health / eventos (puros)
 # =============================================================
@@ -278,8 +290,14 @@ def build_report_for_instance(
     instance_id: str,
     instance_obj: Any = None,
     alarm_focus: bool = False,
+    offline_age_min: Optional[float] = None,
 ) -> Tuple[Optional[bytes], Dict[str, Any]]:
     """Genera el PDF ejecutivo del activo en forma headless.
+
+    offline_age_min: si se pasa (minutos sin reportar), el reporte se marca
+    FUERA DE LÍNEA — banner gris + nota honesta; muestra los ÚLTIMOS datos
+    medidos (no simula condición actual). Para activos con servicio contratado
+    que están parados o sin enlace (ej. SGT300A).
 
     Devuelve (pdf_bytes, meta). Si no hay lecturas o falla, (None, meta_parcial)."""
     from core.live_readings import latest_for_instance, recent_history_all_direct
@@ -316,6 +334,21 @@ def build_report_for_instance(
             "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
     meta = {"instance_id": instance_id, "status": status, "score": score,
             "zone": zone, "alarms": n_danger + n_alarm}
+
+    # FUERA DE LÍNEA — activo con servicio contratado pero sin reportar.
+    # Reusa los ÚLTIMOS datos medidos; solo cambia banner/estado a gris honesto.
+    if offline_age_min is not None:
+        try:
+            newest = min(latest, key=lambda r: _seconds_since(r.get("captured_at")))
+            since_txt = _local_dt_str(newest.get("captured_at"))
+            age_txt = f"hace {_format_age(newest.get('captured_at'))}"
+        except Exception:
+            since_txt, age_txt = "", f"hace {offline_age_min/60.0:.1f} h"
+        health = {"score": score, "zone": "Fuera de línea", "color": "#475569"}
+        kpis.update({"status": "Fuera de línea", "offline": True,
+                     "offline_since": since_txt, "offline_age": age_txt,
+                     "last": age_txt})
+        meta.update({"status": "Fuera de línea", "offline": True})
 
     # Canales con 1X/2X
     vec: Dict[str, Dict[str, Any]] = {}

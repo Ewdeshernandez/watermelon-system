@@ -80,8 +80,24 @@ def _data_age_minutes(iid: str):
     return (datetime.now(timezone.utc) - max(ts)).total_seconds() / 60.0
 
 
-def _send_offline_alert(inst, tag: str, age_min: float) -> bool:
-    """Aviso OFFLINE (dead-man-switch) por email: el activo dejó de reportar."""
+def _send_offline_alert(inst, tag: str, age_min: float, iid: str = "") -> bool:
+    """Aviso OFFLINE (dead-man-switch). Preferido: PDF ejecutivo marcado
+    FUERA DE LÍNEA con los ÚLTIMOS datos medidos (email + WhatsApp) — para
+    activos con servicio contratado (ej. SGT300A) que están parados o sin
+    enlace. Fallback: email de texto si no se pudo armar el PDF."""
+    if iid:
+        try:
+            from core.live_report_builder import build_report_for_instance
+            from core.report_delivery import deliver_report
+            pdf, meta = build_report_for_instance(iid, inst, offline_age_min=age_min)
+            if pdf:
+                res = deliver_report(inst, pdf, meta, alert=True)
+                if res.get("any_ok"):
+                    return True
+                log.warning("   %s: entrega PDF offline sin éxito — fallback texto.", tag)
+        except Exception as e:  # noqa: BLE001
+            log.error("   %s: PDF offline falló (%s) — fallback a email de texto.", tag, e)
+
     email = (getattr(inst, "client_email", "") or "").strip()
     tos = [e.strip() for e in email.replace(";", ",").split(",") if "@" in e]
     if not tos:
@@ -147,7 +163,7 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
             if stored != 3:
                 if dry_run:
                     log.info("   %s: DRY RUN — OFFLINE %.0f min (habría avisado).", tag, _age)
-                elif _send_offline_alert(inst, tag, _age):
+                elif _send_offline_alert(inst, tag, _age, iid=iid):
                     update_instance_header(iid, alarm_alert_level=3)
                     log.warning("⚠ %s OFFLINE (%.0f min sin datos) — aviso enviado.", tag, _age)
                     sent += 1
