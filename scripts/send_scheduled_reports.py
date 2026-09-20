@@ -75,6 +75,27 @@ def _is_due(inst, now: datetime) -> bool:
     return now.weekday() in days and now.hour in hours
 
 
+def _data_age_minutes(iid: str):
+    """Minutos desde la última lectura del activo. None = nunca reportó."""
+    try:
+        from datetime import timezone
+        from core.live_readings import latest_for_instance
+        rows = latest_for_instance(iid) or []
+        ts = []
+        for r in rows:
+            v = r.get("captured_at")
+            try:
+                dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+                ts.append(dt)
+            except Exception:
+                pass
+        if not ts:
+            return None
+        return (datetime.now(timezone.utc) - max(ts)).total_seconds() / 60.0
+    except Exception:
+        return None
+
+
 def _has_recipient(inst) -> bool:
     email = (getattr(inst, "client_email", "") or "").strip()
     wa = (getattr(inst, "whatsapp_number", "") or "").strip()
@@ -121,8 +142,30 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
             continue
 
         tag = getattr(inst, "tag", "") or iid
-        log.info("→ Generando reporte de %s (%s)…", tag, iid)
-        pdf_bytes, meta = build_report_for_instance(iid, inst)
+
+        # Compuerta por estado de datos:
+        #  · CON datos frescos  → reporte normal en las horas normales (no la offline).
+        #  · SIN datos (offline)→ reporte FUERA DE LÍNEA solo en la hora offline
+        #    (default 09:00), evitando doble envío. Config vía env.
+        _off_min = int(os.environ.get("WM_OFFLINE_MINUTES", "60") or 60)
+        _off_hour = int(os.environ.get("WM_OFFLINE_REPORT_HOUR", "9") or 9)
+        _age = _data_age_minutes(iid)
+        _is_offline = (_age is None) or (_age > _off_min)
+        if not force:
+            if _is_offline and now.hour != _off_hour:
+                skipped += 1
+                continue
+            if (not _is_offline) and now.hour == _off_hour:
+                skipped += 1
+                continue
+
+        log.info("→ Generando reporte de %s (%s)… [%s]", tag, iid,
+                 "OFFLINE" if _is_offline else "en línea")
+        if _is_offline:
+            pdf_bytes, meta = build_report_for_instance(
+                iid, inst, offline_age_min=(_age if _age is not None else float(_off_min)))
+        else:
+            pdf_bytes, meta = build_report_for_instance(iid, inst)
         if not pdf_bytes:
             log.error("   %s: no se pudo generar el PDF (¿sin lecturas?). meta=%s", tag, meta)
             sent_fail += 1
