@@ -25,6 +25,58 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def _speed_shaft_label(sensor_label: Optional[str], variable: Optional[str]) -> str:
+    """Etiqueta legible del eje a partir del canal (KPH TURBINA / KPH GENERADOR…)."""
+    t = f"{sensor_label or ''} {variable or ''}".lower()
+    if "turbin" in t:
+        return "Turbina"
+    if "gener" in t:
+        return "Generador"
+    if "motor" in t:
+        return "Motor"
+    if "bomba" in t or "pump" in t:
+        return "Bomba"
+    return (sensor_label or "").strip() or "Eje"
+
+
+def pick_speeds(latest: List[Dict[str, Any]]):
+    """Velocidad(es) del activo. CLAVE: un tren turbo-generador reporta DOS
+    velocidades (KPH TURBINA ~14000 rpm y KPH GENERADOR ~1800 rpm). Tomar la
+    'primera' mostraba la del generador (1800) como si fuera la máquina → engañoso.
+
+    Devuelve (primary_txt, all_txt, primary_val):
+      · primary_txt: velocidad del EJE PRINCIPAL (la mayor; en turbo-gen = turbina)
+      · all_txt: todas las velocidades etiquetadas ('Turbina 14040 · Generador 1800 rpm')
+      · primary_val: float de la principal (o None)
+    """
+    best: Dict[str, float] = {}   # label -> mayor valor por eje (dedupe)
+    for r in (latest or []):
+        var = (r.get("variable") or "").lower()
+        slab = (r.get("sensor_label") or "").lower()
+        is_speed = var.startswith("velocidad") or var.startswith("speed") or "kph" in slab
+        if not is_speed:
+            continue
+        v = r.get("value")
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        lab = _speed_shaft_label(r.get("sensor_label"), r.get("variable"))
+        if lab not in best or fv > best[lab]:
+            best[lab] = fv
+    if not best:
+        return "—", "—", None
+    items = sorted(best.items(), key=lambda kv: -kv[1])   # mayor primero (turbina)
+    primary_val = items[0][1]
+    primary_txt = f"{primary_val:.0f} rpm"
+    if len(items) == 1:
+        return primary_txt, primary_txt, primary_val
+    all_txt = " · ".join(f"{lab} {val:.0f}" for lab, val in items) + " rpm"
+    return primary_txt, all_txt, primary_val
+
+
 # =============================================================
 # Helpers de tiempo (puros) — portados de la página
 # =============================================================
@@ -248,10 +300,7 @@ def build_report_for_instance(
 
     # Health + KPIs
     score, zone, zcolor = _compute_health_score(severity_summary, latest)
-    speed_row = next((r for r in latest
-                      if (r.get("variable") or "").lower().startswith("velocidad")), None)
-    speed_txt = (f"{float(speed_row['value']):.0f} rpm"
-                 if speed_row and speed_row.get("value") is not None else "—")
+    speed_txt, speed_all, _speed_val = pick_speeds(latest)   # turbina primero (no el generador)
     n_danger = severity_summary.get("Danger", 0)
     n_alarm = severity_summary.get("Alarma", 0)
     status = "Crítica" if n_danger else ("Atención" if n_alarm else "Operación normal")
@@ -263,7 +312,8 @@ def build_report_for_instance(
         pass
 
     health = {"score": score, "zone": zone, "color": zcolor}
-    kpis = {"speed": speed_txt, "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
+    kpis = {"speed": speed_txt, "speeds_all": speed_all,
+            "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
     meta = {"instance_id": instance_id, "status": status, "score": score,
             "zone": zone, "alarms": n_danger + n_alarm}
 

@@ -176,7 +176,11 @@ def generate_live_report_pdf(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.append(kpi_tbl)
-    story.append(Paragraph(f"Zona ISO: {zone}", st_meta))
+    _zline = f"Zona ISO: {zone}"
+    _spall = kpis.get("speeds_all")
+    if _spall and _spall not in ("—", kpis.get("speed")) and "·" in _spall:
+        _zline += f"  ·  Velocidades: {_spall}"   # tren turbo-gen: turbina + generador
+    story.append(Paragraph(_zline, st_meta))
     story.append(Spacer(1, 6))
 
     # ---------- Tendencia (si hay PNG) ----------

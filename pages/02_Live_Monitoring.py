@@ -30,6 +30,7 @@ import pandas as pd
 import streamlit as st
 
 from core.auth import require_login, render_user_menu, require_role
+from core.live_report_builder import pick_speeds as _pick_speeds
 from core.live_readings import (
     count_for_instance,
     history_for_metric,
@@ -986,17 +987,8 @@ def _build_share_meta(
         train_str = driven_part
 
     # Velocidad (rpm) — busca fila con variable Velocidad
-    speed_txt = None
-    if latest:
-        speed_row = next(
-            (r for r in latest if (r.get("variable") or "").lower().startswith("velocidad")),
-            None,
-        )
-        if speed_row and speed_row.get("value") is not None:
-            try:
-                speed_txt = f"{float(speed_row['value']):.0f} rpm"
-            except Exception:
-                speed_txt = None
+    _sp = _pick_speeds(latest)[0] if latest else "—"     # eje principal (turbina, no generador)
+    speed_txt = None if _sp in (None, "—") else _sp
 
     # Sensores direct + severity counts
     n_direct = 0
@@ -2139,8 +2131,7 @@ def _build_live_report_pdf(
 
     # Health + KPIs
     score, zone, zcolor = compute_health_score(severity_summary, latest)
-    speed_row = next((r for r in latest if (r.get("variable") or "").lower().startswith("velocidad")), None)
-    speed_txt = f"{float(speed_row['value']):.0f} rpm" if speed_row and speed_row.get("value") is not None else "—"
+    speed_txt = _pick_speeds(latest)[0]                  # eje principal (turbina, no generador)
     n_danger = severity_summary.get("Danger", 0)
     n_alarm = severity_summary.get("Alarma", 0)
     status = "Critical" if n_danger else ("Attention" if n_alarm else "Normal operation")
@@ -2337,12 +2328,8 @@ def render_asset_header(
 
     # KPIs
     direct_rows = [r for r in (latest or []) if r.get("metric") == "Direct"]
-    speed_row = next(
-        (r for r in (latest or []) if (r.get("variable") or "").lower().startswith("velocidad")),
-        None,
-    )
-    speed_val = speed_row.get("value") if speed_row else None
-    speed_txt = f"{float(speed_val):.0f}" if speed_val is not None else "—"
+    _sp_txt, _sp_all, _sp_val = _pick_speeds(latest or [])   # turbina (mayor), no generador
+    speed_txt = f"{_sp_val:.0f}" if _sp_val is not None else "—"
     n_direct = len(direct_rows)
 
     if latest:
