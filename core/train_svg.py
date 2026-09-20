@@ -148,10 +148,14 @@ def build_train_svg(instance_obj: Any, latest: List[Dict[str, Any]],
                 _vs = f"{float(r.get('value')):.2f}"
             except (TypeError, ValueError):
                 _vs = "—"
+            # Gearbox: dots COMPACTOS (sin barra de umbral) — igual que la web,
+            # si no los 8 sensores del gearbox se amontonan. Color+valor bastan.
+            _gear = (side == "gearbox")
             sensors.append({
                 "label": lbl, "side": side, "anchor": anchor,
                 "status": sev.get("status", "Normal"), "value": _vs, "unit": unit,
-                "alarm": sev.get("alarm"), "danger": sev.get("danger"),
+                "alarm": None if _gear else sev.get("alarm"),
+                "danger": None if _gear else sev.get("danger"),
             })
         if not sensors:
             return None

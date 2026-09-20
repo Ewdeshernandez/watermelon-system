@@ -75,7 +75,7 @@ def generate_live_report_pdf(
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable,
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable, KeepTogether,
     )
 
     buf = BytesIO()
@@ -265,7 +265,7 @@ def generate_live_report_pdf(
     # El reporte es de UNA hoja (gerencial). Si hay muchos canales, se
     # priorizan por severidad (Danger > Alarma > Normal) y se muestran los
     # 10 más críticos, con nota al pie indicando cuántos quedaron fuera.
-    _MAX_CH = 9
+    _MAX_CH = 24
 
     def _sev_rank(c):
         s = (c.get("status") or "").lower()
@@ -282,7 +282,7 @@ def generate_live_report_pdf(
     else:
         ch_truncated = 0
 
-    story.append(Paragraph("Canales — Overall + vectores 1X / 2X (API 670)", st_section))
+    _ch_title = Paragraph("Canales — Overall + vectores 1X / 2X (API 670)", st_section)
     head = ["Estado", "Canal", "Ubicación", "Overall", "Unit", "1X ampl", "1X °", "2X ampl", "2X °"]
     data = [head]
     row_styles = []
@@ -321,7 +321,7 @@ def generate_live_report_pdf(
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]
     ctbl.setStyle(TableStyle(base_style + row_styles))
-    story.append(ctbl)
+    story.append(KeepTogether([_ch_title, ctbl]))
     meta_txt = "1X = componente síncrona (desbalance) · 2X = segunda armónica (desalineamiento / soltura)"
     if ch_truncated:
         meta_txt += (f" · Mostrando {_MAX_CH} de {total_ch} canales "
