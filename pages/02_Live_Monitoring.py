@@ -2231,6 +2231,35 @@ def _build_live_report_pdf(
     meta = {"instance_id": instance_id, "status": status, "score": score,
             "zone": zone, "alarms": n_danger + n_alarm}
 
+    # FUERA DE LÍNEA (mismo criterio que el reporte automático del cron): si el
+    # dato MÁS RECIENTE es viejo (> WM_OFFLINE_MINUTES, def 60), el reporte se
+    # marca gris "FUERA DE LÍNEA" con los últimos datos + fecha, NO como en línea.
+    import os as _os
+    try:
+        _off_min = int(_os.environ.get("WM_OFFLINE_MINUTES", "60") or 60)
+    except Exception:  # noqa: BLE001
+        _off_min = 60
+    _newest = None
+    if latest:
+        try:
+            _newest = min(latest, key=lambda r: _seconds_since(r.get("captured_at")))
+        except Exception:  # noqa: BLE001
+            _newest = None
+    if _newest is not None:
+        _age_min = _seconds_since(_newest.get("captured_at")) / 60.0
+        if _age_min > _off_min:
+            try:
+                from core.live_report_builder import _local_dt_str as _lds
+                _since_txt = _lds(_newest.get("captured_at"))
+            except Exception:  # noqa: BLE001
+                _since_txt = ""
+            _age_txt = f"hace {_format_age(_newest.get('captured_at'))}"
+            health = {"score": score, "zone": "Fuera de línea", "color": "#475569"}
+            kpis.update({"status": "Fuera de línea", "offline": True,
+                         "offline_since": _since_txt, "offline_age": _age_txt,
+                         "last": _age_txt})
+            meta.update({"status": "Fuera de línea", "offline": True})
+
     # Canales con 1X/2X
     vec: Dict[str, Dict[str, Any]] = {}
     for r in latest:
