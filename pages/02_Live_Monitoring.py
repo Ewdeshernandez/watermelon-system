@@ -3201,12 +3201,16 @@ def render_history_chart(
 
     # Fetch data por sensor — guardamos por label
     sensor_data: List[Dict[str, Any]] = []
+    _used_fallback = False
     for chosen in chosen_labels:
         idx = labels.index(chosen)
         sensor_lbl, var_name = options[idx]
         rows = _hbk(instance_id, var_name, "Direct", _from_iso, _bucket)
         if not rows:
-            # Fallback (por si la función SQL aún no está creada): crudo cap 1000
+            # Fallback: la RPC trend_bucketed falló (timeout por falta de índice
+            # en rangos largos, o no existe). Traemos crudo cap 1000 — SOLO cubre
+            # las últimas horas, NO el rango pedido. Se avisa honestamente abajo.
+            _used_fallback = True
             raw = history_for_metric(instance_id, var_name, "Direct", limit=1000)
             rows = [{"bucket": r.get("captured_at"), "avg_val": r.get("value"),
                      "min_val": r.get("value"), "max_val": r.get("value"), "n": 1}
@@ -3240,6 +3244,22 @@ def render_history_chart(
     if not sensor_data:
         st.info("No history yet on any selected sensor.")
         return
+
+    # Honestidad de rango: si caímos al fallback crudo, el gráfico NO cubre el
+    # rango pedido (solo las últimas horas). Avisar con el lapso REAL mostrado
+    # en vez de aparentar 30 días. (Se corrige aplicando supabase/sql/
+    # trend_bucketed.sql — índice + timeout.)
+    if _used_fallback:
+        try:
+            _spans = pd.concat([sd["df"]["captured_at"] for sd in sensor_data])
+            _lo, _hi = _spans.min(), _spans.max()
+            _real = f"{_lo:%Y-%m-%d %H:%M} → {_hi:%Y-%m-%d %H:%M}"
+        except Exception:
+            _real = "solo las últimas horas"
+        st.warning(
+            f"⚠ Rango largo en modo reducido: mostrando **{_real}**, no «{range_choice}». "
+            "La agregación de largo plazo está temporalmente no disponible."
+        )
 
     # KPIs combinados — Mín/Máx usan el pico REAL de cada balde (no se pierden
     # al promediar); Σ = total de lecturas crudas agregadas.
