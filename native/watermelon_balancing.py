@@ -34,7 +34,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -618,12 +618,71 @@ def build_app(simulated: bool = True):
                 "rotation": "CCW"}
 
     def _build_pdf():
-        if not st.get("r1p") and not st.get("r2p"):
+        r1p = st.get("r1p"); r2p = st.get("r2p"); iso = st.get("iso")
+        if not r1p and not r2p:
             rp_status.setText(T("Solve a 1-plane or 2-plane case first.", "Resuelve un caso de 1 o 2 planos primero.")); return None
+        _es = (cb_rlang.currentIndex() == 0)
+        s = st["setup_fn"]() if st.get("setup_fn") else {}
+        u = st["unit"]
+        from datetime import date as _date
+
+        def _vec(t, unit=u):
+            return f"{t[0]:,.2f} {unit} ∠ {t[1]:.0f}°" if t else "—"
+        meta = {"title": T("Preliminary Balancing Report", "Reporte Preliminar de Balanceo"),
+                "asset": s.get("machine") or s.get("tag") or "—", "client": s.get("client") or "—",
+                "machine_type": "—", "location": s.get("location") or "—",
+                "test_type": T("Field balancing (influence coefficient)", "Balanceo de campo (coef. de influencia)"),
+                "rpm": f"{s.get('nameplate_rpm') or 0:,.0f}", "technician": s.get("operator") or "—",
+                "reviewer": s.get("approved_by") or "—", "date": _date.today().isoformat(),
+                "equipment": "Watermelon Balancing"}
+        quality, sections, analysis, findings, recs = [], [], [], [], []
+        if r1p:
+            r = r1p["result"]
+            quality.append((T("1-plane solution", "Solución 1 plano"),
+                            "GO" if r.get("quality") == "GOOD" else "REVIEW",
+                            T(f"Correction {r['corr_mass_g']:,.1f} g ∠ {r['corr_ang_deg']:.0f}°",
+                              f"Corrección {r['corr_mass_g']:,.1f} g ∠ {r['corr_ang_deg']:.0f}°")))
+            sections.append({"title": T("Single plane (ISO 21940-12)", "Un plano (ISO 21940-12)"),
+                "table": {"headers": [T("Measurement", "Medición"), T("Vector", "Vector")],
+                          "rows": [[T("V0 — initial", "V0 — inicial"), _vec(r1p.get("v0"))],
+                                   [T("Trial weight", "Peso de prueba"), _vec(r1p.get("trial"), "g")],
+                                   [T("Vt — with trial", "Vt — con prueba"), _vec(r1p.get("vt"))],
+                                   [T("Vf — final", "Vf — final"), _vec(r1p.get("vf"))],
+                                   [T("Correction weight", "Peso de corrección"), f"{r['corr_mass_g']:,.2f} g ∠ {r['corr_ang_deg']:.0f}°"],
+                                   [T("Predicted residual", "Residual predicho"), f"{r['pred_mag']:,.3f} {u}"]]}})
+            findings.append(T(f"Single-plane: place {r['corr_mass_g']:,.2f} g at {r['corr_ang_deg']:.0f}°; predicted residual {r['pred_mag']:,.2f} {u}.",
+                              f"Un plano: colocar {r['corr_mass_g']:,.2f} g a {r['corr_ang_deg']:.0f}°; residual predicho {r['pred_mag']:,.2f} {u}."))
+        if r2p:
+            r = r2p["result"]; wa = to_polar(r["WA_corr"]); wb = to_polar(r["WB_corr"])
+            aa = to_polar(r["A_after"]); ba = to_polar(r["B_after"])
+            quality.append((T("2-plane solution", "Solución 2 planos"),
+                            "GO" if r.get("quality") == "GOOD" else "REVIEW",
+                            T(f"A {wa[0]:,.1f} g ∠ {wa[1]:.0f}° · B {wb[0]:,.1f} g ∠ {wb[1]:.0f}°",
+                              f"A {wa[0]:,.1f} g ∠ {wa[1]:.0f}° · B {wb[0]:,.1f} g ∠ {wb[1]:.0f}°")))
+            sections.append({"title": T("Two planes (ISO 21940-12)", "Dos planos (ISO 21940-12)"),
+                "table": {"headers": [T("Item", "Ítem"), T("Value", "Valor")],
+                          "rows": [[T("Plane A correction", "Corrección plano A"), f"{wa[0]:,.2f} g ∠ {wa[1]:.0f}°"],
+                                   [T("Plane B correction", "Corrección plano B"), f"{wb[0]:,.2f} g ∠ {wb[1]:.0f}°"],
+                                   [T("Predicted residual A", "Residual predicho A"), f"{aa[0]:,.3f} {u}"],
+                                   [T("Predicted residual B", "Residual predicho B"), f"{ba[0]:,.3f} {u}"]]}})
+            findings.append(T(f"Two-plane: A {wa[0]:,.2f} g ∠ {wa[1]:.0f}°, B {wb[0]:,.2f} g ∠ {wb[1]:.0f}°.",
+                              f"Dos planos: A {wa[0]:,.2f} g ∠ {wa[1]:.0f}°, B {wb[0]:,.2f} g ∠ {wb[1]:.0f}°."))
+        if iso:
+            _bg = iso.get("best_grade")
+            quality.append((T("ISO 21940 quality", "Calidad ISO 21940"),
+                            "GO" if (_bg is not None and _bg <= 6.3) else "REVIEW", iso.get("summary_label", "—")))
+            findings.append(T(f"ISO 21940: {iso.get('summary_label','—')}.", f"ISO 21940: {iso.get('summary_label','—')}."))
+        analysis = [T("Influence-coefficient balancing: H=(Vt−V0)/Wt, Wc=−V0/H (ISO 21940-12).",
+                      "Balanceo por coef. de influencia: H=(Vt−V0)/Wt, Wc=−V0/H (ISO 21940-12).")]
+        recs = [T("Install the correction weight(s) and run a verification to confirm the residual.",
+                  "Instalar el/los peso(s) de corrección y correr una verificación para confirmar el residual."),
+                T("Compare the residual unbalance against the ISO 21940 grade for this machine.",
+                  "Comparar el desbalance residual contra el grado ISO 21940 de esta máquina.")]
         try:
-            from core.balance.report import build_balance_pdf
-            pdf = build_balance_pdf(meta=_meta(), one_plane=st.get("r1p"), two_plane=st.get("r2p"), iso=st.get("iso"))
-            return pdf
+            from core.modal.preliminary_report import build_preliminary_pdf
+            return build_preliminary_pdf(meta=meta, quality=quality, sections=sections, analysis=analysis,
+                                         findings=findings, recommendations=recs,
+                                         run_id=f"BAL-{meta['asset']}", lang=("es" if _es else "en"))
         except Exception as exc:  # noqa: BLE001
             rp_status.setText(f"❌ {type(exc).__name__}: {exc}"); return None
 
