@@ -3297,6 +3297,21 @@ def render_history_chart(
     _from_iso = (_dtmod.now(_tzmod.utc) - _delta).isoformat()
 
     from core.live_readings import history_bucketed as _hbk
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Prefetch en PARALELO (cada canal = 1 RPC I/O). Antes secuencial: 4 canales
+    # × ~10 s en 30 d = ~40 s. En paralelo baja a ~1× el más lento.
+    def _fetch_one(chosen: str):
+        _i = labels.index(chosen)
+        _lbl, _var = options[_i]
+        try:
+            return chosen, _hbk(instance_id, _var, "Direct", _from_iso, _bucket)
+        except Exception:  # noqa: BLE001
+            return chosen, []
+    _prefetch: Dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(chosen_labels)))) as _ex:
+        for _c, _r in _ex.map(_fetch_one, chosen_labels):
+            _prefetch[_c] = _r
 
     # Fetch data por sensor — guardamos por label
     sensor_data: List[Dict[str, Any]] = []
@@ -3304,7 +3319,7 @@ def render_history_chart(
     for chosen in chosen_labels:
         idx = labels.index(chosen)
         sensor_lbl, var_name = options[idx]
-        rows = _hbk(instance_id, var_name, "Direct", _from_iso, _bucket)
+        rows = _prefetch.get(chosen) or []
         if not rows:
             # Fallback: la RPC trend_bucketed falló (timeout por falta de índice
             # en rangos largos, o no existe). Traemos crudo cap 1000 — SOLO cubre
