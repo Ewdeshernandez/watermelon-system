@@ -867,12 +867,10 @@ def render_sensor_map_library(
     # discreto debajo del diagrama (usa st.rerun interno, mantiene auth).
     st.markdown(svg, unsafe_allow_html=True)
 
-    # Ciclo 23.61 — Exportador HD. Botones de descarga debajo del diagrama
-    # para que el operador pueda mandar el snapshot por WhatsApp, email, o
-    # ponerlo en un reporte/PPT. SVG raw (vectorial, infinita resolución) +
-    # PNG 4K (cairosvg si está disponible). El timestamp queda en el nombre
-    # del archivo para auditoría.
-    _render_export_bar(svg, instance_obj, latest, severity_summary)
+    # Export diagram REMOVIDO (v3.33): el esquemático ahora viaja DENTRO del
+    # reporte PDF (imagen héroe, sensores por severidad). Un solo botón
+    # "Download report" reemplaza la barra de export. La función
+    # _render_export_bar queda disponible por si se necesita el SVG suelto.
     return True
 
 
@@ -2223,8 +2221,14 @@ def _build_live_report_pdf(
         trend_png = None
 
     try:
+        try:
+            from core.briefing_builder import _render_sensor_map
+            _schem_png = _render_sensor_map(instance_obj, channels)
+        except Exception:  # noqa: BLE001
+            _schem_png = None
         pdf_bytes = generate_live_report_pdf(instance_id, instance_obj, health, kpis,
-                                             channels, events, trend_png)
+                                             channels, events, trend_png,
+                                             schematic_png=_schem_png)
         return pdf_bytes, meta
     except Exception:
         return None, {}
@@ -2384,17 +2388,29 @@ def render_asset_header(
     # System1 para lectura gerencial inmediata. Se intercala antes del
     # status pill en la barra oscura.
     _score, _zone, _zcolor = compute_health_score(severity_summary, latest)
-    health_block = (
-        f'<div style="display:flex; align-items:center; gap:10px; '
-        f'background:#1e293b; border:1px solid #334155; border-radius:10px; '
-        f'padding:5px 12px 5px 8px;">'
-        f'{health_gauge_svg(_score, _zcolor)}'
-        f'<div style="display:flex; flex-direction:column; gap:2px;">'
-        f'<span style="font-size:9px; color:#64748b; font-weight:700; '
-        f'letter-spacing:0.1em; text-transform:uppercase;">Asset health</span>'
-        f'<span style="font-size:12px; color:{_zcolor}; font-weight:800;">{_zone}</span>'
-        f'</div></div>'
-    )
+    if (not latest) or _is_stale:
+        # Data vieja/ausente → NO mostrar salud/zona como si fuera en vivo (honestidad)
+        health_block = (
+            '<div style="display:flex; align-items:center; gap:10px; '
+            'background:#1e293b; border:1px solid #334155; border-radius:10px; '
+            'padding:9px 14px;">'
+            '<span style="font-size:9px; color:#64748b; font-weight:700; '
+            'letter-spacing:0.1em; text-transform:uppercase;">Asset health</span>'
+            '<span style="font-size:13px; color:#94a3b8; font-weight:800;">SIN DATOS</span>'
+            '</div>'
+        )
+    else:
+        health_block = (
+            f'<div style="display:flex; align-items:center; gap:10px; '
+            f'background:#1e293b; border:1px solid #334155; border-radius:10px; '
+            f'padding:5px 12px 5px 8px;">'
+            f'{health_gauge_svg(_score, _zcolor)}'
+            f'<div style="display:flex; flex-direction:column; gap:2px;">'
+            f'<span style="font-size:9px; color:#64748b; font-weight:700; '
+            f'letter-spacing:0.1em; text-transform:uppercase;">Asset health</span>'
+            f'<span style="font-size:12px; color:{_zcolor}; font-weight:800;">{_zone}</span>'
+            f'</div></div>'
+        )
 
     # Asset banner compacto (Ciclo 23.23) — barra oscura de 1 línea con
     # título + KPIs inline + status pill. Reemplaza la card grande de
@@ -3840,26 +3856,32 @@ def main() -> None:
     # que pelea contra los reportes rígidos de Emerson/Bently.
     col_rep, col_send, _sp = st.columns([1.4, 1.4, 3])
     with col_rep:
-        if st.button("Download PDF report", use_container_width=True,
-                     key=f"live_pdf_{instance_id}",
-                     help="1-page executive report with the current asset status"):
-            with st.spinner("Generating executive report…"):
-                pdf_bytes, _meta = _build_live_report_pdf(
+        # 1-CLIC: el PDF se arma en render (cacheado ~90s por activo) → un solo
+        # click descarga directo a la PC. Fuera del fragment de 10s, así que no
+        # rearma en cada tick; sólo cuando el usuario interactúa y venció el TTL.
+        import time as _t_pdf
+        _pk = f"_livepdf_{instance_id}"
+        _pc = st.session_state.get(_pk)
+        if not (_pc and (_t_pdf.time() - _pc.get("ts", 0) < 90)):
+            with st.spinner("Preparando reporte…"):
+                _pdfb, _ = _build_live_report_pdf(
                     instance_id, instance_obj, latest,
                     rendered_rows, severity_summary, spark_data,
                 )
-            if pdf_bytes:
-                _stamp = datetime.now().strftime("%Y%m%d_%H%M")
-                st.download_button(
-                    "Download ready PDF",
-                    data=pdf_bytes,
-                    file_name=f"Reporte_{instance_id}_{_stamp}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key=f"live_pdf_dl_{instance_id}",
-                )
-            else:
-                st.error("Could not generate the report. Check that there are active readings.")
+            st.session_state[_pk] = {"pdf": _pdfb, "ts": _t_pdf.time()}
+            _pc = st.session_state[_pk]
+        _pdfb = (_pc or {}).get("pdf")
+        if _pdfb:
+            _stamp = datetime.now().strftime("%Y%m%d_%H%M")
+            st.download_button(
+                "⬇  Download report", data=_pdfb,
+                file_name=f"Reporte_{instance_id}_{_stamp}.pdf",
+                mime="application/pdf", use_container_width=True,
+                key=f"live_pdf_dl_{instance_id}",
+                help="1-page executive report (schematic + status). One click → downloads.",
+            )
+        else:
+            st.caption("No active readings to build the report.")
 
     # Ciclo 23.150 — Envío manual al cliente (email + WhatsApp). Reusa el
     # mismo builder del PDF y el orquestador core.report_delivery. El destino

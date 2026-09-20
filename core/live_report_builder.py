@@ -443,9 +443,15 @@ def build_report_for_instance(
         pass  # no pisar una tendencia de alarma ya generada
 
     try:
+        try:
+            from core.briefing_builder import _render_sensor_map
+            schematic_png = _render_sensor_map(instance_obj, channels)
+        except Exception:  # noqa: BLE001
+            schematic_png = None
         pdf_bytes = generate_live_report_pdf(instance_id, instance_obj, health, kpis,
                                              channels, events, trend_png,
-                                             trend_title=trend_title)
+                                             trend_title=trend_title,
+                                             schematic_png=schematic_png)
         return pdf_bytes, meta
     except Exception:
         return None, meta

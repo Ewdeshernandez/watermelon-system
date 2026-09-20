@@ -56,6 +56,7 @@ def generate_live_report_pdf(
     events: List[Dict[str, Any]],
     trend_png: Optional[bytes] = None,
     trend_title: str = "Tendencia overall",
+    schematic_png: Optional[bytes] = None,
 ) -> bytes:
     """Genera el PDF ejecutivo de 1 página. Devuelve bytes.
 
@@ -218,6 +219,24 @@ def generate_live_report_pdf(
     ]))
     story.append(band_tbl)
     story.append(Spacer(1, 10))
+
+    # ---------- Esquemático del tren (HÉROE) — sensores por severidad ----------
+    if schematic_png:
+        try:
+            from reportlab.lib.utils import ImageReader
+            _ir = ImageReader(BytesIO(schematic_png))
+            _iw, _ih = _ir.getSize()
+            _w = 17.4 * cm
+            _h = _w * _ih / _iw
+            if _h > 8.6 * cm:                 # cap alto (landscape); recentra
+                _h = 8.6 * cm; _w = _h * _iw / _ih
+            story.append(Paragraph("Estado del tren — sensores coloreados por severidad", st_section))
+            _simg = Image(BytesIO(schematic_png), width=_w, height=_h)
+            _simg.hAlign = "CENTER"
+            story.append(_simg)
+            story.append(Spacer(1, 10))
+        except Exception:
+            pass
 
     # ---------- Tendencia (si hay PNG) ----------
     if trend_png:
