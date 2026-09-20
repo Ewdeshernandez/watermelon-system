@@ -2131,7 +2131,7 @@ def _build_live_report_pdf(
 
     # Health + KPIs
     score, zone, zcolor = compute_health_score(severity_summary, latest)
-    speed_txt = _pick_speeds(latest)[0]                  # eje principal (turbina, no generador)
+    speed_txt, _speeds_all, _ = _pick_speeds(latest)    # eje principal (turbina, no generador)
     n_danger = severity_summary.get("Danger", 0)
     n_alarm = severity_summary.get("Alarma", 0)
     status = "Critical" if n_danger else ("Attention" if n_alarm else "Normal operation")
@@ -2143,7 +2143,7 @@ def _build_live_report_pdf(
         except Exception:
             pass
     health = {"score": score, "zone": zone, "color": zcolor}
-    kpis = {"speed": speed_txt, "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
+    kpis = {"speed": speed_txt, "speeds_all": _speeds_all, "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
     meta = {"instance_id": instance_id, "status": status, "score": score,
             "zone": zone, "alarms": n_danger + n_alarm}
 
@@ -2330,6 +2330,13 @@ def render_asset_header(
     direct_rows = [r for r in (latest or []) if r.get("metric") == "Direct"]
     _sp_txt, _sp_all, _sp_val = _pick_speeds(latest or [])   # turbina (mayor), no generador
     speed_txt = f"{_sp_val:.0f}" if _sp_val is not None else "—"
+    # 2 ejes (turbo-generador): sub con el generador
+    _speed_extra = ""
+    if _sp_all and "·" in _sp_all:
+        _parts = _sp_all.replace(" rpm", "").split(" · ")
+        _others = [pp for pp in _parts if not pp.lower().startswith("turbina")]
+        if _others:
+            _speed_extra = _others[0]
     n_direct = len(direct_rows)
 
     if latest:
@@ -2488,8 +2495,8 @@ def render_asset_header(
                     <div class="wm-bar-class">{class_label} · ISO 20816 / API 670</div>
                 </div>
                 <div class="wm-bar-kpi">
-                    <span class="wm-bar-kpi-label">SPEED</span>
-                    <span class="wm-bar-kpi-value">{speed_txt}<span class="wm-bar-kpi-unit">rpm</span></span>
+                    <span class="wm-bar-kpi-label">{"TURBINA" if _speed_extra else "SPEED"}</span>
+                    <span class="wm-bar-kpi-value">{speed_txt}<span class="wm-bar-kpi-unit">rpm</span>{f'<span style="display:block;font-size:9px;font-weight:600;color:#8aa0bd;letter-spacing:.03em;margin-top:1px;">{_speed_extra} rpm</span>' if _speed_extra else ''}</span>
                 </div>
                 <div class="wm-bar-kpi">
                     <span class="wm-bar-kpi-label">LAST READING</span>

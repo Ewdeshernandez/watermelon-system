@@ -181,7 +181,43 @@ def generate_live_report_pdf(
     if _spall and _spall not in ("—", kpis.get("speed")) and "·" in _spall:
         _zline += f"  ·  Velocidades: {_spall}"   # tren turbo-gen: turbina + generador
     story.append(Paragraph(_zline, st_meta))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
+
+    # ---------- Banner de estado + diagnóstico en lenguaje simple ----------
+    _status = str(kpis.get("status", "—"))
+    _sl = _status.lower()
+    _fg, _bg = _sev_colors(_status)
+    _alarms = kpis.get("alarms", 0) or 0
+    if "crít" in _sl or "crit" in _sl:
+        _band = "CONDICIÓN CRÍTICA — ACCIÓN INMEDIATA"
+        _diag = (f"{_alarms} punto(s) en nivel de PELIGRO. Requiere atención inmediata: "
+                 "inspeccionar el equipo y evaluar parada según criticidad y contexto operativo.")
+    elif "atenci" in _sl or "alarm" in _sl:
+        _band = "ATENCIÓN — SEGUIMIENTO"
+        _diag = (f"{_alarms} punto(s) en ALARMA. Programar revisión y vigilar la tendencia. "
+                 "Aún no exige parada, pero no debe ignorarse.")
+    else:
+        _band = "OPERACIÓN NORMAL"
+        _diag = (f"El activo opera dentro de parámetros normales (ISO 20816, Zona {zone}). "
+                 "Sin acciones requeridas; continuar el monitoreo en línea.")
+    st_band = ParagraphStyle("bd", fontName="Helvetica-Bold", fontSize=12.5,
+                             textColor=colors.HexColor(_fg), leading=15)
+    st_diag = ParagraphStyle("dg", fontName="Helvetica", fontSize=9.5,
+                             textColor=colors.HexColor(_NAVY), leading=13)
+    band_tbl = Table([[Paragraph(_band, st_band)], [Paragraph(_diag, st_diag)]],
+                     colWidths=[17.2 * cm])
+    band_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_bg)),
+        ("LINEBEFORE", (0, 0), (0, -1), 3, colors.HexColor(_fg)),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (0, 0), 9),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 1),
+        ("TOPPADDING", (0, 1), (-1, 1), 1),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 9),
+    ]))
+    story.append(band_tbl)
+    story.append(Spacer(1, 10))
 
     # ---------- Tendencia (si hay PNG) ----------
     if trend_png:
@@ -291,6 +327,9 @@ def generate_live_report_pdf(
     story.append(Paragraph(
         "Generado por Watermelon System · SIGASAS · Monitoreo de condición de maquinaria rotativa · "
         "ISO 20816-3 / API 670", foot))
+    story.append(Paragraph(
+        "Documento confidencial — uso exclusivo del cliente. Reporte automático de condición; "
+        "ante decisiones críticas, validar con el especialista.", foot))
 
     doc.build(story)
     return buf.getvalue()
