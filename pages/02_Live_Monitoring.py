@@ -2296,11 +2296,22 @@ def render_asset_header(
     summary = severity_summary or {}
     n_danger = summary.get("Danger", 0)
     n_alarm = summary.get("Alarma", 0)
+    # Frescura: edad de la lectura MÁS reciente. Data vieja NO es "en vivo" —
+    # no puntuar salud/estado sobre lecturas rancias (honestidad tipo System1).
+    _HDR_STALE_SEC = 900.0   # 15 min sin dato fresco → STALE (no verde/salud)
+    _fresh_age = None
+    try:
+        _ages = [_seconds_since(r.get("captured_at")) for r in (latest or [])]
+        _ages = [a for a in _ages if isinstance(a, (int, float)) and a >= 0]
+        _fresh_age = min(_ages) if _ages else None
+    except Exception:  # noqa: BLE001
+        _fresh_age = None
+    _is_stale = bool(latest) and (_fresh_age is not None) and (_fresh_age > _HDR_STALE_SEC)
     # Ciclo 23.132 — Si NO hay latest readings → estado "SIN DATOS"
     # (no mostrar "OPERACIÓN NORMAL" en verde cuando realmente no hay
     # señal del activo — eso es engañoso para el cliente).
-    if not latest:
-        status_label = "NO DATA"
+    if (not latest) or _is_stale:
+        status_label = "OFFLINE / SIN DATOS" if _is_stale else "NO DATA"
         status_fg = "#475569"
         status_bg = "#f1f5f9"
         status_border = "#cbd5e1"
