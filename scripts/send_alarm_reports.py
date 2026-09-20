@@ -120,6 +120,36 @@ def _send_offline_alert(inst, tag: str, age_min: float, iid: str = "") -> bool:
     return ok
 
 
+def _push_live_alarm(inst, tag: str, status: str, iid: str) -> None:
+    """Notifica a la app Watermelon Live (Web Push) cuando dispara alarma/danger.
+    Server-to-server: POST a WM_LIVE_PUSH_URL/api/push/send con WM_PUSH_SECRET.
+    No-op si no está configurada la URL/secreto."""
+    base = (os.environ.get("WM_LIVE_PUSH_URL", "") or "").rstrip("/")
+    secret = os.environ.get("WM_PUSH_SECRET", "")
+    if not base or not secret:
+        return
+    emails = [e.strip().lower() for e in
+              (getattr(inst, "client_email", "") or "").replace(";", ",").split(",")
+              if "@" in e]
+    if not emails:
+        return
+    import json as _json
+    import urllib.request as _rq
+    body = _json.dumps({
+        "client_emails": emails,
+        "title": f"⚠ {tag}: {status}",
+        "body": f"Vibración en {status}. Toca para ver el detalle en vivo.",
+        "url": f"/asset/{iid}",
+    }).encode()
+    req = _rq.Request(f"{base}/api/push/send", data=body, method="POST",
+                      headers={"Content-Type": "application/json", "x-wm-secret": secret})
+    try:
+        with _rq.urlopen(req, timeout=8) as r:
+            log.info("   %s: push Live -> %s", tag, r.status)
+    except Exception as e:  # noqa: BLE001
+        log.warning("   %s: push Live error: %s", tag, e)
+
+
 def process(only_instance: str = "", force: bool = False, dry_run: bool = False) -> int:
     from core.instance_state import list_instances, get_instance, update_instance_header
     from core.live_report_builder import current_severity_level, build_report_for_instance
@@ -222,6 +252,12 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
                 log.info("   %s email: %s", tag, "OK" if em.get("ok") else f"FALLA · {em.get('error')}")
             if wa is not None:
                 log.info("   %s whatsapp: %s", tag, "OK" if wa.get("ok") else f"FALLA · {wa.get('error')}")
+            # Push a la app Watermelon Live (si está configurada). Server-to-server,
+            # protegido por WM_PUSH_SECRET. No bloquea el aviso si falla.
+            try:
+                _push_live_alarm(inst, tag, status, iid)
+            except Exception as e:  # noqa: BLE001
+                log.warning("   %s: push Live falló: %s", tag, e)
             if res.get("any_ok"):
                 sent += 1
                 update_instance_header(iid, alarm_alert_level=level)
