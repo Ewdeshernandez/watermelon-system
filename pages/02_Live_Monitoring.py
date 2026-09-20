@@ -4383,22 +4383,26 @@ def main() -> None:
         import logging
         logging.warning("render_api670_table (overview) failed: %s", e)
 
-    # Advanced analysis — DENTRO de Live Monitoring, una sección más abajo
-    # (botón que abre la página dedicada Espectro/Onda/Órbita del snapshot).
+    # Advanced analysis — EXPANDER dentro de Live Monitoring (como Tabular List):
+    # al abrirlo se despliega todo (Espectro · Forma de onda · Órbita del último
+    # snapshot). Render lazy: solo carga al abrir (evita costo en cada rerun).
     try:
-        _c_an1, _c_an2, _c_an3 = st.columns([2, 3, 2])
-        with _c_an2:
-            if st.button(
-                "Advanced analysis",
-                key="wm_open_live_analysis",
-                use_container_width=True,
-                help="Spectrum · Waveform · Orbit of the latest snapshot",
-            ):
-                st.session_state["_live_analysis_instance"] = instance_id
-                st.switch_page("pages/_live_analysis.py")
+        _tag_adv = getattr(instance_obj, "tag", None) or instance_id
+        with st.expander("Advanced analysis — Spectrum · Waveform · Orbit",
+                         expanded=False):
+            _adv_key = f"_adv_open_{instance_id}"
+            if not st.session_state.get(_adv_key):
+                if st.button("Open advanced analysis", key=f"wm_adv_open_{instance_id}",
+                             use_container_width=True):
+                    st.session_state[_adv_key] = True
+                    st.rerun()
+                st.caption("Spectrum · Waveform · Orbit of the latest saved snapshot.")
+            else:
+                from core.advanced_analysis_view import render_advanced_analysis
+                render_advanced_analysis(instance_id, _tag_adv)
     except Exception as e:  # noqa: BLE001
         import logging
-        logging.warning("live analysis button failed: %s", e)
+        logging.warning("advanced analysis expander failed: %s", e)
 
     # Ciclo 23.171 — "Detailed analysis — by sensor" ELIMINADO por redundante:
     # · Overall trend (multi-canal overlay + Tiles + botonera de rango) ya cubre

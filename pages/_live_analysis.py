@@ -79,6 +79,12 @@ _VIEWS = [
     ":material/track_changes: Orbit",
 ]
 
+# Ciclo 23.175 — render centralizado y reusable (mismo que el expander de Live
+# Monitoring). El bloque viejo de abajo queda inerte tras st.stop().
+from core.advanced_analysis_view import render_advanced_analysis
+render_advanced_analysis(instance_id, _tag)
+st.stop()
+
 c_left, c_right = st.columns([3, 2])
 with c_left:
     st.markdown(
