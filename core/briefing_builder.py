@@ -963,22 +963,6 @@ def build_asset_draft(
     # El resumen del borrador tampoco lleva el bloque de recomendaciones IA
     sections["summary"] = _strip_ai_reco_block(sections.get("summary", ""))
 
-    # Recomendaciones del SISTEMA como SEMILLA editable: si el activo aún no
-    # tiene recomendaciones gestionadas, se siembran las automáticas en el
-    # store para que el revisor/aprobador las vea PRE-CARGADAS y las edite,
-    # agregue o borre (es el ÚNICO campo editable en revisión/aprobación).
-    # Si ya hay recomendaciones del especialista, NO se tocan (él manda).
-    try:
-        from core.briefing_recommendations import (
-            list_recommendations, save_recommendations)
-        if not list_recommendations(instance_id):
-            _seed = sections.get("recommendations") or []
-            if _seed:
-                save_recommendations(instance_id,
-                                     [{"text": t} for t in _seed])
-    except Exception as e:
-        log.warning("seed recomendaciones (%s) falló: %s", instance_id, e)
-
     try:
         from core.briefing_queue import new_pending_draft, get_draft
         # Un consecutivo por CICLO de reporte: si ya hay borrador pendiente
@@ -1001,6 +985,52 @@ def build_asset_draft(
     return {"instance_id": instance_id, "tag": tag, "ok": ok,
             "status": data["kpis"]["status"], "score": data["health"]["score"],
             "alarms": data["kpis"]["alarms"], "period": period_label}
+
+
+def system_recommendation_proposals(instance_id: str,
+                                    instance_obj: Any = None) -> List[str]:
+    """Propuestas FRESCAS de recomendación del sistema según los hallazgos
+    actuales (severidad en vivo). Devuelve SOLO textos NUEVOS: los que aún no
+    están en la lista gestionada del analista ni fueron descartados. Alimenta
+    el panel 'Propuestas del sistema' en revisión/aprobación — el analista las
+    ADOPTA (pasan a su lista editable) o las DESCARTA. No modifica nada por sí
+    sola."""
+    from core.instance_state import get_instance
+    if instance_obj is None:
+        instance_obj = get_instance(instance_id)
+    data = _compute_asset_data(instance_id, instance_obj)
+    if not data:
+        return []
+    channels = data.get("channels", [])
+    n_danger = int(data.get("n_danger", 0) or 0)
+    n_alarm = int(data.get("n_alarm", 0) or 0)
+    props: List[str] = []
+    for c in [c for c in channels if c.get("status") == "Danger"]:
+        props.append(
+            f"Atender de inmediato {c.get('sensor_label')} "
+            f"({c.get('value')} {c.get('unit', '')}) en condición crítica; "
+            f"inspeccionar y evaluar parada controlada según la criticidad del activo.")
+    for c in [c for c in channels if c.get("status") == "Alarma"]:
+        props.append(
+            f"Programar inspección de {c.get('sensor_label')} "
+            f"({c.get('value')} {c.get('unit', '')}) en alarma; verificar balanceo "
+            f"(ISO 21940-12) y alineación, y vigilar la tendencia.")
+    if n_danger:
+        props.append("Confirmar consistencia de fase 1X entre arranques antes de "
+                     "cualquier intervención de balanceo o alineación.")
+    elif n_alarm:
+        props.append("Aumentar temporalmente la frecuencia de monitoreo del activo.")
+    else:
+        props.append("Mantener la frecuencia actual de monitoreo.")
+        props.append("Conservar este briefing como línea base para comparación en "
+                     "próximas corridas.")
+    try:
+        from core.briefing_recommendations import filter_new_proposals
+        return filter_new_proposals(instance_id, props)
+    except Exception as e:
+        log.warning("system_recommendation_proposals(%s) filtro falló: %s",
+                    instance_id, e)
+        return props
 
 
 def build_all_drafts(period_label: str = "Semanal",

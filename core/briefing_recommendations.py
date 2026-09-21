@@ -124,6 +124,76 @@ def delete_recommendation(instance_id: str, rec_id: str) -> bool:
     return save_recommendations(instance_id, keep)
 
 
+# ---------------------------------------------------------------------------
+# Propuestas del sistema — DESCARTADAS (para no volver a proponer lo mismo)
+# ---------------------------------------------------------------------------
+PARAM_KEY_DISMISSED = "briefing_reco_dismissed"
+
+
+def _norm_text(t: str) -> str:
+    """Clave de comparación de una recomendación (dedup): minúsculas, sin
+    espacios extra ni puntuación final."""
+    import re
+    s = re.sub(r"\s+", " ", str(t or "").strip().lower())
+    return s.rstrip(" .;:")
+
+
+def list_dismissed(instance_id: str) -> List[str]:
+    """Textos normalizados de propuestas del sistema que el analista descartó
+    (no se vuelven a proponer)."""
+    try:
+        from core.instance_state import get_instance_parameters
+        raw = get_instance_parameters(instance_id).get(PARAM_KEY_DISMISSED) or []
+        return [str(x) for x in raw if str(x).strip()]
+    except Exception as e:
+        log.warning("list_dismissed(%s) falló: %s", instance_id, e)
+        return []
+
+
+def dismiss_proposal(instance_id: str, text: str) -> bool:
+    """Marca una propuesta del sistema como descartada (por su texto normalizado)."""
+    try:
+        from core.instance_state import update_instance_parameter
+        key = _norm_text(text)
+        if not key:
+            return False
+        cur = list_dismissed(instance_id)
+        if key not in cur:
+            cur.append(key)
+        return update_instance_parameter(instance_id, PARAM_KEY_DISMISSED, cur)
+    except Exception as e:
+        log.warning("dismiss_proposal(%s) falló: %s", instance_id, e)
+        return False
+
+
+def clear_dismissed(instance_id: str) -> bool:
+    """Reactiva todas las propuestas descartadas (vuelven a proponerse)."""
+    try:
+        from core.instance_state import update_instance_parameter
+        return update_instance_parameter(instance_id, PARAM_KEY_DISMISSED, None)
+    except Exception as e:
+        log.warning("clear_dismissed(%s) falló: %s", instance_id, e)
+        return False
+
+
+def filter_new_proposals(instance_id: str, proposals: List[str]) -> List[str]:
+    """De una lista de propuestas del sistema, devuelve SOLO las que no están
+    ya en la lista gestionada del analista ni fueron descartadas (dedup por
+    texto normalizado)."""
+    have = {_norm_text(r["text"]) for r in list_recommendations(instance_id)}
+    gone = set(list_dismissed(instance_id))
+    out, seen = [], set()
+    for p in proposals or []:
+        k = _norm_text(p)
+        if not k or k in have or k in gone or k in seen:
+            continue
+        seen.add(k)
+        out.append(str(p).strip())
+    return out
+
+
 __all__ = ["list_recommendations", "save_recommendations",
            "add_recommendation", "update_recommendation",
-           "delete_recommendation", "PARAM_KEY"]
+           "delete_recommendation", "PARAM_KEY",
+           "PARAM_KEY_DISMISSED", "list_dismissed", "dismiss_proposal",
+           "clear_dismissed", "filter_new_proposals"]

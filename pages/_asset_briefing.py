@@ -400,6 +400,49 @@ for _iid, _tag, _d in _pending:
         if _q_ss not in st.session_state:
             st.session_state[_q_ss] = _qlist(_iid)
 
+        # ---- Propuestas del sistema (frescas según hallazgos) ----
+        # El sistema PROPONE; el analista ADOPTA (pasa a su lista editable) o
+        # DESCARTA (no vuelve a proponerse). No se auto-mezclan.
+        from core.briefing_builder import system_recommendation_proposals
+        from core.briefing_recommendations import (
+            add_recommendation as _q_add, dismiss_proposal as _q_dismiss,
+            clear_dismissed as _q_cleardis)
+        _props_ss = f"reco_props_{_iid}"
+        if _props_ss not in st.session_state:
+            try:
+                st.session_state[_props_ss] = system_recommendation_proposals(_iid)
+            except Exception:
+                st.session_state[_props_ss] = []
+        _props = st.session_state[_props_ss] or []
+        if _props:
+            with st.expander(f"💡 System proposals ({len(_props)}) — adopt or dismiss",
+                             expanded=True):
+                st.caption("The system proposes recommendations from the current "
+                           "findings. 'Adopt' moves it into your editable list; "
+                           "'Dismiss' hides it so it is not proposed again.")
+                for _pi, _ptxt in enumerate(_props):
+                    _pc1, _pc2, _pc3 = st.columns([0.72, 0.14, 0.14])
+                    _pc1.write(_ptxt)
+                    if _pc2.button("Adopt", key=f"adopt_{_iid}_{_pi}",
+                                   use_container_width=True):
+                        _q_add(_iid, _ptxt)
+                        st.session_state[_q_ss] = _qlist(_iid)
+                        st.session_state.pop(_props_ss, None)
+                        st.rerun()
+                    if _pc3.button("Dismiss", key=f"dismiss_{_iid}_{_pi}",
+                                   use_container_width=True):
+                        _q_dismiss(_iid, _ptxt)
+                        st.session_state.pop(_props_ss, None)
+                        st.rerun()
+        else:
+            _pc = st.columns([0.8, 0.2])
+            _pc[0].caption("No new system proposals (all adopted or dismissed).")
+            if _pc[1].button("Reset dismissed", key=f"reco_reset_{_iid}",
+                             use_container_width=True):
+                _q_cleardis(_iid)
+                st.session_state.pop(_props_ss, None)
+                st.rerun()
+
         def _q_to_date(s):
             try:
                 return _qdate.fromisoformat(str(s)[:10])
