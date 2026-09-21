@@ -127,9 +127,19 @@ def embed_texts(texts: List[str], input_type: str = "document",
 # ---------------------------------------------------------------------------
 # Extracción + chunking
 # ---------------------------------------------------------------------------
+def _sanitize_text(t: str) -> str:
+    """Quita bytes NUL (\\x00) y controles C0 que Postgres text no acepta
+    (error 22P05 'unsupported Unicode escape'), conservando \\t \\n \\r."""
+    if not t:
+        return ""
+    import re
+    t = t.replace("\x00", "")
+    return re.sub(r"[\x01-\x08\x0b\x0c\x0e-\x1f]", " ", t)
+
+
 def extract_pdf_text(pdf_bytes: bytes) -> str:
     """Texto plano de un PDF. Intenta PyMuPDF (mejor extractor) y cae a pypdf.
-    Vacío si el PDF es imagen pura (escaneado sin OCR)."""
+    Vacío si el PDF es imagen pura (escaneado sin OCR). Sanitiza NUL/controles."""
     # 1) PyMuPDF — extractor robusto, sin dependencias de sistema
     try:
         try:
@@ -143,7 +153,7 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
                 parts.append(pg.get_text("text") or "")
             except Exception:
                 continue
-        txt = "\n".join(parts).strip()
+        txt = _sanitize_text("\n".join(parts)).strip()
         if txt:
             return txt
     except Exception as e:
@@ -163,7 +173,7 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
                 parts.append(pg.extract_text() or "")
             except Exception:
                 continue
-        return "\n".join(parts).strip()
+        return _sanitize_text("\n".join(parts)).strip()
     except Exception as e:
         log.warning("extract_pdf_text (pypdf) falló: %s", e)
         return ""
