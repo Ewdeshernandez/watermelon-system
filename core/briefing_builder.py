@@ -204,44 +204,46 @@ def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict
     n_danger = data.get("n_danger", 0)
     channels = data.get("channels", [])
 
-    # Resumen — registro ejecutivo (Machinery Diagnostics)
+    # Resumen — BREVE, gerencial, con criterio de analista de vibraciones
+    # Cat. IV. Practico y directo: qué se vio en la semana + veredicto.
     n_ch = len([c for c in channels if c.get("value") is not None])
 
     def _pl(n: int, sing: str, plur: str) -> str:
         return f"{n} {sing if n == 1 else plur}"
 
+    # Peores puntos (para nombrarlos en el resumen — cobertura de "lo visto")
+    _peor = sorted((c for c in channels if c.get("status") in ("Alarma", "Danger")),
+                   key=lambda c: 0 if c.get("status") == "Danger" else 1)
+    _peor_txt = ", ".join(
+        f"{c.get('sensor_label')} {c.get('value')} {c.get('unit','')}".strip()
+        for c in _peor[:3])
+
     if n_danger:
-        _verbo = "identifica" if (n_danger + n_alarm) == 1 else "identifican"
-        _crit = _pl(n_danger, "canal en condición crítica", "canales en condición crítica")
-        _al = f" y {_pl(n_alarm, 'canal en alarma', 'canales en alarma')}" if n_alarm else ""
         summary = (
-            f"Durante el periodo {period.lower()}, el tren {tag} operó a "
-            f"{speed} y registró severidad global en {zone}. Se {_verbo} "
-            f"{_crit}{_al} sobre un total de {n_ch} puntos monitoreados. La "
-            f"condición exige acción a corto plazo conforme a ISO 20816 y "
-            f"API 670; el detalle por punto y la recomendación asociada se "
-            f"presentan en las secciones siguientes.")
+            f"En la semana, {tag} operó a {speed} con severidad global {zone}. "
+            f"Se detectan {_pl(n_danger, 'punto en condición crítica', 'puntos en condición crítica')}"
+            f"{(' y ' + _pl(n_alarm, 'punto en alarma', 'puntos en alarma')) if n_alarm else ''} "
+            f"de {n_ch} monitoreados ({_peor_txt}). El nivel y su tendencia "
+            f"exigen intervención a corto plazo (ISO 20816 / API 670). Acción en "
+            f"Recomendaciones; sustento en el desarrollo.")
     elif n_alarm:
-        _verbo = "identifica" if n_alarm == 1 else "identifican"
-        _al = _pl(n_alarm, "canal en alarma", "canales en alarma")
         summary = (
-            f"Durante el periodo {period.lower()}, el tren {tag} operó a "
-            f"{speed} con severidad global en {zone}. Se {_verbo} {_al} sobre "
-            f"{n_ch} puntos monitoreados, sin canales en condición crítica. La "
-            f"tendencia se mantiene bajo vigilancia según ISO 20816 y API 670; "
-            f"los puntos afectados y su seguimiento se detallan a continuación.")
+            f"En la semana, {tag} operó a {speed} con severidad global {zone}. "
+            f"Se identifica {_pl(n_alarm, 'punto en alarma', 'puntos en alarma')} "
+            f"de {n_ch} monitoreados ({_peor_txt}), sin puntos críticos; el resto "
+            f"del tren (turbina, gearbox y generador) se mantiene bajo umbral. "
+            f"Vibración dominada por 1X, sin evidencia clara de falla en desarrollo; "
+            f"se recomienda seguimiento cercano. Acción en Recomendaciones.")
     else:
         summary = (
-            f"Durante el periodo {period.lower()}, el tren {tag} presentó "
-            f"operación estable a {speed}, con severidad global en {zone} — "
-            f"Normal conforme a ISO 20816 y API 670. Los {n_ch} puntos "
-            f"monitoreados (cojinetes de turbina, gearbox y generador) se "
-            f"mantuvieron dentro de límites aceptables, sin excursiones sobre "
-            f"umbral. Las componentes espectrales dominantes corresponden a la "
-            f"frecuencia síncrona (1X), sin armónicos elevados ni bandas "
-            f"laterales que sugieran mecanismos de falla; la tendencia temporal "
-            f"no evidencia escalamiento ni cambio de patrón que indique "
-            f"degradación mecánica en desarrollo.")
+            f"En la semana, {tag} operó estable a {speed}; severidad global {zone} "
+            f"(Normal, ISO 20816 / API 670). Los {n_ch} puntos monitoreados "
+            f"(turbina, gearbox y generador) permanecieron bajo umbral. La vibración "
+            f"está dominada por la componente síncrona 1X, sin armónicos, bandas "
+            f"laterales ni componentes sub/supersíncronas: no hay indicios de "
+            f"desbalance severo, desalineación, holgura, roce ni degradación de "
+            f"rodamientos o engranes. Tendencia plana, sin escalamiento. Máquina "
+            f"sana: no se requiere acción, se mantiene el monitoreo de rutina.")
 
     # Diagnóstico — por canal en alarma/danger
     alarmados = [c for c in channels if c.get("status") in ("Alarma", "Danger")]
@@ -796,6 +798,22 @@ def build_asset_briefing(
 
     sensor_map_png = _render_sensor_map(instance_obj, data["channels"], instance_id)
 
+    # Figura del Resumen Ejecutivo = MISMO diagrama vectorial del hero de Live
+    # Monitoring (tren dibujado + valores + barras de umbral). Misma receta que
+    # core.live_report_builder. Si el activo no tiene iconos/keys, cae al
+    # sensor_map_png de arriba.
+    train_drawing = None
+    try:
+        from core.live_readings import latest_for_instance
+        from core.live_report_builder import _build_sensor_lookup
+        from core.train_svg import build_train_svg, svg_to_train_drawing
+        _latest_live = latest_for_instance(instance_id) or []
+        _slk = _build_sensor_lookup(instance_obj)
+        _svg_train = build_train_svg(instance_obj, _latest_live, _slk)
+        train_drawing = svg_to_train_drawing(_svg_train) if _svg_train else None
+    except Exception as e:
+        log.warning("train_drawing briefing falló (%s) → schematic PNG", e)
+
     # Tablas históricas (v3.31.408): métricas de forma de onda (últimos 10
     # snapshots) + matriz de overall diario (últimos 10 días, semáforo).
     try:
@@ -883,6 +901,7 @@ def build_asset_briefing(
             recommendations=recommendations,
             channels=data["channels"],
             sensor_map_png=sensor_map_png,
+            train_drawing=train_drawing,
             meta_extra=pdf_meta,
             wf_history=wf_history,
             overall_history=overall_history,

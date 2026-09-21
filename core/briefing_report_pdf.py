@@ -90,6 +90,7 @@ def generate_briefing_pdf(
     meta_extra: Optional[Dict[str, Any]] = None,
     wf_history: Optional[List[Dict[str, Any]]] = None,
     overall_history: Optional[Dict[str, Any]] = None,
+    train_drawing: Optional[Any] = None,
 ) -> bytes:
     """Devuelve los bytes del PDF del briefing del activo, en formato pro."""
     from reportlab.lib import colors
@@ -165,63 +166,46 @@ def generate_briefing_pdf(
         _sem_color, _sem_label = "#94a3b8", _status_txt.upper() or "SIN DATOS"
 
     body.append(_h1("RESUMEN EJECUTIVO"))
-    kpi_tbl = Table([[
-        _kpi("Salud", health.get("score", "—"), hcolor),
-        _kpi("Estado", f"● {_sem_label}", colors.HexColor(_sem_color)),
-        _kpi("Velocidad", kpis.get("speed", "—")),
-        _kpi("Alarmas", kpis.get("alarms", 0),
-             colors.HexColor(_RED) if kpis.get("alarms", 0) else colors.HexColor(_GREEN)),
-    ]], colWidths=[4.2 * cm] * 4)
-    kpi_tbl.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(_LINE)),
-        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor(_LINE)),
-        ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-        ("LEFTPADDING", (0, 0), (-1, -1), 9),
-    ]))
-    body.append(kpi_tbl)
-    body.append(Paragraph(f"Zona ISO 20816: {health.get('zone', '—')}", st_meta))
-    body.append(Spacer(1, 6))
-
-    # El resumen puede venir como markdown del AI (###, **, listas): se
-    # renderiza nativo para que el cliente NO vea sintaxis cruda.
-    if summary:
-        body.extend(render_markdown_flowables(summary, styles))
 
     # Caption de figura centrado (las imágenes van centradas con su caption)
     st_cap_fig = ParagraphStyle("bfCapFig", parent=st_cap, alignment=TA_CENTER)
 
-    # ---- Estado actual del tren (esquemático del Resumen Ejecutivo) ----
-    # Reemplaza al Mapa de Sensores con polares: vista lateral compacta con
-    # cojinetes coloreados por severidad + Overall bajo cada plano.
-    if sensor_map_png:
+    # ---- Imagen del tren = LA MISMA de Live Monitoring (con valores + barras) ----
+    # Va PRIMERO en el resumen y SUSTITUYE a la barra KPI: la figura ya comunica
+    # salud/estado/valores por punto. Preferido: drawing vectorial (train_drawing,
+    # idéntico al hero de Live Monitoring); si no, PNG del schematic; si ninguno,
+    # se omite.
+    _placed_img = False
+    if train_drawing is not None:
+        try:
+            train_drawing.hAlign = "CENTER"
+            body.append(KeepTogether([
+                train_drawing,
+                Paragraph(f"Figura — Estado del tren en vivo · {tag}", st_cap_fig),
+            ]))
+            _placed_img = True
+        except Exception:
+            _placed_img = False
+    if (not _placed_img) and sensor_map_png:
         try:
             img = Image(BytesIO(sensor_map_png), width=17.5 * cm, height=7.5 * cm,
                         kind="proportional")
             img.hAlign = "CENTER"
             body.append(KeepTogether([
                 img,
-                Paragraph(f"Figura — Estado actual del tren · {tag}", st_cap_fig),
+                Paragraph(f"Figura — Estado del tren · {tag}", st_cap_fig),
             ]))
         except Exception:
             pass
+    body.append(Spacer(1, 8))
 
-    # ---- Diagnóstico ----
-    if diagnosis:
-        body.append(_h1("DIAGNÓSTICO"))
-        body.extend(render_markdown_flowables(diagnosis, styles))
+    # ---- Texto del resumen: breve, gerencial, nivel analista Cat. IV ----
+    # (el resumen puede venir como markdown del AI: se renderiza nativo)
+    if summary:
+        body.extend(render_markdown_flowables(summary, styles))
 
-    # ---- Recomendaciones ----
-    # Acepta dos formatos:
-    #   • str  — borrador automático (legacy)
-    #   • dict — recomendación gestionada por el especialista:
-    #            {"text": ..., "started_at": "YYYY-MM-DD"}; la fecha de
-    #            inicio se muestra al final en gris opaco.
+    # ---- Recomendaciones: van ANTES del desarrollo (el gerente lee acción) ----
     if recommendations:
-        # Recomendaciones JUNTAS en una sola página (título incluido — sin
-        # títulos huérfanos). Si exceden una página completa, KeepTogether
-        # degrada y permite el corte.
         _rec_block: List[Any] = [_h1("RECOMENDACIONES")]
         for i, rec in enumerate(recommendations, start=1):
             if isinstance(rec, dict):
@@ -233,6 +217,11 @@ def generate_briefing_pdf(
                 line = f"{i}. {paragraph_safe(rec)}"
             _rec_block.append(Paragraph(line, st_body))
         body.append(KeepTogether(_rec_block))
+
+    # ---- Desarrollo — Diagnóstico (detalle técnico, después de la acción) ----
+    if diagnosis:
+        body.append(_h1("DIAGNÓSTICO"))
+        body.extend(render_markdown_flowables(diagnosis, styles))
 
     # ---- Tabular List (espejo de la vista de la app) ----
     # Arranca en PÁGINA NUEVA: las recomendaciones quedan solas en la suya
