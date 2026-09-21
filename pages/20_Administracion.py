@@ -96,6 +96,8 @@ if _sel == "clientes":
     from core.admin.clients import render as _render
 elif _sel == "licencias":
     from core.admin.licenses import render as _render
+elif _sel == "conocimiento":
+    from core.admin.knowledge import render as _render
 else:
     from core.admin.users import render as _render
 

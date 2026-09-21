@@ -482,6 +482,36 @@ def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
             )
             machine_ctx = (machine_ctx + "\n" + "\n".join(_lines)).strip()
 
+        # ---- Material de REFERENCIA (RAG) del repositorio de conocimiento ----
+        # Recupera pasajes de cursos/manuales relevantes a los hallazgos + modelo
+        # de máquina y los inyecta como referencia. BLINDAJE: la IA se apoya y
+        # cita, pero NO copia texto (material con derechos de autor).
+        try:
+            from core.knowledge_base import build_reference_context, voyage_ready
+            if voyage_ready():
+                _model = ""
+                if instance_obj is not None:
+                    _model = " ".join(p for p in [
+                        getattr(instance_obj, "driver_model", "") or "",
+                        getattr(instance_obj, "driven_model", "") or "",
+                    ] if p).strip()
+                _query = (f"{machine_train}. {sections.get('diagnosis', '')} "
+                          f"{sections.get('summary', '')}").strip()
+                _ref = build_reference_context(_query, filter_model=_model, k=6)
+                if _ref:
+                    machine_ctx = (
+                        machine_ctx +
+                        "\n\nMATERIAL DE REFERENCIA (cursos de vibraciones y "
+                        "manuales de máquina del repositorio interno). Úsalo para "
+                        "fundamentar la terminología, los criterios y los umbrales "
+                        "de norma. REGLA ESTRICTA: apóyate en él y cita la norma o "
+                        "el manual cuando corresponda, pero NO copies texto literal "
+                        "ni reproduzcas párrafos (es material con derechos de "
+                        "autor); sintetiza siempre con tus propias palabras.\n\n"
+                        + _ref).strip()
+        except Exception as e:
+            log.warning("RAG referencia falló: %s", e)
+
         # Items: el estado tabular + un item por cada figura presente, para que
         # la IA sintetice sabiendo que existen (aunque su contenido no venga
         # interpretado, evita el contrasentido de "no hay espectros").

@@ -13,6 +13,7 @@ ADMIN_SECTIONS = [
     ("clientes", "Clientes"),
     ("licencias", "Licencias Planta"),
     ("usuarios", "Usuarios"),
+    ("conocimiento", "Conocimiento"),
 ]
 
 __all__ = ["ADMIN_SECTIONS"]
