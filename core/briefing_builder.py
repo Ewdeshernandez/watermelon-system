@@ -555,6 +555,74 @@ def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
     return sections
 
 
+def _apply_ai_figure_comments(figures: Dict[str, Any], sections: Dict[str, Any],
+                              tag: str, data: Dict[str, Any],
+                              instance_obj: Any) -> None:
+    """Sobrescribe (in place) el 'analysis' de cada figura con un comentario
+    nivel Cat. IV generado por IA + RAG. Silencioso si no hay IA/figuras."""
+    from core.ai_diagnostic import is_ai_available
+    if not is_ai_available():
+        return
+    _trends = figures.get("trends") or []
+    _others = [k for k in ("spectrum", "waveform", "orbit") if figures.get(k)]
+    if not _trends and not _others:
+        return
+
+    # Contexto de máquina (fuente de verdad anti-alucinación) + RAG
+    machine_ctx = ""
+    try:
+        machine_ctx = _machine_context_block(instance_obj, data)
+    except Exception:
+        machine_ctx = ""
+    _model = " ".join(p for p in [
+        getattr(instance_obj, "driver_model", "") or "",
+        getattr(instance_obj, "driven_model", "") or "",
+    ] if p).strip()
+    try:
+        from core.knowledge_base import build_reference_context, voyage_ready
+        if voyage_ready():
+            _q = (f"{tag}. {sections.get('diagnosis', '')} "
+                  f"{sections.get('summary', '')}").strip()
+            _ref = build_reference_context(_q, filter_model=_model, k=6)
+            if _ref:
+                machine_ctx = (machine_ctx +
+                    "\n\nMATERIAL DE REFERENCIA (cursos/manuales — apóyate y "
+                    "fundamenta, NO copies literal):\n\n" + _ref).strip()
+    except Exception as e:
+        log.warning("RAG para comentarios de figura falló: %s", e)
+
+    # Spec de figuras (con el análisis determinístico como semilla)
+    spec: Dict[str, Any] = {"trends": []}
+    for i, t in enumerate(_trends):
+        _lbl = (t.get("section") or "Tendencia de vibración").strip()
+        if t.get("descr"):
+            _lbl += f" ({t['descr']})"
+        spec["trends"].append({"key": f"trend_{i}", "label": _lbl,
+                               "seed": t.get("analysis", "")})
+    for k in _others:
+        spec[k] = True
+        spec[f"{k}_seed"] = figures.get(f"{k}_analysis", "")
+
+    try:
+        from core.instance_state import compose_train_description
+        _train = compose_train_description(instance_obj) or ""
+    except Exception:
+        _train = ""
+    from core.ai_figure_comments import generate_figure_comments
+    comments = generate_figure_comments(f"{tag} — {_train}".strip(" —"),
+                                        machine_ctx, spec)
+    if not comments:
+        return
+    # Sobrescribir in place
+    for i, t in enumerate(_trends):
+        c = comments.get(f"trend_{i}")
+        if c:
+            t["analysis"] = c
+    for k in _others:
+        if comments.get(k):
+            figures[f"{k}_analysis"] = comments[k]
+
+
 # ---------------------------------------------------------------------------
 # 2b) Portada: consecutivo por equipo + rango del periodo evaluado
 # ---------------------------------------------------------------------------
@@ -814,6 +882,13 @@ def build_asset_briefing(
     if use_ai:
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
+        # Comentario de figura nivel Cat. IV (IA + RAG): sobrescribe el análisis
+        # determinístico de cada figura con uno experto fundamentado en los
+        # cursos/manuales. Falla en silencio → se conserva el base.
+        try:
+            _apply_ai_figure_comments(figures, sections, tag, data, instance_obj)
+        except Exception as e:
+            log.warning("comentarios de figura IA fallaron (se usa base): %s", e)
 
     # Override del flujo de APROBACIÓN: el especialista editó resumen y
     # diagnóstico en la cola de revisión → esos textos mandan sobre lo
