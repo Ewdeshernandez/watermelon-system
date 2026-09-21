@@ -87,25 +87,27 @@ def generate_live_report_pdf(
     )
     story: List[Any] = []
 
-    mono = "Courier"
-    st_title = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=20,
-                              textColor=colors.HexColor(_NAVY), spaceAfter=2, leading=23)
-    st_sub = ParagraphStyle("s", fontName="Helvetica", fontSize=10.5,
+    # Tipografía premium (misma familia del briefing: DejaVuSans vía shell) —
+    # glifos unicode correctos (●, ▲, ▼, ·) y look consistente. v2 pulido.
+    from core.report_pdf_shell import REGULAR as SANS, BOLD as SANSB
+    mono = SANS  # números alineados a la derecha (sin typewriter Courier)
+    st_title = ParagraphStyle("t", fontName=SANSB, fontSize=18,
+                              textColor=colors.HexColor(_NAVY), spaceAfter=2, leading=21)
+    st_sub = ParagraphStyle("s", fontName=SANS, fontSize=10,
                             textColor=colors.HexColor(_SLATE), spaceAfter=1, leading=13)
-    st_meta = ParagraphStyle("m", fontName="Courier", fontSize=8.5,
+    st_meta = ParagraphStyle("m", fontName=SANS, fontSize=8.2,
                              textColor=colors.HexColor(_MUTE), leading=11)
-    st_section = ParagraphStyle("sec", fontName="Helvetica-Bold", fontSize=11,
-                                textColor=colors.HexColor(_SLATE), spaceBefore=8,
-                                spaceAfter=4, leading=13)
-    st_cell = ParagraphStyle("c", fontName="Helvetica", fontSize=9,
+    st_section = ParagraphStyle("sec", fontName=SANSB, fontSize=10.5,
+                                textColor=colors.HexColor(_NAVY), spaceBefore=8,
+                                spaceAfter=5, leading=13)
+    st_cell = ParagraphStyle("c", fontName=SANS, fontSize=9,
                              textColor=colors.HexColor(_NAVY))
-    st_cellnum = ParagraphStyle("cn", fontName="Courier", fontSize=9,
+    st_cellnum = ParagraphStyle("cn", fontName=SANS, fontSize=9,
                                 textColor=colors.HexColor(_NAVY), alignment=TA_RIGHT)
     # Estilo chico para la columna "Ubicación": envuelve el texto en varias
-    # líneas DENTRO de la celda en vez de desbordarse sobre "Overall"
-    # (fix v3.31.381 — labels largos tipo "4YA gearbox bomba" se amontonaban).
-    st_loc = ParagraphStyle("loc", fontName="Helvetica", fontSize=7.6,
-                            leading=8.8, textColor=colors.HexColor(_NAVY))
+    # líneas DENTRO de la celda en vez de desbordarse sobre "Overall".
+    st_loc = ParagraphStyle("loc", fontName=SANS, fontSize=7.6,
+                            leading=8.8, textColor=colors.HexColor(_SLATE))
 
     # ---------- Header ----------
     logo_cell = ""
@@ -134,6 +136,17 @@ def generate_live_report_pdf(
         header_left.append(Paragraph(sub2, st_sub))
     header_left.append(Paragraph(f"Generado {now_txt} · ISO 20816 / API 670", st_meta))
 
+    # Color de acento por estado (para la línea superior + chip de estado).
+    _hs = str(kpis.get("status", "") or "")
+    if kpis.get("offline"):
+        _acc, _acc_bg, _acc_label = "#475569", "#f1f5f9", "FUERA DE LÍNEA"
+    else:
+        _acc, _acc_bg = _sev_colors(_hs)
+        _sll = _hs.lower()
+        _acc_label = ("PELIGRO" if ("crít" in _sll or "crit" in _sll)
+                      else "ALARMA" if ("atenci" in _sll or "alarm" in _sll)
+                      else "NORMAL")
+
     if logo_path.exists():
         try:
             logo_cell = Image(str(logo_path), width=3.6 * cm, height=3.6 * cm * 0.494)
@@ -141,15 +154,28 @@ def generate_live_report_pdf(
         except Exception:
             logo_cell = ""
 
-    htbl = Table([[header_left, logo_cell]], colWidths=[12.5 * cm, 5.5 * cm])
+    # Chip de estado (pill) a la derecha, bajo el logo.
+    st_pill = ParagraphStyle("pill", fontName=SANSB, fontSize=9.5,
+                             textColor=colors.HexColor(_acc), alignment=TA_CENTER,
+                             leading=12)
+    pill = Table([[Paragraph(f"● {_acc_label}", st_pill)]], colWidths=[3.6 * cm])
+    pill.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_acc_bg)),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    pill.hAlign = "RIGHT"
+    right_cell = [logo_cell, Spacer(1, 6), pill] if logo_cell else [pill]
+
+    htbl = Table([[header_left, right_cell]], colWidths=[12.5 * cm, 5.5 * cm])
     htbl.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ALIGN", (1, 0), (1, 0), "RIGHT"),
     ]))
     story.append(htbl)
-    story.append(Spacer(1, 4))
-    story.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor(_LINE)))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 5))
+    story.append(HRFlowable(width="100%", thickness=1.6, color=colors.HexColor(_acc)))
+    story.append(Spacer(1, 9))
 
     # ---------- KPIs ----------
     score = health.get("score")
@@ -158,24 +184,29 @@ def generate_live_report_pdf(
     hcolor = colors.HexColor(health.get("color", _MUTE))
 
     def _kpi(label, value, vcolor=None):
-        lab = ParagraphStyle("kl", fontName="Helvetica-Bold", fontSize=8,
-                             textColor=colors.HexColor(_MUTE))
-        val = ParagraphStyle("kv", fontName="Courier-Bold", fontSize=12,
-                             textColor=vcolor or colors.HexColor(_NAVY), leading=14)
+        lab = ParagraphStyle("kl", fontName=SANSB, fontSize=7.3,
+                             textColor=colors.HexColor(_MUTE), leading=9, spaceAfter=3)
+        val = ParagraphStyle("kv", fontName=SANSB, fontSize=14.5,
+                             textColor=vcolor or colors.HexColor(_NAVY), leading=17)
         return [Paragraph(label.upper(), lab), Paragraph(str(value), val)]
 
     kpi_tbl = Table([[
         _kpi("Salud", f"{score_txt}", hcolor),
-        _kpi("Estado", kpis.get("status", "—")),
+        _kpi("Estado", _acc_label.capitalize(), colors.HexColor(_acc)),
         _kpi("Velocidad", kpis.get("speed", "—")),
         _kpi("Alarmas", kpis.get("alarms", 0),
              colors.HexColor(_RED) if kpis.get("alarms", 0) else colors.HexColor(_GREEN)),
         _kpi("Última lectura", kpis.get("last", "—")),
-    ]], colWidths=[3.4 * cm] * 5)
+    ]], colWidths=[3.44 * cm] * 5)
     kpi_tbl.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(_LINE)),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor(_LINE)),
+        ("TOPPADDING", (0, 0), (-1, -1), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ("LEFTPADDING", (0, 0), (-1, -1), 11),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
     ]))
     story.append(kpi_tbl)
     _zline = f"Zona ISO: {zone}"
@@ -218,9 +249,9 @@ def generate_live_report_pdf(
         _band = "OPERACIÓN NORMAL"
         _diag = (f"El activo opera dentro de parámetros normales (ISO 20816, {zone}). "
                  "Sin acciones requeridas; continuar el monitoreo en línea.")
-    st_band = ParagraphStyle("bd", fontName="Helvetica-Bold", fontSize=12.5,
+    st_band = ParagraphStyle("bd", fontName=SANSB, fontSize=12.5,
                              textColor=colors.HexColor(_fg), leading=15)
-    st_diag = ParagraphStyle("dg", fontName="Helvetica", fontSize=9.5,
+    st_diag = ParagraphStyle("dg", fontName=SANS, fontSize=9.5,
                              textColor=colors.HexColor(_NAVY), leading=13)
     band_tbl = Table([[Paragraph(_band, st_band)], [Paragraph(_diag, st_diag)]],
                      colWidths=[17.2 * cm])
@@ -302,12 +333,14 @@ def generate_live_report_pdf(
 
     _ch_title = Paragraph("Canales — Overall + vectores 1X / 2X (API 670)", st_section)
     head = ["Estado", "Canal", "Ubicación", "Overall", "Unit", "1X ampl", "1X °", "2X ampl", "2X °"]
+    st_estado = ParagraphStyle("est", fontName=SANSB, fontSize=8.2,
+                               textColor=colors.HexColor(_NAVY), leading=10)
     data = [head]
-    row_styles = []
-    for i, c in enumerate(channels, start=1):
-        fg, bg = _sev_colors(c.get("status", ""))
+    for c in channels:
+        fg, _bg = _sev_colors(c.get("status", ""))
+        _stt = c.get("status") or "—"
         data.append([
-            (c.get("status") or "—"),
+            Paragraph(f'<font color="{fg}">●</font>&nbsp;{_stt}', st_estado),
             c.get("sensor_label", "—"),
             Paragraph(str(c.get("plane_label") or "—"), st_loc),
             c.get("value", "—"),
@@ -317,28 +350,31 @@ def generate_live_report_pdf(
             c.get("x2_amp", "—"),
             c.get("x2_ph", "—"),
         ])
-        row_styles.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor(fg)))
-        row_styles.append(("BACKGROUND", (0, i), (0, i), colors.HexColor(bg)))
 
-    ctbl = Table(data, colWidths=[1.7*cm, 1.5*cm, 3.6*cm, 1.8*cm, 1.5*cm,
+    ctbl = Table(data, colWidths=[1.9*cm, 1.4*cm, 3.5*cm, 1.8*cm, 1.4*cm,
                                   1.6*cm, 1.2*cm, 1.6*cm, 1.2*cm])
     base_style = [
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 8.5),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor(_SLATE)),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f8fafc")),
-        ("FONTNAME", (1, 1), (-1, -1), "Courier"),
-        ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 1), (-1, -1), 9),
-        ("FONTSIZE", (0, 1), (0, -1), 7.5),
+        # Header: fondo navy suave + texto claro (más definido)
+        ("FONTNAME", (0, 0), (-1, 0), SANSB),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_NAVY)),
+        ("TOPPADDING", (0, 0), (-1, 0), 5), ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+        # Cuerpo
+        ("FONTNAME", (1, 1), (-1, -1), SANS),
+        ("FONTSIZE", (1, 1), (-1, -1), 9),
         ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
         ("ALIGN", (0, 0), (2, -1), "LEFT"),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 1), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 3.5),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        # Zebra + hairline inferior
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#f7f9fc")]),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
+        ("LINEBELOW", (0, 0), (-1, 0), 0, colors.white),
     ]
-    ctbl.setStyle(TableStyle(base_style + row_styles))
+    ctbl.setStyle(TableStyle(base_style))
     story.append(KeepTogether([_ch_title, ctbl]))
     meta_txt = "1X = componente síncrona (desbalance) · 2X = segunda armónica (desalineamiento / soltura)"
     if ch_truncated:
@@ -359,20 +395,25 @@ def generate_live_report_pdf(
             ev_styles.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor(acolor)))
         etbl = Table(ev_data, colWidths=[0.7*cm, 2.0*cm, 2.2*cm, 3.5*cm, 2.5*cm])
         etbl.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 0), (-1, 0), SANSB),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor(_MUTE)),
-            ("FONTNAME", (1, 1), (-1, -1), "Courier"),
-            ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_NAVY)),
+            ("FONTNAME", (1, 1), (-1, -1), SANS),
+            ("ALIGN", (0, 0), (0, -1), "CENTER"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#f7f9fc")]),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ] + ev_styles))
         story.append(etbl)
 
     # ---------- Footer ----------
     story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.4, color=colors.HexColor(_LINE)))
-    foot = ParagraphStyle("f", fontName="Helvetica", fontSize=8,
+    foot = ParagraphStyle("f", fontName=SANS, fontSize=8,
                           textColor=colors.HexColor(_MUTE), alignment=TA_CENTER)
     story.append(Spacer(1, 4))
     story.append(Paragraph(
