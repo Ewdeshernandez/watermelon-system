@@ -397,17 +397,18 @@ def build_report_for_instance(
                "unit": e["unit"], "age": _format_age(e.get("captured_at", "")), "rising": e["rising"]}
               for e in ev]
 
-    # Ciclo 23.157 — Reporte de ALARMA (alarm_focus=True, solo cron de
-    # alarmas): la tendencia muestra EXCLUSIVAMENTE los canales en
-    # Alarma/Danger, últimas 48 h (máx por bucket de 30 min vía RPC
-    # trend_bucketed), con sus límites de alarma/danger. El reporte
-    # programado mantiene la tendencia overall normal.
+    # Reporte de ALARMA (alarm_focus=True, cron de alarmas): la tendencia
+    # muestra EXCLUSIVAMENTE los canales en Alarma/Danger, últimos 7 DÍAS
+    # (máx por hora), con sus límites de alarma/danger. Ventana ampliada de
+    # 48 h → 7 d (2026-09-21, decisión del usuario) para distinguir escalón
+    # súbito vs deriva lenta. Usa el rollup horario (instantáneo); si un canal
+    # no está en el rollup, cae al bucketed por hora sobre la data cruda.
     trend_png = None
     trend_title = "Tendencia overall"
     if alarm_focus:
         try:
             from datetime import timedelta
-            from core.live_readings import history_bucketed
+            from core.live_readings import history_bucketed, history_rollup
             _alarm_rows = [r for r in rendered_rows
                            if r.get("status") in ("Alarma", "Danger")]
             if _alarm_rows:
@@ -419,18 +420,22 @@ def build_report_for_instance(
                             and (r.get("metric") or "") == "Direct"):
                         _var_by_sensor.setdefault(r["sensor_label"], r["variable"])
                 _from_iso = (datetime.now(timezone.utc)
-                             - timedelta(hours=48)).isoformat()
+                             - timedelta(days=7)).isoformat()
                 _palette = ["#dc2626", "#d97706", "#7c3aed", "#0891b2"]
                 _series = []
                 for i, rr in enumerate(_alarm_rows):
                     _var = _var_by_sensor.get(rr["sensor_label"])
                     if not _var:
                         continue
-                    _b48 = history_bucketed(instance_id, _var, "Direct",
-                                            _from_iso, "30 minutes") or []
-                    xs = [b.get("bucket") for b in _b48
+                    _pts = history_rollup(instance_id, _var, "Direct",
+                                          _from_iso, "1 hour") or []
+                    if len([p for p in _pts if p.get("max_val") is not None]) < 2:
+                        # Fallback: rollup no cubre este canal → bucketed crudo 1 h
+                        _pts = history_bucketed(instance_id, _var, "Direct",
+                                                _from_iso, "1 hour") or []
+                    xs = [b.get("bucket") for b in _pts
                           if b.get("max_val") is not None]
-                    ys = [b.get("max_val") for b in _b48
+                    ys = [b.get("max_val") for b in _pts
                           if b.get("max_val") is not None]
                     if len(ys) >= 2:
                         _series.append({"label": rr["sensor_label"], "x": xs,
@@ -442,10 +447,10 @@ def build_report_for_instance(
                         _series,
                         alarm=(_rr0.get("alarm_used", 0) or 0),
                         danger=(_rr0.get("danger_used", 0) or 0),
-                        y_title=f"{_unit0} (máx / 30 min)",
+                        y_title=f"{_unit0} (máx / hora)",
                     )
                     if trend_png:
-                        trend_title = "Canales en alarma — tendencia últimas 48 h"
+                        trend_title = "Canales en alarma — tendencia últimos 7 días"
         except Exception:
             trend_png = None
 
