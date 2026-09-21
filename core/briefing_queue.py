@@ -149,8 +149,8 @@ def approve_and_send(instance_id: str, *,
         meta_extra = {
             "prepared_by": prepared_by.strip(),
             "reviewed_by": approved_by.strip(),
-            "prepared_label": "Elaborado por:",
-            "reviewed_label": "Aprobado por:",
+            "prepared_label": "Preparado por:",
+            "reviewed_label": "Revisado por:",
         }
         # Consecutivo definitivo: el reclamado al crear el borrador; si el
         # borrador es viejo y no trae, se reclama uno nuevo aquí.

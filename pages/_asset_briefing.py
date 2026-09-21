@@ -427,16 +427,18 @@ for _iid, _tag, _d in _pending:
 
         _s1, _s2 = st.columns(2)
         with _s1:
-            _elab = st.text_input("Prepared by", value=_me_name,
+            _elab = st.text_input("Prepared by", value="Laura C. Garzón",
                                   key=f"bfq_elab_{_iid}")
-            _elab_rol = st.text_input("Role (prepared)", value="",
+            _elab_rol = st.text_input("Role (prepared)",
+                                      value="Junior Condition Monitoring Engineer",
                                       key=f"bfq_elabr_{_iid}",
                                       placeholder="optional")
         with _s2:
-            _aprb = st.text_input("Approved by", value="",
+            _aprb = st.text_input("Reviewed by", value="Ewdes A. Hernández",
                                   key=f"bfq_aprb_{_iid}",
                                   placeholder="required to approve")
-            _aprb_rol = st.text_input("Role (approved)", value="",
+            _aprb_rol = st.text_input("Role (reviewed)",
+                                      value="Machinery Diagnostic Champion",
                                       key=f"bfq_aprbr_{_iid}",
                                       placeholder="optional")
 
@@ -461,8 +463,10 @@ for _iid, _tag, _d in _pending:
                         meta_extra={
                             "prepared_by": _elab or _me_name,
                             "reviewed_by": _aprb,
-                            "prepared_label": "Elaborado por:",
-                            "reviewed_label": "Aprobado por:",
+                            "prepared_role": _elab_rol,
+                            "reviewed_role": _aprb_rol,
+                            "prepared_label": "Preparado por:",
+                            "reviewed_label": "Revisado por:",
                             "consecutive": _d.get("consecutive", ""),
                         },
                     )

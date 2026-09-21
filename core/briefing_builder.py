@@ -771,35 +771,38 @@ def build_asset_briefing(
         wf_history = []
     overall_history = _overall_history_matrix(instance_id, data["channels"])
 
-    # meta de portada: train SIN cliente (el cliente va como línea propia del
-    # bloque del activo) + firmas/consecutivo que pase la UI.
-    train_bare = " ".join(p for p in [
-        getattr(instance_obj, "driver_model", "") or "",
-        "→", getattr(instance_obj, "driven_model", "") or "",
-    ] if p and p != "→") or ""
-    # Fecha del reporte = momento exacto de generación (fecha + hora local).
-    # Antes la portada caía a solo-fecha; el usuario quiere el timestamp real.
+    # Fecha del reporte = SOLO fecha (sin hora), Bogotá. El usuario pidió
+    # quitar el timestamp de la portada del reporte semanal.
     from datetime import datetime as _dt
     try:
         from zoneinfo import ZoneInfo
-        _gen_ts = _dt.now(ZoneInfo("America/Bogota")).strftime("%Y-%m-%d %H:%M")
+        _gen_ts = _dt.now(ZoneInfo("America/Bogota")).strftime("%Y-%m-%d")
     except Exception:
-        _gen_ts = _dt.now().strftime("%Y-%m-%d %H:%M")
-    # Bloque del activo en portada — MISMO criterio que los Reports clásicos
-    # (16_Reports _maybe_set): asset_class + tag en la línea grande, luego
-    # modelo, ubicación y cliente, y el tren compuesto en gris.
-    try:
-        from core.instance_state import compose_train_description
-        _train_full = (compose_train_description(instance_obj) or "").strip()
-    except Exception:
-        _train_full = ""
+        _gen_ts = _dt.now().strftime("%Y-%m-%d")
+    # Bloque del activo en portada: el equipo se nombra UNA sola vez (línea
+    # grande = "driver acoplado a driven"), luego la planta y el cliente. Sin
+    # repetir asset_class + tag + modelo (antes salía triplicado).
+    _drv = " ".join(p for p in [
+        (getattr(instance_obj, "driver_manufacturer", "") or "").strip(),
+        (getattr(instance_obj, "driver_model", "") or "").strip(),
+    ] if p).strip()
+    _dvn = " ".join(p for p in [
+        (getattr(instance_obj, "driven_manufacturer", "") or "").strip(),
+        (getattr(instance_obj, "driven_model", "") or "").strip(),
+    ] if p).strip()
+    if _drv and _dvn:
+        _equipo = f"{_drv} acoplado a {_dvn}"
+    else:
+        _equipo = _drv or _dvn or (getattr(instance_obj, "asset_class", "") or "").strip() or tag
     pdf_meta = {
-        "asset_class": (getattr(instance_obj, "asset_class", "") or "").strip(),
-        "asset_model": (getattr(instance_obj, "driver_model", "")
-                        or getattr(instance_obj, "driven_model", "") or "").strip(),
+        # Línea grande = el equipo, una sola vez. unit/asset_model vacíos para
+        # que el shell no repita el tag ni el modelo debajo.
+        "asset_class": _equipo,
+        "unit": "",
+        "asset_model": "",
         "location": (getattr(instance_obj, "site", "")
                      or getattr(instance_obj, "location", "") or "").strip(),
-        "train_description": _train_full or train_bare,
+        "train_description": "",
         "client": client,
         "report_date": _gen_ts,  # meta_extra puede sobreescribir si la UI lo pasa
         # Portada: rango REAL del periodo evaluado + consecutivo del equipo.

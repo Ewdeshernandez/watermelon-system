@@ -156,7 +156,7 @@ El módulo Live Monitoring manda avisos/reportes solo. Los dispara **GitHub Acti
 |---|---|---|
 | `*/15 * * * *` | **Alarma/Danger** — avisa al entrar/escalar (anti-spam 1×/episodio) + **heartbeat OFFLINE** (activo sin datos > `WM_OFFLINE_MINUTES`, def 60) | `scripts/send_alarm_reports.py` |
 | `0 * * * *` | **Diario/programado** — envía a los activos cuya hora/día programados coinciden | `scripts/send_scheduled_reports.py` |
-| `0 12 * * 1` | **Semanal** (lunes 07:00 COL) — briefing por activo **auto-enviado** al cliente sin firma humana | `scripts/send_weekly_briefing.py --auto-send` |
+| `0 12 * * 1` (+ sáb noche) | **Semanal** — briefing por activo con FLUJO humano: genera BORRADOR → avisa por email al revisor (`WM_BRIEFING_REVIEW_EMAIL`, def ehernandez@sigasas.com) → el especialista revisa/firma/aprueba en la app ("Briefing por activo") → al aprobar se envía solo al cliente. Firmas: Preparado por Laura C. Garzón / Revisado por Ewdes A. Hernández. **NO usar `--auto-send`** (ese modo se salta la revisión y firma "Watermelon System (automático)"). | `scripts/send_weekly_briefing.py --period Semanal` |
 
 **Secret requerido (una vez):** `STREAMLIT_SECRETS_TOML` en GitHub → Settings → Secrets →
 Actions = contenido COMPLETO de `.streamlit/secrets.toml` (`[supabase]`, `[email]`,
