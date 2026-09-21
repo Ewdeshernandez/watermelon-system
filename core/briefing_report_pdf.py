@@ -112,8 +112,9 @@ def generate_briefing_pdf(
     meta_extra = meta_extra or {}
     meta: Dict[str, Any] = {
         "report_title": f"REPORTE {period_label.upper()}",
-        "format_code": "WMS-FMT-002",
-        "format_version": "1",
+        # Banda de código de formato (WMS-FMT-…) OCULTA: el usuario la quitó por
+        # estética. El encabezado interno queda solo con el título del reporte.
+        "hide_format_band": True,
         "unit": tag,
         "train_description": train or "",
         "period": period_label,
@@ -131,6 +132,14 @@ def generate_briefing_pdf(
                             spaceAfter=8, alignment=TA_RIGHT)
 
     body: List[Any] = []
+
+    # Numeración automática de secciones nivel-1 (entran a la TABLA DE
+    # CONTENIDO con su número, porque el shell registra el texto del heading).
+    _h1n = [0]
+
+    def _h1(title: str) -> Paragraph:
+        _h1n[0] += 1
+        return Paragraph(f"{_h1n[0]}. {title}", styles["WMTOC1"])
 
     # ---- Banner de estado + KPIs ----
     hcolor = colors.HexColor(health.get("color", "#94a3b8"))
@@ -155,7 +164,7 @@ def generate_briefing_pdf(
     else:
         _sem_color, _sem_label = "#94a3b8", _status_txt.upper() or "SIN DATOS"
 
-    body.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
+    body.append(_h1("RESUMEN EJECUTIVO"))
     kpi_tbl = Table([[
         _kpi("Salud", health.get("score", "—"), hcolor),
         _kpi("Estado", f"● {_sem_label}", colors.HexColor(_sem_color)),
@@ -200,7 +209,7 @@ def generate_briefing_pdf(
 
     # ---- Diagnóstico ----
     if diagnosis:
-        body.append(Paragraph("DIAGNÓSTICO", styles["WMTOC1"]))
+        body.append(_h1("DIAGNÓSTICO"))
         body.extend(render_markdown_flowables(diagnosis, styles))
 
     # ---- Recomendaciones ----
@@ -213,7 +222,7 @@ def generate_briefing_pdf(
         # Recomendaciones JUNTAS en una sola página (título incluido — sin
         # títulos huérfanos). Si exceden una página completa, KeepTogether
         # degrada y permite el corte.
-        _rec_block: List[Any] = [Paragraph("RECOMENDACIONES", styles["WMTOC1"])]
+        _rec_block: List[Any] = [_h1("RECOMENDACIONES")]
         for i, rec in enumerate(recommendations, start=1):
             if isinstance(rec, dict):
                 txt = paragraph_safe(rec.get("text", ""))
@@ -230,7 +239,7 @@ def generate_briefing_pdf(
     # y el título nunca queda huérfano al pie de página.
     if channels:
         body.append(PageBreak())
-        body.append(Paragraph("TABULAR LIST — CANALES (API 670 / ISO 20816-3)", styles["WMTOC1"]))
+        body.append(_h1("TABULAR LIST — CANALES (API 670 / ISO 20816-3)"))
         _asof = (meta or {}).get("tabular_asof", "")
         if _asof:
             body.append(Paragraph(
@@ -411,8 +420,7 @@ def generate_briefing_pdf(
     if _trends or _others:
         # El título de sección viaja DENTRO del bloque de la primera figura
         # (KeepTogether) para que nunca quede huérfano al pie de una página.
-        _section_head: List[Any] = [Paragraph("FIGURAS Y ANÁLISIS",
-                                              styles["WMTOC1"])]
+        _section_head: List[Any] = [_h1("FIGURAS Y ANÁLISIS")]
         _fecha = _fecha_es(meta.get("report_date"))
         _equipo = f"Unidad {tag}"
         _n = 0

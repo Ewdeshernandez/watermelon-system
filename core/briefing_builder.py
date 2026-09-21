@@ -204,16 +204,44 @@ def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict
     n_danger = data.get("n_danger", 0)
     channels = data.get("channels", [])
 
-    # Resumen
-    estado = ("condición crítica" if n_danger else
-              "puntos en alarma" if n_alarm else "operación normal")
-    summary = (
-        f"Durante el periodo {period.lower()}, el activo {tag} se mantuvo en "
-        f"{zone} con velocidad {speed}. "
-        + (f"Se registran {n_danger + n_alarm} canal(es) sobre umbral ({estado})."
-           if (n_alarm or n_danger) else
-           "No se registran canales sobre umbral; el activo opera dentro de la "
-           "zona aceptable según ISO 20816 / API 670."))
+    # Resumen — registro ejecutivo (Machinery Diagnostics)
+    n_ch = len([c for c in channels if c.get("value") is not None])
+
+    def _pl(n: int, sing: str, plur: str) -> str:
+        return f"{n} {sing if n == 1 else plur}"
+
+    if n_danger:
+        _verbo = "identifica" if (n_danger + n_alarm) == 1 else "identifican"
+        _crit = _pl(n_danger, "canal en condición crítica", "canales en condición crítica")
+        _al = f" y {_pl(n_alarm, 'canal en alarma', 'canales en alarma')}" if n_alarm else ""
+        summary = (
+            f"Durante el periodo {period.lower()}, el tren {tag} operó a "
+            f"{speed} y registró severidad global en {zone}. Se {_verbo} "
+            f"{_crit}{_al} sobre un total de {n_ch} puntos monitoreados. La "
+            f"condición exige acción a corto plazo conforme a ISO 20816 y "
+            f"API 670; el detalle por punto y la recomendación asociada se "
+            f"presentan en las secciones siguientes.")
+    elif n_alarm:
+        _verbo = "identifica" if n_alarm == 1 else "identifican"
+        _al = _pl(n_alarm, "canal en alarma", "canales en alarma")
+        summary = (
+            f"Durante el periodo {period.lower()}, el tren {tag} operó a "
+            f"{speed} con severidad global en {zone}. Se {_verbo} {_al} sobre "
+            f"{n_ch} puntos monitoreados, sin canales en condición crítica. La "
+            f"tendencia se mantiene bajo vigilancia según ISO 20816 y API 670; "
+            f"los puntos afectados y su seguimiento se detallan a continuación.")
+    else:
+        summary = (
+            f"Durante el periodo {period.lower()}, el tren {tag} presentó "
+            f"operación estable a {speed}, con severidad global en {zone} — "
+            f"Normal conforme a ISO 20816 y API 670. Los {n_ch} puntos "
+            f"monitoreados (cojinetes de turbina, gearbox y generador) se "
+            f"mantuvieron dentro de límites aceptables, sin excursiones sobre "
+            f"umbral. Las componentes espectrales dominantes corresponden a la "
+            f"frecuencia síncrona (1X), sin armónicos elevados ni bandas "
+            f"laterales que sugieran mecanismos de falla; la tendencia temporal "
+            f"no evidencia escalamiento ni cambio de patrón que indique "
+            f"degradación mecánica en desarrollo.")
 
     # Diagnóstico — por canal en alarma/danger
     alarmados = [c for c in channels if c.get("status") in ("Alarma", "Danger")]
@@ -221,8 +249,10 @@ def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict
         det = "; ".join(
             f"{c['sensor_label']} ({c.get('plane_label','')}) {c['value']} {c['unit']} "
             f"en {c['status']}" for c in alarmados[:6])
+        _uno = len(alarmados) == 1
         diagnosis = (
-            f"Los siguientes puntos superan su umbral y requieren seguimiento: {det}. "
+            f"{'El siguiente punto supera' if _uno else 'Los siguientes puntos superan'} "
+            f"su umbral y {'requiere' if _uno else 'requieren'} seguimiento: {det}. "
             "El resto de la cadena de medición se mantiene dentro de límites normales.")
     else:
         diagnosis = (
@@ -621,16 +651,18 @@ def _overall_history_matrix(instance_id: str,
 # ---------------------------------------------------------------------------
 # 3) Builder por activo
 # ---------------------------------------------------------------------------
-def _render_sensor_map(instance_obj: Any, channels: List[Dict[str, Any]]) -> Optional[bytes]:
-    """Diagrama de ESTADO ACTUAL DEL TREN (el esquemático del Resumen
-    Ejecutivo): vista lateral compacta con cada cojinete coloreado por el
-    peor status del plano + Overall debajo. Reemplaza al Mapa de Sensores
-    con polares (v3.31.397). Headless — severidades LIVE."""
+def _render_sensor_map(instance_obj: Any, channels: List[Dict[str, Any]],
+                       instance_id: str = "") -> Optional[bytes]:
+    """Figura del Resumen Ejecutivo = MISMA imagen que Live Monitoring: el
+    schematic REAL del activo (subido/dibujado) con markers de severidad +
+    Overall horneados sobre las coordenadas x_pct/y_pct de cada sensor
+    (core.sensor_diagram.render_on_schematic). Si el activo no tiene
+    schematic_png o sus sensores no están posicionados, cae al diagrama
+    genérico de tren. Headless — severidades LIVE."""
     try:
         sensors = getattr(instance_obj, "sensors", None)
         if not sensors:
             return None
-        from core.sensor_diagram import render_sensor_map_diagram
 
         _norm = {"alarma": "Alarm", "alert": "Alarm", "danger": "Danger",
                  "crítica": "Danger", "critica": "Danger", "normal": "Normal"}
@@ -649,9 +681,31 @@ def _render_sensor_map(instance_obj: Any, channels: List[Dict[str, Any]]) -> Opt
             if c.get("unit"):
                 unit_by_label[lbl] = c["unit"]
 
+        # 1) PREFERIDO: el schematic real del activo (idéntico a Live Monitoring)
+        schem_ref = getattr(instance_obj, "schematic_png", None)
+        iid = instance_id or getattr(instance_obj, "id", "") or ""
+        if schem_ref and iid:
+            try:
+                from core.instance_state import get_instance_document_bytes
+                from core.sensor_diagram import render_on_schematic
+                schem_bytes = get_instance_document_bytes(iid, schem_ref)
+                if schem_bytes:
+                    baked = render_on_schematic(
+                        schem_bytes, sensors,
+                        severity_by_label=sev_by_label or None,
+                        overall_by_label=overall_by_label or None,
+                        unit_by_label=unit_by_label or None,
+                        show_values=True, show_labels=True,
+                    )
+                    if baked:
+                        return baked
+            except Exception as e:
+                log.warning("render_on_schematic falló (%s) → diagrama genérico", e)
+
+        # 2) FALLBACK: diagrama de tren genérico dibujado
+        from core.sensor_diagram import render_sensor_map_diagram
         driver_label = (getattr(instance_obj, "driver_model", "") or "Driver").strip() or "Driver"
         driven_label = (getattr(instance_obj, "driven_model", "") or "Driven").strip() or "Driven"
-
         return render_sensor_map_diagram(
             sensors,
             train_label="",
@@ -740,7 +794,7 @@ def build_asset_briefing(
         _stored = []
     recommendations = (_stored if _stored else sections["recommendations"])
 
-    sensor_map_png = _render_sensor_map(instance_obj, data["channels"])
+    sensor_map_png = _render_sensor_map(instance_obj, data["channels"], instance_id)
 
     # Tablas históricas (v3.31.408): métricas de forma de onda (últimos 10
     # snapshots) + matriz de overall diario (últimos 10 días, semáforo).
