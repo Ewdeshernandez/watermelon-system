@@ -456,6 +456,21 @@ def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
             except Exception as e:
                 log.warning("machine_context falló: %s", e)
 
+        # REGLA anti-alucinación de componentes: no atribuir partes de un tipo
+        # de máquina a otro. Un generador ELÉCTRICO no tiene álabes/etapas de
+        # compresor ni cámaras de combustión; una turbina/compresor sí. Habla
+        # SOLO de los componentes que corresponden a cada máquina del tren.
+        machine_ctx = (machine_ctx +
+            "\n\nREGLA DE COMPONENTES (obligatoria): describe fallas y "
+            "componentes SOLO según el tipo real de cada máquina del tren. Un "
+            "GENERADOR eléctrico NO tiene álabes, etapas de compresor ni "
+            "combustión — sus modos típicos son desbalance/desalineación del "
+            "rotor, cojinetes, excentricidad de entrehierro, barras/estator, "
+            "acoplamiento. Los álabes, compresor axial y cámara de combustión "
+            "pertenecen a la TURBINA/gas generator, no al generador. La caja "
+            "(gearbox) habla de engranes, no de álabes. NO inventes componentes "
+            "que no existen en esa máquina.").strip()
+
         # Análisis QUE YA ESTÁN en el reporte (figuras adjuntas). Sin esto la
         # IA cree que solo hay un punto tabular y afirma "no hay espectros /
         # forma de onda" y recomienda adquirir lo que el reporte ya incluye.
