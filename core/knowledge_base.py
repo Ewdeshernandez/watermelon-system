@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
@@ -63,25 +64,63 @@ def _sb():
 # ---------------------------------------------------------------------------
 # Embeddings (Voyage)
 # ---------------------------------------------------------------------------
-def embed_texts(texts: List[str], input_type: str = "document",
-                model: str = EMBED_MODEL) -> List[List[float]]:
-    """Embeddings de una lista de textos. input_type='document' para indexar,
-    'query' para buscar. Devuelve lista de vectores (1024). Lanza si falla."""
-    key = _voyage_key()
-    if not key:
-        raise RuntimeError("Falta VOYAGE_API_KEY (secrets[voyage].api_key).")
-    out: List[List[float]] = []
-    for i in range(0, len(texts), _MAX_BATCH):
-        batch = [t if (t or "").strip() else " " for t in texts[i:i + _MAX_BATCH]]
-        body = json.dumps({"input": batch, "model": model,
-                           "input_type": input_type}).encode()
+def _post_voyage(body: bytes, key: str, max_retries: int = 6) -> Dict[str, Any]:
+    """POST a Voyage con reintentos + backoff ante 429 (rate limit) / 5xx.
+    Respeta el header Retry-After cuando viene."""
+    import time
+    last = None
+    for attempt in range(max_retries):
         req = urllib.request.Request(
             VOYAGE_URL, data=body, method="POST",
             headers={"Authorization": f"Bearer {key}",
                      "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            resp = json.load(r)
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (429, 500, 502, 503, 529) and attempt < max_retries - 1:
+                ra = e.headers.get("Retry-After") if e.headers else None
+                try:
+                    wait = float(ra) if ra else min(60.0, 4.0 * (2 ** attempt))
+                except Exception:
+                    wait = min(60.0, 4.0 * (2 ** attempt))
+                log.warning("Voyage %s → reintento en %.0fs (intento %d/%d)",
+                            e.code, wait, attempt + 1, max_retries)
+                time.sleep(wait)
+                continue
+            raise
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt < max_retries - 1:
+                time.sleep(min(30.0, 3.0 * (2 ** attempt)))
+                continue
+            raise
+    if last:
+        raise last
+    raise RuntimeError("Voyage: sin respuesta")
+
+
+def embed_texts(texts: List[str], input_type: str = "document",
+                model: str = EMBED_MODEL) -> List[List[float]]:
+    """Embeddings de una lista de textos. input_type='document' para indexar,
+    'query' para buscar. Devuelve lista de vectores (1024). Reintenta ante
+    rate limit (429). Lanza si falla definitivamente."""
+    import time
+    key = _voyage_key()
+    if not key:
+        raise RuntimeError("Falta VOYAGE_API_KEY (secrets[voyage].api_key).")
+    out: List[List[float]] = []
+    n_batches = (len(texts) + _MAX_BATCH - 1) // _MAX_BATCH
+    for bi, i in enumerate(range(0, len(texts), _MAX_BATCH)):
+        batch = [t if (t or "").strip() else " " for t in texts[i:i + _MAX_BATCH]]
+        body = json.dumps({"input": batch, "model": model,
+                           "input_type": input_type}).encode()
+        resp = _post_voyage(body, key)
         out.extend([d["embedding"] for d in resp.get("data", [])])
+        # Throttle suave entre lotes para no pegar el rate limit del tier gratis
+        if bi < n_batches - 1:
+            time.sleep(1.0)
     return out
 
 
