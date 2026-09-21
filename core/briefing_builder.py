@@ -963,6 +963,22 @@ def build_asset_draft(
     # El resumen del borrador tampoco lleva el bloque de recomendaciones IA
     sections["summary"] = _strip_ai_reco_block(sections.get("summary", ""))
 
+    # Recomendaciones del SISTEMA como SEMILLA editable: si el activo aún no
+    # tiene recomendaciones gestionadas, se siembran las automáticas en el
+    # store para que el revisor/aprobador las vea PRE-CARGADAS y las edite,
+    # agregue o borre (es el ÚNICO campo editable en revisión/aprobación).
+    # Si ya hay recomendaciones del especialista, NO se tocan (él manda).
+    try:
+        from core.briefing_recommendations import (
+            list_recommendations, save_recommendations)
+        if not list_recommendations(instance_id):
+            _seed = sections.get("recommendations") or []
+            if _seed:
+                save_recommendations(instance_id,
+                                     [{"text": t} for t in _seed])
+    except Exception as e:
+        log.warning("seed recomendaciones (%s) falló: %s", instance_id, e)
+
     try:
         from core.briefing_queue import new_pending_draft, get_draft
         # Un consecutivo por CICLO de reporte: si ya hay borrador pendiente

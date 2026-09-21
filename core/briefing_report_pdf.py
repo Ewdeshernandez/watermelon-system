@@ -236,6 +236,9 @@ def generate_briefing_pdf(
         body.append(KeepTogether(_rec_block))
 
     # ==== 4. Desarrollo del servicio (detalle técnico, después de la acción) ====
+    # Arranca en página nueva: Introducción + Hallazgos + Recomendaciones quedan
+    # al frente (lectura gerencial) y el desarrollo técnico empieza limpio.
+    body.append(PageBreak())
     body.append(_h1("Desarrollo del servicio"))
 
     # 4.1 Diagnóstico
@@ -257,10 +260,12 @@ def generate_briefing_pdf(
                                leading=10, spaceAfter=4)))
         st_cell = ParagraphStyle("c", fontName=REGULAR, fontSize=7,
                                  textColor=colors.HexColor("#111827"), leading=9)
-        st_cn = ParagraphStyle("cn", fontName="Courier", fontSize=7,
+        st_cn = ParagraphStyle("cn", fontName=REGULAR, fontSize=7,
                                textColor=colors.HexColor("#111827"), leading=9)
         st_hd = ParagraphStyle("hd", fontName=BOLD, fontSize=6.1,
-                               textColor=colors.HexColor("#1d4ed8"), leading=8)
+                               textColor=colors.white, leading=8)
+        st_est = ParagraphStyle("est", fontName=BOLD, fontSize=6.8,
+                                textColor=colors.HexColor("#0f172a"), leading=9)
 
         def _num(v, digits=2):
             try:
@@ -296,26 +301,29 @@ def generate_briefing_pdf(
                 Paragraph(_num(c.get("alarm")), st_cn),
                 Paragraph(_num(c.get("danger")), st_cn),
                 Paragraph(c.get("criterion", "ISO 20816-3"), st_cell),
-                Paragraph(c.get("status", "—"), st_cell),
+                Paragraph(f'<font color="{fg}">●</font>&nbsp;{c.get("status", "—")}', st_est),
                 Paragraph(str(c.get("value", "—")), st_cn),
                 Paragraph(c.get("unit", ""), st_cell),
                 Paragraph(str(c.get("x05_amp", "—")), st_cn),
                 Paragraph(str(c.get("x1_amp", "—")), st_cn),
                 Paragraph(str(c.get("x2_amp", "—")), st_cn),
             ])
-            row_styles.append(("TEXTCOLOR", (_STATUS_COL, i), (_STATUS_COL, i), colors.HexColor(fg)))
-            row_styles.append(("BACKGROUND", (_STATUS_COL, i), (_STATUS_COL, i), colors.HexColor(bg)))
         ctbl = Table(data, colWidths=[1.45 * cm, 2.1 * cm, 1.0 * cm, 1.45 * cm,
                                       1.05 * cm, 1.2 * cm, 2.35 * cm, 1.25 * cm,
                                       1.35 * cm, 1.05 * cm, 0.85 * cm, 0.85 * cm,
                                       0.85 * cm], repeatRows=1)
         ctbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-            ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
+            # Header navy + texto blanco (look v2, consistente con el reporte 1-pág)
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("TOPPADDING", (0, 0), (-1, 0), 5), ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+            # Cuerpo: filas zebra + hairline
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#f7f9fc")]),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
-            ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-        ] + row_styles))
+            ("TOPPADDING", (0, 1), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 1), (-1, -1), 3.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ]))
         body.append(ctbl)
         st_note_center = ParagraphStyle("bfNoteC", parent=st_cap,
                                         alignment=TA_CENTER)
@@ -334,8 +342,8 @@ def generate_briefing_pdf(
     if overall_history and overall_history.get("rows"):
         _dates = overall_history["dates"]
         _hd7 = ParagraphStyle("hd7", fontName=BOLD, fontSize=6.1,
-                              textColor=colors.HexColor("#1d4ed8"), leading=8)
-        _c7 = ParagraphStyle("c7", fontName="Courier", fontSize=6.6,
+                              textColor=colors.white, leading=8)
+        _c7 = ParagraphStyle("c7", fontName=REGULAR, fontSize=6.6,
                              textColor=colors.HexColor("#111827"), leading=8.5)
         _cl7 = ParagraphStyle("cl7", fontName=REGULAR, fontSize=6.6,
                               textColor=colors.HexColor("#111827"), leading=8.5)
@@ -361,11 +369,12 @@ def generate_briefing_pdf(
         _htbl = Table(_data, colWidths=[2.8 * cm] + [_wdate * cm] * len(_dates),
                       repeatRows=1)
         _htbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-            ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("TOPPADDING", (0, 0), (-1, 0), 4), ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 1), (-1, -1), 3), ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ] + _cell_styles))
         body.append(KeepTogether([
             Paragraph("Tendencia del Overall — pico diario · últimos 10 días",
@@ -381,8 +390,8 @@ def generate_briefing_pdf(
     # ---- Métricas de forma de onda (últimos snapshots) ----
     if wf_history:
         _hd8 = ParagraphStyle("hd8", fontName=BOLD, fontSize=6.6,
-                              textColor=colors.HexColor("#1d4ed8"), leading=8.5)
-        _c8 = ParagraphStyle("c8", fontName="Courier", fontSize=7,
+                              textColor=colors.white, leading=8.5)
+        _c8 = ParagraphStyle("c8", fontName=REGULAR, fontSize=7,
                              textColor=colors.HexColor("#111827"), leading=9)
         _cl8 = ParagraphStyle("cl8", fontName=REGULAR, fontSize=7,
                               textColor=colors.HexColor("#111827"), leading=9)
@@ -403,10 +412,13 @@ def generate_briefing_pdf(
                                          1.9 * cm, 2.0 * cm, 2.7 * cm],
                       repeatRows=1)
         _wtbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-            ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("TOPPADDING", (0, 0), (-1, 0), 5), ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#f7f9fc")]),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+            ("TOPPADDING", (0, 1), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 1), (-1, -1), 3.5),
             ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ]))
         body.append(Spacer(1, 8))
