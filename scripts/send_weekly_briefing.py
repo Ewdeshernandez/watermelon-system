@@ -76,12 +76,18 @@ def main() -> int:
                          "hora/día actuales coinciden con la programación "
                          "configurada en la app (briefing_schedule). El día, "
                          "la hora y el periodo salen de esa config.")
+    ap.add_argument("--first-business-day", action="store_true",
+                    help="Solo ejecuta si hoy (America/Bogota) es el PRIMER día "
+                         "hábil del mes (lun-vie; salta fines de semana). Para el "
+                         "briefing MENSUAL disparado desde un cron horario. "
+                         "Combínalo con --on-hour.")
     args = ap.parse_args()
 
     # Gate por día/hora local (para dispararlo desde un cron HORARIO): si hoy no
     # coincide con on-weekday/on-hour (America/Bogota), no hace nada.
-    if args.on_weekday is not None or args.on_hour is not None:
-        from datetime import datetime
+    if (args.on_weekday is not None or args.on_hour is not None
+            or args.first_business_day):
+        from datetime import datetime, date
         try:
             from zoneinfo import ZoneInfo
             now = datetime.now(ZoneInfo("America/Bogota"))
@@ -91,6 +97,18 @@ def main() -> int:
             log.info("No es el día programado (hoy=%d, on-weekday=%d) — nada que hacer.",
                      now.weekday(), args.on_weekday)
             return 0
+        if args.first_business_day:
+            # Primer día hábil = hoy es lun-vie y ningún lun-vie ocurrió antes
+            # este mes.
+            if now.weekday() >= 5:
+                log.info("Hoy es fin de semana — no es primer día hábil.")
+                return 0
+            _earlier_bday = any(
+                date(now.year, now.month, d).weekday() < 5
+                for d in range(1, now.day))
+            if _earlier_bday:
+                log.info("Ya hubo un día hábil antes este mes — no es el primero.")
+                return 0
         if args.on_hour is not None and now.hour != args.on_hour:
             log.info("No es la hora programada (hora=%d, on-hour=%d) — nada que hacer.",
                      now.hour, args.on_hour)
