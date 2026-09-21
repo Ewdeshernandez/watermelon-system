@@ -89,7 +89,28 @@ def embed_texts(texts: List[str], input_type: str = "document",
 # Extracción + chunking
 # ---------------------------------------------------------------------------
 def extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Texto plano de un PDF (pypdf). Vacío si no se puede leer."""
+    """Texto plano de un PDF. Intenta PyMuPDF (mejor extractor) y cae a pypdf.
+    Vacío si el PDF es imagen pura (escaneado sin OCR)."""
+    # 1) PyMuPDF — extractor robusto, sin dependencias de sistema
+    try:
+        try:
+            import pymupdf as fitz
+        except Exception:
+            import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        parts = []
+        for pg in doc:
+            try:
+                parts.append(pg.get_text("text") or "")
+            except Exception:
+                continue
+        txt = "\n".join(parts).strip()
+        if txt:
+            return txt
+    except Exception as e:
+        log.warning("PyMuPDF extract falló (%s) → pypdf", e)
+
+    # 2) pypdf (fallback)
     try:
         from io import BytesIO
         try:
@@ -103,9 +124,9 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
                 parts.append(pg.extract_text() or "")
             except Exception:
                 continue
-        return "\n".join(parts)
+        return "\n".join(parts).strip()
     except Exception as e:
-        log.warning("extract_pdf_text falló: %s", e)
+        log.warning("extract_pdf_text (pypdf) falló: %s", e)
         return ""
 
 
@@ -159,7 +180,10 @@ def ingest_document(title: str, pdf_bytes: bytes, *,
     out: Dict[str, Any] = {"ok": False, "doc_id": None, "n_chunks": 0, "error": ""}
     text = extract_pdf_text(pdf_bytes)
     if not text.strip():
-        out["error"] = "No se pudo extraer texto del PDF (¿es escaneado sin OCR?)."
+        out["error"] = ("El PDF no tiene capa de texto (parece escaneado como "
+                        "imagen). Conviértelo a PDF con texto (OCR) y súbelo de "
+                        "nuevo — p.ej. 'Reconocer texto / OCR' en Acrobat, o una "
+                        "herramienta OCR en línea.")
         return out
     chunks = _chunk_text(text)
     if not chunks:

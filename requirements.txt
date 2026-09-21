@@ -54,3 +54,5 @@ anthropic>=0.39.0
 # correcto es render client-side via canvas (browser hace el trabajo).
 # rebuild trigger
 svglib>=1.5.1  # SVG->reportlab vector (diagrama del tren en el reporte PDF, sin cairo)
+
+pymupdf
