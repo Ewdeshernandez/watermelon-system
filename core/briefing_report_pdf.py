@@ -236,15 +236,22 @@ def generate_briefing_pdf(
         body.append(KeepTogether(_rec_block))
 
     # ==== 4. Desarrollo del servicio (detalle técnico, después de la acción) ====
-    # Arranca en página nueva: Introducción + Hallazgos + Recomendaciones quedan
-    # al frente (lectura gerencial) y el desarrollo técnico empieza limpio.
-    body.append(PageBreak())
-    body.append(_h1("Desarrollo del servicio"))
+    # Salto CONDICIONAL: solo empieza en página nueva si no queda espacio
+    # suficiente (evita la página casi vacía que dejaba el PageBreak fijo).
+    from reportlab.platypus import CondPageBreak
+    body.append(CondPageBreak(7 * cm))
 
-    # 4.1 Diagnóstico
+    # 4.1 Diagnóstico — el título de sección + el de subsección + el primer
+    # párrafo arrancan juntos (KeepTogether) para no dejar títulos huérfanos.
     if diagnosis:
-        body.append(_h2("Diagnóstico"))
-        body.extend(render_markdown_flowables(diagnosis, styles))
+        _diag_flow = render_markdown_flowables(diagnosis, styles)
+        _lead = [_h1("Desarrollo del servicio"), _h2("Diagnóstico")]
+        if _diag_flow:
+            _lead.append(_diag_flow[0])
+        body.append(KeepTogether(_lead))
+        body.extend(_diag_flow[1:])
+    else:
+        body.append(_h1("Desarrollo del servicio"))
 
     # 4.2 Tabular List (espejo de la vista de la app) — arranca en PÁGINA NUEVA
     # para que el título nunca quede huérfano al pie de página.
