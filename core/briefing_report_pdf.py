@@ -134,13 +134,20 @@ def generate_briefing_pdf(
 
     body: List[Any] = []
 
-    # Numeración automática de secciones nivel-1 (entran a la TABLA DE
-    # CONTENIDO con su número, porque el shell registra el texto del heading).
+    # Numeración automática de secciones (entran a la TABLA DE CONTENIDO con
+    # su número, porque el shell registra el texto del heading). Nivel 1 = N.,
+    # nivel 2 = N.M (subsecciones del Desarrollo, estilo reporte OMA).
     _h1n = [0]
+    _h2n = [0]
 
     def _h1(title: str) -> Paragraph:
         _h1n[0] += 1
+        _h2n[0] = 0
         return Paragraph(f"{_h1n[0]}. {title}", styles["WMTOC1"])
+
+    def _h2(title: str) -> Paragraph:
+        _h2n[0] += 1
+        return Paragraph(f"{_h1n[0]}.{_h2n[0]} {title}", styles["WMTOC2"])
 
     # ---- Banner de estado + KPIs ----
     hcolor = colors.HexColor(health.get("color", "#94a3b8"))
@@ -165,16 +172,27 @@ def generate_briefing_pdf(
     else:
         _sem_color, _sem_label = "#94a3b8", _status_txt.upper() or "SIN DATOS"
 
-    body.append(_h1("RESUMEN EJECUTIVO"))
+    # ==== 1. Introducción y alcance (estilo reporte OMA) ====
+    _n_pts = len([c for c in (channels or []) if c.get("value") is not None])
+    _intro = (
+        f"Se presenta el seguimiento de condición del tren {tag}"
+        + (f" ({paragraph_safe(train)})" if train else "")
+        + f" para el periodo {period_label.lower()}, evaluando {_n_pts} punto(s) "
+        "de medición de vibración distribuidos a lo largo del tren de máquinas, "
+        "conforme a ISO 20816 y API 670, a partir de los datos del monitoreo en "
+        "línea. A continuación se presentan los hallazgos, las recomendaciones y "
+        "el desarrollo técnico del servicio.")
+    body.append(_h1("Introducción y alcance"))
+    body.append(Paragraph(_intro, st_body))
+
+    # ==== 2. Hallazgos (imagen del estado del tren + resumen breve) ====
+    body.append(_h1("Hallazgos"))
 
     # Caption de figura centrado (las imágenes van centradas con su caption)
     st_cap_fig = ParagraphStyle("bfCapFig", parent=st_cap, alignment=TA_CENTER)
 
-    # ---- Imagen del tren = LA MISMA de Live Monitoring (con valores + barras) ----
-    # Va PRIMERO en el resumen y SUSTITUYE a la barra KPI: la figura ya comunica
-    # salud/estado/valores por punto. Preferido: drawing vectorial (train_drawing,
-    # idéntico al hero de Live Monitoring); si no, PNG del schematic; si ninguno,
-    # se omite.
+    # Imagen del tren = LA MISMA de Live Monitoring (train_drawing vectorial:
+    # tren + valores + barras de umbral); fallback al PNG del schematic.
     _placed_img = False
     if train_drawing is not None:
         try:
@@ -199,14 +217,13 @@ def generate_briefing_pdf(
             pass
     body.append(Spacer(1, 8))
 
-    # ---- Texto del resumen: breve, gerencial, nivel analista Cat. IV ----
-    # (el resumen puede venir como markdown del AI: se renderiza nativo)
+    # Texto de hallazgos: breve, gerencial, nivel analista Cat. IV (markdown IA)
     if summary:
         body.extend(render_markdown_flowables(summary, styles))
 
-    # ---- Recomendaciones: van ANTES del desarrollo (el gerente lee acción) ----
+    # ==== 3. Recomendaciones: van ANTES del desarrollo (el gerente lee acción) ====
     if recommendations:
-        _rec_block: List[Any] = [_h1("RECOMENDACIONES")]
+        _rec_block: List[Any] = [_h1("Recomendaciones")]
         for i, rec in enumerate(recommendations, start=1):
             if isinstance(rec, dict):
                 txt = paragraph_safe(rec.get("text", ""))
@@ -218,17 +235,19 @@ def generate_briefing_pdf(
             _rec_block.append(Paragraph(line, st_body))
         body.append(KeepTogether(_rec_block))
 
-    # ---- Desarrollo — Diagnóstico (detalle técnico, después de la acción) ----
+    # ==== 4. Desarrollo del servicio (detalle técnico, después de la acción) ====
+    body.append(_h1("Desarrollo del servicio"))
+
+    # 4.1 Diagnóstico
     if diagnosis:
-        body.append(_h1("DIAGNÓSTICO"))
+        body.append(_h2("Diagnóstico"))
         body.extend(render_markdown_flowables(diagnosis, styles))
 
-    # ---- Tabular List (espejo de la vista de la app) ----
-    # Arranca en PÁGINA NUEVA: las recomendaciones quedan solas en la suya
-    # y el título nunca queda huérfano al pie de página.
+    # 4.2 Tabular List (espejo de la vista de la app) — arranca en PÁGINA NUEVA
+    # para que el título nunca quede huérfano al pie de página.
     if channels:
         body.append(PageBreak())
-        body.append(_h1("TABULAR LIST — CANALES (API 670 / ISO 20816-3)"))
+        body.append(_h2("Tabular List — Overall + 1X / 2X (API 670 / ISO 20816-3)"))
         _asof = (meta or {}).get("tabular_asof", "")
         if _asof:
             body.append(Paragraph(
@@ -409,7 +428,7 @@ def generate_briefing_pdf(
     if _trends or _others:
         # El título de sección viaja DENTRO del bloque de la primera figura
         # (KeepTogether) para que nunca quede huérfano al pie de una página.
-        _section_head: List[Any] = [_h1("FIGURAS Y ANÁLISIS")]
+        _section_head: List[Any] = [_h2("Figuras y análisis")]
         _fecha = _fecha_es(meta.get("report_date"))
         _equipo = f"Unidad {tag}"
         _n = 0
