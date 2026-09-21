@@ -190,10 +190,14 @@ def generate_live_report_pdf(
                              textColor=vcolor or colors.HexColor(_NAVY), leading=17)
         return [Paragraph(label.upper(), lab), Paragraph(str(value), val)]
 
+    # En OFFLINE, la velocidad es el ÚLTIMO dato conocido (no la actual, que
+    # se desconoce). Se rotula "Velocidad (último)" para no leerla como en vivo.
+    _off = bool(kpis.get("offline"))
+    _vel_label = "Velocidad (último)" if _off else "Velocidad"
     kpi_tbl = Table([[
         _kpi("Salud", f"{score_txt}", hcolor),
         _kpi("Estado", _acc_label.capitalize(), colors.HexColor(_acc)),
-        _kpi("Velocidad", kpis.get("speed", "—")),
+        _kpi(_vel_label, kpis.get("speed", "—")),
         _kpi("Alarmas", kpis.get("alarms", 0),
              colors.HexColor(_RED) if kpis.get("alarms", 0) else colors.HexColor(_GREEN)),
         _kpi("Última lectura", kpis.get("last", "—")),
@@ -212,7 +216,8 @@ def generate_live_report_pdf(
     _zline = f"Zona ISO: {zone}"
     _spall = kpis.get("speeds_all")
     if _spall and _spall not in ("—", kpis.get("speed")) and "·" in _spall:
-        _zline += f"  ·  Velocidades: {_spall}"   # tren turbo-gen: turbina + generador
+        _vl = "Velocidades (último dato)" if _off else "Velocidades"
+        _zline += f"  ·  {_vl}: {_spall}"   # tren turbo-gen: turbina + generador
     story.append(Paragraph(_zline, st_meta))
     story.append(Spacer(1, 8))
 
