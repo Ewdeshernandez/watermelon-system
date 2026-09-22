@@ -280,6 +280,7 @@ def rclick(cfg: dict, x: int, y: int) -> int:
     time.sleep(0.4)
     mouse.right_click(coords=(x, y))
     time.sleep(0.8)
+    _grab_screen(r"C:\WM_wave\s1.png")   # ve el menú (ventana aparte)
     print("== MenuItems tras right-click en (%d,%d) ==" % (x, y))
     seen = 0
     try:
@@ -299,18 +300,28 @@ def rclick(cfg: dict, x: int, y: int) -> int:
     return 0
 
 
+def _grab_screen(path: str):
+    """Captura TODO el escritorio (incluye popups/menús/diálogos, que son
+    ventanas aparte y NO salen en win.capture_as_image()). Requiere sesión
+    interactiva (la tarea /it la provee)."""
+    from PIL import ImageGrab
+    img = ImageGrab.grab(all_screens=True)
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(p))
+    return img
+
+
 def click_probe(cfg: dict, x: int, y: int, out_png: str) -> int:
-    """Clic izquierdo en (x,y) y recaptura la ventana (verifica selección)."""
+    """Clic izquierdo en (x,y) y captura de pantalla COMPLETA (ve popups)."""
     from pywinauto import mouse
     app, win = _connect()
     time.sleep(0.3)
     mouse.click(coords=(x, y))
     time.sleep(0.8)
-    img = win.capture_as_image()
-    p = Path(out_png)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    img.save(str(p))
-    print("CLICK (%d,%d) -> recaptura %s (%dx%d)" % (x, y, p, img.width, img.height))
+    img = _grab_screen(out_png)
+    print("CLICK (%d,%d) -> pantalla completa %s (%dx%d)" % (
+        x, y, out_png, img.width, img.height))
     return 0
 
 
