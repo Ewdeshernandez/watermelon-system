@@ -81,11 +81,29 @@ def _load_cfg(path: str | None) -> dict:
         return _toml.load(fh)
 
 
+def _hide_console():
+    """Minimiza la ventana de consola (cmd.exe de la tarea) para que NO tape
+    System1 en la captura ni intercepte los clics."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 6)   # SW_MINIMIZE
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _connect():
     from pywinauto import Application
+    _hide_console()
     app = Application(backend="uia").connect(title_re=WINDOW_TITLE_RE, timeout=20)
     win = app.window(title_re=WINDOW_TITLE_RE)
+    try:
+        win.maximize()
+    except Exception:  # noqa: BLE001
+        pass
     win.set_focus()
+    time.sleep(0.4)
     return app, win
 
 
