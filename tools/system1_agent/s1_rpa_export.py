@@ -270,6 +270,50 @@ def shot(cfg: dict, out_path: str) -> int:
     return 0
 
 
+def rclick(cfg: dict, x: int, y: int) -> int:
+    """Clic derecho en (x,y) pantalla y vuelca los MenuItem del popup.
+
+    Sirve para descubrir el texto exacto del 'Export to CSV' (y si hay submenú).
+    """
+    from pywinauto import mouse, Desktop
+    _connect()  # trae System1 al frente
+    time.sleep(0.4)
+    mouse.right_click(coords=(x, y))
+    time.sleep(0.8)
+    print("== MenuItems tras right-click en (%d,%d) ==" % (x, y))
+    seen = 0
+    try:
+        for w in Desktop(backend="uia").windows():
+            try:
+                for mi in w.descendants(control_type="MenuItem"):
+                    t = (mi.window_text() or "").strip()
+                    if t:
+                        seen += 1
+                        print("  MenuItem: '%s'" % t)
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception as exc:  # noqa: BLE001
+        print("  (err: %s)" % exc)
+    if seen == 0:
+        print("  (ninguno — el menú puede ser owner-drawn/no-UIA)")
+    return 0
+
+
+def click_probe(cfg: dict, x: int, y: int, out_png: str) -> int:
+    """Clic izquierdo en (x,y) y recaptura la ventana (verifica selección)."""
+    from pywinauto import mouse
+    app, win = _connect()
+    time.sleep(0.3)
+    mouse.click(coords=(x, y))
+    time.sleep(0.8)
+    img = win.capture_as_image()
+    p = Path(out_png)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(p))
+    print("CLICK (%d,%d) -> recaptura %s (%dx%d)" % (x, y, p, img.width, img.height))
+    return 0
+
+
 def _setup_logging():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -287,11 +331,20 @@ def main(argv=None) -> int:
                     help="captura la ventana de System1 a PNG y sale")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--rclick", nargs=2, type=int, metavar=("X", "Y"),
+                    help="right-click en (X,Y) pantalla y volcar menú")
+    ap.add_argument("--click", nargs=2, type=int, metavar=("X", "Y"),
+                    help="left-click en (X,Y) pantalla y recapturar")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
     if args.shot:
         return shot(cfg, args.shot)
+    if args.rclick:
+        return rclick(cfg, args.rclick[0], args.rclick[1])
+    if args.click:
+        return click_probe(cfg, args.click[0], args.click[1],
+                           r"C:\WM_wave\s1.png")
     if args.inspect:
         return inspect(cfg)
     if args.run:
