@@ -555,11 +555,101 @@ def _find_file_dialog(app):
     return None
 
 
-def _save_as(app, full_path: str, timeout: float = 25.0) -> bool:
-    """Maneja el diálogo Save As (#32770). Rellena el nombre por varios métodos
-    y guarda (Save/Guardar/SplitButton o Enter). Tolera locale ES/EN."""
-    from pywinauto import Desktop
+def _save_as_win32(full_path: str, timeout: float = 25.0) -> bool:
+    """Maneja el diálogo Save As con backend WIN32 (el diálogo de archivo es un
+    #32770 clásico Win32; el backend uia lo ve mal). Fija el nombre en la caja
+    Edit y da Save. Fallback: teclear el path + Enter en el campo enfocado."""
+    from pywinauto import Application
+    from pywinauto.keyboard import send_keys
     end = time.time() + timeout
+    dlg = None
+    while time.time() < end and dlg is None:
+        try:
+            app32 = Application(backend="win32").connect(
+                class_name="#32770", timeout=1)
+            dlg = app32.window(class_name="#32770")
+            if not dlg.exists():
+                dlg = None
+        except Exception:  # noqa: BLE001
+            dlg = None
+            time.sleep(0.5)
+    if dlg is None:
+        log.error("win32: no apareció el diálogo #32770")
+        return False
+    try:
+        dlg.set_focus()
+    except Exception:  # noqa: BLE001
+        pass
+    time.sleep(0.3)
+    # 1) caja de nombre: Edit clásico
+    filled = False
+    for finder in (
+        lambda: dlg.child_window(class_name="Edit"),
+        lambda: dlg.child_window(class_name="ComboBox").child_window(
+            class_name="Edit"),
+    ):
+        try:
+            e = finder()
+            if e.exists():
+                e.set_edit_text(full_path)
+                filled = True
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    # 2) fallback: teclear en el campo enfocado (el diálogo abre con foco ahí)
+    if not filled:
+        try:
+            send_keys("^a{DELETE}")
+            send_keys(full_path.replace("(", "{(}").replace(")", "{)}"),
+                      with_spaces=True, pause=0.01)
+            filled = True
+        except Exception:  # noqa: BLE001
+            pass
+    time.sleep(0.4)
+    # Guardar: botón Save/Guardar, si no Enter
+    saved = False
+    for title in ("&Save", "Save", "&Guardar", "Guardar"):
+        try:
+            b = dlg.child_window(title=title, class_name="Button")
+            if b.exists():
+                b.click()
+                saved = True
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if not saved:
+        try:
+            send_keys("{ENTER}")
+            saved = True
+        except Exception:  # noqa: BLE001
+            pass
+    # posible confirmación de sobreescritura
+    time.sleep(0.5)
+    try:
+        app32b = Application(backend="win32").connect(
+            class_name="#32770", timeout=1)
+        conf = app32b.window(class_name="#32770")
+        if conf.exists():
+            for title in ("&Yes", "Yes", "&Sí", "Sí"):
+                try:
+                    yb = conf.child_window(title=title, class_name="Button")
+                    if yb.exists():
+                        yb.click()
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+    except Exception:  # noqa: BLE001
+        pass
+    return filled and saved
+
+
+def _save_as(app, full_path: str, timeout: float = 25.0) -> bool:
+    """Intenta primero backend WIN32 (fiable para #32770). Si falla, cae al
+    método UIA."""
+    if _save_as_win32(full_path, timeout=timeout):
+        return True
+    from pywinauto import Desktop
+    end = time.time() + 4
     dlg = None
     save_btn = None
     while time.time() < end and dlg is None:
