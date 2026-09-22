@@ -327,7 +327,7 @@ def _tree_scroll_top(win, tree_x: int, tree_y: int, ticks: int = 40) -> None:
     time.sleep(0.2)
     for _ in range(ticks):
         mouse.scroll(coords=(sx, sy), wheel_dist=1)  # +1 = arriba
-        time.sleep(0.01)
+        time.sleep(0.15)                              # lento: evita aceleración
     time.sleep(0.4)
 
 
@@ -365,7 +365,7 @@ def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
         for _ in range(abs(downticks)):
             mouse.scroll(coords=(sx, sy),
                          wheel_dist=-1 if downticks > 0 else 1)  # -1 = abajo
-            time.sleep(0.01)
+            time.sleep(0.15)                          # lento: scroll determinista
         time.sleep(0.3)
     mouse.click(coords=(x, y))                          # x,y = pantalla absoluta
     time.sleep(0.8)
