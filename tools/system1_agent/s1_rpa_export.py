@@ -346,6 +346,38 @@ def treetop(cfg: dict, out_png: str) -> int:
     return 0
 
 
+def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
+    """Topea el árbol -> baja N ticks -> clic (x,y) -> recaptura.
+
+    Estado determinista: siempre parte del tope (scroll saturado), baja un número
+    fijo de ticks (0 = turbina visible desde el tope; N = trae el generador a una
+    posición fija), y clica la coord del nodo. Así la coord es reproducible sin
+    importar el estado previo del árbol.
+    """
+    from pywinauto import mouse
+    app, win = _connect()
+    tx = int(cfg.get("rpa", {}).get("tree_x", 100))
+    ty = int(cfg.get("rpa", {}).get("tree_y", 300))
+    _tree_scroll_top(win, tx, ty)                       # canónico: tope
+    if downticks:
+        r = win.rectangle()
+        sx, sy = r.left + tx, r.top + ty
+        for _ in range(abs(downticks)):
+            mouse.scroll(coords=(sx, sy),
+                         wheel_dist=-1 if downticks > 0 else 1)  # -1 = abajo
+            time.sleep(0.01)
+        time.sleep(0.3)
+    mouse.click(coords=(x, y))                          # x,y = pantalla absoluta
+    time.sleep(0.8)
+    img = win.capture_as_image()
+    p = Path(out_png)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(p))
+    print("PICK down=%d click(%d,%d) -> %s (%dx%d)" % (
+        downticks, x, y, p, img.width, img.height))
+    return 0
+
+
 def keys_probe(cfg: dict, seq: str, out_png: str) -> int:
     """Enfoca el árbol (clic) y envía una secuencia de teclas; recaptura.
 
@@ -396,6 +428,8 @@ def main(argv=None) -> int:
                     help="scroll del árbol al tope + recaptura")
     ap.add_argument("--keys", metavar="SEQ",
                     help="clic al árbol + send_keys(SEQ) + recaptura")
+    ap.add_argument("--pick", nargs=3, type=int, metavar=("DOWNTICKS", "X", "Y"),
+                    help="topea árbol + baja N ticks + clic (X,Y) + recaptura")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -405,6 +439,9 @@ def main(argv=None) -> int:
         return treetop(cfg, r"C:\WM_wave\s1.png")
     if args.keys:
         return keys_probe(cfg, args.keys, r"C:\WM_wave\s1.png")
+    if args.pick:
+        return pick(cfg, args.pick[0], args.pick[1], args.pick[2],
+                    r"C:\WM_wave\s1.png")
     if args.rclick:
         return rclick(cfg, args.rclick[0], args.rclick[1])
     if args.click:
