@@ -454,34 +454,44 @@ def findtpl(cfg: dict, name: str) -> int:
 
 
 def _select_by_template(win, cfg: dict, name: str,
-                        thr: float = 0.80, max_scrolls: int = 14) -> bool:
-    """Trae el nodo a la vista y lo clica, usando búsqueda por imagen.
+                        thr: float = 0.78, max_iter: int = 44) -> bool:
+    """Trae el nodo a la vista y lo clica, por búsqueda de imagen BIDIRECCIONAL.
 
-    Satura hacia arriba (tope), luego en cada paso: captura → busca la etiqueta;
-    si score>=thr clica su centro; si no, scrollea unos ticks abajo y reintenta.
-    Tolera el scroll no determinista de System1.
+    El wheel scroll de System1 es de dirección/monto inconsistente, así que no
+    se asume ni tope ni dirección: en cada paso busca la etiqueta; si no está,
+    scrollea; si la región del árbol NO cambió (llegó a un extremo), invierte la
+    dirección. Así recorre todo el árbol y encuentra el nodo esté donde esté.
     """
     from pywinauto import mouse
+    import numpy as np
     tx = int(cfg.get("rpa", {}).get("tree_x", 100))
     ty = int(cfg.get("rpa", {}).get("tree_y", 300))
+    tree_w = int(cfg.get("rpa", {}).get("tree_w", 340))  # ancho panel árbol (px)
     r = win.rectangle()
     sx, sy = r.left + tx, r.top + ty
-    _tree_scroll_top(win, tx, ty)
     tpl = TPL_DIR / f"{name}.png"
-    for _i in range(max_scrolls):
-        img = _grab()                    # en memoria: NO tocar disco en el loop
+    sign = -1
+    prev_tree = None
+    for _i in range(max_iter):
+        img = _grab()                    # memoria: NO tocar disco en el loop
         m = _find_template(img, tpl, thr)
         if m is not None and m[0] >= thr:
             score, cx, cy = m
             mouse.click(coords=(cx, cy))
             time.sleep(0.7)
-            log.info("select %s: score=%.3f @ (%d,%d)", name, score, cx, cy)
+            log.info("select %s: score=%.3f @ (%d,%d) iter=%d",
+                     name, score, cx, cy, _i)
             return True
+        tree_region = np.array(img)[:, :tree_w].copy()
+        if prev_tree is not None and np.array_equal(tree_region, prev_tree):
+            sign = -sign                 # árbol no se movió: extremo → invertir
+            log.info("select %s: extremo, invierto dirección -> %d", name, sign)
+        prev_tree = tree_region
         for _ in range(3):
-            mouse.scroll(coords=(sx, sy), wheel_dist=-1)
+            mouse.scroll(coords=(sx, sy), wheel_dist=sign)
             time.sleep(0.15)
-        time.sleep(0.2)
-    log.warning("select %s: NO encontrado tras %d scrolls", name, max_scrolls)
+        time.sleep(0.25)
+    log.warning("select %s: NO encontrado tras %d iter", name, max_iter)
     return False
 
 
