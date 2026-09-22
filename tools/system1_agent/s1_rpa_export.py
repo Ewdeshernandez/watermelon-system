@@ -443,11 +443,10 @@ def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
     return 0
 
 
-# Clases de ventana pesadas/irrelevantes: enumerarlas es lento (Chromium) y el
-# menú contextual se cierra antes de clicar. El popup del menú NO es de estas.
-_HEAVY_CLASSES = {"Chrome_WidgetWin_1", "Shell_TrayWnd", "Progman",
-                  "ConsoleWindowClass", "Notepad", "CabinetWClass",
-                  "Azure Data Studio"}
+# Clases Chromium (pgAdmin/Azure) tienen árboles UIA enormes → lentísimas de
+# enumerar. NO contienen el menú de System1, así que se saltan. La ventana
+# principal de System1 SÍ se enumera: el popup del menú vive en su árbol WPF.
+_HEAVY_CLASSES = {"Chrome_WidgetWin_1"}
 
 
 def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
@@ -469,11 +468,6 @@ def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
                 cls = ""
             if cls in _HEAVY_CLASSES:
                 continue
-            try:
-                if "System 1 Premium" in (w.window_text() or ""):
-                    continue              # ventana principal: lenta, sin popup
-            except Exception:  # noqa: BLE001
-                pass
             try:
                 items = w.descendants(control_type="MenuItem")
             except Exception:  # noqa: BLE001
@@ -652,8 +646,8 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
         print("EXPORT %s: no hallé 'Export to CSV' en el menú" % name)
     time.sleep(1.2)
     exists = Path(full).exists()
-    print("EXPORT %s: menu=OK saveas=%s archivo=%s (%s)" % (
-        name, ok, exists, full))
+    print("EXPORT %s: menu=%s saveas=%s archivo=%s (%s)" % (
+        name, clicked_any, ok, exists, full))
     _grab_screen(r"C:\WM_wave\s1.png")
     return 0 if exists else 1
 
