@@ -610,13 +610,29 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
             outp.joinpath(f"{name}.csv").unlink()   # limpio para verificar
     except Exception:  # noqa: BLE001
         pass
+    from pywinauto.keyboard import send_keys
     mouse.right_click(coords=(x, y))
     time.sleep(0.8)
-    if not _click_menuitem(EXPORT_MENU_TEXT):
-        print("EXPORT %s: no hallé 'Export to CSV'" % name)
-        return 1
-    time.sleep(2.0)
+    # Navegar el menú por TECLADO: solo 'Export to CSV' empieza con E → 'e'
+    # lo resalta, Enter lo activa. Evita la enumeración UIA lenta que cierra
+    # el menú. Fallback: _click_menuitem por UIA.
+    menu_ok = False
+    try:
+        send_keys("e")
+        time.sleep(0.3)
+        send_keys("{ENTER}")
+        time.sleep(2.0)
+        menu_ok = True
+    except Exception:  # noqa: BLE001
+        menu_ok = False
     ok = _save_as(app, full)
+    if not ok:
+        # reintento por UIA (por si el teclado no navegó el menú)
+        mouse.right_click(coords=(x, y))
+        time.sleep(0.8)
+        if _click_menuitem(EXPORT_MENU_TEXT):
+            time.sleep(2.0)
+            ok = _save_as(app, full)
     time.sleep(1.2)
     exists = Path(full).exists()
     print("EXPORT %s: menu=OK saveas=%s archivo=%s (%s)" % (
