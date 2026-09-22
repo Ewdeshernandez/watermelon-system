@@ -346,6 +346,31 @@ def treetop(cfg: dict, out_png: str) -> int:
     return 0
 
 
+def keys_probe(cfg: dict, seq: str, out_png: str) -> int:
+    """Enfoca el árbol (clic) y envía una secuencia de teclas; recaptura.
+
+    Las teclas virtuales (HOME/DOWN/ENTER) no sufren el remapeo de layout del
+    RDP anidado (eso solo afecta al TEXTO). Sirve para validar navegación por
+    teclado del árbol: {HOME}{DOWN 9}{ENTER} debería seleccionar 2YD TURBINA NDE.
+    """
+    from pywinauto import mouse
+    from pywinauto.keyboard import send_keys
+    app, win = _connect()
+    tx = int(cfg.get("rpa", {}).get("tree_x", 100))
+    ty = int(cfg.get("rpa", {}).get("tree_y", 300))
+    r = win.rectangle()
+    mouse.click(coords=(r.left + tx, r.top + ty))   # foco al árbol
+    time.sleep(0.4)
+    send_keys(seq, pause=0.03)
+    time.sleep(0.8)
+    img = win.capture_as_image()
+    p = Path(out_png)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(p))
+    print("KEYS '%s' -> recaptura %s (%dx%d)" % (seq, p, img.width, img.height))
+    return 0
+
+
 def _setup_logging():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -369,6 +394,8 @@ def main(argv=None) -> int:
                     help="left-click en (X,Y) pantalla y recapturar")
     ap.add_argument("--treetop", action="store_true",
                     help="scroll del árbol al tope + recaptura")
+    ap.add_argument("--keys", metavar="SEQ",
+                    help="clic al árbol + send_keys(SEQ) + recaptura")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -376,6 +403,8 @@ def main(argv=None) -> int:
         return shot(cfg, args.shot)
     if args.treetop:
         return treetop(cfg, r"C:\WM_wave\s1.png")
+    if args.keys:
+        return keys_probe(cfg, args.keys, r"C:\WM_wave\s1.png")
     if args.rclick:
         return rclick(cfg, args.rclick[0], args.rclick[1])
     if args.click:
