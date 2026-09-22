@@ -461,18 +461,16 @@ def _click_menuitem(text: str, timeout: float = 4.0) -> bool:
                 except Exception:  # noqa: BLE001
                     continue
                 if t == text:
-                    for how in ("click", "invoke", "select"):
+                    try:
+                        mi.click_input()      # click real: dispara el diálogo
+                        return True
+                    except Exception:  # noqa: BLE001
                         try:
-                            if how == "click":
-                                mi.click_input()
-                            elif how == "invoke":
-                                mi.invoke()
-                            else:
-                                mi.select()
+                            mi.invoke()
                             return True
                         except Exception:  # noqa: BLE001
-                            continue
-        time.sleep(0.3)
+                            return False
+        time.sleep(0.25)
     return False
 
 
@@ -489,8 +487,6 @@ def _dismiss_dialogs():
                     pass
                 time.sleep(0.4)
                 break
-        send_keys("{ESC}")     # cierra cualquier menú contextual abierto
-        time.sleep(0.2)
     except Exception:  # noqa: BLE001
         pass
 
@@ -619,7 +615,7 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
     if not _click_menuitem(EXPORT_MENU_TEXT):
         print("EXPORT %s: no hallé 'Export to CSV'" % name)
         return 1
-    time.sleep(1.0)
+    time.sleep(2.0)
     ok = _save_as(app, full)
     time.sleep(1.2)
     exists = Path(full).exists()
