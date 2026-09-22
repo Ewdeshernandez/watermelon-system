@@ -443,20 +443,35 @@ def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
     return 0
 
 
-def _click_menuitem(text: str, timeout: float = 3.0) -> bool:
-    """Clic en un MenuItem por título, buscándolo en TODAS las ventanas top-level
-    (el menú contextual es un popup aparte)."""
+def _click_menuitem(text: str, timeout: float = 4.0) -> bool:
+    """Clic en un MenuItem por título exacto. Itera descendants de todas las
+    top-level (método probado en --rclick). Intenta click_input y, si falla,
+    invoke()/select()."""
     from pywinauto import Desktop
     end = time.time() + timeout
     while time.time() < end:
         for w in Desktop(backend="uia").windows():
             try:
-                mi = w.child_window(title=text, control_type="MenuItem")
-                if mi.exists(timeout=0.2):
-                    mi.click_input()
-                    return True
+                items = w.descendants(control_type="MenuItem")
             except Exception:  # noqa: BLE001
                 continue
+            for mi in items:
+                try:
+                    t = (mi.window_text() or "").strip()
+                except Exception:  # noqa: BLE001
+                    continue
+                if t == text:
+                    for how in ("click", "invoke", "select"):
+                        try:
+                            if how == "click":
+                                mi.click_input()
+                            elif how == "invoke":
+                                mi.invoke()
+                            else:
+                                mi.select()
+                            return True
+                        except Exception:  # noqa: BLE001
+                            continue
         time.sleep(0.3)
     return False
 
