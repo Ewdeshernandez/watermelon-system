@@ -443,6 +443,112 @@ def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
     return 0
 
 
+def _click_menuitem(text: str, timeout: float = 3.0) -> bool:
+    """Clic en un MenuItem por título, buscándolo en TODAS las ventanas top-level
+    (el menú contextual es un popup aparte)."""
+    from pywinauto import Desktop
+    end = time.time() + timeout
+    while time.time() < end:
+        for w in Desktop(backend="uia").windows():
+            try:
+                mi = w.child_window(title=text, control_type="MenuItem")
+                if mi.exists(timeout=0.2):
+                    mi.click_input()
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        time.sleep(0.3)
+    return False
+
+
+def _save_as(app, full_path: str, timeout: float = 6.0) -> bool:
+    """Maneja el diálogo Save As de System1: fija el nombre por UIA SetValue
+    (esquiva el teclado) y da Guardar/Save. Tolera locale ES/EN."""
+    from pywinauto import Desktop
+    end = time.time() + timeout
+    dlg = None
+    while time.time() < end and dlg is None:
+        for w in Desktop(backend="uia").windows():
+            try:
+                t = (w.window_text() or "")
+            except Exception:  # noqa: BLE001
+                t = ""
+            if any(k in t for k in ("Export to CSV", "Save As", "Guardar como",
+                                    "Guardar")):
+                dlg = w
+                break
+        if dlg is None:
+            time.sleep(0.3)
+    if dlg is None:
+        log.error("no apareció el diálogo Save As")
+        return False
+    # caja de nombre de archivo
+    edit = None
+    for ct in ("Edit", "ComboBox"):
+        try:
+            e = dlg.child_window(class_name="Edit") if ct == "Edit" else None
+            if e is not None and e.exists(timeout=0.5):
+                edit = e
+                break
+        except Exception:  # noqa: BLE001
+            pass
+    if edit is None:
+        try:
+            edit = dlg.descendants(control_type="Edit")[0]
+        except Exception:  # noqa: BLE001
+            edit = None
+    if edit is None:
+        log.error("no hallé la caja de nombre en Save As")
+        return False
+    try:
+        edit.set_edit_text(full_path)
+    except Exception:  # noqa: BLE001
+        edit.set_text(full_path)
+    time.sleep(0.3)
+    for title in ("Save", "Guardar", "&Save", "&Guardar"):
+        try:
+            b = dlg.child_window(title=title, control_type="Button")
+            if b.exists(timeout=0.3):
+                b.click_input()
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    # fallback: Enter
+    try:
+        from pywinauto.keyboard import send_keys
+        send_keys("{ENTER}")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
+    """Exporta UNA gráfica: clic-derecho (x,y) → Export to CSV → Save As nombre."""
+    from pywinauto import mouse
+    app, win = _connect()
+    outp = Path(out_dir)
+    outp.mkdir(parents=True, exist_ok=True)
+    full = str(outp / f"{name}.csv")
+    try:
+        if outp.joinpath(f"{name}.csv").exists():
+            outp.joinpath(f"{name}.csv").unlink()   # limpio para verificar
+    except Exception:  # noqa: BLE001
+        pass
+    mouse.right_click(coords=(x, y))
+    time.sleep(0.8)
+    if not _click_menuitem(EXPORT_MENU_TEXT):
+        print("EXPORT %s: no hallé 'Export to CSV'" % name)
+        return 1
+    time.sleep(1.0)
+    ok = _save_as(app, full)
+    time.sleep(1.2)
+    exists = Path(full).exists()
+    print("EXPORT %s: menu=OK saveas=%s archivo=%s (%s)" % (
+        name, ok, exists, full))
+    _grab_screen(r"C:\WM_wave\s1.png")
+    return 0 if exists else 1
+
+
 def maketpl(cfg: dict, name: str, x0: int, y0: int, x1: int, y1: int) -> int:
     """Captura escritorio y recorta [x0:x1, y0:y1] como templates/NAME.png."""
     _connect()
@@ -576,6 +682,8 @@ def main(argv=None) -> int:
                     help="satura scroll arriba (tope) + captura de escritorio")
     ap.add_argument("--grab", action="store_true",
                     help="solo captura de escritorio (sin interactuar)")
+    ap.add_argument("--exp1", nargs=4, metavar=("X", "Y", "NAME", "OUTDIR"),
+                    help="exporta UNA gráfica: right-click (X,Y)->CSV->NAME")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -593,6 +701,9 @@ def main(argv=None) -> int:
         return maketpl(cfg, n, int(x0), int(y0), int(x1), int(y1))
     if args.find:
         return findtpl(cfg, args.find)
+    if args.exp1:
+        x, y, name, outd = args.exp1
+        return export_one(cfg, int(x), int(y), name, outd)
     if args.grab:
         _connect()
         img = _grab_screen(r"C:\WM_wave\s1.png")
