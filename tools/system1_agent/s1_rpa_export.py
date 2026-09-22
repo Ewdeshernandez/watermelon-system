@@ -443,27 +443,37 @@ def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
     return 0
 
 
+# Clases de ventana pesadas/irrelevantes: enumerarlas es lento (Chromium) y el
+# menú contextual se cierra antes de clicar. El popup del menú NO es de estas.
+_HEAVY_CLASSES = {"Chrome_WidgetWin_1", "Shell_TrayWnd", "Progman",
+                  "ConsoleWindowClass", "Notepad", "CabinetWClass",
+                  "Azure Data Studio"}
+
+
 def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
-    """Clic RÁPIDO en un MenuItem por título. Prioriza las ventanas del proceso
-    de System1 (el popup del menú es pequeño), saltando la ventana principal
-    (árbol UIA enorme y lento). Enumerar todo el escritorio cierra el menú antes
-    de clicar; por eso el scope reducido."""
+    """Clic en un MenuItem por título, RÁPIDO: itera Desktop saltando ventanas
+    pesadas (Chromium) y la principal de System1 (árbol WPF enorme). El popup del
+    menú es liviano → se halla y se invoca al instante, antes de que se cierre.
+    invoke() dispara sin mover mouse/foco (click_input cerraría el popup)."""
     from pywinauto import Desktop
     end = time.time() + timeout
     while time.time() < end:
-        wins = []
-        if app is not None:
-            try:
-                wins = list(app.windows())
-            except Exception:  # noqa: BLE001
-                wins = []
+        try:
+            wins = Desktop(backend="uia").windows()
+        except Exception:  # noqa: BLE001
+            wins = []
         for w in wins:
             try:
-                t0 = (w.window_text() or "")
+                cls = w.element_info.class_name
             except Exception:  # noqa: BLE001
-                t0 = ""
-            if "System 1 Premium" in t0:
-                continue                      # saltar ventana principal (lenta)
+                cls = ""
+            if cls in _HEAVY_CLASSES:
+                continue
+            try:
+                if "System 1 Premium" in (w.window_text() or ""):
+                    continue              # ventana principal: lenta, sin popup
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 items = w.descendants(control_type="MenuItem")
             except Exception:  # noqa: BLE001
@@ -474,8 +484,6 @@ def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
                         continue
                 except Exception:  # noqa: BLE001
                     continue
-                # invoke() dispara el item sin mover mouse ni foco (click_input
-                # hace set_foreground y cierra el popup antes de clicar).
                 for how in ("invoke", "select", "click"):
                     try:
                         if how == "invoke":
@@ -627,27 +635,21 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
             outp.joinpath(f"{name}.csv").unlink()   # limpio para verificar
     except Exception:  # noqa: BLE001
         pass
-    from pywinauto.keyboard import send_keys
     ok = False
+    clicked_any = False
     for intento in range(2):
         mouse.right_click(coords=(x, y))
         time.sleep(0.7)
         clicked = _click_menuitem(EXPORT_MENU_TEXT, app=app)
-        if not clicked:
-            # fallback teclado: 'e' resalta 'Export to CSV', Enter activa
-            try:
-                send_keys("e")
-                time.sleep(0.3)
-                send_keys("{ENTER}")
-                clicked = True
-            except Exception:  # noqa: BLE001
-                pass
+        clicked_any = clicked_any or clicked
         if not clicked:
             continue
         time.sleep(2.0)
         ok = _save_as(app, full)
         if ok:
             break
+    if not clicked_any:
+        print("EXPORT %s: no hallé 'Export to CSV' en el menú" % name)
     time.sleep(1.2)
     exists = Path(full).exists()
     print("EXPORT %s: menu=OK saveas=%s archivo=%s (%s)" % (
