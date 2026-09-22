@@ -470,11 +470,23 @@ def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
                 continue
             for mi in items:
                 try:
-                    if (mi.window_text() or "").strip() == text:
-                        mi.click_input()
-                        return True
+                    if (mi.window_text() or "").strip() != text:
+                        continue
                 except Exception:  # noqa: BLE001
                     continue
+                # invoke() dispara el item sin mover mouse ni foco (click_input
+                # hace set_foreground y cierra el popup antes de clicar).
+                for how in ("invoke", "select", "click"):
+                    try:
+                        if how == "invoke":
+                            mi.invoke()
+                        elif how == "select":
+                            mi.select()
+                        else:
+                            mi.click_input()
+                        return True
+                    except Exception:  # noqa: BLE001
+                        continue
         time.sleep(0.2)
     return False
 
