@@ -28,10 +28,13 @@ rpm = 9000.0
 # System1 (producción). Rellenar tras correr:  python s1_agent.py --discover
 # ---------------------------------------------------------------------
 [system1]
+# El nombre de la base en System1 se ve en Database Replication → Browse.
+# Confirmar el nombre EXACTO de la base PostgreSQL con --discover, ya que el
+# nombre lógico de System1 puede diferir del nombre real en PostgreSQL.
 host = "localhost"
 port = 5432
-dbname = ""          # <- lo muestra --discover (o el Browse de Database Replication)
-user = "postgres"    # idealmente un usuario READ-ONLY dedicado
+dbname = ""          # confirmar con --discover (psql -l)
+user = "postgres"    # idealmente el usuario READ-ONLY watermelon_ro (ver sql/)
 password = ""
 # puntos a extraer (cojinetes) tal como aparecen en System1
 points = ["CDE", "CNDE", "TDE", "TNDE", "GDE", "GNDE"]
