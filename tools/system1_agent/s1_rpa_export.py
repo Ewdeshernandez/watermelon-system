@@ -443,34 +443,39 @@ def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
     return 0
 
 
-def _click_menuitem(text: str, timeout: float = 4.0) -> bool:
-    """Clic en un MenuItem por título exacto. Itera descendants de todas las
-    top-level (método probado en --rclick). Intenta click_input y, si falla,
-    invoke()/select()."""
+def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
+    """Clic RÁPIDO en un MenuItem por título. Prioriza las ventanas del proceso
+    de System1 (el popup del menú es pequeño), saltando la ventana principal
+    (árbol UIA enorme y lento). Enumerar todo el escritorio cierra el menú antes
+    de clicar; por eso el scope reducido."""
     from pywinauto import Desktop
     end = time.time() + timeout
     while time.time() < end:
-        for w in Desktop(backend="uia").windows():
+        wins = []
+        if app is not None:
+            try:
+                wins = list(app.windows())
+            except Exception:  # noqa: BLE001
+                wins = []
+        for w in wins:
+            try:
+                t0 = (w.window_text() or "")
+            except Exception:  # noqa: BLE001
+                t0 = ""
+            if "System 1 Premium" in t0:
+                continue                      # saltar ventana principal (lenta)
             try:
                 items = w.descendants(control_type="MenuItem")
             except Exception:  # noqa: BLE001
                 continue
             for mi in items:
                 try:
-                    t = (mi.window_text() or "").strip()
+                    if (mi.window_text() or "").strip() == text:
+                        mi.click_input()
+                        return True
                 except Exception:  # noqa: BLE001
                     continue
-                if t == text:
-                    try:
-                        mi.click_input()      # click real: dispara el diálogo
-                        return True
-                    except Exception:  # noqa: BLE001
-                        try:
-                            mi.invoke()
-                            return True
-                        except Exception:  # noqa: BLE001
-                            return False
-        time.sleep(0.25)
+        time.sleep(0.2)
     return False
 
 
@@ -611,28 +616,26 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
     except Exception:  # noqa: BLE001
         pass
     from pywinauto.keyboard import send_keys
-    mouse.right_click(coords=(x, y))
-    time.sleep(0.8)
-    # Navegar el menú por TECLADO: solo 'Export to CSV' empieza con E → 'e'
-    # lo resalta, Enter lo activa. Evita la enumeración UIA lenta que cierra
-    # el menú. Fallback: _click_menuitem por UIA.
-    menu_ok = False
-    try:
-        send_keys("e")
-        time.sleep(0.3)
-        send_keys("{ENTER}")
-        time.sleep(2.0)
-        menu_ok = True
-    except Exception:  # noqa: BLE001
-        menu_ok = False
-    ok = _save_as(app, full)
-    if not ok:
-        # reintento por UIA (por si el teclado no navegó el menú)
+    ok = False
+    for intento in range(2):
         mouse.right_click(coords=(x, y))
-        time.sleep(0.8)
-        if _click_menuitem(EXPORT_MENU_TEXT):
-            time.sleep(2.0)
-            ok = _save_as(app, full)
+        time.sleep(0.7)
+        clicked = _click_menuitem(EXPORT_MENU_TEXT, app=app)
+        if not clicked:
+            # fallback teclado: 'e' resalta 'Export to CSV', Enter activa
+            try:
+                send_keys("e")
+                time.sleep(0.3)
+                send_keys("{ENTER}")
+                clicked = True
+            except Exception:  # noqa: BLE001
+                pass
+        if not clicked:
+            continue
+        time.sleep(2.0)
+        ok = _save_as(app, full)
+        if ok:
+            break
     time.sleep(1.2)
     exists = Path(full).exists()
     print("EXPORT %s: menu=OK saveas=%s archivo=%s (%s)" % (
