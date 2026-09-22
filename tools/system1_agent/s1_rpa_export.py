@@ -494,14 +494,37 @@ def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
 
 
 def _dismiss_dialogs(app=None):
-    """Cierra un Save As colgado (ESC) de una corrida previa."""
+    """Cierra un Save As colgado (Cancel/ESC) de una corrida previa, incluido
+    el diálogo Win32 #32770 (que UIA a veces no ve)."""
+    from pywinauto import Application
     from pywinauto.keyboard import send_keys
-    try:
-        if _find_file_dialog(app) is not None:
-            send_keys("{ESC}")
+    # win32: cerrar #32770 con Cancel (o ESC)
+    for _ in range(3):
+        try:
+            a = Application(backend="win32").connect(
+                class_name="#32770", timeout=0.6)
+            d = a.window(class_name="#32770")
+            if not d.exists():
+                break
+            done = False
+            for tt in ("Cancel", "&Cancel", "Cancelar", "&Cancelar"):
+                try:
+                    b = d.child_window(title=tt, class_name="Button")
+                    if b.exists():
+                        b.click_input()
+                        done = True
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+            if not done:
+                try:
+                    d.set_focus()
+                    send_keys("{ESC}")
+                except Exception:  # noqa: BLE001
+                    pass
             time.sleep(0.5)
-    except Exception:  # noqa: BLE001
-        pass
+        except Exception:  # noqa: BLE001
+            break
 
 
 def _find_save_button(w):
@@ -606,41 +629,62 @@ def _save_as_win32(full_path: str, timeout: float = 25.0) -> bool:
         except Exception:  # noqa: BLE001
             pass
     time.sleep(0.4)
-    # Guardar: botón Save/Guardar, si no Enter
-    saved = False
-    for title in ("&Save", "Save", "&Guardar", "Guardar"):
+
+    def _confirm_overwrite():
         try:
-            b = dlg.child_window(title=title, class_name="Button")
-            if b.exists():
-                b.click()
-                saved = True
-                break
-        except Exception:  # noqa: BLE001
-            continue
-    if not saved:
-        try:
-            send_keys("{ENTER}")
-            saved = True
+            a = Application(backend="win32").connect(
+                class_name="#32770", timeout=0.6)
+            c = a.window(class_name="#32770")
+            if c.exists():
+                for tt in ("&Yes", "Yes", "&Sí", "Sí"):
+                    try:
+                        yb = c.child_window(title=tt, class_name="Button")
+                        if yb.exists():
+                            yb.click_input()
+                            return
+                    except Exception:  # noqa: BLE001
+                        continue
         except Exception:  # noqa: BLE001
             pass
-    # posible confirmación de sobreescritura
-    time.sleep(0.5)
-    try:
-        app32b = Application(backend="win32").connect(
-            class_name="#32770", timeout=1)
-        conf = app32b.window(class_name="#32770")
-        if conf.exists():
-            for title in ("&Yes", "Yes", "&Sí", "Sí"):
-                try:
-                    yb = conf.child_window(title=title, class_name="Button")
-                    if yb.exists():
-                        yb.click()
-                        break
-                except Exception:  # noqa: BLE001
-                    continue
-    except Exception:  # noqa: BLE001
-        pass
-    return filled and saved
+
+    # Guardar: clic REAL en el botón Save (b.click() por mensaje no dispara).
+    # Verifico por existencia del archivo; reintento con Alt+S y Enter.
+    tgt = Path(full_path)
+    for attempt in range(4):
+        clicked = False
+        for title in ("&Save", "Save", "&Guardar", "Guardar"):
+            try:
+                b = dlg.child_window(title=title, class_name="Button")
+                if b.exists():
+                    b.click_input()
+                    clicked = True
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        if not clicked:
+            try:
+                dlg.set_focus()
+                send_keys("%s")            # Alt+S = acelerador Save
+            except Exception:  # noqa: BLE001
+                pass
+        time.sleep(0.6)
+        _confirm_overwrite()
+        # esperar a que aparezca el archivo
+        for _ in range(6):
+            if tgt.exists():
+                return True
+            time.sleep(0.4)
+        # aún no: reintento con Enter en el diálogo enfocado
+        try:
+            dlg.set_focus()
+            send_keys("{ENTER}")
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.6)
+        _confirm_overwrite()
+        if tgt.exists():
+            return True
+    return tgt.exists()
 
 
 def _save_as(app, full_path: str, timeout: float = 25.0) -> bool:
