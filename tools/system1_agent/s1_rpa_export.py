@@ -556,6 +556,8 @@ def main(argv=None) -> int:
                     help="selecciona el nodo NAME por imagen + recaptura")
     ap.add_argument("--topshot", action="store_true",
                     help="satura scroll arriba (tope) + captura de escritorio")
+    ap.add_argument("--grab", action="store_true",
+                    help="solo captura de escritorio (sin interactuar)")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -573,6 +575,11 @@ def main(argv=None) -> int:
         return maketpl(cfg, n, int(x0), int(y0), int(x1), int(y1))
     if args.find:
         return findtpl(cfg, args.find)
+    if args.grab:
+        _connect()
+        img = _grab_screen(r"C:\WM_wave\s1.png")
+        print("GRAB -> C:\\WM_wave\\s1.png (%dx%d)" % (img.width, img.height))
+        return 0
     if args.topshot:
         app, win = _connect()
         tx = int(cfg.get("rpa", {}).get("tree_x", 100))
