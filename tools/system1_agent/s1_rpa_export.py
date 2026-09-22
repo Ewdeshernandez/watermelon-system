@@ -249,6 +249,27 @@ def run(cfg: dict, dry: bool) -> int:
     return 0 if fail == 0 else 1
 
 
+def shot(cfg: dict, out_path: str) -> int:
+    """Captura la ventana de System1 a PNG (pixeles nativos, para mapear coords).
+
+    UIA no expone el contenido de System1 (canvas propietario); el RPA irá por
+    coordenadas de pantalla. Esta imagen sirve para leer la posición de cada
+    nodo del árbol y el centro de la gráfica. El origen (0,0) del PNG = esquina
+    top-left de la ventana; coord de pantalla = px_img + win.left.
+    """
+    app, win = _connect()
+    r = win.rectangle()
+    img = win.capture_as_image()
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(p))
+    print("SHOT %s  (%dx%d)  win.left=%d win.top=%d" % (
+        p, img.width, img.height, r.left, r.top))
+    print("MAP: screen_x = img_x + (%d) ; screen_y = img_y + (%d)" % (
+        r.left, r.top))
+    return 0
+
+
 def _setup_logging():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -261,11 +282,16 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Watermelon System1 RPA Exporter")
     ap.add_argument("--config")
     ap.add_argument("--inspect", action="store_true")
+    ap.add_argument("--shot", metavar="PNG", nargs="?",
+                    const=r"C:\WM_wave\s1.png",
+                    help="captura la ventana de System1 a PNG y sale")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--dry", action="store_true")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
+    if args.shot:
+        return shot(cfg, args.shot)
     if args.inspect:
         return inspect(cfg)
     if args.run:
