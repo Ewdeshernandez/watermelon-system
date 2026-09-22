@@ -493,6 +493,70 @@ def list_captures(asset: str, limit: int = 200, client=None) -> List[Dict[str, s
     return out
 
 
+def load_system1_captures(asset: str, client=None,
+                          prefix: str = "s1") -> List[Capture]:
+    """Lee los CSV que System1 exporta (formato 'Export to CSV'), subidos por el
+    uploader PowerShell a dynamic_raw/{asset}/{prefix}/*.csv (un archivo = un
+    sensor, ej. 1xd.csv). Empareja X/Y por cojinete y devuelve Captures v1
+    (X, Y, KPH sintético) listos para reconstruir — sin necesitar Python en la VM.
+    """
+    client = client or _service_client()
+    if client is None:
+        return []
+    st_api = client.storage.from_(BUCKET)
+    try:
+        files = st_api.list(f"{asset}/{prefix}") or []
+    except Exception:
+        return []
+    # sensor -> (bearing, axis)
+    import re as _re
+    rex = _re.compile(r"^\s*(\d+)\s*([xyXY])")
+    groups: Dict[str, Dict[str, dict]] = {}
+    for f in files:
+        nm = f.get("name", "")
+        if not nm.lower().endswith(".csv"):
+            continue
+        m = rex.match(nm)
+        if not m:
+            continue
+        bearing, axis = m.group(1), m.group(2).lower()
+        try:
+            raw = st_api.download(f"{asset}/{prefix}/{nm}")
+            parsed = parse_system1_waveform_csv(raw)
+        except Exception:
+            continue
+        if parsed["values"].size:
+            groups.setdefault(bearing, {})[axis] = parsed
+
+    out: List[Capture] = []
+    for bearing, ax in sorted(groups.items()):
+        base = ax.get("x") or ax.get("y")
+        t = base["t_s"]
+        channels: Dict[str, np.ndarray] = {}
+        if "x" in ax:
+            channels[CH_X] = ax["x"]["values"]
+        if "y" in ax:
+            yv = ax["y"]["values"]
+            if yv.size != t.size:
+                n = min(yv.size, t.size)
+                yv, t2 = yv[:n], t[:n]
+            channels[CH_Y] = yv
+        spr = base["samples_per_rev"]
+        channels[CH_KPH] = synth_keyphasor(t.size, spr)
+        units = (f"{CH_X}:{ax.get('x', base)['y_unit']},"
+                 f"{CH_Y}:{ax.get('y', base)['y_unit']},{CH_KPH}:pulse")
+        meta = {
+            "asset": asset, "point": f"BRG{bearing}",
+            "captured_at": base.get("timestamp", ""),
+            "rpm": base["rpm"] or "", "fs_hz": base["fs_hz"] or "",
+            "samples_per_rev": spr or "", "units": units,
+            "source": "system1_csv", "variable": base.get("variable", ""),
+        }
+        out.append(Capture(meta={k: str(v) for k, v in meta.items()},
+                           t=t, channels=channels))
+    return out
+
+
 def download_capture(key: str, client=None) -> Optional[Capture]:
     """Descarga y parsea una captura del bucket."""
     client = client or _service_client()
@@ -531,5 +595,6 @@ __all__ = [
     "spectrum", "orders_axis", "top_peaks",
     "keyphasor_edges", "rpm_from_keyphasor", "compute_orbit_from_capture",
     "BUCKET", "list_captures", "download_capture", "upload_capture",
+    "load_system1_captures",
     "CH_X", "CH_Y", "CH_KPH", "CAPTURE_VERSION",
 ]

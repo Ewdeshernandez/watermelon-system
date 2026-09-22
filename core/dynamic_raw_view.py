@@ -20,7 +20,8 @@ import streamlit as st
 
 from core.dynamic_raw import (
     Capture, CH_X, CH_Y, CH_KPH, download_capture, list_captures,
-    keyphasor_edges, orders_axis, rpm_from_keyphasor, spectrum, top_peaks,
+    load_system1_captures, keyphasor_edges, orders_axis, rpm_from_keyphasor,
+    spectrum, top_peaks,
 )
 
 _VIEWS = [
@@ -70,57 +71,29 @@ def _resolve_asset(candidates: List[str]) -> tuple[str, List[Dict[str, str]]]:
     return (seen[0] if seen else ""), []
 
 
-def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
-                       asset: Optional[str] = None) -> None:
-    """Dibuja el análisis avanzado dinámico del activo desde onda cruda."""
-    cand = [asset or "", (tag or "").upper(), tag or "", str(instance_id)]
-    resolved, caps = _resolve_asset(cand)
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_s1_cached(asset: str) -> List[Dict]:
+    """Captures desde los CSV que System1 exporta (subidos por el uploader
+    PowerShell a {asset}/s1/). Serializado para cache."""
+    caps = load_system1_captures(asset)
+    return [{"meta": c.meta, "t": c.t.tolist(),
+             "channels": {k: v.tolist() for k, v in c.channels.items()}}
+            for c in caps]
 
-    if not caps:
-        st.info(
-            "Aún no hay onda cruda dinámica para este activo. "
-            "En el server Parex corre el agente System1 "
-            "(`python s1_agent.py --demo --once` para probar el canal)."
-        )
-        st.caption(f"Buscado como activo: {resolved or '—'} · bucket `dynamic_raw`")
-        return
 
-    # agrupar por punto
-    by_point: Dict[str, List[Dict[str, str]]] = {}
-    for c in caps:
-        by_point.setdefault(c["point"], []).append(c)
-    points = sorted(by_point.keys())
-
-    c1, c2 = st.columns([2, 3])
-    with c1:
-        point = st.selectbox("Punto (cojinete)", points,
-                             key=f"wm_dr_pt_{instance_id}")
-    times = by_point[point]  # ya vienen recientes primero
-
-    def _lbl(o: Dict[str, str]) -> str:
-        d, t = o.get("day", ""), o.get("time", "")
-        if len(d) == 8 and len(t) == 6:
-            return f"{d[:4]}-{d[4:6]}-{d[6:]} {t[:2]}:{t[2:4]}:{t[4:]}"
-        return o.get("name", "")
-
-    with c2:
-        sel = st.selectbox("Fecha/hora de captura", times, format_func=_lbl,
-                           key=f"wm_dr_ts_{instance_id}_{point}")
-
+def _chip(resolved: str, point: str, source: str) -> None:
     st.markdown(
         f"<span style='background:{_INK};color:#f1f5f9;border-radius:8px;"
         f"padding:4px 12px;font-weight:700;font-size:12px;letter-spacing:.06em;'>"
         f"{resolved} · {point}</span> "
-        f"<span style='color:#64748b;font-size:12px;'>fuente: System1 (raw)</span>",
+        f"<span style='color:#64748b;font-size:12px;'>fuente: {source}</span>",
         unsafe_allow_html=True)
 
-    cached = _download_cached(sel["key"])
-    if not cached:
-        st.warning("No se pudo descargar esta captura.")
-        return
-    cap = _cap_from_cached(cached)
 
-    rpm = cap.rpm or rpm_from_keyphasor(cap.t, cap.get(CH_KPH)) if cap.has(CH_KPH) else cap.rpm
+def _render_capture(cap: Capture, instance_id: str) -> None:
+    rpm = cap.rpm
+    if rpm is None and cap.has(CH_KPH):
+        rpm = rpm_from_keyphasor(cap.t, cap.get(CH_KPH))
     fs = cap.fs_hz
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("RPM", f"{rpm:,.0f}" if rpm else "—")
@@ -137,13 +110,71 @@ def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
                         key=f"wm_dr_view_r_{instance_id}",
                         label_visibility="collapsed")
     view = view or _VIEWS[0]
-
     if "Waveform" in view:
         _plot_waveform(cap)
     elif "Spectrum" in view:
         _plot_spectrum(cap, rpm)
     else:
         _plot_orbit(cap, rpm)
+
+
+def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
+                       asset: Optional[str] = None) -> None:
+    """Dibuja el análisis avanzado dinámico del activo desde onda cruda.
+    Prioridad: export en vivo de System1 (uploader PowerShell) → capturas v1
+    del agente Python."""
+    cand = [c for c in [asset or "", (tag or "").upper(), tag or "",
+                        str(instance_id)] if c]
+
+    # 1) System1 export en vivo (PowerShell uploader → {asset}/s1/)
+    for c in cand:
+        s1 = _load_s1_cached(c.strip())
+        if s1:
+            caps = [_cap_from_cached(d) for d in s1]
+            pts = [c2.point or f"BRG{i}" for i, c2 in enumerate(caps)]
+            point = st.selectbox("Punto (cojinete)", pts,
+                                 key=f"wm_dr_pt_{instance_id}")
+            _chip(c.strip(), point, "System1 (export en vivo)")
+            _render_capture(caps[pts.index(point)], instance_id)
+            return
+
+    # 2) capturas v1 del agente Python
+    resolved, caps = _resolve_asset(cand)
+    if not caps:
+        st.info(
+            "Aún no hay onda cruda dinámica para este activo. En el server corre "
+            "el uploader (`upload_csv.ps1`) o el agente (`s1_agent.py --csv`)."
+        )
+        st.caption(f"Buscado como activo: {resolved or '—'} · bucket `dynamic_raw`")
+        return
+
+    by_point: Dict[str, List[Dict[str, str]]] = {}
+    for c in caps:
+        by_point.setdefault(c["point"], []).append(c)
+    points = sorted(by_point.keys())
+
+    c1, c2 = st.columns([2, 3])
+    with c1:
+        point = st.selectbox("Punto (cojinete)", points,
+                             key=f"wm_dr_pt_{instance_id}")
+    times = by_point[point]
+
+    def _lbl(o: Dict[str, str]) -> str:
+        d, t = o.get("day", ""), o.get("time", "")
+        if len(d) == 8 and len(t) == 6:
+            return f"{d[:4]}-{d[4:6]}-{d[6:]} {t[:2]}:{t[2:4]}:{t[4:]}"
+        return o.get("name", "")
+
+    with c2:
+        sel = st.selectbox("Fecha/hora de captura", times, format_func=_lbl,
+                           key=f"wm_dr_ts_{instance_id}_{point}")
+    _chip(resolved, point, "System1 (raw)")
+
+    cached = _download_cached(sel["key"])
+    if not cached:
+        st.warning("No se pudo descargar esta captura.")
+        return
+    _render_capture(_cap_from_cached(cached), instance_id)
 
 
 # =========================================================
