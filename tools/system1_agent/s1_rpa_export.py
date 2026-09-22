@@ -476,37 +476,72 @@ def _click_menuitem(text: str, timeout: float = 4.0) -> bool:
     return False
 
 
-def _save_as(app, full_path: str, timeout: float = 6.0) -> bool:
-    """Maneja el diálogo Save As de System1: fija el nombre por UIA SetValue
-    (esquiva el teclado) y da Guardar/Save. Tolera locale ES/EN."""
+def _dismiss_dialogs():
+    """Cierra un Save As o menú colgado (ESC) de una corrida previa."""
+    from pywinauto import Desktop
+    from pywinauto.keyboard import send_keys
+    try:
+        for w in Desktop(backend="uia").windows():
+            if _find_save_button(w) is not None:
+                try:
+                    send_keys("{ESC}")
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(0.4)
+                break
+        send_keys("{ESC}")     # cierra cualquier menú contextual abierto
+        time.sleep(0.2)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _find_save_button(w):
+    """Devuelve el botón Save/Guardar de una ventana, o None."""
+    for title in ("Save", "Guardar", "&Save", "&Guardar"):
+        try:
+            b = w.child_window(title=title, control_type="Button")
+            if b.exists(timeout=0.2):
+                return b
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _save_as(app, full_path: str, timeout: float = 12.0) -> bool:
+    """Maneja el diálogo Save As estándar de Windows. Lo detecta por tener un
+    botón Save/Guardar (no por título). Fija el nombre por SetValue (esquiva el
+    teclado) y guarda. Tolera locale ES/EN."""
     from pywinauto import Desktop
     end = time.time() + timeout
     dlg = None
+    save_btn = None
     while time.time() < end and dlg is None:
         for w in Desktop(backend="uia").windows():
-            try:
-                t = (w.window_text() or "")
-            except Exception:  # noqa: BLE001
-                t = ""
-            if any(k in t for k in ("Export to CSV", "Save As", "Guardar como",
-                                    "Guardar")):
-                dlg = w
+            b = _find_save_button(w)
+            if b is not None:
+                dlg, save_btn = w, b
                 break
         if dlg is None:
             time.sleep(0.3)
     if dlg is None:
         log.error("no apareció el diálogo Save As")
         return False
-    # caja de nombre de archivo
+    # caja de nombre de archivo: ComboBox/Edit "File name" o el primer Edit
     edit = None
-    for ct in ("Edit", "ComboBox"):
+    for finder in (
+        lambda: dlg.child_window(title_re="(File name|Nombre).*",
+                                 control_type="Edit"),
+        lambda: dlg.child_window(title_re="(File name|Nombre).*",
+                                 control_type="ComboBox"),
+        lambda: dlg.child_window(class_name="Edit"),
+    ):
         try:
-            e = dlg.child_window(class_name="Edit") if ct == "Edit" else None
-            if e is not None and e.exists(timeout=0.5):
+            e = finder()
+            if e.exists(timeout=0.4):
                 edit = e
                 break
         except Exception:  # noqa: BLE001
-            pass
+            continue
     if edit is None:
         try:
             edit = dlg.descendants(control_type="Edit")[0]
@@ -515,32 +550,41 @@ def _save_as(app, full_path: str, timeout: float = 6.0) -> bool:
     if edit is None:
         log.error("no hallé la caja de nombre en Save As")
         return False
-    try:
-        edit.set_edit_text(full_path)
-    except Exception:  # noqa: BLE001
-        edit.set_text(full_path)
-    time.sleep(0.3)
-    for title in ("Save", "Guardar", "&Save", "&Guardar"):
+    ok_set = False
+    for setter in ("set_edit_text", "set_text", "type_keys"):
         try:
-            b = dlg.child_window(title=title, control_type="Button")
-            if b.exists(timeout=0.3):
-                b.click_input()
-                return True
+            if setter == "type_keys":
+                edit.click_input()
+                edit.type_keys(full_path, with_spaces=True, set_foreground=True)
+            else:
+                getattr(edit, setter)(full_path)
+            ok_set = True
+            break
         except Exception:  # noqa: BLE001
             continue
-    # fallback: Enter
+    if not ok_set:
+        log.error("no pude fijar el nombre")
+        return False
+    time.sleep(0.4)
     try:
-        from pywinauto.keyboard import send_keys
-        send_keys("{ENTER}")
+        save_btn.click_input()
         return True
     except Exception:  # noqa: BLE001
-        return False
+        try:
+            from pywinauto.keyboard import send_keys
+            send_keys("{ENTER}")
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
 
 def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
     """Exporta UNA gráfica: clic-derecho (x,y) → Export to CSV → Save As nombre."""
     from pywinauto import mouse
     app, win = _connect()
+    _dismiss_dialogs()                      # cierra Save As/menú colgado previo
+    win.set_focus()
+    time.sleep(0.3)
     outp = Path(out_dir)
     outp.mkdir(parents=True, exist_ok=True)
     full = str(outp / f"{name}.csv")
