@@ -21,7 +21,7 @@ import streamlit as st
 
 from core.dynamic_raw import (
     Capture, CH_X, CH_Y, CH_KPH, download_capture, list_captures,
-    keyphasor_edges, rpm_from_keyphasor, spectrum, top_peaks,
+    rpm_from_keyphasor,
 )
 
 # ---- paleta profesional ----
@@ -35,11 +35,8 @@ _ORBIT_RAW = "rgba(148,163,184,0.50)"
 _ORBIT_FILT = "#0f172a"
 _ACCENT = "#e11d48"
 
-_VIEWS = [
-    ":material/show_chart: Onda",
-    ":material/equalizer: Espectro",
-    ":material/track_changes: Órbita",
-]
+# Pestañas con BOLITAS de color (patrón del módulo Calibración), sin iconitos.
+_VIEWS = ["🔵  Onda", "🟢  Espectro", "🟠  Órbita"]
 
 
 # =========================================================
@@ -247,110 +244,99 @@ def _disp_type(unit: str) -> str:
 _FMAX_CPM = {"disp": 60000, "vel": 300000, "accel": 600000}
 
 
-def _amp_pp(unit: str, amp: np.ndarray) -> Tuple[np.ndarray, str]:
-    """Convierte amplitud-pico del FFT a pp para desplazamiento (norma API/ISO).
-    Devuelve (amp_convertida, sufijo_unidad)."""
-    u = unit or "µm"
-    if _disp_type(u) == "disp":
-        return amp * 2.0, f"{u} pp"
-    return amp, f"{u} pico"
+def _hires_spectrum(v: np.ndarray, fs: float, zpad: int = 8):
+    """FFT de ALTA RESOLUCIÓN: ventana Hann + zero-padding (curva suave, no
+    dentada). Devuelve (freqs_hz, amp_pico) calibrada a amplitud real."""
+    v = np.asarray(v, float)
+    v = v[np.isfinite(v)]
+    n = v.size
+    if n < 8 or not fs or fs <= 0:
+        return np.zeros(0), np.zeros(0)
+    w = np.hanning(n)
+    vw = (v - v.mean()) * w
+    nfft = int(2 ** np.ceil(np.log2(n * max(1, zpad))))
+    sp = np.fft.rfft(vw, n=nfft)
+    freqs = np.fft.rfftfreq(nfft, 1.0 / fs)
+    amp = np.abs(sp) * 2.0 / (n * 0.5)   # ≈ amplitud pico (corrige ventana Hann)
+    if amp.size:
+        amp[0] /= 2.0
+    return freqs, amp
 
 
 # =========================================================
-# ONDA
+# ONDA — un gráfico INDEPENDIENTE por sensor (apilados)
 # =========================================================
 def _plot_waveform(cap: Capture, nx: str, ny: str) -> None:
-    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
     t = cap.t * 1000.0  # ms
     u = cap.unit_of(CH_X) or "µm"
-    fig = go.Figure()
-    ymins = []
-    for ch, color, nm in ((CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)):
-        v = cap.get(ch)
-        if v is not None:
-            fig.add_scatter(x=t, y=v, mode="lines",
-                            name=f"{nm}  ·  {_pp(v):.1f} {u} pp",
-                            line=dict(color=color, width=1.6))
-            ymins.append(float(np.nanmin(v)))
-    # keyphasor = BOLITAS verdes en el arranque de cada vuelta (sin líneas)
-    if cap.has(CH_KPH) and ymins:
-        edges = keyphasor_edges(cap.get(CH_KPH))
-        y0 = min(ymins)
-        kx = [float(t[e]) for e in edges[:200] if e < t.size]
-        if kx:
-            fig.add_scatter(x=kx, y=[y0] * len(kx), mode="markers",
-                            name="Keyphasor",
-                            marker=dict(color=_KPH_COLOR, size=8,
-                                        line=dict(color="white", width=1)))
-    _base_layout(fig, title="Forma de onda")
     xmax = float(t[-1]) if t.size else 1.0
-    fig.update_xaxes(title="Tiempo [ms]", range=[0, xmax], constrain="domain")
-    fig.update_yaxes(title=f"Amplitud [{u}]", zeroline=True,
-                     zerolinecolor="rgba(15,23,42,0.30)")
+    chans = [(CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)]
+    chans = [(c, col, nm) for c, col, nm in chans if cap.get(c) is not None]
+    if not chans:
+        st.info("Sin canales de onda.")
+        return
+    fig = make_subplots(rows=len(chans), cols=1, shared_xaxes=True,
+                        vertical_spacing=0.10,
+                        subplot_titles=[f"{nm}   ·   {_pp(cap.get(c)):.1f} {u} pp"
+                                        for c, col, nm in chans])
+    for i, (ch, color, nm) in enumerate(chans, start=1):
+        v = cap.get(ch)
+        fig.add_scatter(x=t, y=v, mode="lines", name=nm, row=i, col=1,
+                        line=dict(color=color, width=1.6), showlegend=False)
+        fig.update_yaxes(title_text=f"[{u}]", row=i, col=1, zeroline=True,
+                         zerolinecolor="rgba(15,23,42,0.30)")
+        fig.update_xaxes(range=[0, xmax], row=i, col=1)
+    fig.update_xaxes(title_text="Tiempo [ms]", row=len(chans), col=1)
+    _base_layout(fig, height=200 * len(chans) + 60, title="Forma de onda")
+    fig.update_layout(showlegend=False)
+    _style_subtitles(fig)
     st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_wf_{cap.point}_{cap.captured_at}")
-    st.caption(f"Duración capturada: {xmax:.0f} ms ({cap.samples_per_rev or '—'} "
-               f"muestras/vuelta). Para más tiempo, sube las vueltas en la captura "
-               f"de campo.")
+    st.caption(f"Duración capturada: {xmax:.0f} ms · {cap.samples_per_rev or '—'} "
+               f"muestras/vuelta. Más tiempo/resolución = más vueltas en la "
+               f"captura de campo.")
 
 
 # =========================================================
-# ESPECTRO  (dominio de frecuencia en CPM)
+# ESPECTRO — un gráfico INDEPENDIENTE por sensor (alta resolución, CPM)
 # =========================================================
 def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None:
-    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
     fs = cap.fs_hz
     if not fs:
         st.info("Sin frecuencia de muestreo — no se puede calcular el espectro.")
         return
     unit = cap.unit_of(CH_X) or "µm"
+    is_disp = _disp_type(unit) == "disp"
+    ysuf = f"{unit} pp" if is_disp else f"{unit} pico"
     fmax_cpm = min(_FMAX_CPM[_disp_type(unit)], fs / 2.0 * 60.0)
-    use_orders = bool(rpm and rpm > 0)
-    fig = go.Figure()
-    peaks_all: List[Dict[str, float]] = []
-    fills = {CH_X: "rgba(37,99,235,0.10)", CH_Y: "rgba(234,88,12,0.09)"}
-    ysuf = ""
-    for ch, color, nm in ((CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)):
-        v = cap.get(ch)
-        if v is None:
-            continue
-        freqs, amp = spectrum(v, fs)
+    fills = {CH_X: "rgba(37,99,235,0.12)", CH_Y: "rgba(234,88,12,0.10)"}
+    chans = [(CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)]
+    chans = [(c, col, nm) for c, col, nm in chans if cap.get(c) is not None]
+    if not chans:
+        st.info("Sin canales para el espectro.")
+        return
+    fig = make_subplots(rows=len(chans), cols=1, shared_xaxes=True,
+                        vertical_spacing=0.12,
+                        subplot_titles=[nm for c, col, nm in chans])
+    for i, (ch, color, nm) in enumerate(chans, start=1):
+        freqs, amp = _hires_spectrum(cap.get(ch), fs)
         if freqs.size == 0:
             continue
-        amp2, ysuf = _amp_pp(unit, amp)
         cpm = freqs * 60.0
-        fig.add_scatter(x=cpm, y=amp2, mode="lines", name=nm,
-                        line=dict(color=color, width=1.6),
-                        fill="tozeroy", fillcolor=fills[ch])
-        # picos → BOLITAS del color del canal (sin flechas ni texto)
-        pk = top_peaks(freqs, amp, rpm, n=3)
-        if pk:
-            px = [p["freq_hz"] * 60.0 for p in pk]
-            py = [(p["amp"] * 2.0 if _disp_type(unit) == "disp" else p["amp"])
-                  for p in pk]
-            fig.add_scatter(x=px, y=py, mode="markers", showlegend=False,
-                            marker=dict(color=color, size=9,
-                                        line=dict(color="white", width=1)),
-                            hovertemplate="%{x:,.0f} CPM<br>%{y:.2f} " +
-                            ysuf + "<extra></extra>")
-        peaks_all += [{**p, "ch": nm} for p in pk]
-    _base_layout(fig, title="Espectro (FFT)")
-    fig.update_xaxes(title="Frecuencia [CPM]", range=[0, fmax_cpm],
-                     constrain="domain", tickformat=",d")
-    fig.update_yaxes(title=f"Amplitud [{ysuf}]", zeroline=True,
-                     zerolinecolor="rgba(15,23,42,0.30)", rangemode="tozero")
+        yv = amp * 2.0 if is_disp else amp     # pp para desplazamiento
+        fig.add_scatter(x=cpm, y=yv, mode="lines", name=nm, row=i, col=1,
+                        line=dict(color=color, width=1.4),
+                        fill="tozeroy", fillcolor=fills[ch], showlegend=False)
+        fig.update_xaxes(range=[0, fmax_cpm], tickformat=",d", row=i, col=1)
+        fig.update_yaxes(title_text=f"[{ysuf}]", rangemode="tozero", row=i, col=1)
+    fig.update_xaxes(title_text="Frecuencia [CPM]", row=len(chans), col=1)
+    _base_layout(fig, height=220 * len(chans) + 60, title="Espectro (FFT)")
+    fig.update_layout(showlegend=False)
+    _style_subtitles(fig)
     st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_sp_{cap.point}_{cap.captured_at}")
-    if peaks_all:
-        peaks_all.sort(key=lambda p: p["amp"], reverse=True)
-        sc = 2.0 if _disp_type(unit) == "disp" else 1.0
-        rows = [{"Sensor": p["ch"],
-                 "CPM": f"{p['freq_hz']*60:,.0f}",
-                 "Hz": round(p["freq_hz"], 1),
-                 "Orden": round(p.get("order", 0), 2) if use_orders else "—",
-                 f"Amplitud [{ysuf}]": round(p["amp"] * sc, 2)}
-                for p in peaks_all[:6]]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
 # =========================================================
@@ -373,25 +359,14 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str,
         xf = np.append(xf, xf[0]); yf = np.append(yf, yf[0])
 
     fig = go.Figure()
-    # cruz de origen (referencia, sutil)
     fig.add_hline(y=0, line=dict(color="rgba(15,23,42,0.14)", width=1))
     fig.add_vline(x=0, line=dict(color="rgba(15,23,42,0.14)", width=1))
-    # órbita cruda tenue + filtrada protagonista
     fig.add_scatter(x=x, y=y, mode="lines", name="Cruda",
                     line=dict(color=_ORBIT_RAW, width=1))
     fig.add_scatter(x=xf, y=yf, mode="lines", name="Filtrada (síncrona)",
                     line=dict(color=_ORBIT_FILT, width=2.6))
-    # keyphasor = BOLITA verde (referencia de fase 0°), sin texto ni flechas
-    if cap.has(CH_KPH):
-        edges = keyphasor_edges(cap.get(CH_KPH))
-        if edges.size and edges[0] < x.size:
-            e = int(edges[0])
-            fig.add_scatter(x=[x[e]], y=[y[e]], mode="markers",
-                            name="Keyphasor (0°)",
-                            marker=dict(color=_KPH_COLOR, size=14,
-                                        line=dict(color="white", width=2)))
     amp_pp = max(_pp(xf), _pp(yf))
-    _base_layout(fig, height=470, title=f"Órbita · {_point_label(point)}")
+    _base_layout(fig, height=480, title=f"Órbita · {_point_label(point)}")
     fig.update_xaxes(title=f"{nx} [{u}]", scaleanchor="y", scaleratio=1,
                      zeroline=False)
     fig.update_yaxes(title=f"{ny} [{u}]", zeroline=False)
@@ -399,7 +374,14 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str,
                     key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
     cap_rpm = f"{rpm:,.0f} RPM · " if rpm else ""
     st.caption(f"{cap_rpm}amplitud ≈ {amp_pp:.1f} {u} pp · filtrada por promedio "
-               f"de vueltas (síncrona 1X). Bolita verde = keyphasor (0°).")
+               f"de vueltas (síncrona 1X).")
+
+
+def _style_subtitles(fig) -> None:
+    """Deja los títulos de subplot alineados a la izquierda y discretos."""
+    for ann in fig.layout.annotations:
+        ann.update(x=0, xanchor="left", font=dict(size=12, color=_INK,
+                   family="Arial"))
 
 
 __all__ = ["render_dynamic_raw"]
