@@ -791,6 +791,37 @@ def _menu_click_by_template(name: str, thr: float = 0.72) -> bool:
     return False
 
 
+# Grilla 4x2 de la hoja "Export csv1" de System1 (coords de pantalla del CENTRO
+# de cada gráfica). Fila1 = turbina, Fila2 = generador. Calibrado 1740x882.
+DEFAULT_TILES = [
+    {"name": "1yd", "x": 384, "y": 405},
+    {"name": "1xd", "x": 742, "y": 405},
+    {"name": "2yd", "x": 1100, "y": 405},
+    {"name": "2xd", "x": 1458, "y": 405},
+    {"name": "5yd", "x": 384, "y": 680},
+    {"name": "5xd", "x": 742, "y": 680},
+    {"name": "6yd", "x": 1100, "y": 680},
+    {"name": "6xd", "x": 1458, "y": 680},
+]
+
+
+def export_all(cfg: dict, out_dir: str) -> int:
+    """Exporta las 8 gráficas de la hoja (clic-derecho→Export→Save As) por
+    coordenada fija. Sin árbol ni scroll."""
+    tiles = cfg.get("rpa", {}).get("tiles", DEFAULT_TILES)
+    ok = 0
+    results = []
+    for t in tiles:
+        rc = export_one(cfg, int(t["x"]), int(t["y"]), t["name"], out_dir)
+        good = (rc == 0)
+        results.append("%s=%s" % (t["name"], "OK" if good else "FAIL"))
+        if good:
+            ok += 1
+        time.sleep(0.5)
+    print("EXPORTALL: %d/%d  [%s]" % (ok, len(tiles), " ".join(results)))
+    return 0 if ok == len(tiles) else 1
+
+
 def maketpl(cfg: dict, name: str, x0: int, y0: int, x1: int, y1: int) -> int:
     """Captura escritorio y recorta [x0:x1, y0:y1] como templates/NAME.png."""
     _connect()
@@ -926,6 +957,8 @@ def main(argv=None) -> int:
                     help="solo captura de escritorio (sin interactuar)")
     ap.add_argument("--exp1", nargs=4, metavar=("X", "Y", "NAME", "OUTDIR"),
                     help="exporta UNA gráfica: right-click (X,Y)->CSV->NAME")
+    ap.add_argument("--expall", metavar="OUTDIR",
+                    help="exporta las 8 gráficas de la hoja a OUTDIR")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -946,6 +979,8 @@ def main(argv=None) -> int:
     if args.exp1:
         x, y, name, outd = args.exp1
         return export_one(cfg, int(x), int(y), name, outd)
+    if args.expall:
+        return export_all(cfg, args.expall)
     if args.grab:
         _connect()
         img = _grab_screen(r"C:\WM_wave\s1.png")
