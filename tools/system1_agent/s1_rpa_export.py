@@ -493,19 +493,13 @@ def _click_menuitem(text: str, app=None, timeout: float = 3.0) -> bool:
     return False
 
 
-def _dismiss_dialogs():
-    """Cierra un Save As o menú colgado (ESC) de una corrida previa."""
-    from pywinauto import Desktop
+def _dismiss_dialogs(app=None):
+    """Cierra un Save As colgado (ESC) de una corrida previa."""
     from pywinauto.keyboard import send_keys
     try:
-        for w in Desktop(backend="uia").windows():
-            if _find_save_button(w) is not None:
-                try:
-                    send_keys("{ESC}")
-                except Exception:  # noqa: BLE001
-                    pass
-                time.sleep(0.4)
-                break
+        if _find_file_dialog(app) is not None:
+            send_keys("{ESC}")
+            time.sleep(0.5)
     except Exception:  # noqa: BLE001
         pass
 
@@ -534,20 +528,44 @@ def _is_file_dialog(w) -> bool:
     return _find_save_button(w) is not None
 
 
-def _save_as(app, full_path: str, timeout: float = 12.0) -> bool:
-    """Maneja el diálogo Save As estándar de Windows. Lo detecta por tener un
-    botón Save/Guardar (no por título). Fija el nombre por SetValue (esquiva el
-    teclado) y guarda. Tolera locale ES/EN."""
+def _find_file_dialog(app):
+    """Busca el diálogo Save As (#32770) vía app y Desktop. None si no está."""
+    from pywinauto import Desktop
+    # 1) rápido: por clase, vía app (incluye diálogos propios) y Desktop
+    for finder in (
+        lambda: app.window(class_name="#32770") if app is not None else None,
+        lambda: Desktop(backend="uia").window(class_name="#32770"),
+    ):
+        try:
+            d = finder()
+            if d is not None and d.exists(timeout=0.3):
+                return d
+        except Exception:  # noqa: BLE001
+            continue
+    # 2) fallback: iterar top-level, clase primero (rápido), botón después
+    try:
+        for w in Desktop(backend="uia").windows():
+            try:
+                if w.element_info.class_name == "#32770":
+                    return w
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _save_as(app, full_path: str, timeout: float = 25.0) -> bool:
+    """Maneja el diálogo Save As (#32770). Rellena el nombre por varios métodos
+    y guarda (Save/Guardar/SplitButton o Enter). Tolera locale ES/EN."""
     from pywinauto import Desktop
     end = time.time() + timeout
     dlg = None
     save_btn = None
     while time.time() < end and dlg is None:
-        for w in Desktop(backend="uia").windows():
-            if _is_file_dialog(w):
-                dlg = w
-                save_btn = _find_save_button(w)
-                break
+        dlg = _find_file_dialog(app)
+        if dlg is not None:
+            save_btn = _find_save_button(dlg)
         if dlg is None:
             time.sleep(0.3)
     if dlg is None:
@@ -618,7 +636,7 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
     """Exporta UNA gráfica: clic-derecho (x,y) → Export to CSV → Save As nombre."""
     from pywinauto import mouse
     app, win = _connect()
-    _dismiss_dialogs()                      # cierra Save As/menú colgado previo
+    _dismiss_dialogs(app)                    # cierra Save As colgado previo
     win.set_focus()
     time.sleep(0.3)
     outp = Path(out_dir)
@@ -650,6 +668,37 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
         name, clicked_any, ok, exists, full))
     _grab_screen(r"C:\WM_wave\s1.png")
     return 0 if exists else 1
+
+
+def cropfile(src: str, name: str, x0: int, y0: int, x1: int, y1: int) -> int:
+    """Recorta [x0:x1,y0:y1] de un PNG existente → templates/NAME.png.
+    Sirve para plantillas de menús (el menú se cierra si se regraba)."""
+    from PIL import Image
+    img = Image.open(src)
+    TPL_DIR.mkdir(parents=True, exist_ok=True)
+    crop = img.crop((x0, y0, x1, y1))
+    out = TPL_DIR / f"{name}.png"
+    crop.save(str(out))
+    print("CROPFILE %s [%d,%d,%d,%d] -> %s (%dx%d)" % (
+        name, x0, y0, x1, y1, out, crop.width, crop.height))
+    return 0
+
+
+def _menu_click_by_template(name: str, thr: float = 0.72) -> bool:
+    """Con el menú abierto: captura, halla la etiqueta del item por imagen y
+    hace un click de MOUSE REAL en su centro (dispara el comando WPF; invoke UIA
+    no lo hacía)."""
+    from pywinauto import mouse
+    tpl = TPL_DIR / f"{name}.png"
+    if not tpl.exists():
+        return False
+    img = _grab()
+    m = _find_template(img, tpl, thr)
+    if m is not None and m[0] >= thr:
+        _s, cx, cy = m
+        mouse.click(coords=(cx, cy))
+        return True
+    return False
 
 
 def maketpl(cfg: dict, name: str, x0: int, y0: int, x1: int, y1: int) -> int:
