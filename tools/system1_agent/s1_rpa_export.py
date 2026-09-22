@@ -496,15 +496,27 @@ def _dismiss_dialogs():
 
 
 def _find_save_button(w):
-    """Devuelve el botón Save/Guardar de una ventana, o None."""
-    for title in ("Save", "Guardar", "&Save", "&Guardar"):
-        try:
-            b = w.child_window(title=title, control_type="Button")
-            if b.exists(timeout=0.2):
-                return b
-        except Exception:  # noqa: BLE001
-            continue
+    """Devuelve el botón Save/Guardar de una ventana (Button o SplitButton)."""
+    for ct in ("Button", "SplitButton"):
+        for title in ("Save", "Guardar", "&Save", "&Guardar"):
+            try:
+                b = w.child_window(title=title, control_type=ct)
+                if b.exists(timeout=0.15):
+                    return b
+            except Exception:  # noqa: BLE001
+                continue
     return None
+
+
+def _is_file_dialog(w) -> bool:
+    """True si w es un diálogo de archivo estándar de Windows (class #32770)
+    o tiene botón Save/Guardar."""
+    try:
+        if w.element_info.class_name == "#32770":
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return _find_save_button(w) is not None
 
 
 def _save_as(app, full_path: str, timeout: float = 12.0) -> bool:
@@ -517,14 +529,23 @@ def _save_as(app, full_path: str, timeout: float = 12.0) -> bool:
     save_btn = None
     while time.time() < end and dlg is None:
         for w in Desktop(backend="uia").windows():
-            b = _find_save_button(w)
-            if b is not None:
-                dlg, save_btn = w, b
+            if _is_file_dialog(w):
+                dlg = w
+                save_btn = _find_save_button(w)
                 break
         if dlg is None:
             time.sleep(0.3)
     if dlg is None:
-        log.error("no apareció el diálogo Save As")
+        log.error("no apareció el diálogo Save As. Ventanas top-level:")
+        try:
+            for w in Desktop(backend="uia").windows():
+                try:
+                    log.error("  win: '%s' class=%s", w.window_text(),
+                              w.element_info.class_name)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
         return False
     # caja de nombre de archivo: ComboBox/Edit "File name" o el primer Edit
     edit = None
