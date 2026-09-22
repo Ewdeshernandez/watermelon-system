@@ -325,15 +325,26 @@ def rclick(cfg: dict, x: int, y: int) -> int:
     return 0
 
 
-def _grab_screen(path: str):
-    """Captura TODO el escritorio (incluye popups/menús/diálogos, que son
-    ventanas aparte y NO salen en win.capture_as_image()). Requiere sesión
-    interactiva (la tarea /it la provee)."""
+def _grab():
+    """Captura TODO el escritorio a memoria (sin tocar disco). Incluye
+    popups/menús/diálogos (ventanas aparte que NO salen en capture_as_image).
+    Requiere sesión interactiva (la tarea /it la provee)."""
     from PIL import ImageGrab
-    img = ImageGrab.grab(all_screens=True)
+    return ImageGrab.grab(all_screens=True)
+
+
+def _grab_screen(path: str):
+    """Igual que _grab() pero guarda a disco (para inspección). Reintenta si el
+    archivo está bloqueado (lo lee el host por SMB)."""
+    img = _grab()
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    img.save(str(p))
+    for _ in range(5):
+        try:
+            img.save(str(p))
+            break
+        except PermissionError:
+            time.sleep(0.4)
     return img
 
 
@@ -458,7 +469,7 @@ def _select_by_template(win, cfg: dict, name: str,
     _tree_scroll_top(win, tx, ty)
     tpl = TPL_DIR / f"{name}.png"
     for _i in range(max_scrolls):
-        img = _grab_screen(r"C:\WM_wave\s1.png")
+        img = _grab()                    # en memoria: NO tocar disco en el loop
         m = _find_template(img, tpl, thr)
         if m is not None and m[0] >= thr:
             score, cx, cy = m
