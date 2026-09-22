@@ -65,10 +65,76 @@ def _connect():
 
 
 def inspect(cfg: dict) -> int:
-    """Vuelca identificadores de controles para afinar selectores."""
+    """Lista TreeItems (tags de onda) y panes grandes (candidatos a gráfica).
+
+    En vez de volcar todo el árbol (enorme y lento), enumera lo que el RPA
+    necesita: los nodos seleccionables del árbol (con su rectángulo) y los
+    contenedores grandes donde se dibuja la onda (para fijar plot_xy).
+    """
     app, win = _connect()
+    r = win.rectangle()
     print("== System1 window ==")
-    win.print_control_identifiers(depth=3)
+    print("WINDOW rect L%d T%d R%d B%d  (w=%d h=%d)" % (
+        r.left, r.top, r.right, r.bottom, r.width(), r.height()))
+
+    def _rect(c):
+        try:
+            return c.rectangle()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _txt(c):
+        try:
+            t = c.window_text()
+        except Exception:  # noqa: BLE001
+            t = ""
+        return (t or "").strip()
+
+    # --- TreeItems: los tags de onda seleccionables ---
+    print("\n== TreeItems (tag candidatos) ==")
+    n = 0
+    for ct in ("TreeItem", "ListItem"):
+        try:
+            items = win.descendants(control_type=ct)
+        except Exception as exc:  # noqa: BLE001
+            print("  (err %s: %s)" % (ct, exc))
+            continue
+        for it in items:
+            t = _txt(it)
+            rc = _rect(it)
+            if not t:
+                continue
+            n += 1
+            if rc is not None:
+                print("  [%s] '%s'  @cx=%d cy=%d" % (
+                    ct, t, (rc.left + rc.right) // 2, (rc.top + rc.bottom) // 2))
+            else:
+                print("  [%s] '%s'" % (ct, t))
+    if n == 0:
+        print("  (ninguno — el árbol puede ser Custom/Pane; ver panes abajo)")
+
+    # --- Panes/Custom grandes: candidatos a área de gráfica (para plot_xy) ---
+    print("\n== Contenedores grandes (candidatos a gráfica, plot_xy) ==")
+    cands = []
+    for ct in ("Pane", "Custom", "Document", "Image", "Group"):
+        try:
+            for c in win.descendants(control_type=ct):
+                rc = _rect(c)
+                if rc is None:
+                    continue
+                area = rc.width() * rc.height()
+                if area <= 0:
+                    continue
+                cands.append((area, ct, _txt(c), rc))
+        except Exception:  # noqa: BLE001
+            pass
+    cands.sort(reverse=True)
+    for area, ct, t, rc in cands[:12]:
+        # offset del CENTRO del control relativo a la esquina de la ventana
+        ox = (rc.left + rc.right) // 2 - r.left
+        oy = (rc.top + rc.bottom) // 2 - r.top
+        print("  [%s] area=%d  rect(L%d T%d R%d B%d)  plot_xy=[%d,%d]  '%s'" % (
+            ct, area, rc.left, rc.top, rc.right, rc.bottom, ox, oy, t[:40]))
     return 0
 
 
