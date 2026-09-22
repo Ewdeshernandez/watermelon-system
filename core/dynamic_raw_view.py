@@ -21,7 +21,7 @@ import streamlit as st
 
 from core.dynamic_raw import (
     Capture, CH_X, CH_Y, CH_KPH, download_capture, list_captures,
-    keyphasor_edges, orders_axis, rpm_from_keyphasor, spectrum, top_peaks,
+    keyphasor_edges, rpm_from_keyphasor, spectrum, top_peaks,
 )
 
 # ---- paleta profesional ----
@@ -203,10 +203,14 @@ def _render_capture(cap: Capture, instance_id: str, point: str) -> None:
 # =========================================================
 # Layout base
 # =========================================================
+# Sin barra de herramientas de Plotly (cámara/zoom/±) — se ve limpio.
+_PCFG = {"displayModeBar": False, "displaylogo": False, "scrollZoom": False}
+
+
 def _base_layout(fig, height=380, title=""):
     fig.update_layout(
         height=height, template="plotly_white",
-        margin=dict(l=56, r=18, t=52 if title else 18, b=46),
+        margin=dict(l=64, r=18, t=52 if title else 18, b=48),
         showlegend=True,
         legend=dict(orientation="h", y=1.10, x=0, bgcolor="rgba(0,0,0,0)",
                     font=dict(size=11)),
@@ -214,19 +218,42 @@ def _base_layout(fig, height=380, title=""):
         plot_bgcolor="white", paper_bgcolor="white",
         title=dict(text=title, x=0, xanchor="left",
                    font=dict(size=15, color=_INK, family="Arial Black")),
-        hovermode="x unified",
+        hovermode="closest", dragmode=False,
     )
     fig.update_xaxes(gridcolor=_GRID, zeroline=False, showline=True,
-                     linecolor="rgba(15,23,42,0.25)", ticks="outside",
-                     tickcolor="rgba(15,23,42,0.25)")
-    fig.update_yaxes(gridcolor=_GRID, zeroline=True,
-                     zerolinecolor="rgba(15,23,42,0.28)", showline=True,
-                     linecolor="rgba(15,23,42,0.25)")
+                     linecolor="rgba(15,23,42,0.35)", ticks="outside",
+                     tickcolor="rgba(15,23,42,0.30)")
+    fig.update_yaxes(gridcolor=_GRID, showline=True,
+                     linecolor="rgba(15,23,42,0.35)", ticks="outside",
+                     tickcolor="rgba(15,23,42,0.30)")
     return fig
 
 
 def _pp(v: np.ndarray) -> float:
     return float(np.nanmax(v) - np.nanmin(v)) if v.size else 0.0
+
+
+def _disp_type(unit: str) -> str:
+    """Tipo de medición por la unidad (viene de la config de System1)."""
+    u = (unit or "").lower()
+    if any(k in u for k in ("m/s2", "m/s²", " g", "accel")) or u == "g":
+        return "accel"
+    if any(k in u for k in ("mm/s", "in/s", "ips", "vel")):
+        return "vel"
+    return "disp"  # µm / mils → desplazamiento
+
+
+# CPM máx de display por tipo (desplazamiento 60k, velocidad 300k, accel 600k)
+_FMAX_CPM = {"disp": 60000, "vel": 300000, "accel": 600000}
+
+
+def _amp_pp(unit: str, amp: np.ndarray) -> Tuple[np.ndarray, str]:
+    """Convierte amplitud-pico del FFT a pp para desplazamiento (norma API/ISO).
+    Devuelve (amp_convertida, sufijo_unidad)."""
+    u = unit or "µm"
+    if _disp_type(u) == "disp":
+        return amp * 2.0, f"{u} pp"
+    return amp, f"{u} pico"
 
 
 # =========================================================
@@ -237,35 +264,38 @@ def _plot_waveform(cap: Capture, nx: str, ny: str) -> None:
     t = cap.t * 1000.0  # ms
     u = cap.unit_of(CH_X) or "µm"
     fig = go.Figure()
+    ymins = []
     for ch, color, nm in ((CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)):
         v = cap.get(ch)
         if v is not None:
             fig.add_scatter(x=t, y=v, mode="lines",
-                            name=f"{nm}  ({_pp(v):.1f} {u} pp)",
-                            line=dict(color=color, width=1.5))
-    # marcas de keyphasor (arranque de vuelta) — tenues + marcador de fase
-    if cap.has(CH_KPH):
+                            name=f"{nm}  ·  {_pp(v):.1f} {u} pp",
+                            line=dict(color=color, width=1.6))
+            ymins.append(float(np.nanmin(v)))
+    # keyphasor = BOLITAS verdes en el arranque de cada vuelta (sin líneas)
+    if cap.has(CH_KPH) and ymins:
         edges = keyphasor_edges(cap.get(CH_KPH))
-        ymin = min([float(np.nanmin(cap.get(c))) for c in (CH_X, CH_Y)
-                    if cap.get(c) is not None] or [0.0])
-        for e in edges[:96]:
-            if e < t.size:
-                fig.add_vline(x=float(t[e]), line=dict(color=_KPH_COLOR, width=1,
-                              dash="dot"), opacity=0.30)
-        kx = [float(t[e]) for e in edges[:96] if e < t.size]
+        y0 = min(ymins)
+        kx = [float(t[e]) for e in edges[:200] if e < t.size]
         if kx:
-            fig.add_scatter(x=kx, y=[ymin]*len(kx), mode="markers",
-                            name="Keyphasor", marker=dict(color=_KPH_COLOR,
-                            size=7, symbol="triangle-up"))
+            fig.add_scatter(x=kx, y=[y0] * len(kx), mode="markers",
+                            name="Keyphasor",
+                            marker=dict(color=_KPH_COLOR, size=8,
+                                        line=dict(color="white", width=1)))
     _base_layout(fig, title="Forma de onda")
-    fig.update_xaxes(title="Tiempo [ms]")
-    fig.update_yaxes(title=f"Amplitud [{u}]")
-    st.plotly_chart(fig, use_container_width=True,
+    xmax = float(t[-1]) if t.size else 1.0
+    fig.update_xaxes(title="Tiempo [ms]", range=[0, xmax], constrain="domain")
+    fig.update_yaxes(title=f"Amplitud [{u}]", zeroline=True,
+                     zerolinecolor="rgba(15,23,42,0.30)")
+    st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_wf_{cap.point}_{cap.captured_at}")
+    st.caption(f"Duración capturada: {xmax:.0f} ms ({cap.samples_per_rev or '—'} "
+               f"muestras/vuelta). Para más tiempo, sube las vueltas en la captura "
+               f"de campo.")
 
 
 # =========================================================
-# ESPECTRO
+# ESPECTRO  (dominio de frecuencia en CPM)
 # =========================================================
 def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None:
     import plotly.graph_objects as go
@@ -273,11 +303,13 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None
     if not fs:
         st.info("Sin frecuencia de muestreo — no se puede calcular el espectro.")
         return
-    u = cap.unit_of(CH_X) or "µm"
+    unit = cap.unit_of(CH_X) or "µm"
+    fmax_cpm = min(_FMAX_CPM[_disp_type(unit)], fs / 2.0 * 60.0)
     use_orders = bool(rpm and rpm > 0)
     fig = go.Figure()
     peaks_all: List[Dict[str, float]] = []
     fills = {CH_X: "rgba(37,99,235,0.10)", CH_Y: "rgba(234,88,12,0.09)"}
+    ysuf = ""
     for ch, color, nm in ((CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)):
         v = cap.get(ch)
         if v is None:
@@ -285,37 +317,38 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None
         freqs, amp = spectrum(v, fs)
         if freqs.size == 0:
             continue
-        xaxis = orders_axis(freqs, rpm) if use_orders else freqs
-        fig.add_scatter(x=xaxis, y=amp, mode="lines", name=nm,
-                        line=dict(color=color, width=1.5),
+        amp2, ysuf = _amp_pp(unit, amp)
+        cpm = freqs * 60.0
+        fig.add_scatter(x=cpm, y=amp2, mode="lines", name=nm,
+                        line=dict(color=color, width=1.6),
                         fill="tozeroy", fillcolor=fills[ch])
-        peaks_all += [{**p, "ch": nm} for p in top_peaks(freqs, amp, rpm, n=3)]
-    # cursores de orden
-    if use_orders:
-        for k in (1, 2, 3, 4, 5):
-            fig.add_vline(x=k, line=dict(color="rgba(100,116,139,0.55)",
-                          width=1, dash="dash"))
-            fig.add_annotation(x=k, yref="paper", y=1.02, text=f"{k}X",
-                               showarrow=False,
-                               font=dict(size=11, color=_MUTED))
-        fig.update_xaxes(title="Orden (× velocidad de giro)", range=[0, 10])
-    else:
-        fig.update_xaxes(title="Frecuencia [Hz]")
-    # etiquetar los 2 picos mayores
-    for p in sorted(peaks_all, key=lambda z: z["amp"], reverse=True)[:2]:
-        xp = p.get("order") if use_orders else p["freq_hz"]
-        fig.add_annotation(x=xp, y=p["amp"], text=f"{p['amp']:.1f}",
-                           showarrow=True, arrowhead=0, ax=0, ay=-16,
-                           font=dict(size=10, color=_INK))
+        # picos → BOLITAS del color del canal (sin flechas ni texto)
+        pk = top_peaks(freqs, amp, rpm, n=3)
+        if pk:
+            px = [p["freq_hz"] * 60.0 for p in pk]
+            py = [(p["amp"] * 2.0 if _disp_type(unit) == "disp" else p["amp"])
+                  for p in pk]
+            fig.add_scatter(x=px, y=py, mode="markers", showlegend=False,
+                            marker=dict(color=color, size=9,
+                                        line=dict(color="white", width=1)),
+                            hovertemplate="%{x:,.0f} CPM<br>%{y:.2f} " +
+                            ysuf + "<extra></extra>")
+        peaks_all += [{**p, "ch": nm} for p in pk]
     _base_layout(fig, title="Espectro (FFT)")
-    fig.update_yaxes(title=f"Amplitud pico [{u}]")
-    st.plotly_chart(fig, use_container_width=True,
+    fig.update_xaxes(title="Frecuencia [CPM]", range=[0, fmax_cpm],
+                     constrain="domain", tickformat=",d")
+    fig.update_yaxes(title=f"Amplitud [{ysuf}]", zeroline=True,
+                     zerolinecolor="rgba(15,23,42,0.30)", rangemode="tozero")
+    st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_sp_{cap.point}_{cap.captured_at}")
     if peaks_all:
         peaks_all.sort(key=lambda p: p["amp"], reverse=True)
-        rows = [{"Sensor": p["ch"], "Frecuencia [Hz]": round(p["freq_hz"], 1),
+        sc = 2.0 if _disp_type(unit) == "disp" else 1.0
+        rows = [{"Sensor": p["ch"],
+                 "CPM": f"{p['freq_hz']*60:,.0f}",
+                 "Hz": round(p["freq_hz"], 1),
                  "Orden": round(p.get("order", 0), 2) if use_orders else "—",
-                 f"Amplitud [{u}]": round(p["amp"], 2)}
+                 f"Amplitud [{ysuf}]": round(p["amp"] * sc, 2)}
                 for p in peaks_all[:6]]
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
@@ -340,44 +373,33 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str,
         xf = np.append(xf, xf[0]); yf = np.append(yf, yf[0])
 
     fig = go.Figure()
-    # órbita cruda tenue
+    # cruz de origen (referencia, sutil)
+    fig.add_hline(y=0, line=dict(color="rgba(15,23,42,0.14)", width=1))
+    fig.add_vline(x=0, line=dict(color="rgba(15,23,42,0.14)", width=1))
+    # órbita cruda tenue + filtrada protagonista
     fig.add_scatter(x=x, y=y, mode="lines", name="Cruda",
                     line=dict(color=_ORBIT_RAW, width=1))
-    # órbita filtrada (promedio de vueltas) — protagonista
     fig.add_scatter(x=xf, y=yf, mode="lines", name="Filtrada (síncrona)",
                     line=dict(color=_ORBIT_FILT, width=2.6))
-    # keyphasor: punto de referencia de fase + sentido de giro
+    # keyphasor = BOLITA verde (referencia de fase 0°), sin texto ni flechas
     if cap.has(CH_KPH):
         edges = keyphasor_edges(cap.get(CH_KPH))
         if edges.size and edges[0] < x.size:
             e = int(edges[0])
-            fig.add_scatter(x=[x[e]], y=[y[e]], mode="markers+text",
-                            name="Keyphasor (0°)", text=["  0°"],
-                            textposition="middle right",
-                            textfont=dict(color=_KPH_COLOR, size=11),
-                            marker=dict(color=_KPH_COLOR, size=13,
+            fig.add_scatter(x=[x[e]], y=[y[e]], mode="markers",
+                            name="Keyphasor (0°)",
+                            marker=dict(color=_KPH_COLOR, size=14,
                                         line=dict(color="white", width=2)))
-            # flecha de sentido de giro (primeras muestras)
-            if xf.size > 6:
-                fig.add_annotation(x=xf[5], y=yf[5], ax=xf[1], ay=yf[1],
-                                   xref="x", yref="y", axref="x", ayref="y",
-                                   showarrow=True, arrowhead=3, arrowsize=1.4,
-                                   arrowcolor=_ACCENT, arrowwidth=2)
-    # cruz en el origen
-    fig.add_hline(y=0, line=dict(color="rgba(15,23,42,0.18)", width=1))
-    fig.add_vline(x=0, line=dict(color="rgba(15,23,42,0.18)", width=1))
-
     amp_pp = max(_pp(xf), _pp(yf))
     _base_layout(fig, height=470, title=f"Órbita · {_point_label(point)}")
     fig.update_xaxes(title=f"{nx} [{u}]", scaleanchor="y", scaleratio=1,
                      zeroline=False)
     fig.update_yaxes(title=f"{ny} [{u}]", zeroline=False)
-    st.plotly_chart(fig, use_container_width=True,
+    st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
     cap_rpm = f"{rpm:,.0f} RPM · " if rpm else ""
-    st.caption(f"{cap_rpm}amplitud ≈ {amp_pp:.1f} {u} pp · órbita filtrada por "
-               f"promedio de vueltas (síncrona 1X). Punto verde = keyphasor (0°); "
-               f"flecha roja = sentido de giro.")
+    st.caption(f"{cap_rpm}amplitud ≈ {amp_pp:.1f} {u} pp · filtrada por promedio "
+               f"de vueltas (síncrona 1X). Bolita verde = keyphasor (0°).")
 
 
 __all__ = ["render_dynamic_raw"]
