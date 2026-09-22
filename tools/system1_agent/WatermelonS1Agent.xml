@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Watermelon System1 Agent — tarea programada HORARIA.
+  Importar en el server Parex:
+    Task Scheduler → Action → Import Task... → seleccionar este XML.
+  Antes: editar la ruta <Command> si la carpeta no es C:\Watermelon\system1_agent\
+  Corre cada hora, todos los dias, aunque nadie tenga sesion abierta.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>Watermelon System</Author>
+    <Description>Extrae onda cruda dinamica de System1 (PostgreSQL) y la sube al Watermelon Cloud cada hora.</Description>
+    <URI>\WatermelonS1Agent</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T00:05:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+      <Repetition>
+        <Interval>PT1H</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>S4U</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RestartOnFailure>
+      <Interval>PT5M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Watermelon\system1_agent\run_agent.bat</Command>
+      <WorkingDirectory>C:\Watermelon\system1_agent</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

@@ -1,0 +1,52 @@
+# =====================================================================
+# Watermelon System1 Agent · config
+# Copia este archivo como  config.toml  y llena los valores.
+# NO subas config.toml a git (lleva credenciales).
+# =====================================================================
+
+# Activo (equipo) al que pertenecen estas capturas. Debe coincidir con el
+# asset_id que usa Watermelon Live para el tren SGT300B.
+asset = "SGT300B"
+
+# ---------------------------------------------------------------------
+# Supabase (destino). Usa el SERVICE KEY (server-side, bypass RLS).
+# Alternativa recomendada: exportar por variables de entorno en el server
+#   SUPABASE_URL / SUPABASE_SERVICE_KEY  (así no queda la key en disco).
+# ---------------------------------------------------------------------
+[supabase]
+url = "https://yxeqwkhybueelmkrdkgq.supabase.co"
+service_key = "PONER_SERVICE_ROLE_KEY_AQUI"
+
+# ---------------------------------------------------------------------
+# DemoReader (para probar el pipeline sin la DB real): python s1_agent.py --demo --once
+# ---------------------------------------------------------------------
+[demo]
+points = ["CDE", "CNDE", "TDE", "TNDE", "GDE", "GNDE"]
+rpm = 9000.0
+
+# ---------------------------------------------------------------------
+# System1 (producción). Rellenar tras correr:  python s1_agent.py --discover
+# ---------------------------------------------------------------------
+[system1]
+host = "localhost"
+port = 5432
+dbname = ""          # <- lo muestra --discover (o el Browse de Database Replication)
+user = "postgres"    # idealmente un usuario READ-ONLY dedicado
+password = ""
+# puntos a extraer (cojinetes) tal como aparecen en System1
+points = ["CDE", "CNDE", "TDE", "TNDE", "GDE", "GNDE"]
+
+# Query de extracción incremental. Debe devolver filas:
+#   point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev, sample_index, value
+# ordenadas por (point, captured_at, channel, sample_index).
+# Parámetros disponibles: %(since)s (ISO del último captured_at) y %(point)s.
+# EDITAR con los nombres reales de tabla/columna que muestre --discover.
+[system1.query]
+sql = """
+-- PLANTILLA — ajustar a la tabla real de waveforms de System1
+-- SELECT point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev,
+--        sample_index, value
+-- FROM   s1_waveform_samples
+-- WHERE  point = %(point)s AND captured_at > %(since)s
+-- ORDER  BY captured_at, channel, sample_index;
+"""

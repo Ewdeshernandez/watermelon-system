@@ -4404,6 +4404,26 @@ def main() -> None:
         import logging
         logging.warning("advanced analysis expander failed: %s", e)
 
+    # Dynamic analysis — onda CRUDA de System1 (agente VM Parex → bucket
+    # dynamic_raw, cada hora). Reconstruye onda/espectro/órbita con keyphasor.
+    try:
+        _tag_dyn = getattr(instance_obj, "tag", None) or instance_id
+        with st.expander("Dynamic analysis — System1 raw (waveform · spectrum · orbit)",
+                         expanded=False):
+            _dyn_key = f"_dyn_open_{instance_id}"
+            if not st.session_state.get(_dyn_key):
+                if st.button("Open dynamic analysis", key=f"wm_dyn_open_{instance_id}",
+                             use_container_width=True):
+                    st.session_state[_dyn_key] = True
+                    st.rerun()
+                st.caption("Raw waveform + keyphasor from System1 (hourly agent).")
+            else:
+                from core.dynamic_raw_view import render_dynamic_raw
+                render_dynamic_raw(instance_id, _tag_dyn)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.warning("dynamic analysis expander failed: %s", e)
+
     # Ciclo 23.171 — "Detailed analysis — by sensor" ELIMINADO por redundante:
     # · Overall trend (multi-canal overlay + Tiles + botonera de rango) ya cubre
     #   la tendencia por sensor, mejor.
