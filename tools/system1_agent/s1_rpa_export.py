@@ -42,10 +42,35 @@ except ModuleNotFoundError:  # pragma: no cover
 
 HERE = Path(__file__).resolve().parent
 LOG_DIR = HERE / "logs"
+TPL_DIR = HERE / "templates"          # plantillas de etiquetas de nodo (PNG)
 log = logging.getLogger("s1_rpa")
 
 WINDOW_TITLE_RE = r".*System 1.*"
 EXPORT_MENU_TEXT = "Export to CSV"
+
+
+def _find_template(screen_img, tpl_path: Path, thr: float = 0.80):
+    """Busca una plantilla en la captura de pantalla (matchTemplate).
+
+    Devuelve (score, cx, cy) del mejor match en coords de PANTALLA (= pixeles de
+    la captura de escritorio ImageGrab). None si no supera el umbral.
+    """
+    import numpy as np
+    import cv2
+    if not tpl_path.exists():
+        log.warning("plantilla no existe: %s", tpl_path)
+        return None
+    scr = cv2.cvtColor(np.array(screen_img), cv2.COLOR_RGB2GRAY)
+    tpl = cv2.imread(str(tpl_path), cv2.IMREAD_GRAYSCALE)
+    if tpl is None:
+        return None
+    res = cv2.matchTemplate(scr, tpl, cv2.TM_CCOEFF_NORMED)
+    _minv, maxv, _minl, maxl = cv2.minMaxLoc(res)
+    h, w = tpl.shape[:2]
+    cx, cy = maxl[0] + w // 2, maxl[1] + h // 2
+    if maxv < thr:
+        return (maxv, cx, cy)   # devuelve igual, el llamador decide por score
+    return (maxv, cx, cy)
 
 
 def _load_cfg(path: str | None) -> dict:
@@ -389,6 +414,66 @@ def pick(cfg: dict, downticks: int, x: int, y: int, out_png: str) -> int:
     return 0
 
 
+def maketpl(cfg: dict, name: str, x0: int, y0: int, x1: int, y1: int) -> int:
+    """Captura escritorio y recorta [x0:x1, y0:y1] como templates/NAME.png."""
+    _connect()
+    time.sleep(0.3)
+    img = _grab_screen(r"C:\WM_wave\s1.png")   # también deja la full para ver
+    TPL_DIR.mkdir(parents=True, exist_ok=True)
+    crop = img.crop((x0, y0, x1, y1))
+    out = TPL_DIR / f"{name}.png"
+    crop.save(str(out))
+    print("MAKETPL %s = [%d,%d,%d,%d] -> %s (%dx%d)" % (
+        name, x0, y0, x1, y1, out, crop.width, crop.height))
+    return 0
+
+
+def findtpl(cfg: dict, name: str) -> int:
+    """Busca templates/NAME.png en la pantalla actual; imprime score+centro."""
+    _connect()
+    time.sleep(0.3)
+    img = _grab_screen(r"C:\WM_wave\s1.png")
+    r = _find_template(img, TPL_DIR / f"{name}.png", thr=0.0)
+    if r is None:
+        print("FIND %s: plantilla ausente" % name)
+        return 1
+    score, cx, cy = r
+    print("FIND %s: score=%.3f centro=(%d,%d)" % (name, score, cx, cy))
+    return 0
+
+
+def _select_by_template(win, cfg: dict, name: str,
+                        thr: float = 0.80, max_scrolls: int = 14) -> bool:
+    """Trae el nodo a la vista y lo clica, usando búsqueda por imagen.
+
+    Satura hacia arriba (tope), luego en cada paso: captura → busca la etiqueta;
+    si score>=thr clica su centro; si no, scrollea unos ticks abajo y reintenta.
+    Tolera el scroll no determinista de System1.
+    """
+    from pywinauto import mouse
+    tx = int(cfg.get("rpa", {}).get("tree_x", 100))
+    ty = int(cfg.get("rpa", {}).get("tree_y", 300))
+    r = win.rectangle()
+    sx, sy = r.left + tx, r.top + ty
+    _tree_scroll_top(win, tx, ty)
+    tpl = TPL_DIR / f"{name}.png"
+    for _i in range(max_scrolls):
+        img = _grab_screen(r"C:\WM_wave\s1.png")
+        m = _find_template(img, tpl, thr)
+        if m is not None and m[0] >= thr:
+            score, cx, cy = m
+            mouse.click(coords=(cx, cy))
+            time.sleep(0.7)
+            log.info("select %s: score=%.3f @ (%d,%d)", name, score, cx, cy)
+            return True
+        for _ in range(3):
+            mouse.scroll(coords=(sx, sy), wheel_dist=-1)
+            time.sleep(0.15)
+        time.sleep(0.2)
+    log.warning("select %s: NO encontrado tras %d scrolls", name, max_scrolls)
+    return False
+
+
 def keys_probe(cfg: dict, seq: str, out_png: str) -> int:
     """Enfoca el árbol (clic) y envía una secuencia de teclas; recaptura.
 
@@ -441,6 +526,15 @@ def main(argv=None) -> int:
                     help="clic al árbol + send_keys(SEQ) + recaptura")
     ap.add_argument("--pick", nargs=3, type=int, metavar=("DOWNTICKS", "X", "Y"),
                     help="topea árbol + baja N ticks + clic (X,Y) + recaptura")
+    ap.add_argument("--maketpl", nargs=5,
+                    metavar=("NAME", "X0", "Y0", "X1", "Y1"),
+                    help="recorta la pantalla y guarda templates/NAME.png")
+    ap.add_argument("--find", metavar="NAME",
+                    help="busca templates/NAME.png en pantalla; imprime score")
+    ap.add_argument("--seltest", metavar="NAME",
+                    help="selecciona el nodo NAME por imagen + recaptura")
+    ap.add_argument("--topshot", action="store_true",
+                    help="satura scroll arriba (tope) + captura de escritorio")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -453,6 +547,25 @@ def main(argv=None) -> int:
     if args.pick:
         return pick(cfg, args.pick[0], args.pick[1], args.pick[2],
                     r"C:\WM_wave\s1.png")
+    if args.maketpl:
+        n, x0, y0, x1, y1 = args.maketpl
+        return maketpl(cfg, n, int(x0), int(y0), int(x1), int(y1))
+    if args.find:
+        return findtpl(cfg, args.find)
+    if args.topshot:
+        app, win = _connect()
+        tx = int(cfg.get("rpa", {}).get("tree_x", 100))
+        ty = int(cfg.get("rpa", {}).get("tree_y", 300))
+        _tree_scroll_top(win, tx, ty)
+        img = _grab_screen(r"C:\WM_wave\s1.png")
+        print("TOPSHOT -> C:\\WM_wave\\s1.png (%dx%d)" % (img.width, img.height))
+        return 0
+    if args.seltest:
+        app, win = _connect()
+        ok = _select_by_template(win, cfg, args.seltest)
+        _grab_screen(r"C:\WM_wave\s1.png")
+        print("SELTEST %s: %s" % (args.seltest, "OK" if ok else "NO"))
+        return 0 if ok else 1
     if args.rclick:
         return rclick(cfg, args.rclick[0], args.rclick[1])
     if args.click:
