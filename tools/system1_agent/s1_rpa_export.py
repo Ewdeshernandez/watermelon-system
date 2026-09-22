@@ -314,6 +314,38 @@ def click_probe(cfg: dict, x: int, y: int, out_png: str) -> int:
     return 0
 
 
+def _tree_scroll_top(win, tree_x: int, tree_y: int, ticks: int = 40) -> None:
+    """Lleva el árbol de System1 a su tope con la rueda del mouse.
+
+    El árbol es un canvas sin scroll UIA; scrolleamos por rueda para tener un
+    estado determinista (los offsets de cada nodo son estables desde el tope).
+    """
+    from pywinauto import mouse
+    r = win.rectangle()
+    sx, sy = r.left + tree_x, r.top + tree_y
+    mouse.move(coords=(sx, sy))
+    time.sleep(0.2)
+    for _ in range(ticks):
+        mouse.scroll(coords=(sx, sy), wheel_dist=1)  # +1 = arriba
+        time.sleep(0.01)
+    time.sleep(0.4)
+
+
+def treetop(cfg: dict, out_png: str) -> int:
+    """Scroll del árbol al tope + recaptura (para calibrar coords fijas)."""
+    app, win = _connect()
+    # tree_x/tree_y = offset dentro de la ventana sobre el panel del árbol
+    tx = int(cfg.get("rpa", {}).get("tree_x", 100))
+    ty = int(cfg.get("rpa", {}).get("tree_y", 300))
+    _tree_scroll_top(win, tx, ty)
+    img = win.capture_as_image()
+    p = Path(out_png)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(p))
+    print("TREETOP scroll@(%d,%d) -> %s (%dx%d)" % (tx, ty, p, img.width, img.height))
+    return 0
+
+
 def _setup_logging():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -335,11 +367,15 @@ def main(argv=None) -> int:
                     help="right-click en (X,Y) pantalla y volcar menú")
     ap.add_argument("--click", nargs=2, type=int, metavar=("X", "Y"),
                     help="left-click en (X,Y) pantalla y recapturar")
+    ap.add_argument("--treetop", action="store_true",
+                    help="scroll del árbol al tope + recaptura")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
     if args.shot:
         return shot(cfg, args.shot)
+    if args.treetop:
+        return treetop(cfg, r"C:\WM_wave\s1.png")
     if args.rclick:
         return rclick(cfg, args.rclick[0], args.rclick[1])
     if args.click:
