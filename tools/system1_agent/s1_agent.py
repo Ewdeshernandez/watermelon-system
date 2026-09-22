@@ -194,15 +194,19 @@ class DemoReader:
 
 
 class System1Reader:
-    """Lee la PostgreSQL de Bently System1. La forma exacta de las tablas de
-    onda se descubre con --discover; la query va en config [system1.query] para
-    adaptarse SIN tocar código.
+    """Lee la base de Bently System1 = **SQL Server** (MSSQLSERVER), base
+    `BNC_Databases`. Verificado en el server Parex: SQL Server escucha en 1433
+    y responde con **Windows Authentication (sin password)** al correr en la
+    misma máquina. La forma exacta de las tablas de onda se descubre con
+    --discover; la query va en config [system1.query] para adaptarse SIN tocar
+    código.
 
     Contrato esperado de la query: filas
         point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev,
         sample_index, value
-    ordenadas por (point, captured_at, channel, sample_index). El agente las
-    agrupa en capturas (point, captured_at) con canales X/Y/KPH.
+    ordenadas por (point, captured_at, channel, sample_index). Placeholders
+    posicionales `?` en este orden: (since, point). El agente agrupa en
+    capturas (point, captured_at) con canales X/Y/KPH.
     """
 
     def __init__(self, cfg: dict):
@@ -213,20 +217,24 @@ class System1Reader:
         self.query = s1.get("query", {}).get("sql", "")
 
     def _connect(self):
-        import psycopg  # v3
-        return psycopg.connect(self.dsn)
+        import pyodbc
+        return pyodbc.connect(self.dsn, timeout=10, readonly=True)
 
     def fetch_new(self) -> List[RawCapture]:
         if not self.query:
             raise RuntimeError("Falta [system1.query].sql — corre --discover y "
                                "define la query.")
         captures: List[RawCapture] = []
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             for pt in self.cfg.get("system1", {}).get("points", []):
-                since = get_last(pt) or "1970-01-01T00:00:00Z"
-                rows = conn.execute(self.query, {"since": since,
-                                                 "point": pt}).fetchall()
+                since = get_last(pt) or "1970-01-01T00:00:00"
+                cur = conn.cursor()
+                cur.execute(self.query, since, pt)  # ? = since, ? = point
+                rows = cur.fetchall()
                 captures.extend(self._group(pt, rows))
+        finally:
+            conn.close()
         return captures
 
     def _group(self, point: str, rows) -> List[RawCapture]:
@@ -264,46 +272,57 @@ class System1Reader:
 
 
 def _dsn_from(s1: dict) -> str:
-    return (f"host={s1.get('host','localhost')} port={s1.get('port',5432)} "
-            f"dbname={s1.get('dbname','')} user={s1.get('user','')} "
-            f"password={s1.get('password','')}")
+    """Connection string ODBC para SQL Server (System1 = MSSQLSERVER)."""
+    driver = s1.get("driver", "ODBC Driver 17 for SQL Server")
+    server = s1.get("server", s1.get("host", "localhost"))
+    database = s1.get("database", s1.get("dbname", "BNC_Databases"))
+    parts = [f"DRIVER={{{driver}}}", f"SERVER={server}", f"DATABASE={database}"]
+    if s1.get("trusted", True):
+        parts.append("Trusted_Connection=yes")   # Windows Auth, sin password
+    else:
+        parts.append(f"UID={s1.get('user', '')}")
+        parts.append(f"PWD={s1.get('password', '')}")
+    parts.append("Encrypt=optional")
+    return ";".join(parts) + ";"
 
 
 # =========================================================
-# DISCOVER (read-only) — mapear la DB de System1
+# DISCOVER (read-only) — mapear la DB de System1 (SQL Server)
 # =========================================================
 def discover(cfg: dict) -> None:
-    import psycopg
+    import pyodbc
     s1 = cfg.get("system1", {})
     dsn = s1.get("dsn") or _dsn_from(s1)
-    print("== Conectando a System1 PostgreSQL (read-only) ==")
-    with psycopg.connect(dsn) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT current_database(), version()")
-        db, ver = cur.fetchone()
-        print(f"DB={db}\n{ver}\n")
-        cur.execute("""SELECT table_schema, table_name
-            FROM information_schema.tables
-            WHERE table_type='BASE TABLE'
-              AND table_schema NOT IN ('pg_catalog','information_schema')
-            ORDER BY table_schema, table_name""")
-        tables = cur.fetchall()
-        print(f"== {len(tables)} tablas ==")
-        # heurística: tablas con pinta de onda / waveform / trend / sample
-        kw = ("wave", "waveform", "tw", "sample", "raw", "dynamic", "vector",
-              "trend", "point", "channel", "signal", "keyphasor", "kph")
-        cand = [(s, t) for s, t in tables
-                if any(k in t.lower() for k in kw)]
-        print("\n== Candidatas (onda/canal/keyphasor) ==")
-        for s, t in cand:
-            cur.execute(f'SELECT count(*) FROM "{s}"."{t}"')
-            (cnt,) = cur.fetchone()
-            cur.execute("""SELECT column_name, data_type
-                FROM information_schema.columns
-                WHERE table_schema=%s AND table_name=%s
-                ORDER BY ordinal_position""", (s, t))
-            cols = ", ".join(f"{c}:{d}" for c, d in cur.fetchall())
-            print(f"  {s}.{t}  (rows={cnt})\n     {cols}")
+    print("== Conectando a System1 SQL Server (read-only, Windows Auth) ==")
+    conn = pyodbc.connect(dsn, timeout=10, readonly=True)
+    cur = conn.cursor()
+    cur.execute("SELECT DB_NAME(), @@VERSION")
+    db, ver = cur.fetchone()
+    print(f"DB={db}\n{ver}\n")
+    cur.execute("""SELECT TABLE_SCHEMA, TABLE_NAME
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_TYPE='BASE TABLE'
+        ORDER BY TABLE_SCHEMA, TABLE_NAME""")
+    tables = cur.fetchall()
+    print(f"== {len(tables)} tablas ==")
+    # heurística: tablas con pinta de onda / waveform / trend / sample
+    kw = ("wave", "waveform", "tw", "sample", "raw", "dynamic", "vector",
+          "trend", "point", "channel", "signal", "keyphasor", "kph", "spectrum")
+    cand = [(s, t) for s, t in tables if any(k in t.lower() for k in kw)]
+    print("\n== Candidatas (onda/canal/keyphasor) ==")
+    for s, t in cand:
+        try:
+            cur.execute(f"SELECT COUNT(*) FROM [{s}].[{t}]")
+            cnt = cur.fetchone()[0]
+        except Exception:
+            cnt = "?"
+        cur.execute("""SELECT COLUMN_NAME, DATA_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA=? AND TABLE_NAME=?
+            ORDER BY ORDINAL_POSITION""", s, t)
+        cols = ", ".join(f"{c}:{d}" for c, d in cur.fetchall())
+        print(f"  {s}.{t}  (rows={cnt})\n     {cols}")
+    conn.close()
     print("\nSiguiente: define [system1.query].sql en config.toml usando estas "
           "tablas y vuelve a correr con --once.")
 

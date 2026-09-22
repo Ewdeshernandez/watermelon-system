@@ -29,29 +29,42 @@ rpm = 9000.0
 # ---------------------------------------------------------------------
 # System1 (producción). Rellenar tras correr:  python s1_agent.py --discover
 # ---------------------------------------------------------------------
+# VERIFICADO en el server Parex (2026-09-21):
+#   El backend de System1 es SQL SERVER (MSSQLSERVER), escucha en 1433.
+#   Base de datos = BNC_Databases  (Bently Nevada, el historian de System1).
+#   Responde con WINDOWS AUTHENTICATION (sin password) corriendo en la misma
+#   máquina. PostgreSQL 14 también está instalado pero NO escucha TCP: no es
+#   el backend de System1.
 [system1]
-# El nombre de la base en System1 se ve en Database Replication → Browse.
-# Confirmar el nombre EXACTO de la base PostgreSQL con --discover, ya que el
-# nombre lógico de System1 puede diferir del nombre real en PostgreSQL.
-host = "localhost"
-port = 5432
-dbname = ""          # confirmar con --discover (psql -l)
-user = "postgres"    # idealmente el usuario READ-ONLY watermelon_ro (ver sql/)
-password = ""
+server = "localhost"
+database = "BNC_Databases"
+trusted = true                 # Windows Auth (sin password) — el agente corre en el server
+driver = "ODBC Driver 17 for SQL Server"   # o "ODBC Driver 11 for SQL Server" (instalado)
+# Si algún día se usa SQL login en vez de Windows Auth:
+#   trusted = false
+#   user = "watermelon_ro"
+#   password = "..."
 # puntos a extraer (cojinetes) tal como aparecen en System1
 points = ["CDE", "CNDE", "TDE", "TNDE", "GDE", "GNDE"]
 
-# Query de extracción incremental. Debe devolver filas:
+# Query de extracción incremental (T-SQL). Debe devolver filas:
 #   point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev, sample_index, value
 # ordenadas por (point, captured_at, channel, sample_index).
-# Parámetros disponibles: %(since)s (ISO del último captured_at) y %(point)s.
+# Placeholders posicionales `?` en ORDEN: (since, point).
 # EDITAR con los nombres reales de tabla/columna que muestre --discover.
+# NOTA: System1 suele guardar la onda como BLOB binario (VARBINARY) por
+# waveform, no fila-por-muestra. Si es así, la query trae el blob + metadatos y
+# habrá que decodificarlo (tarea de mapeo del formato Bently).
 [system1.query]
 sql = """
--- PLANTILLA — ajustar a la tabla real de waveforms de System1
--- SELECT point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev,
---        sample_index, value
--- FROM   s1_waveform_samples
--- WHERE  point = %(point)s AND captured_at > %(since)s
--- ORDER  BY captured_at, channel, sample_index;
+-- PLANTILLA — ajustar a la tabla real de waveforms de System1 (BNC_Databases)
+-- SELECT p.Name AS point, c.Name AS channel, w.Timestamp AS captured_at,
+--        c.Unit AS unit, w.Rpm AS rpm, w.SampleRate AS fs_hz,
+--        w.SamplesPerRev AS samples_per_rev, s.Idx AS sample_index, s.Value AS value
+-- FROM   Waveform w
+-- JOIN   Channel c ON c.Id = w.ChannelId
+-- JOIN   Point   p ON p.Id = c.PointId
+-- JOIN   Sample  s ON s.WaveformId = w.Id
+-- WHERE  w.Timestamp > ? AND p.Name = ?
+-- ORDER  BY w.Timestamp, c.Name, s.Idx;
 """

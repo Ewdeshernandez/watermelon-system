@@ -1,5 +1,5 @@
 # Watermelon System1 Agent — deps mínimas para el server de planta
 numpy>=1.24
 supabase>=2.4
-psycopg[binary]>=3.1   # solo para modo producción (System1Reader/--discover)
+pyodbc>=5.0            # SQL Server (System1 = MSSQLSERVER/BNC_Databases); solo modo producción
 tomli>=2.0; python_version < "3.11"

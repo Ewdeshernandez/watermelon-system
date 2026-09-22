@@ -13,9 +13,12 @@ System1 PostgreSQL 14  (VM Parex)
 ```
 
 ## Por qué esto funciona (y no es un black box)
-System1 Premium guarda en **PostgreSQL 14** (base abierta) y trae **Database
-Replication** + **Data Export** nativos. La data **no está encriptada**; se lee
-con un usuario read-only. Este agente solo hace `SELECT`.
+VERIFICADO en el server Parex (2026-09-21): el backend de Bently System1 es
+**SQL Server** (servicio `MSSQLSERVER`, puerto 1433), base **`BNC_Databases`**.
+Responde con **Windows Authentication (sin password)** al correr en la misma
+máquina — probado con `sqlcmd -S localhost -E`, listó las 7 bases incluida
+`BNC_Databases`. La data **no está encriptada**. Este agente solo hace `SELECT`.
+(PostgreSQL 14 también está instalado pero no escucha TCP: no es el backend.)
 
 ---
 
@@ -43,15 +46,21 @@ con un usuario read-only. Este agente solo hace `SELECT`.
    Abrir Watermelon Live · Análisis Avanzado → deben verse onda/espectro/órbita
    del activo `SGT300B`. Si aparecen, el canal a la nube quedó probado.
 
-6. **Descubrir la base de System1** (read-only):
+6. **Descubrir el esquema de System1** (read-only, Windows Auth):
    ```
    python s1_agent.py --discover
    ```
-   Lista la DB, tablas candidatas de waveform y sus columnas. Con eso:
-   - Llenar `[system1] dbname/user/password/points`.
-   - Escribir `[system1.query].sql` con los nombres reales de tabla/columna.
-     La query debe devolver:
+   Conecta a `BNC_Databases` (SQL Server) y lista tablas candidatas de waveform
+   y sus columnas. Con eso:
+   - Ajustar `[system1] points` (y `driver` si hace falta).
+   - Escribir `[system1.query].sql` (T-SQL) con los nombres reales de
+     tabla/columna. Debe devolver:
      `point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev, sample_index, value`
+     con placeholders `?` en orden (since, point).
+   - Alternativa por clics: **Azure Data Studio** (instalado) → conectar a
+     `localhost` con *Windows Authentication* → expandir `BNC_Databases` → Tables.
+   - NOTA: si la onda está como BLOB binario por waveform (típico en System1),
+     la query trae el blob + metadatos y hay que decodificar el formato Bently.
 
 7. **Probar producción**:
    ```

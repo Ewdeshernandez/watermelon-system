@@ -24,43 +24,45 @@ python s1_agent.py --demo --once
 Abrir Watermelon Live · Live Monitoring · SGT300B → "Dynamic analysis". Si se ven
 onda/espectro/órbita → el canal quedó probado. (Ya lo dejamos verde desde el Mac.)
 
-## 5. Descubrir la DB de System1  ← EL PASO QUE FALTA
+## 5. Descubrir el esquema de System1  ← EL PASO QUE FALTA
+Backend YA verificado: **SQL Server**, base **`BNC_Databases`**, **Windows Auth
+sin password** (probado: `sqlcmd -S localhost -E` listó las 7 bases).
 ```
 python s1_agent.py --discover
 ```
-Copiar la salida (lista tablas de waveform y columnas). Con eso:
-- Llenar `[system1] dbname / user / password / points`.
-- Escribir `[system1.query].sql` con los nombres reales.
-
-Query esperada (debe devolver estas columnas, en este orden):
+Copiar la salida (tablas de waveform + columnas). Con eso escribir
+`[system1.query].sql` (T-SQL) con los nombres reales. Debe devolver:
 ```
 point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev, sample_index, value
 ORDER BY captured_at, channel, sample_index
 ```
-Parámetros: `%(since)s` (último captured_at) y `%(point)s`.
+Placeholders posicionales `?` en orden: (since, point).
 
-Ejemplo (ajustar tabla/columnas a lo que muestre --discover):
+Alternativa por clics (sin teclear): **Azure Data Studio** (instalado) →
+conectar a `localhost` con *Windows Authentication* → expandir `BNC_Databases`
+→ Tables → clic derecho en la tabla de onda → *Select Top 1000*.
+
+Ejemplo (ajustar a lo que muestre --discover):
 ```sql
-SELECT p.name          AS point,
-       c.name          AS channel,
-       w.timestamp     AS captured_at,
-       c.unit          AS unit,
-       w.rpm           AS rpm,
-       w.sample_rate   AS fs_hz,
-       w.samples_per_rev AS samples_per_rev,
-       s.idx           AS sample_index,
-       s.value         AS value
-FROM   waveform w
-JOIN   channel  c ON c.id = w.channel_id
-JOIN   point    p ON p.id = c.point_id
-JOIN   sample   s ON s.waveform_id = w.id
-WHERE  p.name = %(point)s AND w.timestamp > %(since)s
-ORDER  BY w.timestamp, c.name, s.idx;
+SELECT p.Name AS point, c.Name AS channel, w.Timestamp AS captured_at,
+       c.Unit AS unit, w.Rpm AS rpm, w.SampleRate AS fs_hz,
+       w.SamplesPerRev AS samples_per_rev, s.Idx AS sample_index, s.Value AS value
+FROM   Waveform w
+JOIN   Channel c ON c.Id = w.ChannelId
+JOIN   Point   p ON p.Id = c.PointId
+JOIN   Sample  s ON s.WaveformId = w.Id
+WHERE  w.Timestamp > ? AND p.Name = ?
+ORDER  BY w.Timestamp, c.Name, s.Idx;
 ```
+> OJO: System1 suele guardar la onda como **BLOB binario** (VARBINARY) por
+> waveform, no fila-por-muestra. Si es así, la query trae el blob + metadatos y
+> hay que decodificar el formato Bently (tarea de mapeo aparte).
 
-## 6. (Recomendado) usuario read-only
-`sql/create_readonly_role.sql` — crea `watermelon_ro` con solo SELECT. Usarlo en
-`[system1] user/password` en vez de `postgres`.
+## 6. (Opcional) login SQL Server read-only
+Producción usa Windows Auth (el agente corre como el usuario del server, que ya
+lee). Para endurecer, `sql/create_readonly_role.sql` crea un login `watermelon_ro`
+con solo SELECT sobre `BNC_Databases`; entonces en config `trusted = false` +
+`user`/`password`.
 
 ## 7. Probar producción
 ```
