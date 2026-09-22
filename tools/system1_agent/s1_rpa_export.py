@@ -128,13 +128,40 @@ def inspect(cfg: dict) -> int:
                 cands.append((area, ct, _txt(c), rc))
         except Exception:  # noqa: BLE001
             pass
-    cands.sort(reverse=True)
+    cands.sort(key=lambda c: c[0], reverse=True)
     for area, ct, t, rc in cands[:12]:
         # offset del CENTRO del control relativo a la esquina de la ventana
         ox = (rc.left + rc.right) // 2 - r.left
         oy = (rc.top + rc.bottom) // 2 - r.top
         print("  [%s] area=%d  rect(L%d T%d R%d B%d)  plot_xy=[%d,%d]  '%s'" % (
             ct, area, rc.left, rc.top, rc.right, rc.bottom, ox, oy, t[:40]))
+
+    # --- TODOS los controles con texto (para hallar selectores de onda) ---
+    print("\n== Controles con texto (buscar tags de onda tipo 1XD/1YD) ==")
+    seen = 0
+    try:
+        alld = win.descendants()
+    except Exception as exc:  # noqa: BLE001
+        alld = []
+        print("  (err descendants: %s)" % exc)
+    for c in alld:
+        t = _txt(c)
+        if not t or len(t) > 60:
+            continue
+        try:
+            ct = c.element_info.control_type
+        except Exception:  # noqa: BLE001
+            ct = "?"
+        rc = _rect(c)
+        seen += 1
+        if seen > 120:
+            print("  ... (cortado en 120)")
+            break
+        if rc is not None:
+            print("  [%s] '%s'  @cx=%d cy=%d" % (
+                ct, t, (rc.left + rc.right) // 2, (rc.top + rc.bottom) // 2))
+        else:
+            print("  [%s] '%s'" % (ct, t))
     return 0
 
 
