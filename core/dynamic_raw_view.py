@@ -310,33 +310,44 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None
     unit = cap.unit_of(CH_X) or "µm"
     is_disp = _disp_type(unit) == "disp"
     ysuf = f"{unit} pp" if is_disp else f"{unit} pico"
+    # Rango por tipo de medición (desplazamiento 60k / velocidad 300k / accel
+    # 600k CPM), tope en Nyquist.
     fmax_cpm = min(_FMAX_CPM[_disp_type(unit)], fs / 2.0 * 60.0)
-    fills = {CH_X: "rgba(37,99,235,0.12)", CH_Y: "rgba(234,88,12,0.10)"}
+    dtick_cpm = 10000 if fmax_cpm <= 80000 else 100000
     chans = [(CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)]
     chans = [(c, col, nm) for c, col, nm in chans if cap.get(c) is not None]
     if not chans:
         st.info("Sin canales para el espectro.")
         return
-    fig = make_subplots(rows=len(chans), cols=1, shared_xaxes=True,
-                        vertical_spacing=0.12,
-                        subplot_titles=[nm for c, col, nm in chans])
-    for i, (ch, color, nm) in enumerate(chans, start=1):
+    # calcular espectros + pico dominante (para el título/lectura tipo System1)
+    data = []
+    titles = []
+    for ch, color, nm in chans:
         freqs, amp = _hires_spectrum(cap.get(ch), fs)
-        if freqs.size == 0:
-            continue
         cpm = freqs * 60.0
-        yv = amp * 2.0 if is_disp else amp     # pp para desplazamiento
+        yv = amp * 2.0 if is_disp else amp
+        if yv.size > 2:
+            k = int(np.argmax(yv[1:]) + 1)
+            titles.append(f"{nm}   ·   {yv[k]:.2f} {ysuf} @ {cpm[k]:,.0f} CPM")
+        else:
+            titles.append(nm)
+        data.append((cpm, yv, color, nm))
+    fig = make_subplots(rows=len(data), cols=1, shared_xaxes=True,
+                        vertical_spacing=0.14, subplot_titles=titles)
+    for i, (cpm, yv, color, nm) in enumerate(data, start=1):
         fig.add_scatter(x=cpm, y=yv, mode="lines", name=nm, row=i, col=1,
-                        line=dict(color=color, width=1.4),
-                        fill="tozeroy", fillcolor=fills[ch], showlegend=False)
-        fig.update_xaxes(range=[0, fmax_cpm], tickformat=",d", row=i, col=1)
+                        line=dict(color=color, width=1.2), showlegend=False)
+        fig.update_xaxes(range=[0, fmax_cpm], tickformat=",d", dtick=dtick_cpm,
+                         row=i, col=1)
         fig.update_yaxes(title_text=f"[{ysuf}]", rangemode="tozero", row=i, col=1)
-    fig.update_xaxes(title_text="Frecuencia [CPM]", row=len(chans), col=1)
-    _base_layout(fig, height=220 * len(chans) + 60, title="Espectro (FFT)")
+    fig.update_xaxes(title_text="Frecuencia [CPM]", row=len(data), col=1)
+    _base_layout(fig, height=240 * len(data) + 60, title="Espectro (FFT)")
     fig.update_layout(showlegend=False)
     _style_subtitles(fig)
     st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_sp_{cap.point}_{cap.captured_at}")
+    st.caption(f"Rango 0–{fmax_cpm:,.0f} CPM ({_disp_type(unit)}). Lectura del "
+               f"pico dominante de cada sensor en su título.")
 
 
 # =========================================================
