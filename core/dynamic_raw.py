@@ -19,6 +19,7 @@ El agente y la web IMPORTAN de aquí para no divergir en el formato.
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -194,6 +195,121 @@ def parse_capture_csv(data) -> Capture:
         if j < arr.shape[1]:
             channels[name] = arr[:, j]
     return Capture(meta=meta, t=t, channels=channels)
+
+
+# =========================================================
+# PARSER del CSV que EXPORTA System1 (Export to CSV de la onda)
+# =========================================================
+def parse_system1_waveform_csv(data) -> Dict[str, object]:
+    """Lee el CSV que produce System1 al hacer 'Export to CSV' sobre una forma
+    de onda. Formato real (verificado en el server Parex):
+
+        Machine Name,SGT300B
+        Point Name,1XD TURBINA DE
+        Wf Amp,51.063
+        Number of Revs,16
+        X-Axis Unit,ms
+        Y-Axis Unit,µm
+        Sample Speed, 14049 rpm
+        Sample Status,Valid
+        Timestamp,9/21/2026 8:29:22 PM
+        Variable,Disp Wf(128X/16revs).KPH TURBINA
+        X-Axis Value,Y-Axis Value
+        0,4.581
+        0.033,5.743
+        ...
+
+    La onda está sincronizada con keyphasor (arranca en la marca; cada
+    samples_per_rev muestras = 1 vuelta). NO hay columna KPH: es implícita.
+
+    Devuelve dict: {meta, point, rpm, revs, samples_per_rev, fs_hz,
+    x_unit, y_unit, t_s (np.ndarray, segundos), values (np.ndarray)}.
+    """
+    if hasattr(data, "read"):
+        text = data.read()
+    elif isinstance(data, (bytes, bytearray)):
+        text = data.decode("utf-8", "replace")
+    elif isinstance(data, str) and ("\n" not in data) and data.endswith(".csv"):
+        with open(data, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    else:
+        text = str(data)
+    if isinstance(text, (bytes, bytearray)):
+        text = text.decode("utf-8", "replace")
+
+    meta: Dict[str, str] = {}
+    xs: List[float] = []
+    ys: List[float] = []
+    in_data = False
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if not in_data:
+            # fila de encabezado de datos
+            low = s.lower().replace(" ", "")
+            if low.startswith("x-axisvalue") or low.startswith("x-axis,"):
+                in_data = True
+                continue
+            if "," in s:
+                k, v = s.split(",", 1)
+                meta[k.strip()] = v.strip()
+            continue
+        parts = s.split(",")
+        if len(parts) < 2:
+            continue
+        try:
+            xs.append(float(parts[0]))
+            ys.append(float(parts[1]))
+        except ValueError:
+            continue
+
+    t_ms = np.asarray(xs, dtype=float)
+    values = np.asarray(ys, dtype=float)
+    # X-Axis Unit puede ser ms → pasar a segundos
+    x_unit = meta.get("X-Axis Unit", "ms").strip().lower()
+    t_s = t_ms / 1000.0 if x_unit.startswith("ms") else t_ms.copy()
+
+    def _num(key: str) -> Optional[float]:
+        raw = meta.get(key, "")
+        m = re.search(r"[-+]?\d*\.?\d+", str(raw))
+        return float(m.group(0)) if m else None
+
+    revs = int(_num("Number of Revs") or 0) or None
+    rpm = _num("Sample Speed")
+    spr = None
+    if revs and values.size:
+        spr = int(round(values.size / revs))
+    fs_hz = None
+    if t_s.size >= 2:
+        dt = float(np.median(np.diff(t_s)))
+        if dt > 0:
+            fs_hz = 1.0 / dt
+    if fs_hz is None and rpm and spr:
+        fs_hz = spr * rpm / 60.0
+
+    return {
+        "meta": meta,
+        "point": meta.get("Point Name", "").strip(),
+        "variable": meta.get("Variable", "").strip(),
+        "timestamp": meta.get("Timestamp", "").strip(),
+        "rpm": rpm, "revs": revs, "samples_per_rev": spr, "fs_hz": fs_hz,
+        "x_unit": meta.get("X-Axis Unit", "").strip(),
+        "y_unit": meta.get("Y-Axis Unit", "").strip(),
+        "t_s": t_s, "values": values,
+    }
+
+
+def synth_keyphasor(n: int, samples_per_rev: Optional[int]) -> np.ndarray:
+    """Genera un canal KPH sintético (pulso al inicio de cada vuelta) a partir
+    de samples_per_rev, ya que la onda de System1 arranca en la marca y no trae
+    columna KPH. Sirve para reconstruir fase/órbita igual que con KPH real."""
+    kph = np.zeros(int(n), dtype=float)
+    if samples_per_rev and samples_per_rev > 1:
+        idx = np.arange(0, n, samples_per_rev, dtype=int)
+        for i in idx:
+            kph[i:min(i + 2, n)] = 1.0
+    return kph
 
 
 # =========================================================
@@ -411,6 +527,7 @@ def upload_capture(asset: str, point: str, csv_text: str,
 
 __all__ = [
     "Capture", "build_capture_csv", "parse_capture_csv",
+    "parse_system1_waveform_csv", "synth_keyphasor",
     "spectrum", "orders_axis", "top_peaks",
     "keyphasor_edges", "rpm_from_keyphasor", "compute_orbit_from_capture",
     "BUCKET", "list_captures", "download_capture", "upload_capture",

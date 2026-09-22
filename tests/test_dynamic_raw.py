@@ -11,8 +11,68 @@ import pytest
 from core.dynamic_raw import (
     build_capture_csv, parse_capture_csv, spectrum, top_peaks,
     keyphasor_edges, rpm_from_keyphasor, compute_orbit_from_capture,
+    parse_system1_waveform_csv, synth_keyphasor,
     CH_X, CH_Y, CH_KPH,
 )
+
+# CSV real que exporta System1 (Export to CSV de la onda), verificado en Parex.
+_S1_WF = """Machine Name,SGT300B
+Point Name,1XD TURBINA DE
+Wf Amp,51.063
+Number of Revs,16
+X-Axis Unit,ms
+Y-Axis Unit,µm
+Sample Speed, 14049 rpm
+Sample Status,Valid
+Timestamp,9/21/2026 8:29:22 PM
+Variable,Disp Wf(128X/16revs).KPH TURBINA
+X-Axis Value,Y-Axis Value
+0,4.581
+0.033,5.743
+0.067,6.809
+0.1,7.681
+0.133,8.553
+0.167,9.958
+0.2,11.315
+"""
+
+
+def test_parse_system1_waveform_csv():
+    r = parse_system1_waveform_csv(_S1_WF)
+    assert r["point"] == "1XD TURBINA DE"
+    assert r["revs"] == 16
+    assert abs(r["rpm"] - 14049) < 1
+    assert r["y_unit"] == "µm"
+    assert r["t_s"].size == 7 and r["values"].size == 7
+    # X-Axis en ms → segundos
+    assert abs(r["t_s"][1] - 0.033 / 1000.0) < 1e-9
+    assert abs(r["values"][0] - 4.581) < 1e-6
+    # fs desde dt (0.033 ms) ~ 30 kHz
+    assert r["fs_hz"] and 25000 < r["fs_hz"] < 35000
+
+
+def test_synth_keyphasor():
+    kph = synth_keyphasor(2048, 128)
+    edges = keyphasor_edges(kph)
+    assert edges.size == 15  # 16 vueltas → 15 flancos de subida detectables
+
+
+def test_agent_vendored_s1_csv_matches_core():
+    """El parser vendored del agente (tools/system1_agent/s1_csv.py) debe dar
+    lo mismo que core y mapear sensor→cojinete/eje."""
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parents[1] / "tools" / "system1_agent" / "s1_csv.py"
+    spec = importlib.util.spec_from_file_location("s1_csv", p)
+    s1 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(s1)
+    r_core = parse_system1_waveform_csv(_S1_WF)
+    r_vend = s1.parse_system1_waveform_csv(_S1_WF)
+    assert r_vend["rpm"] == r_core["rpm"] and r_vend["revs"] == r_core["revs"]
+    np.testing.assert_allclose(r_vend["values"], r_core["values"])
+    assert s1.sensor_bearing_axis("1xd") == ("1", "x")
+    assert s1.sensor_bearing_axis("6yd") == ("6", "y")
+    assert s1.sensor_bearing_axis("state") == (None, None)
 
 
 def _synthetic_capture(rpm=3000.0, spr=256, revs=32, amp=50.0):

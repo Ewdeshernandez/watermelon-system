@@ -27,6 +27,38 @@ points = ["CDE", "CNDE", "TDE", "TNDE", "GDE", "GNDE"]
 rpm = 9000.0
 
 # ---------------------------------------------------------------------
+# MODO PRINCIPAL: onda cruda desde los CSV que exporta System1.
+# La onda NO está en SQL Server; sale por 'Export to CSV' de cada gráfica.
+# El RPA (s1_rpa_export.py) genera esos CSV; el agente (--csv) los lee y sube.
+# Formato verificado: header 'Clave,Valor' + 'X-Axis Value,Y-Axis Value' + datos.
+# Nombres = etiqueta de sensor (1xd, 1yd, 2xd, 2yd, 5xd, 5yd, 6xd, 6yd).
+# Emparejado X/Y por cojinete → órbita; keyphasor implícito (arranca en la marca).
+# ---------------------------------------------------------------------
+[system1_csv]
+folder = "C:\\Users\\Administrator\\Desktop\\CSV"
+
+# ---------------------------------------------------------------------
+# RPA (reemplaza a la persona): automatiza el Export to CSV por punto.
+#   python s1_rpa_export.py --inspect   (1ª vez, afina selectores)
+#   python s1_rpa_export.py --run
+# plot_xy = offset del centro de la gráfica dentro de la ventana de System1.
+# Cada punto: tag = texto del nodo en el árbol; name = nombre de archivo CSV.
+# ---------------------------------------------------------------------
+[rpa]
+out_folder = "C:\\Users\\Administrator\\Desktop\\CSV"
+plot_xy = [640, 360]
+points = [
+  { tag = "1XD TURBINA DE",  name = "1xd" },
+  { tag = "1YD TURBINA DE",  name = "1yd" },
+  { tag = "2XD TURBINA",     name = "2xd" },
+  { tag = "2YD TURBINA",     name = "2yd" },
+  { tag = "5XD GENERADOR",   name = "5xd" },
+  { tag = "5YD GENERADOR",   name = "5yd" },
+  { tag = "6XD GENERADOR",   name = "6xd" },
+  { tag = "6YD GENERADOR",   name = "6yd" },
+]
+
+# ---------------------------------------------------------------------
 # System1 (producción). Rellenar tras correr:  python s1_agent.py --discover
 # ---------------------------------------------------------------------
 # VERIFICADO en el server Parex (2026-09-21):

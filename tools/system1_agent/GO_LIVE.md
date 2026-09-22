@@ -76,3 +76,6 @@ Task Scheduler → Import Task… → `WatermelonS1Agent.xml`
 ---
 Cuando tengas la salida de `--discover`, pásamela y te dejo el `[system1.query].sql`
 final escrito y validado.
+
+## Actualización (backend real)
+La onda NO está en SQL Server (solo config). Se saca por `Export to CSV` de cada gráfica. Flujo automático = `s1_rpa_export.py --run` (RPA, reemplaza persona) → `s1_agent.py --csv --once` (convierte+sube). Ver README.

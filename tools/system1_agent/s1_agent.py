@@ -271,6 +271,83 @@ class System1Reader:
         return out
 
 
+class System1CsvFolderReader:
+    """Lee la carpeta donde System1 exporta las ondas (Export to CSV) — la
+    misma que hoy llena una persona a mano (ej. Desktop\\CSV con 1xd.csv,
+    1yd.csv, ...). El robot RPA (s1_rpa_export.py) genera esos CSV cada hora;
+    este reader los convierte y sube. Empareja X/Y por cojinete y sintetiza el
+    keyphasor (la onda de System1 arranca en la marca)."""
+
+    def __init__(self, cfg: dict):
+        self.cfg = cfg
+        self.asset = cfg.get("asset", "SGT300B")
+        sc = cfg.get("system1_csv", {})
+        default_folder = str(Path.home() / "Desktop" / "CSV")
+        self.folder = Path(sc.get("folder", default_folder))
+
+    def _captured_at(self, meta_ts: str, fallback: Path) -> datetime:
+        for fmt in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
+                    "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(meta_ts, fmt).replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+        return datetime.fromtimestamp(fallback.stat().st_mtime, tz=timezone.utc)
+
+    def fetch_new(self) -> List[RawCapture]:
+        from s1_csv import parse_system1_waveform_csv, synth_keyphasor, \
+            sensor_bearing_axis
+        if not self.folder.exists():
+            log.warning("Carpeta de export no existe: %s", self.folder)
+            return []
+        # agrupar archivos por cojinete
+        groups: Dict[str, Dict[str, dict]] = {}
+        for f in sorted(self.folder.glob("*.csv")):
+            bearing, axis = sensor_bearing_axis(f.stem)
+            if not bearing or axis not in ("x", "y"):
+                continue
+            try:
+                parsed = parse_system1_waveform_csv(str(f))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("No se pudo parsear %s: %s", f.name, exc)
+                continue
+            if parsed["values"].size == 0:
+                continue
+            groups.setdefault(bearing, {})[axis] = {"file": f, "p": parsed}
+
+        out: List[RawCapture] = []
+        for bearing, ax in sorted(groups.items()):
+            base = ax.get("x") or ax.get("y")
+            p = base["p"]
+            t = p["t_s"]
+            channels: Dict[str, np.ndarray] = {}
+            if "x" in ax:
+                channels["X"] = ax["x"]["p"]["values"]
+            if "y" in ax:
+                yv = ax["y"]["p"]["values"]
+                # alinear largo con t
+                if yv.size != t.size:
+                    n = min(yv.size, t.size)
+                    yv = yv[:n]
+                channels["Y"] = yv
+            channels["KPH"] = synth_keyphasor(t.size, p["samples_per_rev"])
+            units = (f"X:{ax.get('x', base)['p']['y_unit']},"
+                     f"Y:{ax.get('y', base)['p']['y_unit']},KPH:pulse")
+            meta = {
+                "rpm": p["rpm"], "fs_hz": round(p["fs_hz"], 3) if p["fs_hz"] else "",
+                "samples_per_rev": p["samples_per_rev"] or "",
+                "units": units, "source": "system1_csv",
+                "variable": p["variable"],
+                "point_name": p["point"],
+            }
+            cap_at = self._captured_at(p["timestamp"], base["file"])
+            point = f"BRG{bearing}"
+            out.append(RawCapture(self.asset, point, cap_at, t, channels, meta))
+        log.info("System1CsvFolderReader: %d cojinete(s) desde %s",
+                 len(out), self.folder)
+        return out
+
+
 def _dsn_from(s1: dict) -> str:
     """Connection string ODBC para SQL Server (System1 = MSSQLSERVER)."""
     driver = s1.get("driver", "ODBC Driver 17 for SQL Server")
@@ -354,8 +431,13 @@ def upload_capture(client, cap: RawCapture) -> str:
 # =========================================================
 # CICLO
 # =========================================================
-def run_once(cfg: dict, demo: bool, dry: bool = False) -> dict:
-    reader = DemoReader(cfg) if demo else System1Reader(cfg)
+def run_once(cfg: dict, source: str = "csv", dry: bool = False) -> dict:
+    if source == "demo":
+        reader = DemoReader(cfg)
+    elif source == "sql":
+        reader = System1Reader(cfg)
+    else:  # 'csv' (default): carpeta de export de System1
+        reader = System1CsvFolderReader(cfg)
     caps = reader.fetch_new()
     log.info("Capturas nuevas: %d", len(caps))
     stats = {"found": len(caps), "uploaded": 0, "failed": 0, "keys": []}
@@ -426,9 +508,13 @@ def _setup_logging():
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Watermelon System1 Agent")
     ap.add_argument("--config", help="ruta a config.toml")
-    ap.add_argument("--demo", action="store_true", help="usar DemoReader")
+    ap.add_argument("--demo", action="store_true", help="usar DemoReader (sintético)")
+    ap.add_argument("--csv", action="store_true",
+                    help="leer la carpeta de export de System1 (default en --once)")
+    ap.add_argument("--sql", action="store_true",
+                    help="leer SQL Server directo (solo config/estáticos)")
     ap.add_argument("--once", action="store_true", help="una ronda y salir")
-    ap.add_argument("--discover", action="store_true", help="explorar la DB")
+    ap.add_argument("--discover", action="store_true", help="explorar la DB SQL Server")
     ap.add_argument("--selftest", action="store_true", help="validar CSV sin red")
     ap.add_argument("--dry", action="store_true", help="no subir; solo validar")
     args = ap.parse_args(argv)
@@ -440,8 +526,9 @@ def main(argv=None) -> int:
     if args.discover:
         discover(cfg)
         return 0
-    if args.once or args.demo:
-        stats = run_once(cfg, demo=args.demo, dry=args.dry)
+    if args.once or args.demo or args.csv or args.sql:
+        source = "demo" if args.demo else "sql" if args.sql else "csv"
+        stats = run_once(cfg, source=source, dry=args.dry)
         print(json.dumps(stats, indent=2, ensure_ascii=False))
         return 0 if stats["failed"] == 0 else 1
     ap.print_help()

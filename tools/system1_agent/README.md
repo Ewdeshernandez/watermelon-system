@@ -1,75 +1,61 @@
 # Watermelon System1 Agent
 
-Robot **headless** que corre en el servidor de Bently System1 (VM Parex) y sube
-la **onda cruda dinámica con keyphasor** al Watermelon Cloud **cada hora**.
-Watermelon Live · *Análisis Avanzado* la reconstruye en forma de onda, espectro
-(FFT, órdenes 1X/2X/3X) y órbita.
+Trae la **onda cruda dinámica con keyphasor** de Bently System1 (VM Parex) al
+Watermelon Cloud **cada hora, sin que nadie la exporte a mano**. Watermelon Live
+· *Dynamic analysis* la reconstruye en forma de onda, espectro (FFT, órdenes
+1X/2X/3X) y órbita.
 
 ```
-System1 PostgreSQL 14  (VM Parex)
-   └─ s1_agent.py  (Task Scheduler, cada hora, incremental por timestamp)
-        └─ CSV por punto/instante (X, Y, KPH)  →  Supabase Storage: dynamic_raw
-             └─ Watermelon Live · Análisis Avanzado  →  onda / espectro / órbita
+System1 (VM Parex)
+  ├─ s1_rpa_export.py  (RPA, cada hora)  → replica el 'clic derecho → Export to CSV'
+  │      de cada onda → carpeta  Desktop\CSV\  (1xd.csv, 1yd.csv, ...)
+  └─ s1_agent.py --csv  (cada hora)      → lee esos CSV, empareja X/Y por cojinete,
+         arma el formato Watermelon (con keyphasor) y sube a Supabase: dynamic_raw
+              └─ Watermelon Live · Dynamic analysis → onda / espectro / órbita
 ```
 
-## Por qué esto funciona (y no es un black box)
-VERIFICADO en el server Parex (2026-09-21): el backend de Bently System1 es
-**SQL Server** (servicio `MSSQLSERVER`, puerto 1433), base **`BNC_Databases`**.
-Responde con **Windows Authentication (sin password)** al correr en la misma
-máquina — probado con `sqlcmd -S localhost -E`, listó las 7 bases incluida
-`BNC_Databases`. La data **no está encriptada**. Este agente solo hace `SELECT`.
-(PostgreSQL 14 también está instalado pero no escucha TCP: no es el backend.)
+## Por qué así (lo que se verificó en el server, 2026-09-21)
+- El backend de System1 es **SQL Server** (base `BNC_Databases`), **legible con
+  Windows Auth sin password** — pero ahí solo vive la **configuración**. La
+  **onda cruda NO está en SQL Server** (abrir una máquina no attacha ninguna base
+  de datos de onda).
+- La onda sale por el **`Export to CSV`** de cada gráfica (menú de clic derecho).
+  Formato real: header `Clave,Valor` (Machine/Point/Number of Revs/Sample
+  Speed/…) + `X-Axis Value,Y-Axis Value` + muestras (t en ms, amp). Keyphasor
+  implícito: la onda arranca en la marca; cada `samples_per_rev` = 1 vuelta.
+- Por eso el robot es **RPA** (automatiza ese export) + un **lector de carpeta**
+  que convierte y sube. `pywinauto` fija el nombre de archivo por UIA (no por
+  teclado) — esquiva el remapeo de layout del RDP/VMware anidado.
 
 ---
 
 ## Instalación en el server Parex (una vez)
 
 1. **Copiar** esta carpeta a `C:\Watermelon\system1_agent\`.
-
-2. **Python 3.9+** (si no está): instalar desde python.org y marcar *Add to PATH*.
-
-3. **Dependencias**:
-   ```
-   cd C:\Watermelon\system1_agent
-   python -m pip install -r requirements.txt
-   ```
-
-4. **Config**: copiar `config.example.toml` → `config.toml` y llenar:
-   - `[supabase] service_key` (Supabase → Settings → API → `service_role`).
-     *Mejor aún:* setear variables de entorno del sistema
-     `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` (así la key no queda en disco).
-
-5. **Probar el pipeline SIN tocar System1** (sube capturas sintéticas):
+2. **Python 3.9+** + deps: `python -m pip install -r requirements.txt`
+3. **Supabase**: `config.example.toml` → `config.toml`, setear
+   `[supabase] service_key` (o variables de entorno `SUPABASE_URL` /
+   `SUPABASE_SERVICE_KEY`).
+4. **Probar el canal a la nube** (sintético, sin tocar System1):
    ```
    python s1_agent.py --demo --once
    ```
-   Abrir Watermelon Live · Análisis Avanzado → deben verse onda/espectro/órbita
-   del activo `SGT300B`. Si aparecen, el canal a la nube quedó probado.
-
-6. **Descubrir el esquema de System1** (read-only, Windows Auth):
+   Abrir Watermelon Live → SGT300B → *Dynamic analysis*: deben verse
+   onda/espectro/órbita. (Ya quedó verde desde el Mac.)
+5. **Afinar el RPA** (1ª vez): con System1 abierto en la máquina/pantalla de onda:
    ```
-   python s1_agent.py --discover
+   python s1_rpa_export.py --inspect
    ```
-   Conecta a `BNC_Databases` (SQL Server) y lista tablas candidatas de waveform
-   y sus columnas. Con eso:
-   - Ajustar `[system1] points` (y `driver` si hace falta).
-   - Escribir `[system1.query].sql` (T-SQL) con los nombres reales de
-     tabla/columna. Debe devolver:
-     `point, channel, captured_at, unit, rpm, fs_hz, samples_per_rev, sample_index, value`
-     con placeholders `?` en orden (since, point).
-   - Alternativa por clics: **Azure Data Studio** (instalado) → conectar a
-     `localhost` con *Windows Authentication* → expandir `BNC_Databases` → Tables.
-   - NOTA: si la onda está como BLOB binario por waveform (típico en System1),
-     la query trae el blob + metadatos y hay que decodificar el formato Bently.
-
-7. **Probar producción**:
+   Ajustar en `config.toml` → `[rpa]`: el `tag` de cada punto (texto del nodo del
+   árbol), `plot_xy` (centro de la gráfica dentro de la ventana) y `out_folder`.
+   Probar sin exportar: `python s1_rpa_export.py --run --dry`, luego `--run`.
+6. **Convertir + subir** lo que el RPA dejó en la carpeta:
    ```
-   python s1_agent.py --once
+   python s1_agent.py --csv --once
    ```
-
-8. **Agendar cada hora**: Task Scheduler → *Import Task…* → `WatermelonS1Agent.xml`
-   (editar la ruta si la carpeta no es `C:\Watermelon\system1_agent\`).
-   Corre cada hora, aunque nadie tenga sesión abierta.
+7. **Agendar cada hora** (Task Scheduler → *Import Task…*):
+   - `WatermelonS1Agent.xml` corre `run_agent.bat`, que hace primero el RPA y
+     luego el `--csv`. Corre aunque nadie tenga sesión abierta.
 
 ---
 
@@ -79,22 +65,19 @@ máquina — probado con `sqlcmd -S localhost -E`, listó las 7 bases incluida
 |---|---|
 | `python s1_agent.py --selftest` | Valida el formato CSV, sin red |
 | `python s1_agent.py --demo --once` | Sube 1 ronda sintética (prueba el canal) |
-| `python s1_agent.py --demo --once --dry` | Genera y valida, **sin** subir |
-| `python s1_agent.py --discover` | Explora la DB de System1 (read-only) |
-| `python s1_agent.py --once` | 1 ronda real (producción) |
+| `python s1_rpa_export.py --inspect` | Vuelca el árbol UIA de System1 (afinar) |
+| `python s1_rpa_export.py --run [--dry]` | Exporta las ondas a CSV (reemplaza persona) |
+| `python s1_agent.py --csv --once` | Convierte la carpeta CSV y sube |
+| `python s1_agent.py --discover` | (opcional) explora SQL Server = solo config |
 
 ## Estado e idempotencia
-- `data/agent_state.db` (SQLite) guarda el último `captured_at` por punto →
-  solo sube lo nuevo (incremental, barato para correr cada hora).
-- Storage usa `x-upsert`: reintentar **no** duplica.
-- Logs en `logs/s1_agent.log`.
+- El nombre remoto usa el **Timestamp** de la captura → subir de nuevo no
+  duplica (`x-upsert`). `data/agent_state.db` guarda estado; logs en `logs/`.
 
 ## Seguridad
-- Usar un **usuario PostgreSQL read-only** para el agente.
-- El `service_key` de Supabase es server-side: mantenerlo en variable de entorno
-  o en `config.toml` (que está en `.gitignore`), nunca en git.
+- Windows Auth para SQL (sin password). `service_key` de Supabase server-side
+  (env o `config.toml`, que está en `.gitignore`).
 
 ## Formato de intercambio
-Idéntico a `core/dynamic_raw.py` (v1). Un archivo = un punto en un instante,
-canales muestreados en simultáneo. Header autodescriptivo `#clave=valor`, luego
-`t_s,X,Y,KPH`.
+El agente convierte el CSV de System1 al formato v1 de `core/dynamic_raw.py`
+(un archivo = un cojinete con canales X, Y, KPH). La web reconstruye desde ahí.

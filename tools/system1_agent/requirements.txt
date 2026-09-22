@@ -1,5 +1,8 @@
-# Watermelon System1 Agent — deps mínimas para el server de planta
+# Watermelon System1 Agent — deps para el server de planta (Windows)
 numpy>=1.24
 supabase>=2.4
-pyodbc>=5.0            # SQL Server (System1 = MSSQLSERVER/BNC_Databases); solo modo producción
 tomli>=2.0; python_version < "3.11"
+# RPA (reemplaza a la persona): exporta la onda a CSV por UIA
+pywinauto>=0.6.8; platform_system == "Windows"
+# Solo si se usa el modo SQL directo (config/estáticos, no onda):
+pyodbc>=5.0; platform_system == "Windows"
