@@ -4,9 +4,11 @@
 # NO subas config.toml a git (lleva credenciales).
 # =====================================================================
 
-# Activo (equipo) al que pertenecen estas capturas. Debe coincidir con el
-# asset_id que usa Watermelon Live para el tren SGT300B.
-asset = "SGT300B"
+# Activo (equipo) al que pertenecen estas capturas. DEBE coincidir con el
+# instance_id que usa Watermelon Live (el mismo del colector Modbus estático).
+# Para el tren SGT300 B ese id es turbina_sgt300_b. La vista web resuelve por
+# instance_id/tag, así que usar el id exacto garantiza el match.
+asset = "turbina_sgt300_b"
 
 # ---------------------------------------------------------------------
 # Supabase (destino). Usa el SERVICE KEY (server-side, bypass RLS).
