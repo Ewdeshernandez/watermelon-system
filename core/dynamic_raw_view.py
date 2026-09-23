@@ -170,13 +170,16 @@ def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
                         ).strftime("%d/%m/%Y %I:%M:%S %p")
     else:
         when = _lbl(sel)
-    _chip(resolved, point, when)
 
     cached = _download_cached(sel["key"])
     if not cached:
         st.warning("No se pudo descargar esta captura.")
         return
-    _render_capture(_cap_from_cached(cached), instance_id, point, resolved, when)
+    try:
+        _render_capture(_cap_from_cached(cached), instance_id, point, resolved,
+                        when)
+    except Exception as exc:  # noqa: BLE001  (nunca romper la pantalla)
+        st.warning(f"No se pudo dibujar esta captura ({exc}).")
 
 
 def _render_capture(cap: Capture, instance_id: str, point: str,
@@ -185,16 +188,17 @@ def _render_capture(cap: Capture, instance_id: str, point: str,
     if rpm is None and cap.has(CH_KPH):
         rpm = rpm_from_keyphasor(cap.t, cap.get(CH_KPH))
     nx, ny = _sensor_names(point)
-    # Encabezado que viaja DENTRO del gráfico (para que salga en el JPG)
+    # ocultar el botón "expandir" de Streamlit (feo) en estos gráficos
+    st.markdown("<style>[data-testid='StyledFullScreenButton'],"
+                "button[title='View fullscreen']{display:none!important}</style>",
+                unsafe_allow_html=True)
+    # Subtítulo/identidad que viaja DENTRO de cada gráfico (sale en el JPG):
+    # máquina · cojinete · rpm · fecha (verde). Se pone en cada onda/espectro.
     rpm_txt = f"{rpm:,.0f} RPM" if rpm else "— RPM"
-    header = (f"{resolved} · {_point_label(point)} ({nx}/{ny}) · "
-              f"Desplazamiento · {rpm_txt} · {when}")
-
-    if rpm:
-        st.markdown(
-            f"<div style='color:#334155;font-size:13px;margin:0 0 8px'>"
-            f"Velocidad de giro&nbsp; <b style='color:#0f172a;font-size:15px'>"
-            f"{rpm:,.0f}</b> RPM</div>", unsafe_allow_html=True)
+    sub = (f"<span style='color:#475569'>{resolved} · {_point_label(point)} · "
+           f"Desplazamiento · {rpm_txt}</span> &nbsp; "
+           f"<span style='color:#16a34a'>● {when}</span>")
+    fbase = f"{resolved}_Brg{_brg_num(point) or ''}"
 
     try:
         view = st.segmented_control("Vista", _VIEWS, default=_VIEWS[0],
@@ -206,11 +210,11 @@ def _render_capture(cap: Capture, instance_id: str, point: str,
                         label_visibility="collapsed")
     view = view or _VIEWS[0]
     if "Onda" in view:
-        _plot_waveform(cap, nx, ny, header)
+        _plot_waveform(cap, nx, ny, sub, fbase)
     elif "Espectro" in view:
-        _plot_spectrum(cap, rpm, nx, ny, header)
+        _plot_spectrum(cap, rpm, nx, ny, sub, fbase)
     else:
-        _plot_orbit(cap, rpm, point, nx, ny, header)
+        _plot_orbit(cap, rpm, point, nx, ny, sub, fbase)
 
 
 # =========================================================
@@ -348,8 +352,17 @@ def _hires_spectrum(v: np.ndarray, fs: float, zpad: int = 8):
 # =========================================================
 # ONDA — un gráfico INDEPENDIENTE por sensor (apilados)
 # =========================================================
-def _plot_waveform(cap: Capture, nx: str, ny: str, header: str = "") -> None:
-    from plotly.subplots import make_subplots
+def _cfg(fbase: str, kind: str) -> dict:
+    """Config Plotly con nombre de archivo del export = máquina_Brg_sensor_tipo."""
+    c = dict(_PCFG)
+    c["toImageButtonOptions"] = {"format": "jpeg", "scale": 2,
+                                 "filename": f"{fbase}_{kind}".replace(" ", "_")}
+    return c
+
+
+def _plot_waveform(cap: Capture, nx: str, ny: str, sub: str = "",
+                   fbase: str = "wf") -> None:
+    import plotly.graph_objects as go
     t = cap.t * 1000.0  # ms
     u = cap.unit_of(CH_X) or "µm"
     xmax = float(t[-1]) if t.size else 1.0
@@ -358,47 +371,48 @@ def _plot_waveform(cap: Capture, nx: str, ny: str, header: str = "") -> None:
     if not chans:
         st.info("Sin canales de onda.")
         return
+    # misma escala simétrica para todos los sensores (comparable)
     amax = _nice_ceil(max(float(np.nanmax(np.abs(cap.get(c)))) for c, _, _ in chans)
-                      * 1.10)            # misma escala simétrica ambos + 10%
+                      * 1.10)
     dy_maj = _nice_ceil(amax / 3.0); dy_min = dy_maj / 5.0
     dx_maj = 10.0 if xmax >= 40 else 5.0; dx_min = dx_maj / 5.0
-    stats = {c: _stats(cap.get(c)) for c, col, nm in chans}
-    titles = [f"{nm}   ·   {stats[c][0]:.1f} {u} pp   ·   RMS {stats[c][1]:.1f} {u}"
-              f"   ·   CF {stats[c][2]:.2f}" for c, col, nm in chans]
-    fig = make_subplots(rows=len(chans), cols=1, shared_xaxes=True,
-                        vertical_spacing=0.11, subplot_titles=titles)
-    for i, (ch, color, nm) in enumerate(chans, start=1):
+    for ch, color, nm in chans:              # UN gráfico independiente por sensor
         v = cap.get(ch)
-        pp, rms, cf = stats[ch]
+        pp, rms, cf = _stats(v)
         ht = (f"<b>Cursor · {nm}</b><br>"
               f"<b>%{{y:.2f}} {u}</b>  @  %{{x:.2f}} ms<br>"
               f"────────────<br>"
               f"Crest Factor&nbsp;&nbsp;<b>{cf:.2f}</b><br>"
               f"Overall RMS&nbsp;&nbsp;<b>{rms:.1f} {u}</b><br>"
-              f"Pico–pico&nbsp;&nbsp;<b>{pp:.1f} {u}</b>"
-              f"<extra></extra>")
-        fig.add_scatter(x=t, y=v, mode="lines", name=nm, row=i, col=1,
+              f"Pico–pico&nbsp;&nbsp;<b>{pp:.1f} {u}</b><extra></extra>")
+        title = _title_html(
+            f"Forma de onda — {nm}   ·   {pp:.1f} {u} pp · RMS {rms:.1f} · "
+            f"CF {cf:.2f}", sub)
+        fig = go.Figure()
+        fig.add_scatter(x=t, y=v, mode="lines", name=nm,
                         line=dict(color=color, width=1.6), showlegend=False,
                         hovertemplate=ht)
-        fig.update_yaxes(title_text=f"[{u}]", row=i, col=1, range=[-amax, amax],
-                         zeroline=True, zerolinecolor="rgba(15,23,42,0.35)")
-        fig.update_xaxes(range=[0, xmax], row=i, col=1)
-        _grid_xy(fig, i, dx_maj, dx_min, dy_maj, dy_min)
-    fig.update_xaxes(title_text="Tiempo [ms]", row=len(chans), col=1)
-    _base_layout(fig, height=210 * len(chans) + 60, title="Forma de onda")
-    fig.update_layout(showlegend=False, hovermode="closest")
-    _hoverstyle(fig)
-    _style_subtitles(fig)
-    st.plotly_chart(fig, use_container_width=True, config=_PCFG,
-                    key=f"wm_dr_wf_{cap.point}_{cap.captured_at}")
+        fig.update_yaxes(title_text=f"[{u}]", range=[-amax, amax], zeroline=True,
+                         zerolinecolor="rgba(15,23,42,0.35)", dtick=dy_maj,
+                         gridcolor=_GRID_MAJ, minor=dict(showgrid=False))
+        fig.update_xaxes(title_text="Tiempo [ms]", range=[0, xmax],
+                         showgrid=False, ticks="outside", ticklen=6, dtick=dx_maj,
+                         tickcolor="rgba(15,23,42,0.45)",
+                         minor=dict(dtick=dx_min, showgrid=False, ticks="outside",
+                                    ticklen=3, tickcolor="rgba(15,23,42,0.28)"))
+        _base_layout(fig, height=300, title=title)
+        fig.update_layout(showlegend=False, hovermode="closest")
+        _hoverstyle(fig)
+        st.plotly_chart(fig, use_container_width=True, config=_cfg(fbase, f"{nm}_onda"),
+                        key=f"wm_dr_wf_{cap.point}_{nm}_{cap.captured_at}")
 
 
 # =========================================================
 # ESPECTRO — un gráfico INDEPENDIENTE por sensor (alta resolución, CPM)
 # =========================================================
 def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
-                   header: str = "") -> None:
-    from plotly.subplots import make_subplots
+                   sub: str = "", fbase: str = "sp") -> None:
+    import plotly.graph_objects as go
     fs = cap.fs_hz
     if not fs:
         st.info("Sin frecuencia de muestreo — no se puede calcular el espectro.")
@@ -406,8 +420,6 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
     unit = cap.unit_of(CH_X) or "µm"
     is_disp = _disp_type(unit) == "disp"
     ysuf = f"{unit} pp" if is_disp else f"{unit} pico"
-    # Rango por tipo de medición (desplazamiento 60k / velocidad 300k / accel
-    # 600k CPM), tope en Nyquist.
     fmax_cpm = min(_FMAX_CPM[_disp_type(unit)], fs / 2.0 * 60.0)
     dtick_cpm = 10000 if fmax_cpm <= 80000 else 100000
     chans = [(CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)]
@@ -415,48 +427,51 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
     if not chans:
         st.info("Sin canales para el espectro.")
         return
-    # calcular espectros + pico dominante (para el título/lectura tipo System1)
-    data = []
-    titles = []
+    # 1ª pasada: espectros + pico dominante → misma escala Y para ambos
+    specs = []
     peak_max = 0.0
     for ch, color, nm in chans:
         freqs, amp = _hires_spectrum(cap.get(ch), fs)
         cpm = freqs * 60.0
         yv = amp * 2.0 if is_disp else amp
+        pk_cpm = pk_amp = 0.0
         if yv.size > 2:
             k = int(np.argmax(yv[1:]) + 1)
-            titles.append(f"{nm}   ·   {yv[k]:.2f} {ysuf} @ {cpm[k]:,.0f} CPM")
-            peak_max = max(peak_max, float(yv[k]))
-        else:
-            titles.append(nm)
-        data.append((cpm, yv, color, nm))
-    ymax = _nice_ceil(peak_max * 1.10)   # misma escala ambos + 10% de aire
-    dy_maj = _nice_ceil(ymax / 4.0); dy_min = dy_maj / 5.0
-    fig = make_subplots(rows=len(data), cols=1, shared_xaxes=True,
-                        vertical_spacing=0.16, subplot_titles=titles)
-    for i, (cpm, yv, color, nm) in enumerate(data, start=1):
-        fig.add_scatter(x=cpm, y=yv, mode="lines", name=nm, row=i, col=1,
+            pk_cpm, pk_amp = float(cpm[k]), float(yv[k])
+            peak_max = max(peak_max, pk_amp)
+        specs.append((cpm, yv, color, nm, pk_cpm, pk_amp))
+    ymax = _nice_ceil(peak_max * 1.10)
+    dy_maj = _nice_ceil(ymax / 4.0)
+    for cpm, yv, color, nm, pk_cpm, pk_amp in specs:   # figura por sensor
+        title = _title_html(
+            f"Espectro — {nm}   ·   {pk_amp:.2f} {ysuf} @ {pk_cpm:,.0f} CPM", sub)
+        fig = go.Figure()
+        fig.add_scatter(x=cpm, y=yv, mode="lines", name=nm,
                         line=dict(color=color, width=1.2), showlegend=False,
-                        hovertemplate="%{x:,.0f} CPM<br>%{y:.2f} " + ysuf +
-                        "<extra>" + nm + "</extra>")
-        # ejes explícitos → X e Y se cruzan en (0,0), misma escala Y ambos
-        fig.update_xaxes(range=[0, fmax_cpm], tickformat=",d", row=i, col=1)
-        fig.update_yaxes(title_text=f"[{ysuf}]", range=[0, ymax], row=i, col=1)
-        _grid_xy(fig, i, dtick_cpm, dtick_cpm / 5.0, dy_maj, dy_min)
-    fig.update_xaxes(title_text="Frecuencia [CPM]", row=len(data), col=1)
-    _base_layout(fig, height=240 * len(data) + 60, title="Espectro (FFT)")
-    fig.update_layout(showlegend=False, hovermode="closest")
-    _hoverstyle(fig)
-    _style_subtitles(fig)
-    st.plotly_chart(fig, use_container_width=True, config=_PCFG,
-                    key=f"wm_dr_sp_{cap.point}_{cap.captured_at}")
+                        hovertemplate="%{x:,.0f} CPM<br><b>%{y:.2f} " + ysuf +
+                        "</b><extra>" + nm + "</extra>")
+        fig.update_xaxes(title_text="Frecuencia [CPM]", range=[0, fmax_cpm],
+                         tickformat=",d", showgrid=False, ticks="outside",
+                         ticklen=6, dtick=dtick_cpm,
+                         tickcolor="rgba(15,23,42,0.45)",
+                         minor=dict(dtick=dtick_cpm / 5.0, showgrid=False,
+                                    ticks="outside", ticklen=3,
+                                    tickcolor="rgba(15,23,42,0.28)"))
+        fig.update_yaxes(title_text=f"[{ysuf}]", range=[0, ymax], dtick=dy_maj,
+                         gridcolor=_GRID_MAJ, minor=dict(showgrid=False))
+        _base_layout(fig, height=300, title=title)
+        fig.update_layout(showlegend=False, hovermode="closest")
+        _hoverstyle(fig)
+        st.plotly_chart(fig, use_container_width=True,
+                        config=_cfg(fbase, f"{nm}_espectro"),
+                        key=f"wm_dr_sp_{cap.point}_{nm}_{cap.captured_at}")
 
 
 # =========================================================
 # ÓRBITA
 # =========================================================
 def _plot_orbit(cap: Capture, rpm: Optional[float], point: str,
-                nx: str, ny: str, header: str = "") -> None:
+                nx: str, ny: str, sub: str = "", fbase: str = "orb") -> None:
     import plotly.graph_objects as go
     x, y = cap.get(CH_X), cap.get(CH_Y)
     if x is None or y is None:
@@ -479,17 +494,16 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str,
     fig.add_scatter(x=xf, y=yf, mode="lines", name="Filtrada (síncrona)",
                     line=dict(color=_ORBIT_FILT, width=2.6))
     amp_pp = max(_pp(xf), _pp(yf))
-    _base_layout(fig, height=490, title=f"Órbita · {_point_label(point)}")
+    _base_layout(fig, height=520, title=_title_html(
+        f"Órbita — {_point_label(point)}   ·   {amp_pp:.1f} {u} pp", sub))
     fig.update_layout(hovermode="closest")
     _hoverstyle(fig)
     fig.update_xaxes(title=f"{nx} [{u}]", scaleanchor="y", scaleratio=1,
                      zeroline=False)
     fig.update_yaxes(title=f"{ny} [{u}]", zeroline=False)
-    st.plotly_chart(fig, use_container_width=True, config=_PCFG,
+    st.plotly_chart(fig, use_container_width=True,
+                    config=_cfg(fbase, "orbita"),
                     key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
-    cap_rpm = f"{rpm:,.0f} RPM · " if rpm else ""
-    st.caption(f"{cap_rpm}amplitud ≈ {amp_pp:.1f} {u} pp · filtrada por promedio "
-               f"de vueltas (síncrona 1X).")
 
 
 def _style_subtitles(fig) -> None:
