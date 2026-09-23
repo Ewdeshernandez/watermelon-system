@@ -972,16 +972,31 @@ def _activate_sheet(win, sheet_name: str, cfg: dict | None = None) -> bool:
         return False
 
 
-def export_all(cfg: dict, out_dir: str, sheet: str | None = None) -> int:
+def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
+               names: list | None = None, sheet_xy=None) -> int:
     """Exporta las 8 gráficas de la hoja (clic-derecho→Export→Save As) por
     coordenada fija. Sin árbol ni scroll.
 
     Antes de nada ACTIVA la hoja correcta ('Export csv1' por defecto) por si
     quedó otra encima — así el robot no depende de que un humano la deje abierta.
+
+    - sheet: etiqueta humana de la hoja (para log; la activación es por coord).
+    - sheet_xy: coord de pantalla del tab a clicar (para hojas distintas de la
+      primera, ej. 'GearBox'). Si None usa DEFAULT_SHEET_XY/cfg.
+    - names: 8 nombres de archivo que reemplazan los de DEFAULT_TILES (mismas
+      posiciones de la parrilla 4×2). Para la 2ª hoja del gearbox.
     """
     rpa = cfg.get("rpa", {})
     sheet = sheet or rpa.get("sheet", "Export csv1")
     tiles = rpa.get("tiles", DEFAULT_TILES)
+    if names:
+        # reasigna nombres a las posiciones fijas de la parrilla (por orden)
+        tiles = [{"x": DEFAULT_TILES[i]["x"], "y": DEFAULT_TILES[i]["y"],
+                  "name": nm} for i, nm in enumerate(names[:len(DEFAULT_TILES)])]
+    # coord de activación: explícita (sheet_xy) tiene prioridad
+    if sheet_xy is not None:
+        rpa = dict(rpa); rpa["sheet_xy"] = list(sheet_xy)
+        cfg = dict(cfg); cfg["rpa"] = rpa
     # traer System1 al frente + activar la hoja de exportación
     try:
         app, win = _connect()
@@ -1145,6 +1160,13 @@ def main(argv=None) -> int:
                          "(def 'Export csv1'); a prueba de 'Export csv2'")
     ap.add_argument("--actsheet", metavar="NAME",
                     help="SOLO activa la pestaña NAME + screenshot (diagnóstico)")
+    ap.add_argument("--sheet-xy", dest="sheet_xy", nargs=2, type=int,
+                    metavar=("X", "Y"),
+                    help="coord de pantalla del tab a clicar (ej. GearBox); "
+                         "si falta usa DEFAULT_SHEET_XY (Export csv1)")
+    ap.add_argument("--names", metavar="a,b,c,...",
+                    help="8 nombres de archivo separados por coma que reemplazan "
+                         "los de la parrilla (para la hoja GearBox)")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -1167,12 +1189,17 @@ def main(argv=None) -> int:
         return export_one(cfg, int(x), int(y), name, outd)
     if args.actsheet:
         app, win = _connect()
+        if args.sheet_xy:
+            rpa = dict(cfg.get("rpa", {})); rpa["sheet_xy"] = list(args.sheet_xy)
+            cfg = dict(cfg); cfg["rpa"] = rpa
         ok = _activate_sheet(win, args.actsheet, cfg)
         _grab_screen(r"C:\WM_wave\s1.png")
         print("ACTSHEET %s: %s" % (args.actsheet, "OK" if ok else "NO"))
         return 0 if ok else 1
     if args.expall:
-        return export_all(cfg, args.expall, sheet=args.sheet)
+        names = [s.strip() for s in args.names.split(",")] if args.names else None
+        return export_all(cfg, args.expall, sheet=args.sheet, names=names,
+                          sheet_xy=args.sheet_xy)
     if args.grab:
         _connect()
         img = _grab_screen(r"C:\WM_wave\s1.png")
