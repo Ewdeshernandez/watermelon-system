@@ -249,7 +249,7 @@ def _base_layout(fig, height=380, title=""):
         plot_bgcolor="white", paper_bgcolor="white",
         title=dict(text=title, x=0, xanchor="left",
                    font=dict(size=15, color=_INK, family="Arial Black")),
-        hovermode="closest", dragmode=False,
+        hovermode="closest", clickmode="event+select",
     )
     fig.update_xaxes(gridcolor=_GRID, zeroline=False, showline=True,
                      linecolor="rgba(15,23,42,0.35)", ticks="outside",
@@ -500,13 +500,18 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
                         "</b><extra>" + nm + "</extra>")
         fig.update_xaxes(title_text="Frecuencia [CPM]", range=[0, fmax_cpm],
                          tickformat=",d", showgrid=False, ticks="outside",
-                         ticklen=6, dtick=dtick_cpm,
+                         ticklen=6, dtick=dtick_cpm, showline=True,
+                         linecolor="#334155", linewidth=1.3, mirror=False,
+                         zeroline=True, zerolinecolor="#334155", zerolinewidth=1.3,
                          tickcolor="rgba(15,23,42,0.45)",
                          minor=dict(dtick=dtick_cpm / 5.0, showgrid=False,
                                     ticks="outside", ticklen=3,
                                     tickcolor="rgba(15,23,42,0.28)"))
         fig.update_yaxes(title_text=f"[{ysuf}]", range=[0, ymax], dtick=dy_maj,
-                         gridcolor=_GRID_MAJ, minor=dict(showgrid=False))
+                         gridcolor=_GRID_MAJ, minor=dict(showgrid=False),
+                         showline=True, linecolor="#334155", linewidth=1.3,
+                         mirror=False, zeroline=True, zerolinecolor="#334155",
+                         zerolinewidth=1.3)
         _base_layout(fig, height=300, title=title)
         fig.update_layout(showlegend=False, hovermode="closest")
         _hoverstyle(fig)
