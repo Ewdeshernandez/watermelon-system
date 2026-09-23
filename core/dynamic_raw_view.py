@@ -370,9 +370,13 @@ def _plot_waveform(cap: Capture, nx: str, ny: str, header: str = "") -> None:
     for i, (ch, color, nm) in enumerate(chans, start=1):
         v = cap.get(ch)
         pp, rms, cf = stats[ch]
-        ht = (f"<b>{nm}</b> · %{{x:.2f}} ms<br>"
-              f"<b>%{{y:.2f}} {u}</b><br>"
-              f"pp {pp:.1f}  ·  RMS {rms:.1f}  ·  CF {cf:.2f}<extra></extra>")
+        ht = (f"<b>Cursor · {nm}</b><br>"
+              f"<b>%{{y:.2f}} {u}</b>  @  %{{x:.2f}} ms<br>"
+              f"────────────<br>"
+              f"Crest Factor&nbsp;&nbsp;<b>{cf:.2f}</b><br>"
+              f"Overall RMS&nbsp;&nbsp;<b>{rms:.1f} {u}</b><br>"
+              f"Pico–pico&nbsp;&nbsp;<b>{pp:.1f} {u}</b>"
+              f"<extra></extra>")
         fig.add_scatter(x=t, y=v, mode="lines", name=nm, row=i, col=1,
                         line=dict(color=color, width=1.6), showlegend=False,
                         hovertemplate=ht)
@@ -381,15 +385,12 @@ def _plot_waveform(cap: Capture, nx: str, ny: str, header: str = "") -> None:
         fig.update_xaxes(range=[0, xmax], row=i, col=1)
         _grid_xy(fig, i, dx_maj, dx_min, dy_maj, dy_min)
     fig.update_xaxes(title_text="Tiempo [ms]", row=len(chans), col=1)
-    _base_layout(fig, height=210 * len(chans) + 68, title=_title_html("Forma de onda", header))
+    _base_layout(fig, height=210 * len(chans) + 60, title="Forma de onda")
     fig.update_layout(showlegend=False, hovermode="closest")
     _hoverstyle(fig)
     _style_subtitles(fig)
     st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_wf_{cap.point}_{cap.captured_at}")
-    st.caption(f"Duración capturada: {xmax:.0f} ms · {cap.samples_per_rev or '—'} "
-               f"muestras/vuelta. Más tiempo/resolución = más vueltas en la "
-               f"captura de campo.")
 
 
 # =========================================================
@@ -443,15 +444,12 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
         fig.update_yaxes(title_text=f"[{ysuf}]", range=[0, ymax], row=i, col=1)
         _grid_xy(fig, i, dtick_cpm, dtick_cpm / 5.0, dy_maj, dy_min)
     fig.update_xaxes(title_text="Frecuencia [CPM]", row=len(data), col=1)
-    _base_layout(fig, height=240 * len(data) + 68,
-                 title=_title_html("Espectro (FFT)", header))
+    _base_layout(fig, height=240 * len(data) + 60, title="Espectro (FFT)")
     fig.update_layout(showlegend=False, hovermode="closest")
     _hoverstyle(fig)
     _style_subtitles(fig)
     st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_sp_{cap.point}_{cap.captured_at}")
-    st.caption(f"Rango 0–{fmax_cpm:,.0f} CPM ({_disp_type(unit)}). Lectura del "
-               f"pico dominante de cada sensor en su título.")
 
 
 # =========================================================
@@ -481,8 +479,7 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str,
     fig.add_scatter(x=xf, y=yf, mode="lines", name="Filtrada (síncrona)",
                     line=dict(color=_ORBIT_FILT, width=2.6))
     amp_pp = max(_pp(xf), _pp(yf))
-    _base_layout(fig, height=490,
-                 title=_title_html(f"Órbita · {_point_label(point)}", header))
+    _base_layout(fig, height=490, title=f"Órbita · {_point_label(point)}")
     fig.update_layout(hovermode="closest")
     _hoverstyle(fig)
     fig.update_xaxes(title=f"{nx} [{u}]", scaleanchor="y", scaleratio=1,
