@@ -541,15 +541,10 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
         st.info("Faltan canales X/Y para la órbita.")
         return
     u = cap.unit_of(CH_X) or "µm"
-    # --- Restaurar la FASE entre sondas ---
-    # El export por canal (Disp Wf.KPH) alinea cada onda a su propio keyphasor y
-    # borra el desfase físico entre las sondas. Se recupera rotando Y por la
-    # separación angular entre sondas (ang_x + ang_y). Validado: 45+45=90°→círculo.
-    spr = cap.samples_per_rev or 0
-    if spr and spr > 4:
-        sep = int(round(((float(ang_x) + float(ang_y)) % 360) / 360.0 * spr))
-        if sep:
-            py = np.roll(py, sep)
+    # NOTA fase: el export .KPH de cada sonda comparte el MISMO keyphasor, así que
+    # px[i] y py[i] son el mismo ángulo de eje → la fase entre sondas YA está
+    # preservada (medido: dphi 1X ≈ 88° en cuadratura). NO se rola nada. (El viejo
+    # np.roll(90°) aplastaba la órbita a una línea; validado con data real.)
     # --- Reconstrucción en coordenadas de MÁQUINA (H→derecha, V→arriba) ---
     # Cada sonda mide en su ángulo real desde el TOP (X a la derecha, Y a la
     # izquierda). Se resuelve el sistema 2×2 para el H y V verdaderos.
@@ -563,22 +558,30 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
         H = (d * px - b * py) / det
         V = (-c * px + a * py) / det
     spr = cap.samples_per_rev
-    Hf, Vf = H, V
+    # órbita síncrona 1X = promedio de TODAS las vueltas.
+    Hc, Vc = H, V          # una vuelta CERRADA (para área/sentido/escala/pp)
+    Ho, Vo = H, V          # trazo a DIBUJAR (abierto, con hueco en el keyphasor)
+    kph_h = kph_v = None
     if spr and spr > 4 and H.size >= 2 * spr:
         nrev = H.size // spr
-        Hf = H[:nrev * spr].reshape(nrev, spr).mean(axis=0)
-        Vf = V[:nrev * spr].reshape(nrev, spr).mean(axis=0)
-        Hf = np.append(Hf, Hf[0]); Vf = np.append(Vf, Vf[0])
-    area = float(np.sum(Hf[:-1] * Vf[1:] - Hf[1:] * Vf[:-1])) if Hf.size > 2 else 0
+        Ha = H[:nrev * spr].reshape(nrev, spr).mean(axis=0)
+        Va = V[:nrev * spr].reshape(nrev, spr).mean(axis=0)
+        kph_h, kph_v = float(Ha[0]), float(Va[0])      # muestra 0 = keyphasor
+        Hc = np.append(Ha, Ha[0]); Vc = np.append(Va, Va[0])
+        # trazo ABIERTO: deja un pequeño hueco alrededor del keyphasor → no se
+        # pega al punto brillante; marca inicio/fin como Bently.
+        gap = max(1, spr // 24)
+        Ho, Vo = Ha[gap:], Va[gap:]
+    area = float(np.sum(Hc[:-1] * Vc[1:] - Hc[1:] * Vc[:-1])) if Hc.size > 2 else 0
     sentido = "↺ CCW" if area > 0 else "↻ CW"
     # escala: muestra la BANDA de todas las vueltas (percentil 99 para evitar
     # picos) → llena el marco como System1
     rad = np.hypot(H, V)
     amax = _nice_ceil(max(float(np.percentile(rad, 99)),
-                          float(np.nanmax(np.abs(Hf))),
-                          float(np.nanmax(np.abs(Vf))), 1.0) * 1.12)
+                          float(np.nanmax(np.abs(Hc))),
+                          float(np.nanmax(np.abs(Vc))), 1.0) * 1.12)
     dmaj = _nice_ceil(amax / 3.0)
-    amp_pp = max(_pp(Hf), _pp(Vf))
+    amp_pp = max(_pp(Hc), _pp(Vc))
 
     fig = go.Figure()
     fig.add_hline(y=0, line=dict(color="rgba(15,23,42,0.18)", width=1))
@@ -597,20 +600,17 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
     # banda de todas las vueltas (azul fino, estilo System1)
     fig.add_scatter(x=H, y=V, mode="lines", name="Vueltas", hoverinfo="skip",
                     line=dict(color="rgba(37,99,235,0.45)", width=0.8))
-    # órbita promedio (síncrona 1X) — protagonista
-    fig.add_scatter(x=Hf, y=Vf, mode="lines", name="Órbita 1X",
+    # órbita promedio (síncrona 1X) — protagonista, ABIERTA (hueco en keyphasor)
+    fig.add_scatter(x=Ho, y=Vo, mode="lines", name="Órbita 1X",
                     line=dict(color=_ORBIT_FILT, width=2.4),
                     hovertemplate="H %{x:.1f} · V %{y:.1f} " + u + "<extra></extra>")
-    # keyphasor: un punto en el arranque de CADA vuelta (marca de fase) — el
-    # racimo + el sentido del recorrido indican hacia dónde gira (X→Y o Y→X)
-    if cap.has(CH_KPH):
-        edges = keyphasor_edges(cap.get(CH_KPH))
-        ex = [int(e) for e in edges if 0 <= int(e) < H.size]
-        if ex:
-            fig.add_scatter(x=[H[e] for e in ex], y=[V[e] for e in ex],
-                            mode="markers", name="Keyphasor", hoverinfo="skip",
-                            marker=dict(color=_KPH_COLOR, size=6,
-                                        line=dict(width=0.5, color="white")))
+    # keyphasor: UN punto brillante donde ARRANCA la órbita (marca de fase). El
+    # hueco antes de él + hacia dónde sale el trazo indican el sentido de giro.
+    if kph_h is not None:
+        fig.add_scatter(x=[kph_h], y=[kph_v], mode="markers", name="Keyphasor",
+                        hovertemplate="Keyphasor (inicio)<extra></extra>",
+                        marker=dict(color=_KPH_COLOR, size=11,
+                                    line=dict(width=1.6, color="white")))
     ttl = f"Órbita — {amp_pp:.1f} {u} pp   ·   {sentido}"
     _base_layout(fig, height=620, title=_title_html(ttl, sub))
     # gráfico CUADRADO (como System1): ancho fijo = alto, no estirar
