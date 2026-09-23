@@ -601,25 +601,29 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
     fig.add_scatter(x=Hf, y=Vf, mode="lines", name="Órbita 1X",
                     line=dict(color=_ORBIT_FILT, width=2.4),
                     hovertemplate="H %{x:.1f} · V %{y:.1f} " + u + "<extra></extra>")
+    # keyphasor: un punto en el arranque de CADA vuelta (marca de fase) — el
+    # racimo + el sentido del recorrido indican hacia dónde gira (X→Y o Y→X)
     if cap.has(CH_KPH):
         edges = keyphasor_edges(cap.get(CH_KPH))
-        if edges.size and edges[0] < H.size:
-            e = int(edges[0])
-            fig.add_scatter(x=[H[e]], y=[V[e]], mode="markers", name="Keyphasor",
-                            hoverinfo="skip",
-                            marker=dict(color=_KPH_COLOR, size=11, symbol="x",
-                                        line=dict(width=2, color=_KPH_COLOR)))
-    ttl = (f"Órbita — {_point_label(point)}   ·   {amp_pp:.1f} {u} pp   ·   "
-           f"{sentido}" + (f"   ·   {rpm:,.0f} RPM" if rpm else ""))
+        ex = [int(e) for e in edges if 0 <= int(e) < H.size]
+        if ex:
+            fig.add_scatter(x=[H[e] for e in ex], y=[V[e] for e in ex],
+                            mode="markers", name="Keyphasor", hoverinfo="skip",
+                            marker=dict(color=_KPH_COLOR, size=6,
+                                        line=dict(width=0.5, color="white")))
+    ttl = f"Órbita — {amp_pp:.1f} {u} pp   ·   {sentido}"
     _base_layout(fig, height=620, title=_title_html(ttl, sub))
     # gráfico CUADRADO (como System1): ancho fijo = alto, no estirar
     fig.update_layout(hovermode="closest", showlegend=False, width=620,
                       margin=dict(l=60, r=20, t=66, b=52))
     _hoverstyle(fig)
-    axkw = dict(range=[-amax, amax], zeroline=False, gridcolor=_GRID_MAJ,
-                dtick=dmaj, ticks="outside", ticklen=5,
-                tickcolor="rgba(15,23,42,0.4)",
-                minor=dict(dtick=dmaj / 5.0, showgrid=True, gridcolor=_GRID_MIN))
+    # como System1: SIN cuadrícula de fondo — solo cross central (H=0,V=0) +
+    # ticks mayor/menor sobre los ejes
+    axkw = dict(range=[-amax, amax], zeroline=False, showgrid=False,
+                dtick=dmaj, ticks="outside", ticklen=6,
+                tickcolor="rgba(15,23,42,0.45)",
+                minor=dict(dtick=dmaj / 5.0, showgrid=False, ticks="outside",
+                           ticklen=3, tickcolor="rgba(15,23,42,0.28)"))
     fig.update_xaxes(title="Horizontal [%s] →" % u, scaleanchor="y",
                      scaleratio=1, **axkw)
     fig.update_yaxes(title="Vertical [%s] ↑" % u, **axkw)
