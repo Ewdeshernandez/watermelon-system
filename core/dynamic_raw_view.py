@@ -529,7 +529,8 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
     is_disp = _disp_type(unit) == "disp"
     ysuf = f"{unit} pp" if is_disp else f"{unit} pico"
     fmax_cpm = min(_FMAX_CPM[_disp_type(unit)], fs / 2.0 * 60.0)
-    dtick_cpm = 10000 if fmax_cpm <= 80000 else 100000
+    # ~6 divisiones 'bonitas' adaptadas al Fmax real (Nyquist), no un salto fijo
+    dtick_cpm = _nice_ceil(fmax_cpm / 6.0)
     chans = [(CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)]
     chans = [(c, col, nm) for c, col, nm in chans if cap.get(c) is not None]
     if not chans:
