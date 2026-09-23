@@ -79,25 +79,67 @@ def _resolve_asset(candidates: List[str]) -> Tuple[str, List[Dict[str, str]]]:
 # Etiquetas amigables por cojinete (Turbina 1/2 · Generador 5/6…)
 # =========================================================
 def _brg_num(point: str) -> Optional[int]:
-    m = re.match(r"BRG(\d+)", (point or "").upper())
+    """Nº de cojinete de una ÓRBITA (proximidad): BRGn (turbina/gen) o GBn
+    (gearbox). Los canales sueltos GB_4XA no tienen (devuelve None)."""
+    m = re.match(r"(?:BRG|GB)(\d+)$", (point or "").upper())
     return int(m.group(1)) if m else None
 
 
-def _group_of(n: Optional[int]) -> str:
+def _gb_single(point: str) -> Optional[dict]:
+    """Canal ÚNICO del gearbox: GB_4XA / GB_3YV → {bearing,axis,kind}."""
+    m = re.match(r"GB_(\d+)([XY])([DAV])$", (point or "").upper())
+    if not m:
+        return None
+    return {"bearing": m.group(1), "axis": m.group(2), "kind": m.group(3)}
+
+
+def _is_gb(point: str) -> bool:
+    return (point or "").upper().startswith("GB")
+
+
+def _component_of(point: str) -> str:
+    if _is_gb(point):
+        return "GearBox"
+    n = _brg_num(point)
     if n is None:
         return ""
     return "Turbina" if n <= 4 else "Generador"
 
 
+# medida (por letra de tipo o por unidad): (es, unidad canónica)
+_MEASURE_ES = {"D": ("Desplazamiento", "µm"), "A": ("Aceleración", "g"),
+               "V": ("Velocidad", "mm/s")}
+_DISP2ES = {"disp": ("Desplazamiento", "µm"), "accel": ("Aceleración", "g"),
+            "vel": ("Velocidad", "mm/s")}
+
+
+def _measure_of(point: str, unit: str = "") -> Tuple[str, str]:
+    """(etiqueta ES, unidad) de la medición. Prioriza la unidad real de la
+    captura; cae al sufijo del nombre del canal."""
+    if unit:
+        return _DISP2ES.get(_disp_type(unit), ("Desplazamiento", unit or "µm"))
+    g = _gb_single(point)
+    if g:
+        return _MEASURE_ES.get(g["kind"], ("Desplazamiento", "µm"))
+    return ("Desplazamiento", "µm")
+
+
 def _point_label(point: str) -> str:
+    g = _gb_single(point)
+    if g:
+        meas, _u = _MEASURE_ES.get(g["kind"], ("", ""))
+        return f"GearBox · {g['bearing']}{g['axis']}{g['kind']} · {meas}"
     n = _brg_num(point)
     if n is None:
         return point
-    return f"{_group_of(n)} · Cojinete {n}"
+    return f"{_component_of(point)} · Cojinete {n}"
 
 
 def _sensor_names(point: str) -> Tuple[str, str]:
     """Etiquetas de los sensores X/Y del cojinete, ej. '1X' / '1Y'."""
+    g = _gb_single(point)
+    if g:
+        return f"{g['bearing']}{g['axis']}{g['kind']}", ""
     n = _brg_num(point)
     if n is None:
         return "X", "Y"
@@ -105,7 +147,9 @@ def _sensor_names(point: str) -> Tuple[str, str]:
 
 
 def _order_points(points: List[str]) -> List[str]:
-    return sorted(points, key=lambda p: (_brg_num(p) is None, _brg_num(p) or 999, p))
+    # órbitas primero (por nº), luego canales sueltos del gearbox por nombre
+    return sorted(points, key=lambda p: (_brg_num(p) is None, _brg_num(p) or 999,
+                                         _is_gb(p), p))
 
 
 # =========================================================
@@ -149,7 +193,7 @@ def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
 
     c1, c2 = st.columns([2, 3])
     with c1:
-        point = st.selectbox("Cojinete", points, format_func=_point_label,
+        point = st.selectbox("Punto", points, format_func=_point_label,
                              key=f"wm_dr_pt_{instance_id}")
     times = by_point[point]
 
@@ -188,6 +232,10 @@ def _render_capture(cap: Capture, instance_id: str, point: str,
     if rpm is None and cap.has(CH_KPH):
         rpm = rpm_from_keyphasor(cap.t, cap.get(CH_KPH))
     nx, ny = _sensor_names(point)
+    # medida real (Desplazamiento µm / Aceleración g / Velocidad mm·s⁻¹) por la
+    # unidad de la captura → funciona igual para gearbox mixto
+    meas, _munit = _measure_of(point, cap.unit_of(CH_X) or "")
+    has_orbit = cap.has(CH_Y)          # canal único (A/V) → sin órbita
     # ocultar el toolbar de Streamlit (botón expandir/fullscreen) — deja la
     # cámara de Plotly intacta (esa vive en el modebar de Plotly, no aquí)
     st.markdown(
@@ -197,22 +245,25 @@ def _render_capture(cap: Capture, instance_id: str, point: str,
         "{display:none!important;visibility:hidden!important}</style>",
         unsafe_allow_html=True)
     # Subtítulo/identidad que viaja DENTRO de cada gráfico (sale en el JPG):
-    # máquina · cojinete · rpm · fecha (verde). Se pone en cada onda/espectro.
+    # máquina · punto · medida · rpm · fecha (verde). Se pone en cada onda/espectro.
     rpm_txt = f"{rpm:,.0f} RPM" if rpm else "— RPM"
     sub = (f"<span style='color:#475569'>{resolved} · {_point_label(point)} · "
-           f"Desplazamiento · {rpm_txt}</span> &nbsp; "
+           f"{meas} · {rpm_txt}</span> &nbsp; "
            f"<span style='color:#16a34a'>● {when}</span>")
-    fbase = f"{resolved}_Brg{_brg_num(point) or ''}"
+    tag = f"GB{_brg_num(point)}" if _is_gb(point) and _brg_num(point) \
+        else (point if _is_gb(point) else f"Brg{_brg_num(point) or ''}")
+    fbase = f"{resolved}_{tag}"
 
+    views = _VIEWS if has_orbit else _VIEWS[:2]   # sin Órbita si no hay Y
     try:
-        view = st.segmented_control("Vista", _VIEWS, default=_VIEWS[0],
+        view = st.segmented_control("Vista", views, default=views[0],
                                     key=f"wm_dr_view_{instance_id}",
                                     label_visibility="collapsed")
     except Exception:  # noqa: BLE001
-        view = st.radio("Vista", _VIEWS, horizontal=True,
+        view = st.radio("Vista", views, horizontal=True,
                         key=f"wm_dr_view_r_{instance_id}",
                         label_visibility="collapsed")
-    view = view or _VIEWS[0]
+    view = view or views[0]
     if "Onda" in view:
         _plot_waveform(cap, nx, ny, sub, fbase)
     elif "Espectro" in view:
