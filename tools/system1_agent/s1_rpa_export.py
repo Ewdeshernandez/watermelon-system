@@ -93,6 +93,45 @@ def _hide_console():
         pass
 
 
+def _force_foreground(win):
+    """Trae System1 al FRENTE aunque otra ventana esté encima. Windows bloquea
+    SetForegroundWindow desde background, así que se adjunta el hilo de la
+    ventana en primer plano + ALT truco, se maximiza y se sube al tope."""
+    try:
+        import win32gui, win32con, win32process, win32api, ctypes
+        hwnd = int(win.handle)
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+        except Exception:  # noqa: BLE001
+            pass
+        fg = win32gui.GetForegroundWindow()
+        if fg and fg != hwnd:
+            t_fg, _ = win32process.GetWindowThreadProcessId(fg)
+            t_me = win32api.GetCurrentThreadId()
+            t_wn, _ = win32process.GetWindowThreadProcessId(hwnd)
+            for a, b in ((t_me, t_fg), (t_me, t_wn)):
+                try:
+                    ctypes.windll.user32.AttachThreadInput(a, b, True)
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                # ALT despierta el permiso de foreground
+                win32api.keybd_event(0x12, 0, 0, 0)
+                win32api.keybd_event(0x12, 0, win32con.KEYEVENTF_KEYUP, 0)
+                win32gui.BringWindowToTop(hwnd)
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:  # noqa: BLE001
+                pass
+            for a, b in ((t_me, t_fg), (t_me, t_wn)):
+                try:
+                    ctypes.windll.user32.AttachThreadInput(a, b, False)
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _connect():
     from pywinauto import Application
     _hide_console()
@@ -102,8 +141,12 @@ def _connect():
         win.maximize()
     except Exception:  # noqa: BLE001
         pass
-    win.set_focus()
-    time.sleep(0.4)
+    _force_foreground(win)
+    try:
+        win.set_focus()
+    except Exception:  # noqa: BLE001
+        pass
+    time.sleep(0.6)
     return app, win
 
 
