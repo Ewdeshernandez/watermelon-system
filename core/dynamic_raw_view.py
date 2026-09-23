@@ -562,8 +562,9 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
         Hf = np.append(Hf, Hf[0]); Vf = np.append(Vf, Vf[0])
     area = float(np.sum(Hf[:-1] * Vf[1:] - Hf[1:] * Vf[:-1])) if Hf.size > 2 else 0
     sentido = "↺ CCW" if area > 0 else "↻ CW"
-    amax = _nice_ceil(max(float(np.nanmax(np.abs(H))),
-                          float(np.nanmax(np.abs(V)))) * 1.12)
+    # escala desde la órbita FILTRADA (no la cruda con picos) → llena el marco
+    amax = _nice_ceil(max(float(np.nanmax(np.abs(Hf))),
+                          float(np.nanmax(np.abs(Vf))), 1.0) * 1.20)
     amp_pp = max(_pp(Hf), _pp(Vf))
 
     fig = go.Figure()
