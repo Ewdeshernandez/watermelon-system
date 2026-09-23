@@ -21,7 +21,7 @@ import streamlit as st
 
 from core.dynamic_raw import (
     Capture, CH_X, CH_Y, CH_KPH, download_capture, list_captures,
-    rpm_from_keyphasor,
+    keyphasor_edges, rpm_from_keyphasor,
 )
 
 # ---- paleta profesional ----
@@ -218,7 +218,16 @@ def _render_capture(cap: Capture, instance_id: str, point: str,
     elif "Espectro" in view:
         _plot_spectrum(cap, rpm, nx, ny, sub, fbase)
     else:
-        _plot_orbit(cap, rpm, point, nx, ny, sub, fbase)
+        # Ángulos de montaje de las sondas (grados desde el TOP). Bently típico:
+        # X a 45° derecha, Y a 45° izquierda. Configurable por máquina.
+        oa, ob, oc = st.columns([1, 1, 2])
+        ang_x = oa.number_input(f"{nx} · ° a la derecha del TOP", value=45,
+                                min_value=0, max_value=180, step=5,
+                                key=f"wm_dr_ax_{instance_id}")
+        ang_y = ob.number_input(f"{ny} · ° a la izquierda del TOP", value=45,
+                                min_value=0, max_value=180, step=5,
+                                key=f"wm_dr_ay_{instance_id}")
+        _plot_orbit(cap, rpm, point, nx, ny, sub, fbase, ang_x, ang_y)
 
 
 # =========================================================
@@ -523,39 +532,78 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
 # =========================================================
 # ÓRBITA
 # =========================================================
-def _plot_orbit(cap: Capture, rpm: Optional[float], point: str,
-                nx: str, ny: str, sub: str = "", fbase: str = "orb") -> None:
+def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str,
+                sub: str = "", fbase: str = "orb", ang_x: int = 45,
+                ang_y: int = 45) -> None:
     import plotly.graph_objects as go
-    x, y = cap.get(CH_X), cap.get(CH_Y)
-    if x is None or y is None:
+    px, py = cap.get(CH_X), cap.get(CH_Y)
+    if px is None or py is None:
         st.info("Faltan canales X/Y para la órbita.")
         return
     u = cap.unit_of(CH_X) or "µm"
+    # --- Reconstrucción en coordenadas de MÁQUINA (H→derecha, V→arriba) ---
+    # Cada sonda mide en su ángulo real desde el TOP (X a la derecha, Y a la
+    # izquierda). Se resuelve el sistema 2×2 para el H y V verdaderos.
+    tx = np.radians(float(ang_x)); ty = np.radians(-float(ang_y))
+    a, b = np.sin(tx), np.cos(tx)
+    c, d = np.sin(ty), np.cos(ty)
+    det = a * d - b * c
+    if abs(det) < 1e-6:
+        H, V = px, py
+    else:
+        H = (d * px - b * py) / det
+        V = (-c * px + a * py) / det
     spr = cap.samples_per_rev
-    xf, yf = x, y
-    if spr and spr > 4 and x.size >= 2 * spr:
-        nrev = x.size // spr
-        xf = x[:nrev * spr].reshape(nrev, spr).mean(axis=0)
-        yf = y[:nrev * spr].reshape(nrev, spr).mean(axis=0)
-        xf = np.append(xf, xf[0]); yf = np.append(yf, yf[0])
+    Hf, Vf = H, V
+    if spr and spr > 4 and H.size >= 2 * spr:
+        nrev = H.size // spr
+        Hf = H[:nrev * spr].reshape(nrev, spr).mean(axis=0)
+        Vf = V[:nrev * spr].reshape(nrev, spr).mean(axis=0)
+        Hf = np.append(Hf, Hf[0]); Vf = np.append(Vf, Vf[0])
+    area = float(np.sum(Hf[:-1] * Vf[1:] - Hf[1:] * Vf[:-1])) if Hf.size > 2 else 0
+    sentido = "↺ CCW" if area > 0 else "↻ CW"
+    amax = _nice_ceil(max(float(np.nanmax(np.abs(H))),
+                          float(np.nanmax(np.abs(V)))) * 1.12)
+    amp_pp = max(_pp(Hf), _pp(Vf))
 
     fig = go.Figure()
-    fig.add_hline(y=0, line=dict(color="rgba(15,23,42,0.14)", width=1))
-    fig.add_vline(x=0, line=dict(color="rgba(15,23,42,0.14)", width=1))
-    fig.add_scatter(x=x, y=y, mode="lines", name="Cruda",
+    fig.add_hline(y=0, line=dict(color="rgba(15,23,42,0.18)", width=1))
+    fig.add_vline(x=0, line=dict(color="rgba(15,23,42,0.18)", width=1))
+    # posición física real de cada sonda (línea tenue + etiqueta)
+    for ang, nm in ((tx, nx), (ty, ny)):
+        hx, vy = np.sin(ang) * amax, np.cos(ang) * amax
+        fig.add_scatter(x=[0, hx], y=[0, vy], mode="lines", showlegend=False,
+                        hoverinfo="skip",
+                        line=dict(color="rgba(100,116,139,0.45)", width=1,
+                                  dash="dot"))
+        fig.add_annotation(x=hx, y=vy, text=f"<b>{nm}</b>", showarrow=False,
+                           font=dict(color=_MUTED, size=11),
+                           xshift=int(np.sin(ang) * 12),
+                           yshift=int(np.cos(ang) * 12))
+    fig.add_scatter(x=H, y=V, mode="lines", name="Cruda", hoverinfo="skip",
                     line=dict(color=_ORBIT_RAW, width=1))
-    fig.add_scatter(x=xf, y=yf, mode="lines", name="Filtrada (síncrona)",
-                    line=dict(color=_ORBIT_FILT, width=2.6))
-    amp_pp = max(_pp(xf), _pp(yf))
-    _base_layout(fig, height=520, title=_title_html(
-        f"Órbita — {_point_label(point)}   ·   {amp_pp:.1f} {u} pp", sub))
-    fig.update_layout(hovermode="closest")
+    fig.add_scatter(x=Hf, y=Vf, mode="lines", name="Órbita 1X",
+                    line=dict(color=_ORBIT_FILT, width=2.6),
+                    hovertemplate="H %{x:.1f} · V %{y:.1f} " + u + "<extra></extra>")
+    if cap.has(CH_KPH):
+        edges = keyphasor_edges(cap.get(CH_KPH))
+        if edges.size and edges[0] < H.size:
+            e = int(edges[0])
+            fig.add_scatter(x=[H[e]], y=[V[e]], mode="markers", name="Keyphasor",
+                            hoverinfo="skip",
+                            marker=dict(color=_KPH_COLOR, size=11, symbol="x",
+                                        line=dict(width=2, color=_KPH_COLOR)))
+    ttl = (f"Órbita — {_point_label(point)}   ·   {amp_pp:.1f} {u} pp   ·   "
+           f"{sentido}" + (f"   ·   {rpm:,.0f} RPM" if rpm else ""))
+    _base_layout(fig, height=560, title=_title_html(ttl, sub))
+    fig.update_layout(hovermode="closest", showlegend=False)
     _hoverstyle(fig)
-    fig.update_xaxes(title=f"{nx} [{u}]", scaleanchor="y", scaleratio=1,
-                     zeroline=False)
-    fig.update_yaxes(title=f"{ny} [{u}]", zeroline=False)
-    st.plotly_chart(fig, use_container_width=True,
-                    config=_cfg(fbase, "orbita"),
+    fig.update_xaxes(title="Horizontal [%s] →" % u, range=[-amax, amax],
+                     scaleanchor="y", scaleratio=1, zeroline=False,
+                     gridcolor=_GRID_MAJ)
+    fig.update_yaxes(title="Vertical [%s] ↑" % u, range=[-amax, amax],
+                     zeroline=False, gridcolor=_GRID_MAJ)
+    st.plotly_chart(fig, use_container_width=True, config=_cfg(fbase, "orbita"),
                     key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
 
 
