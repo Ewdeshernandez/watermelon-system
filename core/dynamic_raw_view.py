@@ -541,6 +541,15 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
         st.info("Faltan canales X/Y para la órbita.")
         return
     u = cap.unit_of(CH_X) or "µm"
+    # --- Restaurar la FASE entre sondas ---
+    # El export por canal (Disp Wf.KPH) alinea cada onda a su propio keyphasor y
+    # borra el desfase físico entre las sondas. Se recupera rotando Y por la
+    # separación angular entre sondas (ang_x + ang_y). Validado: 45+45=90°→círculo.
+    spr = cap.samples_per_rev or 0
+    if spr and spr > 4:
+        sep = int(round(((float(ang_x) + float(ang_y)) % 360) / 360.0 * spr))
+        if sep:
+            py = np.roll(py, sep)
     # --- Reconstrucción en coordenadas de MÁQUINA (H→derecha, V→arriba) ---
     # Cada sonda mide en su ángulo real desde el TOP (X a la derecha, Y a la
     # izquierda). Se resuelve el sistema 2×2 para el H y V verdaderos.
