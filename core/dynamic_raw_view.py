@@ -171,14 +171,13 @@ def _render_capture(cap: Capture, instance_id: str, point: str) -> None:
     rpm = cap.rpm
     if rpm is None and cap.has(CH_KPH):
         rpm = rpm_from_keyphasor(cap.t, cap.get(CH_KPH))
-    fs = cap.fs_hz
     nx, ny = _sensor_names(point)
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Velocidad", f"{rpm:,.0f} RPM" if rpm else "—")
-    m2.metric("Muestreo", f"{fs/1000:.1f} kHz" if fs else "—")
-    m3.metric("Muestras/vuelta", cap.samples_per_rev or "—")
-    m4.metric("Duración", f"{cap.t[-1]*1000:.0f} ms" if cap.t.size else "—")
+    if rpm:
+        st.markdown(
+            f"<div style='color:#334155;font-size:13px;margin:0 0 8px'>"
+            f"Velocidad de giro&nbsp; <b style='color:#0f172a;font-size:15px'>"
+            f"{rpm:,.0f}</b> RPM</div>", unsafe_allow_html=True)
 
     try:
         view = st.segmented_control("Vista", _VIEWS, default=_VIEWS[0],
@@ -230,6 +229,20 @@ def _pp(v: np.ndarray) -> float:
     return float(np.nanmax(v) - np.nanmin(v)) if v.size else 0.0
 
 
+def _nice_ceil(x: float) -> float:
+    """Redondea hacia arriba a un tope 'bonito' (1/2/2.5/5/10 × 10^k).
+    Ej.: 44→50, 29.7→30, 18→20."""
+    import math
+    if x is None or x <= 0:
+        return 1.0
+    e = math.floor(math.log10(x))
+    base = 10 ** e
+    for m in (1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10):
+        if x <= m * base + 1e-9:
+            return m * base
+    return 10 * base
+
+
 def _disp_type(unit: str) -> str:
     """Tipo de medición por la unidad (viene de la config de System1)."""
     u = (unit or "").lower()
@@ -276,6 +289,8 @@ def _plot_waveform(cap: Capture, nx: str, ny: str) -> None:
     if not chans:
         st.info("Sin canales de onda.")
         return
+    amax = _nice_ceil(max(float(np.nanmax(np.abs(cap.get(c)))) for c, _, _ in chans)
+                      * 1.10)            # misma escala simétrica ambos + 10%
     fig = make_subplots(rows=len(chans), cols=1, shared_xaxes=True,
                         vertical_spacing=0.10,
                         subplot_titles=[f"{nm}   ·   {_pp(cap.get(c)):.1f} {u} pp"
@@ -284,8 +299,8 @@ def _plot_waveform(cap: Capture, nx: str, ny: str) -> None:
         v = cap.get(ch)
         fig.add_scatter(x=t, y=v, mode="lines", name=nm, row=i, col=1,
                         line=dict(color=color, width=1.6), showlegend=False)
-        fig.update_yaxes(title_text=f"[{u}]", row=i, col=1, zeroline=True,
-                         zerolinecolor="rgba(15,23,42,0.30)")
+        fig.update_yaxes(title_text=f"[{u}]", row=i, col=1, range=[-amax, amax],
+                         zeroline=True, zerolinecolor="rgba(15,23,42,0.30)")
         fig.update_xaxes(range=[0, xmax], row=i, col=1)
     fig.update_xaxes(title_text="Tiempo [ms]", row=len(chans), col=1)
     _base_layout(fig, height=200 * len(chans) + 60, title="Forma de onda")
@@ -322,6 +337,7 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None
     # calcular espectros + pico dominante (para el título/lectura tipo System1)
     data = []
     titles = []
+    peak_max = 0.0
     for ch, color, nm in chans:
         freqs, amp = _hires_spectrum(cap.get(ch), fs)
         cpm = freqs * 60.0
@@ -329,17 +345,20 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None
         if yv.size > 2:
             k = int(np.argmax(yv[1:]) + 1)
             titles.append(f"{nm}   ·   {yv[k]:.2f} {ysuf} @ {cpm[k]:,.0f} CPM")
+            peak_max = max(peak_max, float(yv[k]))
         else:
             titles.append(nm)
         data.append((cpm, yv, color, nm))
+    ymax = _nice_ceil(peak_max * 1.10)   # misma escala ambos + 10% de aire
     fig = make_subplots(rows=len(data), cols=1, shared_xaxes=True,
                         vertical_spacing=0.14, subplot_titles=titles)
     for i, (cpm, yv, color, nm) in enumerate(data, start=1):
         fig.add_scatter(x=cpm, y=yv, mode="lines", name=nm, row=i, col=1,
                         line=dict(color=color, width=1.2), showlegend=False)
+        # ejes explícitos → X e Y se cruzan en (0,0), misma escala Y ambos
         fig.update_xaxes(range=[0, fmax_cpm], tickformat=",d", dtick=dtick_cpm,
                          row=i, col=1)
-        fig.update_yaxes(title_text=f"[{ysuf}]", rangemode="tozero", row=i, col=1)
+        fig.update_yaxes(title_text=f"[{ysuf}]", range=[0, ymax], row=i, col=1)
     fig.update_xaxes(title_text="Frecuencia [CPM]", row=len(data), col=1)
     _base_layout(fig, height=240 * len(data) + 60, title="Espectro (FFT)")
     fig.update_layout(showlegend=False)
