@@ -188,10 +188,14 @@ def _render_capture(cap: Capture, instance_id: str, point: str,
     if rpm is None and cap.has(CH_KPH):
         rpm = rpm_from_keyphasor(cap.t, cap.get(CH_KPH))
     nx, ny = _sensor_names(point)
-    # ocultar el botón "expandir" de Streamlit (feo) en estos gráficos
-    st.markdown("<style>[data-testid='StyledFullScreenButton'],"
-                "button[title='View fullscreen']{display:none!important}</style>",
-                unsafe_allow_html=True)
+    # ocultar el toolbar de Streamlit (botón expandir/fullscreen) — deja la
+    # cámara de Plotly intacta (esa vive en el modebar de Plotly, no aquí)
+    st.markdown(
+        "<style>[data-testid='stElementToolbar'],"
+        "[data-testid='StyledFullScreenButton'],"
+        "button[title='View fullscreen'],button[title='Fullscreen']"
+        "{display:none!important;visibility:hidden!important}</style>",
+        unsafe_allow_html=True)
     # Subtítulo/identidad que viaja DENTRO de cada gráfico (sale en el JPG):
     # máquina · cojinete · rpm · fecha (verde). Se pone en cada onda/espectro.
     rpm_txt = f"{rpm:,.0f} RPM" if rpm else "— RPM"
@@ -275,6 +279,47 @@ def _hoverstyle(fig) -> None:
         bgcolor="rgba(15,23,42,0.96)", bordercolor="rgba(255,255,255,0.30)",
         font=dict(color="#f8fafc", size=12.5, family="Arial"),
         align="left"))
+
+
+def _pin_annotation(fig, sel, color, xunit, xfmt, ysuf, extra=""):
+    """Si el usuario clicó un punto (selección de Streamlit), CLAVA ahí un cuadro
+    tipo Cursor A. Doble-clic en el gráfico limpia la selección → se quita."""
+    pts = []
+    try:
+        seln = sel.get("selection") if hasattr(sel, "get") else \
+            getattr(sel, "selection", None)
+        if seln is not None:
+            pts = (seln.get("points") if hasattr(seln, "get")
+                   else getattr(seln, "points", None)) or []
+    except Exception:  # noqa: BLE001
+        pts = []
+    if not pts:
+        return
+    p = pts[-1]
+    try:
+        xx = float(p["x"] if hasattr(p, "__getitem__") else getattr(p, "x"))
+        yy = float(p["y"] if hasattr(p, "__getitem__") else getattr(p, "y"))
+    except Exception:  # noqa: BLE001
+        return
+    xtxt = format(xx, xfmt)
+    fig.add_annotation(
+        x=xx, y=yy, showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=color, ax=0, ay=-46,
+        text=(f"<b>{yy:.2f} {ysuf}</b>  @  {xtxt} {xunit}"
+              + (f"<br>{extra}" if extra else "")),
+        align="left", bgcolor="rgba(15,23,42,0.96)", bordercolor="#ffffff",
+        borderwidth=1, borderpad=6,
+        font=dict(color="#f8fafc", size=11.5, family="Arial"))
+
+
+def _chart(fig, key, cfg):
+    """Renderiza con selección por punto (click fija, doble-clic limpia)."""
+    try:
+        return st.plotly_chart(fig, use_container_width=True, config=cfg,
+                               key=key, on_select="rerun",
+                               selection_mode="points")
+    except TypeError:  # Streamlit viejo sin on_select
+        return st.plotly_chart(fig, use_container_width=True, config=cfg, key=key)
 
 
 def _nice_ceil(x: float) -> float:
@@ -403,8 +448,11 @@ def _plot_waveform(cap: Capture, nx: str, ny: str, sub: str = "",
         _base_layout(fig, height=300, title=title)
         fig.update_layout(showlegend=False, hovermode="closest")
         _hoverstyle(fig)
-        st.plotly_chart(fig, use_container_width=True, config=_cfg(fbase, f"{nm}_onda"),
-                        key=f"wm_dr_wf_{cap.point}_{nm}_{cap.captured_at}")
+        key = f"wm_dr_wf_{cap.point}_{nm}_{cap.captured_at}"
+        _pin_annotation(fig, st.session_state.get(key), color, "ms", ".2f", u,
+                        extra=f"CF {cf:.2f}  ·  RMS {rms:.1f} {u}  ·  "
+                        f"pp {pp:.1f} {u}")
+        _chart(fig, key, _cfg(fbase, f"{nm}_onda"))
 
 
 # =========================================================
@@ -462,9 +510,9 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
         _base_layout(fig, height=300, title=title)
         fig.update_layout(showlegend=False, hovermode="closest")
         _hoverstyle(fig)
-        st.plotly_chart(fig, use_container_width=True,
-                        config=_cfg(fbase, f"{nm}_espectro"),
-                        key=f"wm_dr_sp_{cap.point}_{nm}_{cap.captured_at}")
+        key = f"wm_dr_sp_{cap.point}_{nm}_{cap.captured_at}"
+        _pin_annotation(fig, st.session_state.get(key), color, "CPM", ",.0f", ysuf)
+        _chart(fig, key, _cfg(fbase, f"{nm}_espectro"))
 
 
 # =========================================================
