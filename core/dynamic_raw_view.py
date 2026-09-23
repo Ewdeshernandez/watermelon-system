@@ -1,42 +1,48 @@
 """
-core.dynamic_raw_view — Análisis Avanzado desde onda CRUDA de System1
-=====================================================================
+core.dynamic_raw_view — Análisis dinámico desde onda CRUDA (con keyphasor)
+==========================================================================
 
-Vista Streamlit que consume el bucket `dynamic_raw` (lo llena el agente de la
-VM Parex, s1_agent.py) y reconstruye, por punto/instante:
+Vista Streamlit que consume el bucket `dynamic_raw` (lo llena el agente en
+sitio) y reconstruye, por cojinete/instante:
   • Forma de onda  (X, Y + marcas de keyphasor)
-  • Espectro       (FFT → órdenes, cursores 1X/2X/3X)
-  • Órbita         (X vs Y + punto de referencia de keyphasor)
+  • Espectro       (FFT → órdenes, cursores 1X/2X/3X + picos)
+  • Órbita         (X vs Y, filtrada por vueltas + referencia de keyphasor)
 
-Embebible en Live Monitoring como expander. Autocontenida: no depende del
-modelo "snapshot"; usa core.dynamic_raw (numpy) + Plotly.
+Presentación clase mundial (estilo rotodinámica profesional). Autocontenida:
+numpy + Plotly, sin depender del modelo "snapshot".
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+import re
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import streamlit as st
 
 from core.dynamic_raw import (
     Capture, CH_X, CH_Y, CH_KPH, download_capture, list_captures,
-    load_system1_captures, keyphasor_edges, orders_axis, rpm_from_keyphasor,
-    spectrum, top_peaks,
+    keyphasor_edges, rpm_from_keyphasor,
 )
 
-_VIEWS = [
-    ":material/show_chart: Waveform",
-    ":material/equalizer: Spectrum",
-    ":material/track_changes: Orbit",
-]
+# ---- paleta profesional ----
 _INK = "#0f172a"
-_GRID = "rgba(148,163,184,0.18)"
-_X_COLOR = "#378ADD"
-_Y_COLOR = "#D85A30"
-_KPH_COLOR = "#16a34a"
+_MUTED = "#64748b"
+_GRID = "rgba(148,163,184,0.16)"
+_X_COLOR = "#2563eb"      # azul — sensor X (horizontal)
+_Y_COLOR = "#ea580c"      # naranja — sensor Y (vertical)
+_KPH_COLOR = "#16a34a"    # verde — keyphasor
+_ORBIT_RAW = "rgba(148,163,184,0.50)"
+_ORBIT_FILT = "#0f172a"
+_ACCENT = "#e11d48"
+
+# Pestañas con BOLITAS de color (patrón del módulo Calibración), sin iconitos.
+_VIEWS = ["🔵  Onda", "🟢  Espectro", "🟠  Órbita"]
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+# =========================================================
+# Cache + carga
+# =========================================================
+@st.cache_data(ttl=90, show_spinner=False)
 def _list_cached(asset: str) -> List[Dict[str, str]]:
     return list_captures(asset)
 
@@ -46,20 +52,18 @@ def _download_cached(key: str) -> Optional[Dict]:
     cap = download_capture(key)
     if cap is None:
         return None
-    return {"meta": cap.meta,
-            "t": cap.t.tolist(),
+    return {"meta": cap.meta, "t": cap.t.tolist(),
             "channels": {k: v.tolist() for k, v in cap.channels.items()}}
 
 
 def _cap_from_cached(d: Dict) -> Capture:
-    return Capture(meta=d["meta"],
-                   t=np.asarray(d["t"], float),
+    return Capture(meta=d["meta"], t=np.asarray(d["t"], float),
                    channels={k: np.asarray(v, float)
                              for k, v in d["channels"].items()})
 
 
-def _resolve_asset(candidates: List[str]) -> tuple[str, List[Dict[str, str]]]:
-    seen = []
+def _resolve_asset(candidates: List[str]) -> Tuple[str, List[Dict[str, str]]]:
+    seen: List[str] = []
     for c in candidates:
         c = (c or "").strip()
         if not c or c in seen:
@@ -71,35 +75,134 @@ def _resolve_asset(candidates: List[str]) -> tuple[str, List[Dict[str, str]]]:
     return (seen[0] if seen else ""), []
 
 
-@st.cache_data(ttl=120, show_spinner=False)
-def _load_s1_cached(asset: str) -> List[Dict]:
-    """Captures desde los CSV que System1 exporta (subidos por el uploader
-    PowerShell a {asset}/s1/). Serializado para cache."""
-    caps = load_system1_captures(asset)
-    return [{"meta": c.meta, "t": c.t.tolist(),
-             "channels": {k: v.tolist() for k, v in c.channels.items()}}
-            for c in caps]
+# =========================================================
+# Etiquetas amigables por cojinete (Turbina 1/2 · Generador 5/6…)
+# =========================================================
+def _brg_num(point: str) -> Optional[int]:
+    m = re.match(r"BRG(\d+)", (point or "").upper())
+    return int(m.group(1)) if m else None
 
 
-def _chip(resolved: str, point: str, source: str) -> None:
+def _group_of(n: Optional[int]) -> str:
+    if n is None:
+        return ""
+    return "Turbina" if n <= 4 else "Generador"
+
+
+def _point_label(point: str) -> str:
+    n = _brg_num(point)
+    if n is None:
+        return point
+    return f"{_group_of(n)} · Cojinete {n}"
+
+
+def _sensor_names(point: str) -> Tuple[str, str]:
+    """Etiquetas de los sensores X/Y del cojinete, ej. '1X' / '1Y'."""
+    n = _brg_num(point)
+    if n is None:
+        return "X", "Y"
+    return f"{n}X", f"{n}Y"
+
+
+def _order_points(points: List[str]) -> List[str]:
+    return sorted(points, key=lambda p: (_brg_num(p) is None, _brg_num(p) or 999, p))
+
+
+# =========================================================
+# Encabezado
+# =========================================================
+def _chip(resolved: str, point: str, when: str) -> None:
+    n = _brg_num(point)
+    color = "#1d4ed8" if (n and n <= 4) else "#b45309"
     st.markdown(
+        f"<div style='display:flex;align-items:center;gap:9px;flex-wrap:wrap;"
+        f"margin:2px 0 8px'>"
         f"<span style='background:{_INK};color:#f1f5f9;border-radius:8px;"
-        f"padding:4px 12px;font-weight:700;font-size:12px;letter-spacing:.06em;'>"
-        f"{resolved} · {point}</span> "
-        f"<span style='color:#64748b;font-size:12px;'>fuente: {source}</span>",
-        unsafe_allow_html=True)
+        f"padding:5px 13px;font-weight:800;font-size:12.5px;letter-spacing:.04em;'>"
+        f"{resolved} · {_point_label(point)}</span>"
+        f"<span style='background:{color};color:#fff;border-radius:6px;"
+        f"padding:3px 9px;font-weight:700;font-size:11px;'>{'/'.join(_sensor_names(point))}</span>"
+        f"<span style='color:{_MUTED};font-size:12px;'>· Desplazamiento</span>"
+        f"<span style='margin-left:auto;background:#e6f7ec;color:#0f7a3d;"
+        f"border:1px solid #a7dcbd;border-radius:8px;padding:4px 12px;"
+        f"font-weight:700;font-size:12px;white-space:nowrap;'>"
+        f"<span style='color:#16a34a'>●</span>&nbsp; {when}</span>"
+        f"</div>", unsafe_allow_html=True)
 
 
-def _render_capture(cap: Capture, instance_id: str) -> None:
+def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
+                       asset: Optional[str] = None) -> None:
+    """Análisis dinámico del activo desde onda cruda (bucket dynamic_raw)."""
+    cand = [c for c in [asset or "", (tag or "").upper(), tag or "",
+                        str(instance_id)] if c]
+    resolved, caps = _resolve_asset(cand)
+    if not caps:
+        st.info("Aún no hay onda cruda para este equipo. El agente en sitio la "
+                "captura y sube automáticamente cada 2 horas.")
+        st.caption(f"Equipo: {resolved or '—'}")
+        return
+
+    by_point: Dict[str, List[Dict[str, str]]] = {}
+    for c in caps:
+        by_point.setdefault(c["point"], []).append(c)
+    points = _order_points(list(by_point.keys()))
+
+    c1, c2 = st.columns([2, 3])
+    with c1:
+        point = st.selectbox("Cojinete", points, format_func=_point_label,
+                             key=f"wm_dr_pt_{instance_id}")
+    times = by_point[point]
+
+    def _lbl(o: Dict[str, str]) -> str:
+        d, t = o.get("day", ""), o.get("time", "")
+        if len(d) == 8 and len(t) == 6:
+            return f"{d[:4]}-{d[4:6]}-{d[6:]}  {t[:2]}:{t[2:4]}:{t[4:]}"
+        return o.get("name", "")
+
+    with c2:
+        sel = st.selectbox("Captura", times, format_func=_lbl,
+                           key=f"wm_dr_ts_{instance_id}_{point}")
+    d, tt = sel.get("day", ""), sel.get("time", "")
+    if len(d) == 8 and len(tt) == 6:
+        from datetime import datetime
+        when = datetime(int(d[:4]), int(d[4:6]), int(d[6:]),
+                        int(tt[:2]), int(tt[2:4]), int(tt[4:])
+                        ).strftime("%d/%m/%Y %I:%M:%S %p")
+    else:
+        when = _lbl(sel)
+
+    cached = _download_cached(sel["key"])
+    if not cached:
+        st.warning("No se pudo descargar esta captura.")
+        return
+    try:
+        _render_capture(_cap_from_cached(cached), instance_id, point, resolved,
+                        when)
+    except Exception as exc:  # noqa: BLE001  (nunca romper la pantalla)
+        st.warning(f"No se pudo dibujar esta captura ({exc}).")
+
+
+def _render_capture(cap: Capture, instance_id: str, point: str,
+                    resolved: str = "", when: str = "") -> None:
     rpm = cap.rpm
     if rpm is None and cap.has(CH_KPH):
         rpm = rpm_from_keyphasor(cap.t, cap.get(CH_KPH))
-    fs = cap.fs_hz
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("RPM", f"{rpm:,.0f}" if rpm else "—")
-    m2.metric("Fs", f"{fs/1000:.1f} kHz" if fs else "—")
-    m3.metric("Muestras/rev", cap.samples_per_rev or "—")
-    m4.metric("Duración", f"{cap.t[-1]:.3f} s" if cap.t.size else "—")
+    nx, ny = _sensor_names(point)
+    # ocultar el toolbar de Streamlit (botón expandir/fullscreen) — deja la
+    # cámara de Plotly intacta (esa vive en el modebar de Plotly, no aquí)
+    st.markdown(
+        "<style>[data-testid='stElementToolbar'],"
+        "[data-testid='StyledFullScreenButton'],"
+        "button[title='View fullscreen'],button[title='Fullscreen']"
+        "{display:none!important;visibility:hidden!important}</style>",
+        unsafe_allow_html=True)
+    # Subtítulo/identidad que viaja DENTRO de cada gráfico (sale en el JPG):
+    # máquina · cojinete · rpm · fecha (verde). Se pone en cada onda/espectro.
+    rpm_txt = f"{rpm:,.0f} RPM" if rpm else "— RPM"
+    sub = (f"<span style='color:#475569'>{resolved} · {_point_label(point)} · "
+           f"Desplazamiento · {rpm_txt}</span> &nbsp; "
+           f"<span style='color:#16a34a'>● {when}</span>")
+    fbase = f"{resolved}_Brg{_brg_num(point) or ''}"
 
     try:
         view = st.segmented_control("Vista", _VIEWS, default=_VIEWS[0],
@@ -110,202 +213,432 @@ def _render_capture(cap: Capture, instance_id: str) -> None:
                         key=f"wm_dr_view_r_{instance_id}",
                         label_visibility="collapsed")
     view = view or _VIEWS[0]
-    if "Waveform" in view:
-        _plot_waveform(cap)
-    elif "Spectrum" in view:
-        _plot_spectrum(cap, rpm)
+    if "Onda" in view:
+        _plot_waveform(cap, nx, ny, sub, fbase)
+    elif "Espectro" in view:
+        _plot_spectrum(cap, rpm, nx, ny, sub, fbase)
     else:
-        _plot_orbit(cap, rpm)
-
-
-def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
-                       asset: Optional[str] = None) -> None:
-    """Dibuja el análisis avanzado dinámico del activo desde onda cruda.
-    Prioridad: export en vivo de System1 (uploader PowerShell) → capturas v1
-    del agente Python."""
-    cand = [c for c in [asset or "", (tag or "").upper(), tag or "",
-                        str(instance_id)] if c]
-
-    # 1) System1 export en vivo (PowerShell uploader → {asset}/s1/)
-    for c in cand:
-        s1 = _load_s1_cached(c.strip())
-        if s1:
-            caps = [_cap_from_cached(d) for d in s1]
-            pts = [c2.point or f"BRG{i}" for i, c2 in enumerate(caps)]
-            point = st.selectbox("Punto (cojinete)", pts,
-                                 key=f"wm_dr_pt_{instance_id}")
-            _chip(c.strip(), point, "System1 (export en vivo)")
-            _render_capture(caps[pts.index(point)], instance_id)
-            return
-
-    # 2) capturas v1 del agente Python
-    resolved, caps = _resolve_asset(cand)
-    if not caps:
-        st.info(
-            "Aún no hay onda cruda dinámica para este activo. En el server corre "
-            "el uploader (`upload_csv.ps1`) o el agente (`s1_agent.py --csv`)."
-        )
-        st.caption(f"Buscado como activo: {resolved or '—'} · bucket `dynamic_raw`")
-        return
-
-    by_point: Dict[str, List[Dict[str, str]]] = {}
-    for c in caps:
-        by_point.setdefault(c["point"], []).append(c)
-    points = sorted(by_point.keys())
-
-    c1, c2 = st.columns([2, 3])
-    with c1:
-        point = st.selectbox("Punto (cojinete)", points,
-                             key=f"wm_dr_pt_{instance_id}")
-    times = by_point[point]
-
-    def _lbl(o: Dict[str, str]) -> str:
-        d, t = o.get("day", ""), o.get("time", "")
-        if len(d) == 8 and len(t) == 6:
-            return f"{d[:4]}-{d[4:6]}-{d[6:]} {t[:2]}:{t[2:4]}:{t[4:]}"
-        return o.get("name", "")
-
-    with c2:
-        sel = st.selectbox("Fecha/hora de captura", times, format_func=_lbl,
-                           key=f"wm_dr_ts_{instance_id}_{point}")
-    _chip(resolved, point, "System1 (raw)")
-
-    cached = _download_cached(sel["key"])
-    if not cached:
-        st.warning("No se pudo descargar esta captura.")
-        return
-    _render_capture(_cap_from_cached(cached), instance_id)
+        # Ángulos de montaje de las sondas (grados desde el TOP). Bently típico:
+        # X a 45° derecha, Y a 45° izquierda. Configurable por máquina.
+        oa, ob, oc = st.columns([1, 1, 2])
+        ang_x = oa.number_input(f"{nx} · ° a la derecha del TOP", value=45,
+                                min_value=0, max_value=180, step=5,
+                                key=f"wm_dr_ax_{instance_id}")
+        ang_y = ob.number_input(f"{ny} · ° a la izquierda del TOP", value=45,
+                                min_value=0, max_value=180, step=5,
+                                key=f"wm_dr_ay_{instance_id}")
+        _plot_orbit(cap, rpm, point, nx, ny, sub, fbase, ang_x, ang_y)
 
 
 # =========================================================
-# PLOTS
+# Layout base
 # =========================================================
-def _base_layout(fig, height=360, title=""):
+# Barra mínima: SOLO el botón de descarga a imagen (JPG). Quita zoom/pan/±.
+_PCFG = {
+    "displayModeBar": True, "displaylogo": False, "scrollZoom": False,
+    "modeBarButtonsToRemove": ["zoom2d", "pan2d", "select2d", "lasso2d",
+                               "zoomIn2d", "zoomOut2d", "autoScale2d",
+                               "resetScale2d", "toggleSpikelines",
+                               "hoverClosestCartesian", "hoverCompareCartesian"],
+    "toImageButtonOptions": {"format": "jpeg", "scale": 2,
+                             "filename": "watermelon_grafico"},
+}
+_GRID_MAJ = "rgba(148,163,184,0.30)"
+_GRID_MIN = "rgba(148,163,184,0.12)"
+
+
+def _base_layout(fig, height=380, title=""):
     fig.update_layout(
-        height=height, title=title, template="plotly_white",
-        margin=dict(l=48, r=16, t=40 if title else 16, b=40),
-        showlegend=True, legend=dict(orientation="h", y=1.06, x=0),
-        font=dict(size=12),
+        height=height, template="plotly_white",
+        margin=dict(l=64, r=18, t=66 if title else 18, b=48),
+        showlegend=True,
+        legend=dict(orientation="h", y=1.10, x=0, bgcolor="rgba(0,0,0,0)",
+                    font=dict(size=11)),
+        font=dict(size=12, color=_INK),
+        plot_bgcolor="white", paper_bgcolor="white",
+        title=dict(text=title, x=0, xanchor="left",
+                   font=dict(size=15, color=_INK, family="Arial Black")),
+        hovermode="closest", clickmode="event+select",
     )
-    fig.update_xaxes(gridcolor=_GRID, zeroline=False)
-    fig.update_yaxes(gridcolor=_GRID, zeroline=True, zerolinecolor=_GRID)
+    fig.update_xaxes(gridcolor=_GRID, zeroline=False, showline=True,
+                     linecolor="rgba(15,23,42,0.35)", ticks="outside",
+                     tickcolor="rgba(15,23,42,0.30)")
+    fig.update_yaxes(gridcolor=_GRID, showline=True,
+                     linecolor="rgba(15,23,42,0.35)", ticks="outside",
+                     tickcolor="rgba(15,23,42,0.30)")
     return fig
 
 
-def _plot_waveform(cap: Capture) -> None:
+def _pp(v: np.ndarray) -> float:
+    return float(np.nanmax(v) - np.nanmin(v)) if v.size else 0.0
+
+
+def _title_html(title: str, header: str = "") -> str:
+    """Título del gráfico + subtítulo con el encabezado (máquina·sensor·rpm·
+    fecha). Va DENTRO de la figura para que aparezca en la imagen exportada."""
+    if header:
+        return (f"{title}<br><span style='font-size:11.5px;color:#475569;'>"
+                f"{header}</span>")
+    return title
+
+
+def _hoverstyle(fig) -> None:
+    """Cuadro de hover elegante (estilo Cursor A de la competencia)."""
+    fig.update_layout(hoverlabel=dict(
+        bgcolor="rgba(15,23,42,0.96)", bordercolor="rgba(255,255,255,0.30)",
+        font=dict(color="#f8fafc", size=12.5, family="Arial"),
+        align="left"))
+
+
+def _pin_annotation(fig, sel, color, xunit, xfmt, ysuf, extra=""):
+    """Si el usuario clicó un punto (selección de Streamlit), CLAVA ahí un cuadro
+    tipo Cursor A. Doble-clic en el gráfico limpia la selección → se quita."""
+    pts = []
+    try:
+        seln = sel.get("selection") if hasattr(sel, "get") else \
+            getattr(sel, "selection", None)
+        if seln is not None:
+            pts = (seln.get("points") if hasattr(seln, "get")
+                   else getattr(seln, "points", None)) or []
+    except Exception:  # noqa: BLE001
+        pts = []
+    if not pts:
+        return
+    p = pts[-1]
+    try:
+        xx = float(p["x"] if hasattr(p, "__getitem__") else getattr(p, "x"))
+        yy = float(p["y"] if hasattr(p, "__getitem__") else getattr(p, "y"))
+    except Exception:  # noqa: BLE001
+        return
+    xtxt = format(xx, xfmt)
+    fig.add_annotation(
+        x=xx, y=yy, showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=1.5,
+        arrowcolor=color, ax=0, ay=-46,
+        text=(f"<b>{yy:.2f} {ysuf}</b>  @  {xtxt} {xunit}"
+              + (f"<br>{extra}" if extra else "")),
+        align="left", bgcolor="rgba(15,23,42,0.96)", bordercolor="#ffffff",
+        borderwidth=1, borderpad=6,
+        font=dict(color="#f8fafc", size=11.5, family="Arial"))
+
+
+def _chart(fig, key, cfg):
+    """Renderiza con selección por punto (click fija, doble-clic limpia)."""
+    try:
+        return st.plotly_chart(fig, use_container_width=True, config=cfg,
+                               key=key, on_select="rerun",
+                               selection_mode="points")
+    except TypeError:  # Streamlit viejo sin on_select
+        return st.plotly_chart(fig, use_container_width=True, config=cfg, key=key)
+
+
+def _nice_ceil(x: float) -> float:
+    """Redondea hacia arriba a un tope 'bonito' (1/2/2.5/5/10 × 10^k).
+    Ej.: 44→50, 29.7→30, 18→20."""
+    import math
+    if x is None or x <= 0:
+        return 1.0
+    e = math.floor(math.log10(x))
+    base = 10 ** e
+    for m in (1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10):
+        if x <= m * base + 1e-9:
+            return m * base
+    return 10 * base
+
+
+def _stats(v: np.ndarray) -> Tuple[float, float, float]:
+    """(pp, RMS_AC, Crest Factor) como System1."""
+    v = np.asarray(v, float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return 0.0, 0.0, 0.0
+    ac = v - v.mean()
+    rms = float(np.sqrt(np.mean(ac ** 2)))
+    pk = float(np.max(np.abs(ac)))
+    cf = pk / rms if rms > 1e-9 else 0.0
+    return _pp(v), rms, cf
+
+
+def _grid_xy(fig, row, dx_maj, dx_min, dy_maj, dy_min):
+    """Estilo System1: X = solo TICKS sobre el eje (mayor+menor), sin líneas
+    verticales; Y = solo líneas horizontales MAYORES (menos líneas)."""
+    fig.update_xaxes(row=row, col=1, dtick=dx_maj, showgrid=False,
+                     ticks="outside", ticklen=6,
+                     tickcolor="rgba(15,23,42,0.45)",
+                     minor=dict(dtick=dx_min, showgrid=False, ticks="outside",
+                                ticklen=3, tickcolor="rgba(15,23,42,0.28)"))
+    fig.update_yaxes(row=row, col=1, dtick=dy_maj, showgrid=True,
+                     gridcolor=_GRID_MAJ, minor=dict(showgrid=False))
+
+
+def _disp_type(unit: str) -> str:
+    """Tipo de medición por la unidad (viene de la config de System1)."""
+    u = (unit or "").lower()
+    if any(k in u for k in ("m/s2", "m/s²", " g", "accel")) or u == "g":
+        return "accel"
+    if any(k in u for k in ("mm/s", "in/s", "ips", "vel")):
+        return "vel"
+    return "disp"  # µm / mils → desplazamiento
+
+
+# CPM máx de display por tipo (desplazamiento 60k, velocidad 300k, accel 600k)
+_FMAX_CPM = {"disp": 60000, "vel": 300000, "accel": 600000}
+
+
+def _hires_spectrum(v: np.ndarray, fs: float, zpad: int = 8):
+    """FFT de ALTA RESOLUCIÓN: ventana Hann + zero-padding (curva suave, no
+    dentada). Devuelve (freqs_hz, amp_pico) calibrada a amplitud real."""
+    v = np.asarray(v, float)
+    v = v[np.isfinite(v)]
+    n = v.size
+    if n < 8 or not fs or fs <= 0:
+        return np.zeros(0), np.zeros(0)
+    w = np.hanning(n)
+    vw = (v - v.mean()) * w
+    nfft = int(2 ** np.ceil(np.log2(n * max(1, zpad))))
+    sp = np.fft.rfft(vw, n=nfft)
+    freqs = np.fft.rfftfreq(nfft, 1.0 / fs)
+    amp = np.abs(sp) * 2.0 / (n * 0.5)   # ≈ amplitud pico (corrige ventana Hann)
+    if amp.size:
+        amp[0] /= 2.0
+    return freqs, amp
+
+
+# =========================================================
+# ONDA — un gráfico INDEPENDIENTE por sensor (apilados)
+# =========================================================
+def _cfg(fbase: str, kind: str) -> dict:
+    """Config Plotly con nombre de archivo del export = máquina_Brg_sensor_tipo."""
+    c = dict(_PCFG)
+    c["toImageButtonOptions"] = {"format": "jpeg", "scale": 2,
+                                 "filename": f"{fbase}_{kind}".replace(" ", "_")}
+    return c
+
+
+def _plot_waveform(cap: Capture, nx: str, ny: str, sub: str = "",
+                   fbase: str = "wf") -> None:
     import plotly.graph_objects as go
-    t = cap.t
-    fig = go.Figure()
-    for ch, color in ((CH_X, _X_COLOR), (CH_Y, _Y_COLOR)):
+    t = cap.t * 1000.0  # ms
+    u = cap.unit_of(CH_X) or "µm"
+    xmax = float(t[-1]) if t.size else 1.0
+    chans = [(CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)]
+    chans = [(c, col, nm) for c, col, nm in chans if cap.get(c) is not None]
+    if not chans:
+        st.info("Sin canales de onda.")
+        return
+    # misma escala simétrica para todos los sensores (comparable)
+    amax = _nice_ceil(max(float(np.nanmax(np.abs(cap.get(c)))) for c, _, _ in chans)
+                      * 1.10)
+    dy_maj = _nice_ceil(amax / 3.0); dy_min = dy_maj / 5.0
+    dx_maj = 10.0 if xmax >= 40 else 5.0; dx_min = dx_maj / 5.0
+    for ch, color, nm in chans:              # UN gráfico independiente por sensor
         v = cap.get(ch)
-        if v is not None:
-            fig.add_scatter(x=t, y=v, mode="lines", name=f"{ch} [{cap.unit_of(ch)}]",
-                            line=dict(color=color, width=1.3))
-    # marcas de keyphasor
-    if cap.has(CH_KPH):
-        edges = keyphasor_edges(cap.get(CH_KPH))
-        for i, e in enumerate(edges[:64]):
-            if e < t.size:
-                fig.add_vline(x=float(t[e]), line=dict(color=_KPH_COLOR, width=1,
-                              dash="dot"), opacity=0.45)
-        if edges.size:
-            fig.add_scatter(x=[None], y=[None], mode="lines",
-                            line=dict(color=_KPH_COLOR, dash="dot"),
-                            name="Keyphasor")
-    _base_layout(fig, title="Forma de onda")
-    fig.update_xaxes(title="Tiempo [s]")
-    fig.update_yaxes(title="Amplitud")
-    st.plotly_chart(fig, use_container_width=True,
-                    key=f"wm_dr_wf_{cap.point}_{cap.captured_at}")
+        pp, rms, cf = _stats(v)
+        ht = (f"<b>Cursor · {nm}</b><br>"
+              f"<b>%{{y:.2f}} {u}</b>  @  %{{x:.2f}} ms<br>"
+              f"────────────<br>"
+              f"Crest Factor&nbsp;&nbsp;<b>{cf:.2f}</b><br>"
+              f"Overall RMS&nbsp;&nbsp;<b>{rms:.1f} {u}</b><br>"
+              f"Pico–pico&nbsp;&nbsp;<b>{pp:.1f} {u}</b><extra></extra>")
+        title = _title_html(
+            f"Forma de onda — {nm}   ·   {pp:.1f} {u} pp · RMS {rms:.1f} · "
+            f"CF {cf:.2f}", sub)
+        fig = go.Figure()
+        fig.add_scatter(x=t, y=v, mode="lines", name=nm,
+                        line=dict(color=color, width=1.6), showlegend=False,
+                        hovertemplate=ht)
+        fig.update_yaxes(title_text=f"[{u}]", range=[-amax, amax], zeroline=True,
+                         zerolinecolor="rgba(15,23,42,0.35)", dtick=dy_maj,
+                         gridcolor=_GRID_MAJ, minor=dict(showgrid=False))
+        fig.update_xaxes(title_text="Tiempo [ms]", range=[0, xmax],
+                         showgrid=False, ticks="outside", ticklen=6, dtick=dx_maj,
+                         tickcolor="rgba(15,23,42,0.45)",
+                         minor=dict(dtick=dx_min, showgrid=False, ticks="outside",
+                                    ticklen=3, tickcolor="rgba(15,23,42,0.28)"))
+        _base_layout(fig, height=300, title=title)
+        fig.update_layout(showlegend=False, hovermode="closest")
+        _hoverstyle(fig)
+        key = f"wm_dr_wf_{cap.point}_{nm}_{cap.captured_at}"
+        _pin_annotation(fig, st.session_state.get(key), color, "ms", ".2f", u,
+                        extra=f"CF {cf:.2f}  ·  RMS {rms:.1f} {u}  ·  "
+                        f"pp {pp:.1f} {u}")
+        _chart(fig, key, _cfg(fbase, f"{nm}_onda"))
 
 
-def _plot_spectrum(cap: Capture, rpm: Optional[float]) -> None:
+# =========================================================
+# ESPECTRO — un gráfico INDEPENDIENTE por sensor (alta resolución, CPM)
+# =========================================================
+def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str,
+                   sub: str = "", fbase: str = "sp") -> None:
     import plotly.graph_objects as go
     fs = cap.fs_hz
     if not fs:
         st.info("Sin frecuencia de muestreo — no se puede calcular el espectro.")
         return
-    fig = go.Figure()
-    use_orders = bool(rpm and rpm > 0)
-    peaks_all: List[Dict[str, float]] = []
-    for ch, color in ((CH_X, _X_COLOR), (CH_Y, _Y_COLOR)):
-        v = cap.get(ch)
-        if v is None:
-            continue
-        freqs, amp = spectrum(v, fs)
-        if freqs.size == 0:
-            continue
-        xaxis = orders_axis(freqs, rpm) if use_orders else freqs
-        fig.add_scatter(x=xaxis, y=amp, mode="lines", name=f"{ch} [{cap.unit_of(ch)}]",
-                        line=dict(color=color, width=1.3))
-        peaks_all += [{**p, "ch": ch} for p in top_peaks(freqs, amp, rpm, n=3)]
-    # cursores de orden 1X/2X/3X
-    if use_orders:
-        for k in (1, 2, 3):
-            fig.add_vline(x=k, line=dict(color="#94a3b8", width=1, dash="dash"),
-                          opacity=0.6)
-            fig.add_annotation(x=k, yref="paper", y=1.0, text=f"{k}X",
-                               showarrow=False, font=dict(size=11, color="#64748b"))
-        fig.update_xaxes(title="Orden (× velocidad de giro)", range=[0, 10])
-    else:
-        fig.update_xaxes(title="Frecuencia [Hz]")
-    _base_layout(fig, title="Espectro (FFT)")
-    fig.update_yaxes(title="Amplitud (pico)")
-    st.plotly_chart(fig, use_container_width=True,
-                    key=f"wm_dr_sp_{cap.point}_{cap.captured_at}")
+    unit = cap.unit_of(CH_X) or "µm"
+    is_disp = _disp_type(unit) == "disp"
+    ysuf = f"{unit} pp" if is_disp else f"{unit} pico"
+    fmax_cpm = min(_FMAX_CPM[_disp_type(unit)], fs / 2.0 * 60.0)
+    dtick_cpm = 10000 if fmax_cpm <= 80000 else 100000
+    chans = [(CH_X, _X_COLOR, nx), (CH_Y, _Y_COLOR, ny)]
+    chans = [(c, col, nm) for c, col, nm in chans if cap.get(c) is not None]
+    if not chans:
+        st.info("Sin canales para el espectro.")
+        return
+    # 1ª pasada: espectros + pico dominante → misma escala Y para ambos
+    specs = []
+    peak_max = 0.0
+    for ch, color, nm in chans:
+        freqs, amp = _hires_spectrum(cap.get(ch), fs)
+        cpm = freqs * 60.0
+        yv = amp * 2.0 if is_disp else amp
+        pk_cpm = pk_amp = 0.0
+        if yv.size > 2:
+            k = int(np.argmax(yv[1:]) + 1)
+            pk_cpm, pk_amp = float(cpm[k]), float(yv[k])
+            peak_max = max(peak_max, pk_amp)
+        specs.append((cpm, yv, color, nm, pk_cpm, pk_amp))
+    ymax = _nice_ceil(peak_max * 1.10)
+    dy_maj = _nice_ceil(ymax / 4.0)
+    for cpm, yv, color, nm, pk_cpm, pk_amp in specs:   # figura por sensor
+        title = _title_html(
+            f"Espectro — {nm}   ·   {pk_amp:.2f} {ysuf} @ {pk_cpm:,.0f} CPM", sub)
+        fig = go.Figure()
+        fig.add_scatter(x=cpm, y=yv, mode="lines", name=nm,
+                        line=dict(color=color, width=1.2), showlegend=False,
+                        hovertemplate="%{x:,.0f} CPM<br><b>%{y:.2f} " + ysuf +
+                        "</b><extra>" + nm + "</extra>")
+        fig.update_xaxes(title_text="Frecuencia [CPM]", range=[0, fmax_cpm],
+                         tickformat=",d", showgrid=False, ticks="outside",
+                         ticklen=6, dtick=dtick_cpm, showline=True,
+                         linecolor="#334155", linewidth=1.3, mirror=False,
+                         zeroline=True, zerolinecolor="#334155", zerolinewidth=1.3,
+                         tickcolor="rgba(15,23,42,0.45)",
+                         minor=dict(dtick=dtick_cpm / 5.0, showgrid=False,
+                                    ticks="outside", ticklen=3,
+                                    tickcolor="rgba(15,23,42,0.28)"))
+        fig.update_yaxes(title_text=f"[{ysuf}]", range=[0, ymax], dtick=dy_maj,
+                         gridcolor=_GRID_MAJ, minor=dict(showgrid=False),
+                         showline=True, linecolor="#334155", linewidth=1.3,
+                         mirror=False, zeroline=True, zerolinecolor="#334155",
+                         zerolinewidth=1.3)
+        _base_layout(fig, height=300, title=title)
+        fig.update_layout(showlegend=False, hovermode="closest")
+        _hoverstyle(fig)
+        key = f"wm_dr_sp_{cap.point}_{nm}_{cap.captured_at}"
+        _pin_annotation(fig, st.session_state.get(key), color, "CPM", ",.0f", ysuf)
+        _chart(fig, key, _cfg(fbase, f"{nm}_espectro"))
 
-    # tabla de picos
-    if peaks_all:
-        peaks_all.sort(key=lambda p: p["amp"], reverse=True)
-        rows = []
-        for p in peaks_all[:6]:
-            rows.append({
-                "Canal": p["ch"],
-                "Frecuencia [Hz]": round(p["freq_hz"], 1),
-                "Orden": round(p.get("order", 0), 2) if use_orders else "—",
-                "Amplitud": round(p["amp"], 2),
-            })
-        st.dataframe(rows, use_container_width=True, hide_index=True)
 
-
-def _plot_orbit(cap: Capture, rpm: Optional[float]) -> None:
+# =========================================================
+# ÓRBITA
+# =========================================================
+def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str,
+                sub: str = "", fbase: str = "orb", ang_x: int = 45,
+                ang_y: int = 45) -> None:
     import plotly.graph_objects as go
-    x, y = cap.get(CH_X), cap.get(CH_Y)
-    if x is None or y is None:
+    px, py = cap.get(CH_X), cap.get(CH_Y)
+    if px is None or py is None:
         st.info("Faltan canales X/Y para la órbita.")
         return
+    u = cap.unit_of(CH_X) or "µm"
+    # --- Restaurar la FASE entre sondas ---
+    # El export por canal (Disp Wf.KPH) alinea cada onda a su propio keyphasor y
+    # borra el desfase físico entre las sondas. Se recupera rotando Y por la
+    # separación angular entre sondas (ang_x + ang_y). Validado: 45+45=90°→círculo.
+    spr = cap.samples_per_rev or 0
+    if spr and spr > 4:
+        sep = int(round(((float(ang_x) + float(ang_y)) % 360) / 360.0 * spr))
+        if sep:
+            py = np.roll(py, sep)
+    # --- Reconstrucción en coordenadas de MÁQUINA (H→derecha, V→arriba) ---
+    # Cada sonda mide en su ángulo real desde el TOP (X a la derecha, Y a la
+    # izquierda). Se resuelve el sistema 2×2 para el H y V verdaderos.
+    tx = np.radians(float(ang_x)); ty = np.radians(-float(ang_y))
+    a, b = np.sin(tx), np.cos(tx)
+    c, d = np.sin(ty), np.cos(ty)
+    det = a * d - b * c
+    if abs(det) < 1e-6:
+        H, V = px, py
+    else:
+        H = (d * px - b * py) / det
+        V = (-c * px + a * py) / det
     spr = cap.samples_per_rev
-    # órbita filtrada 1X: promedio de vueltas si hay samples_per_rev
-    xf, yf = x, y
-    if spr and spr > 4 and x.size >= 2 * spr:
-        nrev = x.size // spr
-        xf = x[:nrev * spr].reshape(nrev, spr).mean(axis=0)
-        yf = y[:nrev * spr].reshape(nrev, spr).mean(axis=0)
-        xf = np.append(xf, xf[0]); yf = np.append(yf, yf[0])  # cerrar
+    Hf, Vf = H, V
+    if spr and spr > 4 and H.size >= 2 * spr:
+        nrev = H.size // spr
+        Hf = H[:nrev * spr].reshape(nrev, spr).mean(axis=0)
+        Vf = V[:nrev * spr].reshape(nrev, spr).mean(axis=0)
+        Hf = np.append(Hf, Hf[0]); Vf = np.append(Vf, Vf[0])
+    area = float(np.sum(Hf[:-1] * Vf[1:] - Hf[1:] * Vf[:-1])) if Hf.size > 2 else 0
+    sentido = "↺ CCW" if area > 0 else "↻ CW"
+    # escala: muestra la BANDA de todas las vueltas (percentil 99 para evitar
+    # picos) → llena el marco como System1
+    rad = np.hypot(H, V)
+    amax = _nice_ceil(max(float(np.percentile(rad, 99)),
+                          float(np.nanmax(np.abs(Hf))),
+                          float(np.nanmax(np.abs(Vf))), 1.0) * 1.12)
+    dmaj = _nice_ceil(amax / 3.0)
+    amp_pp = max(_pp(Hf), _pp(Vf))
 
     fig = go.Figure()
-    fig.add_scatter(x=x, y=y, mode="lines", name="Raw",
-                    line=dict(color="rgba(148,163,184,0.55)", width=1))
-    fig.add_scatter(x=xf, y=yf, mode="lines", name="Filtrada (prom. vueltas)",
-                    line=dict(color=_INK, width=2.2))
-    # punto de keyphasor (referencia de fase): primera marca
+    fig.add_hline(y=0, line=dict(color="rgba(15,23,42,0.18)", width=1))
+    fig.add_vline(x=0, line=dict(color="rgba(15,23,42,0.18)", width=1))
+    # posición física real de cada sonda (línea tenue + etiqueta)
+    for ang, nm in ((tx, nx), (ty, ny)):
+        hx, vy = np.sin(ang) * amax, np.cos(ang) * amax
+        fig.add_scatter(x=[0, hx], y=[0, vy], mode="lines", showlegend=False,
+                        hoverinfo="skip",
+                        line=dict(color="rgba(100,116,139,0.45)", width=1,
+                                  dash="dot"))
+        fig.add_annotation(x=hx, y=vy, text=f"<b>{nm}</b>", showarrow=False,
+                           font=dict(color=_MUTED, size=11),
+                           xshift=int(np.sin(ang) * 12),
+                           yshift=int(np.cos(ang) * 12))
+    # banda de todas las vueltas (azul fino, estilo System1)
+    fig.add_scatter(x=H, y=V, mode="lines", name="Vueltas", hoverinfo="skip",
+                    line=dict(color="rgba(37,99,235,0.45)", width=0.8))
+    # órbita promedio (síncrona 1X) — protagonista
+    fig.add_scatter(x=Hf, y=Vf, mode="lines", name="Órbita 1X",
+                    line=dict(color=_ORBIT_FILT, width=2.4),
+                    hovertemplate="H %{x:.1f} · V %{y:.1f} " + u + "<extra></extra>")
+    # keyphasor: un punto en el arranque de CADA vuelta (marca de fase) — el
+    # racimo + el sentido del recorrido indican hacia dónde gira (X→Y o Y→X)
     if cap.has(CH_KPH):
         edges = keyphasor_edges(cap.get(CH_KPH))
-        if edges.size and edges[0] < x.size:
-            e = int(edges[0])
-            fig.add_scatter(x=[x[e]], y=[y[e]], mode="markers",
-                            name="Keyphasor (0°)",
-                            marker=dict(color=_KPH_COLOR, size=11,
-                                        line=dict(color="white", width=1.5)))
-    u = cap.unit_of(CH_X) or ""
-    _base_layout(fig, height=440, title="Órbita")
-    fig.update_xaxes(title=f"X [{u}]", scaleanchor="y", scaleratio=1)
-    fig.update_yaxes(title=f"Y [{cap.unit_of(CH_Y) or u}]")
-    st.plotly_chart(fig, use_container_width=True,
-                    key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
-    if rpm:
-        st.caption(f"Órbita a {rpm:,.0f} RPM · promedio de vueltas para filtrar "
-                   f"ruido (síncrono 1X). Punto verde = referencia de keyphasor.")
+        ex = [int(e) for e in edges if 0 <= int(e) < H.size]
+        if ex:
+            fig.add_scatter(x=[H[e] for e in ex], y=[V[e] for e in ex],
+                            mode="markers", name="Keyphasor", hoverinfo="skip",
+                            marker=dict(color=_KPH_COLOR, size=6,
+                                        line=dict(width=0.5, color="white")))
+    ttl = f"Órbita — {amp_pp:.1f} {u} pp   ·   {sentido}"
+    _base_layout(fig, height=620, title=_title_html(ttl, sub))
+    # gráfico CUADRADO (como System1): ancho fijo = alto, no estirar
+    fig.update_layout(hovermode="closest", showlegend=False, width=620,
+                      margin=dict(l=60, r=20, t=66, b=52))
+    _hoverstyle(fig)
+    # como System1: SIN cuadrícula de fondo — solo cross central (H=0,V=0) +
+    # ticks mayor/menor sobre los ejes
+    axkw = dict(range=[-amax, amax], zeroline=False, showgrid=False,
+                dtick=dmaj, ticks="outside", ticklen=6,
+                tickcolor="rgba(15,23,42,0.45)",
+                minor=dict(dtick=dmaj / 5.0, showgrid=False, ticks="outside",
+                           ticklen=3, tickcolor="rgba(15,23,42,0.28)"))
+    fig.update_xaxes(title="Horizontal [%s] →" % u, scaleanchor="y",
+                     scaleratio=1, **axkw)
+    fig.update_yaxes(title="Vertical [%s] ↑" % u, **axkw)
+    oc1, oc2, oc3 = st.columns([1, 3, 1])   # centrar el cuadrado
+    with oc2:
+        st.plotly_chart(fig, use_container_width=False,
+                        config=_cfg(fbase, "orbita"),
+                        key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
+
+
+def _style_subtitles(fig) -> None:
+    """Deja los títulos de subplot alineados a la izquierda y discretos."""
+    for ann in fig.layout.annotations:
+        ann.update(x=0, xanchor="left", font=dict(size=12, color=_INK,
+                   family="Arial"))
 
 
 __all__ = ["render_dynamic_raw"]
