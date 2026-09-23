@@ -348,6 +348,131 @@ class System1CsvFolderReader:
         return out
 
 
+def _rpm_ok(rpm, rpm_min: float) -> bool:
+    """True si hay giro real (máquina en marcha). Sin RPM/RPM baja = parada."""
+    try:
+        return rpm is not None and float(rpm) >= rpm_min
+    except (TypeError, ValueError):
+        return False
+
+
+class System1GearboxCsvReader:
+    """Lee la carpeta 'GearBox' (2ª hoja de System1) con 8 señales MIXTAS:
+    proximidad (D, µm) + aceleración (A, g) + velocidad (V, mm/s).
+
+    Clave vs el reader de cojinetes: respeta el TIPO (sufijo D/A/V) para no
+    colapsar 4XD/4XA/4XV al mismo canal. Regla de render (decisión del usuario):
+      - Proximidad (D): par X/Y → ÓRBITA (punto 'GB{brg}', ej. GB4).
+      - Aceleración/Velocidad (A/V): canal ÚNICO (vibración absoluta de carcasa)
+        → onda+espectro, sin órbita (punto 'GB_{sensor}', ej. GB_4XA).
+    Si la máquina está PARADA (RPM≈0/sin giro) NO sube nada (registra 'parada').
+    """
+
+    def __init__(self, cfg: dict):
+        self.cfg = cfg
+        self.asset = cfg.get("asset", "SGT300B")
+        sc = cfg.get("system1_csv", {})
+        default = str(Path.home() / "Desktop" / "CSV_GB")
+        self.folder = Path(sc.get("gearbox_folder", default))
+        self.rpm_min = float(sc.get("rpm_min", 500.0))
+
+    def _captured_at(self, meta_ts: str, fallback: Path) -> datetime:
+        for fmt in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
+                    "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(meta_ts, fmt).replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+        return datetime.fromtimestamp(fallback.stat().st_mtime, tz=timezone.utc)
+
+    def fetch_new(self) -> List[RawCapture]:
+        from s1_csv import parse_system1_waveform_csv, synth_keyphasor, \
+            sensor_parts, KIND_INFO
+        if not self.folder.exists():
+            log.warning("Carpeta GearBox no existe: %s", self.folder)
+            return []
+        parsed_files = []          # (bearing, axis, kind, file, parsed)
+        rpm_seen = []
+        for f in sorted(self.folder.glob("*.csv")):
+            bearing, axis, kind = sensor_parts(f.stem)
+            if not bearing or axis not in ("x", "y") or kind not in ("d", "a", "v"):
+                log.warning("GearBox: nombre no reconocido, salto %s", f.name)
+                continue
+            try:
+                p = parse_system1_waveform_csv(str(f))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("GearBox: no parseo %s: %s", f.name, exc)
+                continue
+            if p["values"].size == 0:
+                continue
+            rpm_seen.append(p.get("rpm"))
+            parsed_files.append((bearing, axis, kind, f, p))
+
+        # --- máquina parada: no subir (registrar) ---
+        if not any(_rpm_ok(r, self.rpm_min) for r in rpm_seen):
+            log.warning("GearBox: MÁQUINA PARADA (RPM<%.0f o sin giro) — NO se "
+                        "sube. rpm vistas=%s", self.rpm_min, rpm_seen)
+            return []
+
+        out: List[RawCapture] = []
+        # 1) PROXIMIDAD (D): emparejar X/Y por cojinete → órbita
+        prox: Dict[str, Dict[str, tuple]] = {}
+        for bearing, axis, kind, f, p in parsed_files:
+            if kind == "d":
+                prox.setdefault(bearing, {})[axis] = (f, p)
+        for bearing, ax in sorted(prox.items()):
+            base_f, base = (ax.get("x") or ax.get("y"))
+            t = base["t_s"]
+            channels: Dict[str, np.ndarray] = {}
+            if "x" in ax:
+                channels["X"] = ax["x"][1]["values"]
+            if "y" in ax:
+                yv = ax["y"][1]["values"]
+                if yv.size != t.size:
+                    yv = yv[:min(yv.size, t.size)]
+                channels["Y"] = yv
+            channels["KPH"] = synth_keyphasor(t.size, base["samples_per_rev"])
+            ux = ax.get("x", ("", base))[1]["y_unit"]
+            uy = ax.get("y", ("", base))[1]["y_unit"]
+            meta = {
+                "rpm": base["rpm"], "fs_hz": round(base["fs_hz"], 3)
+                if base["fs_hz"] else "", "samples_per_rev":
+                base["samples_per_rev"] or "",
+                "units": f"X:{ux},Y:{uy},KPH:pulse", "source": "system1_gearbox",
+                "kind": "displacement", "component": "gearbox",
+                "variable": base["variable"], "point_name": base["point"],
+            }
+            out.append(RawCapture(
+                self.asset, f"GB{bearing}",
+                self._captured_at(base["timestamp"], base_f), t, channels, meta))
+
+        # 2) ACELERACIÓN/VELOCIDAD (A/V): canal único (sin órbita)
+        for bearing, axis, kind, f, p in parsed_files:
+            if kind == "d":
+                continue
+            t = p["t_s"]
+            channels = {"X": p["values"],
+                        "KPH": synth_keyphasor(t.size, p["samples_per_rev"])}
+            klass, canon_unit = KIND_INFO.get(kind, ("", p["y_unit"]))
+            pt = f"GB_{f.stem.upper()}"          # ej. GB_4XA, GB_3YV
+            meta = {
+                "rpm": p["rpm"], "fs_hz": round(p["fs_hz"], 3) if p["fs_hz"]
+                else "", "samples_per_rev": p["samples_per_rev"] or "",
+                "units": f"X:{p['y_unit'] or canon_unit},KPH:pulse",
+                "source": "system1_gearbox", "kind": klass,
+                "component": "gearbox", "axis": axis.upper(),
+                "variable": p["variable"], "point_name": p["point"],
+            }
+            out.append(RawCapture(
+                self.asset, pt, self._captured_at(p["timestamp"], f),
+                t, channels, meta))
+
+        log.info("System1GearboxCsvReader: %d captura(s) desde %s "
+                 "(%d órbita prox + %d canal A/V)", len(out), self.folder,
+                 len(prox), len(out) - len(prox))
+        return out
+
+
 def _dsn_from(s1: dict) -> str:
     """Connection string ODBC para SQL Server (System1 = MSSQLSERVER)."""
     driver = s1.get("driver", "ODBC Driver 17 for SQL Server")
@@ -436,6 +561,8 @@ def run_once(cfg: dict, source: str = "csv", dry: bool = False) -> dict:
         reader = DemoReader(cfg)
     elif source == "sql":
         reader = System1Reader(cfg)
+    elif source == "gearbox":
+        reader = System1GearboxCsvReader(cfg)
     else:  # 'csv' (default): carpeta de export de System1
         reader = System1CsvFolderReader(cfg)
     caps = reader.fetch_new()
@@ -513,6 +640,8 @@ def main(argv=None) -> int:
                     help="leer la carpeta de export de System1 (default en --once)")
     ap.add_argument("--sql", action="store_true",
                     help="leer SQL Server directo (solo config/estáticos)")
+    ap.add_argument("--gearbox", action="store_true",
+                    help="leer la carpeta GearBox (prox+accel+vel, type-aware)")
     ap.add_argument("--once", action="store_true", help="una ronda y salir")
     ap.add_argument("--discover", action="store_true", help="explorar la DB SQL Server")
     ap.add_argument("--selftest", action="store_true", help="validar CSV sin red")
@@ -526,8 +655,9 @@ def main(argv=None) -> int:
     if args.discover:
         discover(cfg)
         return 0
-    if args.once or args.demo or args.csv or args.sql:
-        source = "demo" if args.demo else "sql" if args.sql else "csv"
+    if args.once or args.demo or args.csv or args.sql or args.gearbox:
+        source = ("demo" if args.demo else "sql" if args.sql
+                  else "gearbox" if args.gearbox else "csv")
         stats = run_once(cfg, source=source, dry=args.dry)
         print(json.dumps(stats, indent=2, ensure_ascii=False))
         return 0 if stats["failed"] == 0 else 1

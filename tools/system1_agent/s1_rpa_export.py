@@ -895,9 +895,12 @@ DEFAULT_TILES = [
 # Coord de pantalla (frame VM 1718x920) del CENTRO de la pestaña 'Export csv1'.
 # Los tabs de plots de System1 son owner-drawn (WPF/canvas) y NO exponen texto
 # por UIA, así que la activación va por coordenada, igual que las 8 tiles.
-# Validado en vivo: clic (545,158) → salta a la parrilla 4×2. Override:
-# cfg[rpa].sheet_xy.
-DEFAULT_SHEET_XY = (545, 158)
+# ⚠️ FRÁGIL: la posición del tab cambia si se agregan/quitan/renombran hojas.
+# Layout actual (2026-09-23, tabs 'Export csv1 | GearBox | Plot'):
+#   Export csv1 → (272,165)   GearBox → (445,165)
+# El cron pasa --sheet-xy explícito por hoja; este DEFAULT es solo fallback.
+# (Pendiente: activar por PLANTILLA de imagen para que no dependa de la coord.)
+DEFAULT_SHEET_XY = (272, 165)
 
 
 def _activate_sheet(win, sheet_name: str, cfg: dict | None = None) -> bool:

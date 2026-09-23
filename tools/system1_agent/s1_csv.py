@@ -113,6 +113,15 @@ def synth_keyphasor(n: int, samples_per_rev: Optional[int]) -> np.ndarray:
 
 # sensor label -> (bearing, axis)  ej: "1xd" -> ("1", "x");  "6yd" -> ("6","y")
 _SENSOR_RE = re.compile(r"^\s*(\d+)\s*([xyXY])", re.I)
+# con TIPO: 3er char = d(desplaz/µm prox) | a(aceleración/g) | v(velocidad/mm·s⁻¹)
+_SENSOR_RE3 = re.compile(r"^\s*(\d+)\s*([xyXY])\s*([davDAV])?", re.I)
+
+# tipo → (clase, unidad canónica) para el diagnóstico/render
+KIND_INFO = {
+    "d": ("displacement", "µm"),   # proximidad (relativa) → órbita
+    "a": ("acceleration", "g"),    # acelerómetro carcasa (absoluta)
+    "v": ("velocity", "mm/s"),     # velocidad carcasa (absoluta)
+}
 
 
 def sensor_bearing_axis(name: str):
@@ -121,3 +130,16 @@ def sensor_bearing_axis(name: str):
     if not m:
         return None, None
     return m.group(1), m.group(2).lower()
+
+
+def sensor_parts(name: str):
+    """Del nombre (4xd, 4xa, 3yv...) saca (bearing, axis, kind).
+
+    kind ∈ {'d','a','v'} = desplazamiento/aceleración/velocidad. None si no hay
+    3er char. CLAVE para no colapsar 4XD/4XA/4XV (mismo número+eje, distinto
+    tipo/unidad) al mismo canal."""
+    m = _SENSOR_RE3.match(name or "")
+    if not m:
+        return None, None, None
+    kind = (m.group(3) or "").lower() or None
+    return m.group(1), m.group(2).lower(), kind
