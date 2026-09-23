@@ -892,6 +892,14 @@ DEFAULT_TILES = [
 ]
 
 
+# Coord de pantalla (frame VM 1718x920) del CENTRO de la pestaña 'Export csv1'.
+# Los tabs de plots de System1 son owner-drawn (WPF/canvas) y NO exponen texto
+# por UIA, así que la activación va por coordenada, igual que las 8 tiles.
+# Validado en vivo: clic (545,158) → salta a la parrilla 4×2. Override:
+# cfg[rpa].sheet_xy.
+DEFAULT_SHEET_XY = (545, 158)
+
+
 def _activate_sheet(win, sheet_name: str, cfg: dict | None = None) -> bool:
     """Hace clic en la pestaña de plots (ej 'Export csv1') para GARANTIZAR que la
     hoja correcta esté activa antes de exportar.
@@ -949,20 +957,19 @@ def _activate_sheet(win, sheet_name: str, cfg: dict | None = None) -> bool:
             log.info("pestaña '%s' activada @ (%d,%d)", sheet_name, cx, cy)
             print("SHEET '%s': activada @ (%d,%d)" % (sheet_name, cx, cy))
             return True
-    # fallback: coordenada de pantalla calibrada en config
-    xy = (cfg or {}).get("rpa", {}).get("sheet_xy")
-    if xy:
-        try:
-            mouse.click(coords=(int(xy[0]), int(xy[1])))
-            time.sleep(1.2)
-            print("SHEET '%s': activada por coord %s" % (sheet_name, tuple(xy)))
-            return True
-        except Exception:  # noqa: BLE001
-            pass
-    log.warning("no pude activar la pestaña '%s'", sheet_name)
-    print("SHEET '%s': NO activada (UIA no la vio; fija cfg[rpa].sheet_xy)"
-          % sheet_name)
-    return False
+    # fallback: coordenada de pantalla (config o default validado en vivo).
+    # System1 no expone el tab por UIA, así que ESTE es el camino normal.
+    xy = (cfg or {}).get("rpa", {}).get("sheet_xy") or DEFAULT_SHEET_XY
+    try:
+        mouse.click(coords=(int(xy[0]), int(xy[1])))
+        time.sleep(1.2)
+        log.info("pestaña '%s' activada por coord %s", sheet_name, tuple(xy))
+        print("SHEET '%s': activada por coord %s" % (sheet_name, tuple(xy)))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("no pude activar la pestaña '%s': %s", sheet_name, exc)
+        print("SHEET '%s': NO activada (%s)" % (sheet_name, exc))
+        return False
 
 
 def export_all(cfg: dict, out_dir: str, sheet: str | None = None) -> int:
