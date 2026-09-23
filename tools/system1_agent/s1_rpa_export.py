@@ -892,10 +892,97 @@ DEFAULT_TILES = [
 ]
 
 
-def export_all(cfg: dict, out_dir: str) -> int:
+def _activate_sheet(win, sheet_name: str, cfg: dict | None = None) -> bool:
+    """Hace clic en la pestaña de plots (ej 'Export csv1') para GARANTIZAR que la
+    hoja correcta esté activa antes de exportar.
+
+    Por qué: alguien pudo dejar OTRA hoja abierta y encima (órbita, overview,
+    Export csv2…). El RPA exporta por coordenada fija de la parrilla 4×2 de
+    'Export csv1'; si está otra hoja, el clic-derecho cae en la gráfica
+    equivocada y su menú NO tiene 'Export to CSV' → 0/8. Aquí buscamos el
+    control por su TEXTO en el árbol UIA de System1 (robusto al tamaño de
+    ventana) y lo clicamos. Fallback: coord de pantalla en cfg[rpa].sheet_xy.
+    """
+    if not sheet_name:
+        return False
+    target = sheet_name.strip().lower()
+    try:
+        cands = win.descendants()
+    except Exception:  # noqa: BLE001
+        cands = []
+    best = None                       # (area, ctrl, rect) — el más chico = pestaña
+    for c in cands:
+        try:
+            t = (c.window_text() or "").strip()
+        except Exception:  # noqa: BLE001
+            continue
+        if not t:
+            continue
+        tl = t.lower()
+        # exacto o 'Export csv1' contenido; NO matchea 'Export csv2'
+        if tl == target or target in tl:
+            try:
+                rc = c.rectangle()
+                if rc.width() <= 0 or rc.height() <= 0:
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+            area = rc.width() * rc.height()
+            if best is None or area < best[0]:
+                best = (area, c, rc)
+    from pywinauto import mouse
+    if best is not None:
+        _area, ctrl, rc = best
+        cx, cy = (rc.left + rc.right) // 2, (rc.top + rc.bottom) // 2
+        clicked = False
+        try:
+            ctrl.click_input()
+            clicked = True
+        except Exception:  # noqa: BLE001
+            try:
+                mouse.click(coords=(cx, cy))
+                clicked = True
+            except Exception:  # noqa: BLE001
+                clicked = False
+        if clicked:
+            time.sleep(1.2)            # deja que la hoja se dibuje
+            log.info("pestaña '%s' activada @ (%d,%d)", sheet_name, cx, cy)
+            print("SHEET '%s': activada @ (%d,%d)" % (sheet_name, cx, cy))
+            return True
+    # fallback: coordenada de pantalla calibrada en config
+    xy = (cfg or {}).get("rpa", {}).get("sheet_xy")
+    if xy:
+        try:
+            mouse.click(coords=(int(xy[0]), int(xy[1])))
+            time.sleep(1.2)
+            print("SHEET '%s': activada por coord %s" % (sheet_name, tuple(xy)))
+            return True
+        except Exception:  # noqa: BLE001
+            pass
+    log.warning("no pude activar la pestaña '%s'", sheet_name)
+    print("SHEET '%s': NO activada (UIA no la vio; fija cfg[rpa].sheet_xy)"
+          % sheet_name)
+    return False
+
+
+def export_all(cfg: dict, out_dir: str, sheet: str | None = None) -> int:
     """Exporta las 8 gráficas de la hoja (clic-derecho→Export→Save As) por
-    coordenada fija. Sin árbol ni scroll."""
-    tiles = cfg.get("rpa", {}).get("tiles", DEFAULT_TILES)
+    coordenada fija. Sin árbol ni scroll.
+
+    Antes de nada ACTIVA la hoja correcta ('Export csv1' por defecto) por si
+    quedó otra encima — así el robot no depende de que un humano la deje abierta.
+    """
+    rpa = cfg.get("rpa", {})
+    sheet = sheet or rpa.get("sheet", "Export csv1")
+    tiles = rpa.get("tiles", DEFAULT_TILES)
+    # traer System1 al frente + activar la hoja de exportación
+    try:
+        app, win = _connect()
+        _dismiss_dialogs(app)                 # cierra Save As colgado previo
+        if sheet:
+            _activate_sheet(win, sheet, cfg)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("preparación de hoja falló: %s", exc)
     ok = 0
     results = []
     for t in tiles:
@@ -1046,6 +1133,11 @@ def main(argv=None) -> int:
                     help="exporta UNA gráfica: right-click (X,Y)->CSV->NAME")
     ap.add_argument("--expall", metavar="OUTDIR",
                     help="exporta las 8 gráficas de la hoja a OUTDIR")
+    ap.add_argument("--sheet", metavar="NAME", default=None,
+                    help="pestaña de plots a activar antes de exportar "
+                         "(def 'Export csv1'); a prueba de 'Export csv2'")
+    ap.add_argument("--actsheet", metavar="NAME",
+                    help="SOLO activa la pestaña NAME + screenshot (diagnóstico)")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
@@ -1066,8 +1158,14 @@ def main(argv=None) -> int:
     if args.exp1:
         x, y, name, outd = args.exp1
         return export_one(cfg, int(x), int(y), name, outd)
+    if args.actsheet:
+        app, win = _connect()
+        ok = _activate_sheet(win, args.actsheet, cfg)
+        _grab_screen(r"C:\WM_wave\s1.png")
+        print("ACTSHEET %s: %s" % (args.actsheet, "OK" if ok else "NO"))
+        return 0 if ok else 1
     if args.expall:
-        return export_all(cfg, args.expall)
+        return export_all(cfg, args.expall, sheet=args.sheet)
     if args.grab:
         _connect()
         img = _grab_screen(r"C:\WM_wave\s1.png")
