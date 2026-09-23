@@ -571,9 +571,13 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
         Hf = np.append(Hf, Hf[0]); Vf = np.append(Vf, Vf[0])
     area = float(np.sum(Hf[:-1] * Vf[1:] - Hf[1:] * Vf[:-1])) if Hf.size > 2 else 0
     sentido = "↺ CCW" if area > 0 else "↻ CW"
-    # escala desde la órbita FILTRADA (no la cruda con picos) → llena el marco
-    amax = _nice_ceil(max(float(np.nanmax(np.abs(Hf))),
-                          float(np.nanmax(np.abs(Vf))), 1.0) * 1.20)
+    # escala: muestra la BANDA de todas las vueltas (percentil 99 para evitar
+    # picos) → llena el marco como System1
+    rad = np.hypot(H, V)
+    amax = _nice_ceil(max(float(np.percentile(rad, 99)),
+                          float(np.nanmax(np.abs(Hf))),
+                          float(np.nanmax(np.abs(Vf))), 1.0) * 1.12)
+    dmaj = _nice_ceil(amax / 3.0)
     amp_pp = max(_pp(Hf), _pp(Vf))
 
     fig = go.Figure()
@@ -590,10 +594,12 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
                            font=dict(color=_MUTED, size=11),
                            xshift=int(np.sin(ang) * 12),
                            yshift=int(np.cos(ang) * 12))
-    fig.add_scatter(x=H, y=V, mode="lines", name="Cruda", hoverinfo="skip",
-                    line=dict(color=_ORBIT_RAW, width=1))
+    # banda de todas las vueltas (azul fino, estilo System1)
+    fig.add_scatter(x=H, y=V, mode="lines", name="Vueltas", hoverinfo="skip",
+                    line=dict(color="rgba(37,99,235,0.45)", width=0.8))
+    # órbita promedio (síncrona 1X) — protagonista
     fig.add_scatter(x=Hf, y=Vf, mode="lines", name="Órbita 1X",
-                    line=dict(color=_ORBIT_FILT, width=2.6),
+                    line=dict(color=_ORBIT_FILT, width=2.4),
                     hovertemplate="H %{x:.1f} · V %{y:.1f} " + u + "<extra></extra>")
     if cap.has(CH_KPH):
         edges = keyphasor_edges(cap.get(CH_KPH))
@@ -605,16 +611,23 @@ def _plot_orbit(cap: Capture, rpm: Optional[float], point: str, nx: str, ny: str
                                         line=dict(width=2, color=_KPH_COLOR)))
     ttl = (f"Órbita — {_point_label(point)}   ·   {amp_pp:.1f} {u} pp   ·   "
            f"{sentido}" + (f"   ·   {rpm:,.0f} RPM" if rpm else ""))
-    _base_layout(fig, height=560, title=_title_html(ttl, sub))
-    fig.update_layout(hovermode="closest", showlegend=False)
+    _base_layout(fig, height=620, title=_title_html(ttl, sub))
+    # gráfico CUADRADO (como System1): ancho fijo = alto, no estirar
+    fig.update_layout(hovermode="closest", showlegend=False, width=620,
+                      margin=dict(l=60, r=20, t=66, b=52))
     _hoverstyle(fig)
-    fig.update_xaxes(title="Horizontal [%s] →" % u, range=[-amax, amax],
-                     scaleanchor="y", scaleratio=1, zeroline=False,
-                     gridcolor=_GRID_MAJ)
-    fig.update_yaxes(title="Vertical [%s] ↑" % u, range=[-amax, amax],
-                     zeroline=False, gridcolor=_GRID_MAJ)
-    st.plotly_chart(fig, use_container_width=True, config=_cfg(fbase, "orbita"),
-                    key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
+    axkw = dict(range=[-amax, amax], zeroline=False, gridcolor=_GRID_MAJ,
+                dtick=dmaj, ticks="outside", ticklen=5,
+                tickcolor="rgba(15,23,42,0.4)",
+                minor=dict(dtick=dmaj / 5.0, showgrid=True, gridcolor=_GRID_MIN))
+    fig.update_xaxes(title="Horizontal [%s] →" % u, scaleanchor="y",
+                     scaleratio=1, **axkw)
+    fig.update_yaxes(title="Vertical [%s] ↑" % u, **axkw)
+    oc1, oc2, oc3 = st.columns([1, 3, 1])   # centrar el cuadrado
+    with oc2:
+        st.plotly_chart(fig, use_container_width=False,
+                        config=_cfg(fbase, "orbita"),
+                        key=f"wm_dr_orb_{cap.point}_{cap.captured_at}")
 
 
 def _style_subtitles(fig) -> None:
