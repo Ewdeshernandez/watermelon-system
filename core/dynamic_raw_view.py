@@ -115,14 +115,18 @@ def _chip(resolved: str, point: str, when: str) -> None:
     n = _brg_num(point)
     color = "#1d4ed8" if (n and n <= 4) else "#b45309"
     st.markdown(
-        f"<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;"
-        f"margin:2px 0 6px'>"
+        f"<div style='display:flex;align-items:center;gap:9px;flex-wrap:wrap;"
+        f"margin:2px 0 8px'>"
         f"<span style='background:{_INK};color:#f1f5f9;border-radius:8px;"
         f"padding:5px 13px;font-weight:800;font-size:12.5px;letter-spacing:.04em;'>"
-        f"{_point_label(point)}</span>"
+        f"{resolved} · {_point_label(point)}</span>"
         f"<span style='background:{color};color:#fff;border-radius:6px;"
         f"padding:3px 9px;font-weight:700;font-size:11px;'>{'/'.join(_sensor_names(point))}</span>"
-        f"<span style='color:{_MUTED};font-size:12px;'>{resolved} · captura {when}</span>"
+        f"<span style='color:{_MUTED};font-size:12px;'>· Desplazamiento</span>"
+        f"<span style='margin-left:auto;background:#e6f7ec;color:#0f7a3d;"
+        f"border:1px solid #a7dcbd;border-radius:8px;padding:4px 12px;"
+        f"font-weight:700;font-size:12px;white-space:nowrap;'>"
+        f"<span style='color:#16a34a'>●</span>&nbsp; {when}</span>"
         f"</div>", unsafe_allow_html=True)
 
 
@@ -158,7 +162,15 @@ def render_dynamic_raw(instance_id: str, tag: Optional[str] = None,
     with c2:
         sel = st.selectbox("Captura", times, format_func=_lbl,
                            key=f"wm_dr_ts_{instance_id}_{point}")
-    _chip(resolved, point, _lbl(sel).split("  ")[-1] if "  " in _lbl(sel) else _lbl(sel))
+    d, tt = sel.get("day", ""), sel.get("time", "")
+    if len(d) == 8 and len(tt) == 6:
+        from datetime import datetime
+        when = datetime(int(d[:4]), int(d[4:6]), int(d[6:]),
+                        int(tt[:2]), int(tt[2:4]), int(tt[4:])
+                        ).strftime("%d/%m/%Y %I:%M:%S %p")
+    else:
+        when = _lbl(sel)
+    _chip(resolved, point, when)
 
     cached = _download_cached(sel["key"])
     if not cached:
@@ -199,8 +211,18 @@ def _render_capture(cap: Capture, instance_id: str, point: str) -> None:
 # =========================================================
 # Layout base
 # =========================================================
-# Sin barra de herramientas de Plotly (cámara/zoom/±) — se ve limpio.
-_PCFG = {"displayModeBar": False, "displaylogo": False, "scrollZoom": False}
+# Barra mínima: SOLO el botón de descarga a imagen (JPG). Quita zoom/pan/±.
+_PCFG = {
+    "displayModeBar": True, "displaylogo": False, "scrollZoom": False,
+    "modeBarButtonsToRemove": ["zoom2d", "pan2d", "select2d", "lasso2d",
+                               "zoomIn2d", "zoomOut2d", "autoScale2d",
+                               "resetScale2d", "toggleSpikelines",
+                               "hoverClosestCartesian", "hoverCompareCartesian"],
+    "toImageButtonOptions": {"format": "jpeg", "scale": 2,
+                             "filename": "watermelon_grafico"},
+}
+_GRID_MAJ = "rgba(148,163,184,0.30)"
+_GRID_MIN = "rgba(148,163,184,0.12)"
 
 
 def _base_layout(fig, height=380, title=""):
@@ -241,6 +263,27 @@ def _nice_ceil(x: float) -> float:
         if x <= m * base + 1e-9:
             return m * base
     return 10 * base
+
+
+def _stats(v: np.ndarray) -> Tuple[float, float, float]:
+    """(pp, RMS_AC, Crest Factor) como System1."""
+    v = np.asarray(v, float)
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return 0.0, 0.0, 0.0
+    ac = v - v.mean()
+    rms = float(np.sqrt(np.mean(ac ** 2)))
+    pk = float(np.max(np.abs(ac)))
+    cf = pk / rms if rms > 1e-9 else 0.0
+    return _pp(v), rms, cf
+
+
+def _grid_xy(fig, row, dx_maj, dx_min, dy_maj, dy_min):
+    """Divisiones mayor + menor (estilo System1) en un subplot."""
+    fig.update_xaxes(row=row, col=1, dtick=dx_maj, gridcolor=_GRID_MAJ,
+                     minor=dict(dtick=dx_min, showgrid=True, gridcolor=_GRID_MIN))
+    fig.update_yaxes(row=row, col=1, dtick=dy_maj, gridcolor=_GRID_MAJ,
+                     minor=dict(dtick=dy_min, showgrid=True, gridcolor=_GRID_MIN))
 
 
 def _disp_type(unit: str) -> str:
@@ -291,20 +334,28 @@ def _plot_waveform(cap: Capture, nx: str, ny: str) -> None:
         return
     amax = _nice_ceil(max(float(np.nanmax(np.abs(cap.get(c)))) for c, _, _ in chans)
                       * 1.10)            # misma escala simétrica ambos + 10%
+    dy_maj = _nice_ceil(amax / 3.0); dy_min = dy_maj / 5.0
+    dx_maj = 10.0 if xmax >= 40 else 5.0; dx_min = dx_maj / 5.0
+    titles = []
+    for c, col, nm in chans:
+        pp, rms, cf = _stats(cap.get(c))
+        titles.append(f"{nm}   ·   {pp:.1f} {u} pp   ·   RMS {rms:.1f} {u}"
+                      f"   ·   CF {cf:.2f}")
     fig = make_subplots(rows=len(chans), cols=1, shared_xaxes=True,
-                        vertical_spacing=0.10,
-                        subplot_titles=[f"{nm}   ·   {_pp(cap.get(c)):.1f} {u} pp"
-                                        for c, col, nm in chans])
+                        vertical_spacing=0.11, subplot_titles=titles)
     for i, (ch, color, nm) in enumerate(chans, start=1):
         v = cap.get(ch)
         fig.add_scatter(x=t, y=v, mode="lines", name=nm, row=i, col=1,
-                        line=dict(color=color, width=1.6), showlegend=False)
+                        line=dict(color=color, width=1.6), showlegend=False,
+                        hovertemplate="%{x:.2f} ms<br>%{y:.2f} " + u +
+                        "<extra>" + nm + "</extra>")
         fig.update_yaxes(title_text=f"[{u}]", row=i, col=1, range=[-amax, amax],
-                         zeroline=True, zerolinecolor="rgba(15,23,42,0.30)")
+                         zeroline=True, zerolinecolor="rgba(15,23,42,0.35)")
         fig.update_xaxes(range=[0, xmax], row=i, col=1)
+        _grid_xy(fig, i, dx_maj, dx_min, dy_maj, dy_min)
     fig.update_xaxes(title_text="Tiempo [ms]", row=len(chans), col=1)
-    _base_layout(fig, height=200 * len(chans) + 60, title="Forma de onda")
-    fig.update_layout(showlegend=False)
+    _base_layout(fig, height=210 * len(chans) + 60, title="Forma de onda")
+    fig.update_layout(showlegend=False, hovermode="x unified")
     _style_subtitles(fig)
     st.plotly_chart(fig, use_container_width=True, config=_PCFG,
                     key=f"wm_dr_wf_{cap.point}_{cap.captured_at}")
@@ -350,15 +401,18 @@ def _plot_spectrum(cap: Capture, rpm: Optional[float], nx: str, ny: str) -> None
             titles.append(nm)
         data.append((cpm, yv, color, nm))
     ymax = _nice_ceil(peak_max * 1.10)   # misma escala ambos + 10% de aire
+    dy_maj = _nice_ceil(ymax / 4.0); dy_min = dy_maj / 5.0
     fig = make_subplots(rows=len(data), cols=1, shared_xaxes=True,
-                        vertical_spacing=0.14, subplot_titles=titles)
+                        vertical_spacing=0.16, subplot_titles=titles)
     for i, (cpm, yv, color, nm) in enumerate(data, start=1):
         fig.add_scatter(x=cpm, y=yv, mode="lines", name=nm, row=i, col=1,
-                        line=dict(color=color, width=1.2), showlegend=False)
+                        line=dict(color=color, width=1.2), showlegend=False,
+                        hovertemplate="%{x:,.0f} CPM<br>%{y:.2f} " + ysuf +
+                        "<extra>" + nm + "</extra>")
         # ejes explícitos → X e Y se cruzan en (0,0), misma escala Y ambos
-        fig.update_xaxes(range=[0, fmax_cpm], tickformat=",d", dtick=dtick_cpm,
-                         row=i, col=1)
+        fig.update_xaxes(range=[0, fmax_cpm], tickformat=",d", row=i, col=1)
         fig.update_yaxes(title_text=f"[{ysuf}]", range=[0, ymax], row=i, col=1)
+        _grid_xy(fig, i, dtick_cpm, dtick_cpm / 5.0, dy_maj, dy_min)
     fig.update_xaxes(title_text="Frecuencia [CPM]", row=len(data), col=1)
     _base_layout(fig, height=240 * len(data) + 60, title="Espectro (FFT)")
     fig.update_layout(showlegend=False)
