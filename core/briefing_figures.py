@@ -828,16 +828,20 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
             fig.add_trace(go.Scattergl(x=H, y=V, mode="lines",
                           line=dict(width=1.1, color=_PALETTE[idx % len(_PALETTE)]),
                           showlegend=False), row=r_, col=c_)
+            # ambos ejes a ±R de SU máquina; scaleanchor mantiene la órbita
+            # circular (1:1). Las celdas se hacen CUADRADAS vía el alto del PNG.
             fig.update_xaxes(range=[-R, R], scaleanchor=f"y{idx+1 if idx else ''}",
                              scaleratio=1, showgrid=True, gridcolor="#eef2f7",
                              zeroline=False, row=r_, col=c_)
             fig.update_yaxes(range=[-R, R], showgrid=True, gridcolor="#eef2f7",
                              zeroline=False, row=r_, col=c_)
-        fig.update_layout(height=320 * nrow, plot_bgcolor="white",
+        fig.update_layout(plot_bgcolor="white",
                           paper_bgcolor="white", showlegend=False,
                           margin=dict(l=40, r=20, t=34, b=30),
                           font=dict(size=12, color="#334155"))
-        return {"png": _png(fig), "analysis": _orbit_analysis(findings)}
+        # PNG con celdas cuadradas: ancho fijo 1600 / ncol → alto = cell*nrow
+        _h = int(1600 / max(ncol, 1) * nrow)
+        return {"png": _png(fig, height=_h), "analysis": _orbit_analysis(findings)}
     except Exception as e:
         log.warning("orbit_bundle: %s", e)
         return {"png": None, "analysis": ""}
