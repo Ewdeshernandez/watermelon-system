@@ -315,22 +315,22 @@ def render() -> None:
                                 st.error(res.get("error", "Falló."))
                 with ac5:
                     with st.popover("Eliminar", use_container_width=True):
-                        st.warning(f"⚠Vas a eliminar **{email}** permanentemente. "
+                        st.warning(f"Vas a eliminar **{email}** permanentemente. "
                                    "Esta acción no se puede deshacer.")
-                        _confirm = st.text_input(f"Para confirmar, escribí: **{email}**",
-                                                 key=f"del_confirm_{uid}").strip().lower()
+                        # Admin: sin escribir el email — solo un tic de confirmación
+                        # (evita borrado accidental de un clic, pero sin fricción).
+                        _ok = st.checkbox("Confirmo eliminar este usuario",
+                                          key=f"del_ok_{uid}")
                         if st.button("Eliminar definitivamente", key=f"del_apply_{uid}",
-                                     type="primary", use_container_width=True):
-                            if _confirm != email.lower():
-                                st.error("El email no coincide. Operación cancelada.")
+                                     type="primary", use_container_width=True,
+                                     disabled=not _ok):
+                            res = delete_user(uid)
+                            if res.get("ok"):
+                                st.success(f"Usuario {email} eliminado.")
+                                st.session_state.pop("_admin_users_cache", None)
+                                st.rerun()
                             else:
-                                res = delete_user(uid)
-                                if res.get("ok"):
-                                    st.success(f"Usuario {email} eliminado.")
-                                    st.session_state.pop("_admin_users_cache", None)
-                                    st.rerun()
-                                else:
-                                    st.error(res.get("error", "Falló."))
+                                st.error(res.get("error", "Falló."))
 
     st.divider()
     st.caption(f"📌 Total: {_n_total} usuarios · Roles: admin={_n_admin}, "
