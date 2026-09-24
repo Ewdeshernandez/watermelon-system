@@ -397,6 +397,40 @@ def build_report_for_instance(
                "unit": e["unit"], "age": _format_age(e.get("captured_at", "")), "rising": e["rising"]}
               for e in ev]
 
+    # Alarmas del DÍA (últimas 24 h) desde el log persistente — captura las que
+    # ocurrieron aunque el activo ya esté normal ahora (el detector de ventana
+    # corta arriba no las ve). Fuente real: severity_events.list_recent.
+    _rank = {"Normal": 0, "Sin Norma": 0, "No Data": 0, "Alarma": 1, "Danger": 2}
+    day_events = []
+    try:
+        from datetime import datetime, timedelta, timezone
+        from core.severity_events import list_recent
+        _cut = datetime.now(timezone.utc) - timedelta(hours=24)
+        for r in (list_recent(instance_id, limit=60) or []):
+            try:
+                _ts = datetime.fromisoformat(str(r.get("crossed_at")).replace("Z", "+00:00"))
+            except Exception:
+                _ts = None
+            if _ts is None or _ts < _cut:
+                continue
+            _to, _from = r.get("to_status"), r.get("from_status")
+            # Solo lo que involucra alarma/peligro (entrada o salida).
+            if _rank.get(_to, 0) == 0 and _rank.get(_from, 0) == 0:
+                continue
+            day_events.append({
+                "sensor_label": r.get("sensor_label", "—"),
+                "to": _to or "—", "value": _ev_val(r.get("value")),
+                "unit": r.get("unit", "") or "",
+                "age": _format_age(r.get("crossed_at", "")),
+                "rising": _rank.get(_to, 0) > _rank.get(_from, 0),
+            })
+    except Exception as _e:  # noqa: BLE001
+        pass
+    # Para el reporte diario/normal, las alarmas del día mandan; si el log no
+    # trae nada, se conserva lo detectado en la ventana corta.
+    if day_events:
+        events = day_events[:8]
+
     # Reporte de ALARMA (alarm_focus=True, cron de alarmas): la tendencia
     # muestra EXCLUSIVAMENTE los canales en Alarma/Danger, últimos 7 DÍAS
     # (máx por hora), con sus límites de alarma/danger. Ventana ampliada de

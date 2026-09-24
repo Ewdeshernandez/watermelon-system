@@ -387,12 +387,16 @@ def generate_live_report_pdf(
                      f"(priorizados por severidad)")
     story.append(Paragraph(meta_txt, st_meta))
 
-    # ---------- Eventos ----------
-    if events:
-        story.append(Paragraph("Registro de eventos — cruces de umbral", st_section))
+    # ---------- Alarmas del día (últimas 24 h) ----------
+    story.append(Paragraph("Alarmas del día — últimas 24 h", st_section))
+    if not events:
+        _ok_style = ParagraphStyle("evok", fontName=SANS, fontSize=9.5,
+                                   textColor=colors.HexColor(_GREEN))
+        story.append(Paragraph("● Sin alarmas en las últimas 24 h.", _ok_style))
+    else:
         ev_data = [["", "Canal", "Estado", "Valor", "Hace"]]
         ev_styles = []
-        for i, e in enumerate(events[:6], start=1):
+        for i, e in enumerate(events[:8], start=1):
             arrow = "▲" if e.get("rising") else "▼"
             acolor = _RED if e.get("rising") else _GREEN
             ev_data.append([arrow, e.get("sensor_label", "—"), e.get("to", "—"),
