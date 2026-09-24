@@ -472,6 +472,11 @@ def render_delivery() -> None:
         client = (r.get("client") if isinstance(r, dict) else getattr(r, "client", "")) or "— Sin cliente —"
         groups.setdefault(client, []).append((iid, tag))
 
+    # Celebración tras guardar (sandías subiendo + mensaje), una sola vez.
+    _saved = st.session_state.pop("rc_saved_tag", None)
+    if _saved:
+        _celebrate_saved(_saved)
+
     _n_assets = sum(len(a) for a in groups.values())
     _band("Report Center · Delivery scheduling", "Per-machine delivery config",
           "Pick a machine and set who receives its reports, which reports it gets "
@@ -583,6 +588,81 @@ def _multi_input(ss_key: str, init_vals, validator, placeholder: str, add_label:
     return valid_list, n_invalid
 
 
+def _h12(h: int) -> str:
+    """Hora 0-23 → formato 12h, ej. 6 → '6:00 AM', 18 → '6:00 PM'."""
+    h = int(h) % 24
+    ampm = "AM" if h < 12 else "PM"
+    hr = h % 12 or 12
+    return f"{hr}:00 {ampm}"
+
+
+def _slot_editor(ss_key: str, init_slots):
+    """Editor de horarios: una fila por (día + hora), cada día su propia hora,
+    con ✕ para eliminar y '+ Add day/time'. Hora en formato 12h. Devuelve la
+    lista [[dow, hour], …]."""
+    ids_key = f"{ss_key}__ids"
+    nxt_key = f"{ss_key}__next"
+    if ids_key not in st.session_state:
+        slots = [list(s) for s in (init_slots or [])] or [[0, 6]]
+        st.session_state[ids_key] = list(range(len(slots)))
+        st.session_state[nxt_key] = len(slots)
+        for i, (d, h) in enumerate(slots):
+            st.session_state[f"{ss_key}__d_{i}"] = _DIAS_EN[int(d) % 7]
+            st.session_state[f"{ss_key}__h_{i}"] = int(h)
+
+    ids = st.session_state[ids_key]
+    out = []
+    for _id in list(ids):
+        dkey, hkey = f"{ss_key}__d_{_id}", f"{ss_key}__h_{_id}"
+        st.session_state.setdefault(dkey, _DIAS_EN[0])
+        st.session_state.setdefault(hkey, 6)
+        c1, c2, c3 = st.columns([3.2, 2.2, 0.8])
+        c1.selectbox("Day", _DIAS_EN, key=dkey, label_visibility="collapsed")
+        c2.selectbox("Time", list(range(24)), key=hkey, format_func=_h12,
+                     label_visibility="collapsed")
+        if c3.button("✕", key=f"{ss_key}__rm_{_id}", help="Remove this day/time"):
+            ids.remove(_id)
+            st.rerun()
+        out.append([_DIAS_EN.index(st.session_state[dkey]), int(st.session_state[hkey])])
+
+    if st.button("＋ Add day / time", key=f"{ss_key}__add"):
+        nid = st.session_state[nxt_key]
+        st.session_state[nxt_key] = nid + 1
+        st.session_state[ids_key] = ids + [nid]
+        st.session_state[f"{ss_key}__d_{nid}"] = _DIAS_EN[0]
+        st.session_state[f"{ss_key}__h_{nid}"] = 6
+        st.rerun()
+
+    return out
+
+
+def _celebrate_saved(tag: str) -> None:
+    """Sandías subiendo + mensaje de guardado (se muestra una vez tras salvar)."""
+    st.success(f"✅ Se han guardado correctamente los cambios de **{tag}**.")
+    try:
+        st.toast(f"🍉 Guardado: {tag}", icon="🍉")
+    except Exception:
+        pass
+    _mel = "".join(
+        f'<span style="left:{4 + i * 8}%;animation-delay:{(i % 6) * .12:.2f}s;'
+        f'font-size:{22 + (i % 4) * 8}px;">🍉</span>' for i in range(12))
+    st.markdown(
+        f"""
+        <style>
+        @keyframes rcRise {{
+          0%   {{ transform: translateY(20vh) rotate(0deg); opacity:0; }}
+          15%  {{ opacity:1; }}
+          100% {{ transform: translateY(-96vh) rotate(220deg); opacity:0; }}
+        }}
+        .rc-mel {{ position:fixed; inset:0; pointer-events:none; z-index:9999; overflow:hidden; }}
+        .rc-mel span {{ position:absolute; bottom:-40px; animation:rcRise 2.1s ease-in forwards; }}
+        </style>
+        <div class="rc-mel">{_mel}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, get_signers,
                            save_schedules, save_signers, update_instance_header) -> None:
     inst = get_instance(iid)
@@ -636,38 +716,44 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
         _wa_valid, _wa_bad = _multi_input(
             f"rc_dc_wa_{iid}", _split_items(_wa), _valid_phone,
             "573001234567", "＋ Add number")
+        try:
+            from core.whatsapp_sender import whatsapp_status
+            _ws = whatsapp_status()
+        except Exception:
+            _ws = {"configured": False}
+        if _wa_valid and not _ws.get("configured"):
+            st.warning("⚠️ WhatsApp channel is **not set up yet** — these numbers are saved, "
+                       "but reports won't be delivered by WhatsApp until the Meta WhatsApp "
+                       "Business API is configured (one-time, in secrets). Email is unaffected.")
+        elif _wa_valid and _ws.get("configured"):
+            st.caption(f"WhatsApp ready · mode: {_ws.get('mode','—')}"
+                       + (f" · template {_ws.get('template_name')}" if _ws.get('template_name') else ""))
 
-        # --- Reports this machine gets (one row per type) ---
-        st.markdown('<div class="dc-sec">Reports this machine receives</div>', unsafe_allow_html=True)
+        # --- Reports this machine gets (one row per type; per-day time) ---
+        st.markdown('<div class="dc-sec">Reports this machine receives '
+                    '<span style="color:#8a97a8;font-weight:500;text-transform:none;'
+                    'letter-spacing:0;">· each day can have its own time</span></div>',
+                    unsafe_allow_html=True)
         _draft_entries = {}
         for _per in _REPORT_TYPES:
             _cur = _entries.get(_per, {})
             _badge = "wk" if _per == "Semanal" else "mo"
             _plabel = "Weekly" if _per == "Semanal" else "Monthly"
-            st.markdown(f'<span class="dc-badge {_badge}">{_dot("ok")} {_plabel} report</span>',
-                        unsafe_allow_html=True)
-            _pc1, _pc2, _pc3 = st.columns([1.0, 2.2, 1.0])
-            with _pc1:
+            _init_slots = _cur.get("slots") or [[d, int(_cur.get("hour", 6))]
+                                                for d in (_cur.get("days") or [0])]
+            _tc1, _tc2 = st.columns([1.4, 4])
+            with _tc1:
+                st.markdown(f'<span class="dc-badge {_badge}">{_dot("ok")} {_plabel}</span>',
+                            unsafe_allow_html=True)
                 _en = st.toggle("Enabled", value=bool(_cur.get("enabled")),
                                 key=f"rc_dc_en_{iid}_{_per}")
-            with _pc2:
-                _days_sel = st.multiselect(
-                    "Day(s)", _DIAS_EN,
-                    default=[_DIAS_EN[d] for d in (_cur.get("days") or []) if 0 <= int(d) <= 6],
-                    key=f"rc_dc_days_{iid}_{_per}",
-                    help=("Weekly: pick the weekday(s). Monthly: pick the weekday and the cron "
-                          "fires on that day/hour (1st matching of the month per your cron flags)."))
-            with _pc3:
-                _hour_sel = st.selectbox("Hour", list(range(24)),
-                                         index=int(_cur.get("hour", 5)),
-                                         format_func=lambda h: f"{h:02d}:00",
-                                         key=f"rc_dc_hour_{iid}_{_per}")
-            _draft_entries[_per] = {
-                "enabled": bool(_en),
-                "days": [_DIAS_EN.index(d) for d in (_days_sel or [])] or [0],
-                "hour": int(_hour_sel),
-                "period": _per,
-            }
+            with _tc2:
+                if _en:
+                    _slots = _slot_editor(f"rc_dc_slots_{iid}_{_per}", _init_slots)
+                else:
+                    st.caption("Off — enable to set day(s) and time(s).")
+                    _slots = [list(s) for s in _init_slots]
+            _draft_entries[_per] = {"enabled": bool(_en), "period": _per, "slots": _slots}
 
         # --- Alarm ---
         st.markdown('<div class="dc-sec">Alarm</div>', unsafe_allow_html=True)
@@ -718,7 +804,7 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
                     client=(_client_val or "").strip(),
                 )
                 if _ok1 and _ok2 and _ok3:
-                    st.success(f"Saved config for {tag}.")
+                    st.session_state["rc_saved_tag"] = tag
                     st.rerun()
                 else:
                     st.error("Could not save (check the asset exists).")

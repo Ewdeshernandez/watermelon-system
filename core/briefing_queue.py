@@ -228,13 +228,25 @@ _DEFAULT_SCHED = {"enabled": False, "days": [0], "hour": 5, "period": "Semanal"}
 
 
 def _clean_entry(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliza una programación. v24.2: cada reporte tiene una lista de SLOTS
+    (día, hora) → permite hora distinta por día. Migra el formato viejo
+    (days[] + hour único) a slots. Conserva days/hour derivados por compat."""
+    slots = cfg.get("slots")
+    if slots:
+        cs = sorted({(max(0, min(6, int(s[0]))), max(0, min(23, int(s[1]))))
+                     for s in slots if isinstance(s, (list, tuple)) and len(s) >= 2})
+    else:
+        days = [int(d) for d in (cfg.get("days") or [0]) if 0 <= int(d) <= 6] or [0]
+        hour = max(0, min(23, int(cfg.get("hour", 5))))
+        cs = sorted({(d, hour) for d in days})
+    cs = [[d, h] for d, h in cs] or [[0, 5]]
     return {
         "enabled": bool(cfg.get("enabled")),
-        "days": sorted({int(d) for d in (cfg.get("days") or [0])
-                        if 0 <= int(d) <= 6}) or [0],
-        "hour": max(0, min(23, int(cfg.get("hour", 5)))),
         "period": ("Mensual" if str(cfg.get("period", "")).lower().startswith("mensual")
                    else "Semanal"),
+        "slots": cs,
+        "days": sorted({d for d, _ in cs}),   # compat
+        "hour": cs[0][1],                      # compat
     }
 
 
@@ -383,8 +395,10 @@ def schedule_due(cfg: Dict[str, Any], now: Optional[datetime] = None) -> bool:
         except Exception:
             now = datetime.now()
     try:
-        days = [int(d) for d in (cfg.get("days") or [])]
-        return now.weekday() in days and now.hour == int(cfg.get("hour", -1))
+        slots = cfg.get("slots") or [[d, int(cfg.get("hour", -1))]
+                                     for d in (cfg.get("days") or [])]
+        return any(now.weekday() == int(s[0]) and now.hour == int(s[1])
+                   for s in slots if len(s) >= 2)
     except Exception:
         return False
 
