@@ -384,32 +384,67 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
             _aprb_rol = st.text_input("Role (reviewed)", value=_sg.get("reviewed_role", ""),
                                       key=f"rc_aprbr_{_iid}", placeholder="optional")
 
-        _b2, _b3 = st.columns([1, 1.6])
-        with _b2:
-            if st.button("👁 PDF preview", key=f"rc_prev_{_iid}", use_container_width=True):
-                try:
-                    _qsave(_iid, [{"id": r.get("id") or "", "text": r.get("Recomendación") or "",
-                                   "started_at": r.get("Fecha de inicio")}
-                                  for _, r in _qedited.iterrows()])
-                    st.session_state[_q_ss] = _qlist(_iid)
-                except Exception:
-                    pass
-                with st.spinner("Generating preview…"):
-                    from core.briefing_builder import build_asset_briefing
-                    _pdf, _m = build_asset_briefing(
-                        _iid, _d.get("period", "Semanal"), use_ai=False,
-                        sections_override={"summary": _sum, "diagnosis": _diag},
-                        meta_extra={
-                            "prepared_by": _elab or me_name, "reviewed_by": _aprb,
-                            "prepared_role": _elab_rol, "reviewed_role": _aprb_rol,
-                            "prepared_label": "Preparado por:", "reviewed_label": "Revisado por:",
-                            "consecutive": _d.get("consecutive", ""),
-                        },
-                    )
-                st.session_state[f"rc_pdf_{_iid}"] = _pdf
+        # --- Gate de aprobación: primero VISTA PREVIA + REVISAR recomendaciones ---
+        if st.button("👁 Generate report preview", key=f"rc_prev_{_iid}",
+                     use_container_width=True):
+            try:
+                _qsave(_iid, [{"id": r.get("id") or "", "text": r.get("Recomendación") or "",
+                               "started_at": r.get("Fecha de inicio")}
+                              for _, r in _qedited.iterrows()])
+                st.session_state[_q_ss] = _qlist(_iid)
+            except Exception:
+                pass
+            with st.spinner("Generating preview…"):
+                from core.briefing_builder import build_asset_briefing
+                _pdf, _m = build_asset_briefing(
+                    _iid, _d.get("period", "Semanal"), use_ai=False,
+                    sections_override={"summary": _sum, "diagnosis": _diag},
+                    meta_extra={
+                        "prepared_by": _elab or me_name, "reviewed_by": _aprb,
+                        "prepared_role": _elab_rol, "reviewed_role": _aprb_rol,
+                        "prepared_label": "Preparado por:", "reviewed_label": "Revisado por:",
+                        "consecutive": _d.get("consecutive", ""),
+                    },
+                )
+            st.session_state[f"rc_pdf_{_iid}"] = _pdf
+            # Render de páginas para vista previa inline
+            _imgs = []
+            try:
+                import pymupdf  # type: ignore
+                _doc = pymupdf.open(stream=_pdf, filetype="pdf")
+                for _pg in _doc[: min(3, _doc.page_count)]:
+                    _imgs.append(_pg.get_pixmap(matrix=pymupdf.Matrix(1.4, 1.4)).tobytes("png"))
+                st.session_state[f"rc_prevn_{_iid}"] = _doc.page_count
+            except Exception:
+                _imgs = []
+            st.session_state[f"rc_prevpng_{_iid}"] = _imgs
+
+        _has_preview = bool(st.session_state.get(f"rc_pdf_{_iid}"))
+        _imgs = st.session_state.get(f"rc_prevpng_{_iid}") or []
+        if _imgs:
+            with st.expander(f"👁 Report preview — {st.session_state.get(f'rc_prevn_{_iid}', len(_imgs))} "
+                             f"page(s) (showing first {len(_imgs)})", expanded=True):
+                for _im in _imgs:
+                    st.image(_im, use_container_width=True)
+        elif _has_preview:
+            st.caption("Preview generated — download below to view.")
+
+        # Confirmación explícita de revisión de recomendaciones
+        _ack = st.checkbox("He revisado las recomendaciones y la vista previa del reporte.",
+                           key=f"rc_ack_{_iid}")
+        _ready = _has_preview and _ack
+        if not _ready:
+            _missing = []
+            if not _has_preview:
+                _missing.append("generar la **vista previa** del reporte")
+            if not _ack:
+                _missing.append("confirmar la **revisión de las recomendaciones**")
+            st.info("Antes de aprobar, falta: " + " · ".join(_missing) + ".")
+
+        _b3 = st.container()
         with _b3:
             if st.button("✅ Approve and send to client", key=f"rc_go_{_iid}",
-                         type="primary", use_container_width=True):
+                         type="primary", use_container_width=True, disabled=not _ready):
                 if not (_aprb or "").strip():
                     st.error("'Approved by' is missing — the report must carry both signatures.")
                 elif not (_elab or "").strip():
@@ -435,6 +470,9 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                                        f"channels configured: {_dv.get('error', _dv)}. "
                                        f"Download the PDF and send it manually.")
                         st.session_state[f"rc_pdf_{_iid}"] = _res.get("pdf")
+                        for _k in (f"rc_ack_{_iid}", f"rc_prevpng_{_iid}",
+                                   f"rc_prevn_{_iid}"):
+                            st.session_state.pop(_k, None)
                         st.session_state.pop("rc_open", None)
                         st.session_state["rc_cache"] = list_pending()
                     else:
