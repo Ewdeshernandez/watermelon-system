@@ -470,14 +470,14 @@ for _iid, _tag, _d in _pending:
 
         _s1, _s2 = st.columns(2)
         with _s1:
-            _elab = st.text_input("Prepared by", value="Laura C. Garzón",
+            _elab = st.text_input("Prepared by", value="Ángel Daniel Leiva",
                                   key=f"bfq_elab_{_iid}")
             _elab_rol = st.text_input("Role (prepared)",
-                                      value="Junior Condition Monitoring Engineer",
+                                      value="Senior Machinery Diagnostics Engineer · ISO 18436 Cat. III",
                                       key=f"bfq_elabr_{_iid}",
                                       placeholder="optional")
         with _s2:
-            _aprb = st.text_input("Reviewed by", value="Ewdes A. Hernández",
+            _aprb = st.text_input("Reviewed by", value="Ewdes Andrés Hernández",
                                   key=f"bfq_aprb_{_iid}",
                                   placeholder="required to approve")
             _aprb_rol = st.text_input("Role (reviewed)",

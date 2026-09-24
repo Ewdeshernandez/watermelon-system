@@ -94,7 +94,7 @@ def generate_briefing_pdf(
 ) -> bytes:
     """Devuelve los bytes del PDF del briefing del activo, en formato pro."""
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import cm
     from reportlab.platypus import (
@@ -145,9 +145,14 @@ def generate_briefing_pdf(
         _h2n[0] = 0
         return Paragraph(f"{_h1n[0]}. {title}", styles["WMTOC1"])
 
+    # Título de subsección al MARGEN IZQUIERDO (norma ICONTEC/NTC 1486 de
+    # informes técnicos). Conserva el name "WMTOC2" para que la TOC lo detecte.
+    _h2_left = ParagraphStyle("WMTOC2", parent=styles["WMSubTitle"],
+                              alignment=TA_LEFT, spaceBefore=10, spaceAfter=6)
+
     def _h2(title: str) -> Paragraph:
         _h2n[0] += 1
-        return Paragraph(f"{_h1n[0]}.{_h2n[0]} {title}", styles["WMTOC2"])
+        return Paragraph(f"{_h1n[0]}.{_h2n[0]} {title}", _h2_left)
 
     # ---- Banner de estado + KPIs ----
     hcolor = colors.HexColor(health.get("color", "#94a3b8"))
@@ -256,7 +261,9 @@ def generate_briefing_pdf(
     # 4.2 Tabular List (espejo de la vista de la app) — arranca en PÁGINA NUEVA
     # para que el título nunca quede huérfano al pie de página.
     if channels:
-        body.append(PageBreak())
+        # No forzar página nueva (dejaba la p. de Diagnóstico casi vacía); solo
+        # salta si no cabe el arranque de la tabla.
+        body.append(CondPageBreak(12 * cm))
         body.append(_h2("Tabular List — Overall + 1X / 2X (API 670 / ISO 20816-3)"))
         _asof = (meta or {}).get("tabular_asof", "")
         if _asof:
@@ -461,7 +468,8 @@ def generate_briefing_pdf(
         _equipo = f"Unidad {tag}"
         _n = 0
         st_analysis = ParagraphStyle("bfAnalysis", parent=styles["WMBody"],
-                                     alignment=TA_JUSTIFY, spaceBefore=2, spaceAfter=10)
+                                     alignment=TA_JUSTIFY, leading=15.5,
+                                     spaceBefore=4, spaceAfter=13)
         st_fig_head = ParagraphStyle("WMTOC2", parent=styles["WMTOC2"], alignment=TA_CENTER)
 
         def _add_fig(png, head, big_h, analysis: str = "", lead=None):

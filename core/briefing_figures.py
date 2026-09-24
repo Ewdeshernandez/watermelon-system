@@ -446,7 +446,21 @@ def _amp_txt(f: Dict[str, Any]) -> str:
 
 def _is_turbine_label(label: str) -> bool:
     l = (label or "").upper()
-    return "CRF" in l or "TRF" in l
+    return "CRF" in l or "TRF" in l or "TURBINA" in l or "TURBINE" in l
+
+
+def _machine_of_label(label: str) -> str:
+    """Clasifica un plano en Turbina / Gearbox / Generador por su Point Name.
+    Los nombres reales traen el token del equipo ('1XD TURBINA DE',
+    '4XD GEARBOX', '5XD GEN DE'). Orden de chequeo: turbina → gearbox (incluye
+    starter/bomba/reductor) → generador; por defecto Generador."""
+    l = (label or "").upper()
+    if "CRF" in l or "TRF" in l or "TURBINA" in l or "TURBINE" in l:
+        return "Turbina"
+    if ("GEARBOX" in l or "GEAR" in l or "REDUCTOR" in l or "STARTER" in l
+            or "BOMBA" in l or "PUMP" in l):
+        return "Gearbox"
+    return "Generador"
 
 
 def _spectral_sentences(findings: List[Dict[str, Any]],
@@ -534,8 +548,6 @@ def _spectrum_analysis(findings: List[Dict[str, Any]]) -> str:
         return ""
     shafts = sorted({f.get("shaft_cpm", 0.0) for f in findings
                      if f.get("shaft_cpm")})
-    turb = [f for f in findings if _is_turbine_label(f.get("label", ""))]
-    gen = [f for f in findings if not _is_turbine_label(f.get("label", ""))]
 
     has_sub_or_2x = False
     paras: List[str] = [
@@ -543,14 +555,20 @@ def _spectrum_analysis(findings: List[Dict[str, Any]]) -> str:
         "de severidad de ISO 20816-3 y a las prácticas de diagnóstico "
         "rotodinámico de API 670 y API 684."
     ]
-    if turb:
-        sents = _spectral_sentences(turb, shafts)
+    # Un párrafo por equipo, en orden físico del tren, con su espacio propio.
+    _INTRO = {
+        "Turbina": "Turbina de gas (cojinetes CRF y TRF). ",
+        "Gearbox": "Gearbox — caja reductora epicíclica. ",
+        "Generador": "Generador y tren de potencia. ",
+    }
+    for _mach in ("Turbina", "Gearbox", "Generador"):
+        grp = [f for f in findings
+               if _machine_of_label(f.get("label", "")) == _mach]
+        if not grp:
+            continue
+        sents = _spectral_sentences(grp, shafts)
         if sents:
-            paras.append("Turbina de gas (planos CRF y TRF). " + " ".join(sents))
-    if gen:
-        sents = _spectral_sentences(gen, shafts)
-        if sents:
-            paras.append("Generador y tren de potencia. " + " ".join(sents))
+            paras.append(_INTRO[_mach] + " ".join(sents))
 
     for f in findings:
         o = f.get("order")
@@ -696,21 +714,24 @@ def _waveform_analysis(findings: List[Dict[str, Any]]) -> str:
     """Forma de onda en prosa de analista, párrafos por máquina (v3.31.405)."""
     if not findings:
         return ""
-    turb = [f for f in findings if _is_turbine_label(f.get("label", ""))]
-    gen = [f for f in findings if not _is_turbine_label(f.get("label", ""))]
     paras: List[str] = [
         "Las formas de onda en el dominio del tiempo se revisaron buscando "
         "impactividad, truncamiento, modulación y asimetrías — los "
         "precursores que el espectro promediado puede enmascarar."
     ]
-    if turb:
-        s = _waveform_sentences(turb)
+    _INTRO = {
+        "Turbina": "Turbina de gas (cojinetes CRF y TRF). ",
+        "Gearbox": "Gearbox — caja reductora epicíclica. ",
+        "Generador": "Generador y tren de potencia. ",
+    }
+    for _mach in ("Turbina", "Gearbox", "Generador"):
+        grp = [f for f in findings
+               if _machine_of_label(f.get("label", "")) == _mach]
+        if not grp:
+            continue
+        s = _waveform_sentences(grp)
         if s:
-            paras.append("Turbina de gas (planos CRF y TRF). " + " ".join(s))
-    if gen:
-        s = _waveform_sentences(gen)
-        if s:
-            paras.append("Generador y tren de potencia. " + " ".join(s))
+            paras.append(_INTRO[_mach] + " ".join(s))
     if all(f.get("crest", 0.0) < 3.5 for f in findings):
         paras.append("En conjunto, no hay evidencia de eventos impulsivos ni "
                      "de recorte de señal: las ondas son coherentes con la "

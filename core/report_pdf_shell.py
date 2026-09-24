@@ -430,7 +430,7 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
 
     # Firmas
     prepared_by = (meta.get("prepared_by") or "").strip()
-    prepared_role = (meta.get("prepared_role") or "Junior Condition Monitoring Engineer").strip()
+    prepared_role = (meta.get("prepared_role") or "Senior Machinery Diagnostics Engineer · ISO 18436 Cat. III").strip()
     prepared_city = (meta.get("prepared_city") or "Cajicá, Cundinamarca · Colombia").strip()
     reviewed_by = (meta.get("reviewed_by") or "").strip()
     reviewed_role = (meta.get("reviewed_role") or "Machinery Diagnostic Champion").strip()
@@ -439,16 +439,36 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
     # los reportes clásicos conservan su default).
     prepared_label = (meta.get("prepared_label") or "Preparado por:").strip()
     reviewed_label = (meta.get("reviewed_label") or "Revisado por:").strip()
+    prepared_sig = meta.get("prepared_sig")
+    reviewed_sig = meta.get("reviewed_sig")
 
     sig_label = ParagraphStyle(name="WMSigLabel", parent=styles["Normal"], fontName=BOLD, fontSize=10.2, leading=13, alignment=TA_CENTER, textColor=colors.HexColor(_INK), spaceAfter=4)
     sig_name = ParagraphStyle(name="WMSigName", parent=styles["Normal"], fontName=BOLD, fontSize=11, leading=14, alignment=TA_CENTER, textColor=colors.HexColor(_INK), spaceAfter=2)
     sig_role = ParagraphStyle(name="WMSigRole", parent=styles["Normal"], fontName=REGULAR, fontSize=9.5, leading=12, alignment=TA_CENTER, textColor=colors.HexColor("#374151"), spaceAfter=2)
     sig_city = ParagraphStyle(name="WMSigCity", parent=styles["Normal"], fontName=REGULAR, fontSize=9.0, leading=11.5, alignment=TA_CENTER, textColor=colors.HexColor("#64748b"))
 
-    def _cell(label, name, role, city):
+    def _sig_img(sig):
+        """Firma cursiva opcional (bytes o ruta PNG transparente). Se dibuja
+        SOBRE el nombre, dentro de la misma celda centrada → sin overlay
+        externo, sin riesgo de firma doble. Si no viene, no ocupa espacio."""
+        if not sig:
+            return None
+        try:
+            src = BytesIO(sig) if isinstance(sig, (bytes, bytearray)) else str(sig)
+            im = Image(src, width=4.6 * cm, height=1.35 * cm, kind="proportional")
+            im.hAlign = "CENTER"
+            return im
+        except Exception:
+            return None
+
+    def _cell(label, name, role, city, sig=None):
         if not name:
             return [Paragraph("", sig_label)]
-        c = [Paragraph(label, sig_label), Paragraph(paragraph_safe(name), sig_name)]
+        c = [Paragraph(label, sig_label)]
+        _im = _sig_img(sig)
+        if _im is not None:
+            c.append(_im)
+        c.append(Paragraph(paragraph_safe(name), sig_name))
         if role:
             c.append(Paragraph(paragraph_safe(role), sig_role))
         if city:
@@ -458,8 +478,8 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
     if prepared_by and reviewed_by:
         # Dos firmas → dos columnas paralelas centradas.
         sig_tbl = Table([[
-            _cell(prepared_label, prepared_by, prepared_role, prepared_city),
-            _cell(reviewed_label, reviewed_by, reviewed_role, reviewed_city),
+            _cell(prepared_label, prepared_by, prepared_role, prepared_city, prepared_sig),
+            _cell(reviewed_label, reviewed_by, reviewed_role, reviewed_city, reviewed_sig),
         ]], colWidths=[8.3 * cm, 8.3 * cm])
         sig_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -473,10 +493,10 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
         # Una sola firma → columna ÚNICA centrada en la página (el nombre del
         # especialista queda al centro, no corrido a la izquierda).
         if prepared_by:
-            label, name, role, city = prepared_label, prepared_by, prepared_role, prepared_city
+            label, name, role, city, _sig = prepared_label, prepared_by, prepared_role, prepared_city, prepared_sig
         else:
-            label, name, role, city = reviewed_label, reviewed_by, reviewed_role, reviewed_city
-        sig_tbl = Table([[_cell(label, name, role, city)]], colWidths=[11.0 * cm])
+            label, name, role, city, _sig = reviewed_label, reviewed_by, reviewed_role, reviewed_city, reviewed_sig
+        sig_tbl = Table([[_cell(label, name, role, city, _sig)]], colWidths=[11.0 * cm])
         sig_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
