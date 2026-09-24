@@ -755,6 +755,25 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
                     _slots = [list(s) for s in _init_slots]
             _draft_entries[_per] = {"enabled": bool(_en), "period": _per, "slots": _slots}
 
+        # --- Daily quick report (1-page Live, DIRECT — no approval) ---
+        from core.briefing_queue import get_quick_schedule
+        _q = get_quick_schedule(iid)
+        st.markdown('<div class="dc-sec">Daily quick report '
+                    '<span style="color:#8a97a8;font-weight:500;text-transform:none;'
+                    'letter-spacing:0;">· 1-page Live snapshot · sent DIRECT (no approval) '
+                    'by email &amp; WhatsApp</span></div>', unsafe_allow_html=True)
+        _qc1, _qc2 = st.columns([1.4, 4])
+        with _qc1:
+            st.markdown(f'<span class="dc-badge" style="background:#e8f6ee;border-color:#bfe6cd;'
+                        f'color:#1b6b3a;">{_dot("ok")} Quick</span>', unsafe_allow_html=True)
+            _q_en = st.toggle("Enabled", value=bool(_q.get("enabled")), key=f"rc_dc_qen_{iid}")
+        with _qc2:
+            if _q_en:
+                _q_slots = _slot_editor(f"rc_dc_qslots_{iid}", _q.get("slots") or [[0, 7]])
+            else:
+                st.caption("Off — enable to send the 1-page live report on set day(s)/time(s).")
+                _q_slots = [list(s) for s in (_q.get("slots") or [])]
+
         # --- Alarm ---
         st.markdown('<div class="dc-sec">Alarm</div>', unsafe_allow_html=True)
         _alarm_in = st.toggle("Auto-send on alarm / danger (immediate 1-page report, checked every 15 min)",
@@ -790,7 +809,9 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
                 st.error("There are invalid entries (marked ✕). Fix or remove them "
                          "before saving.")
             else:
+                from core.briefing_queue import save_quick_schedule
                 _ok1 = save_schedules(iid, list(_draft_entries.values()))
+                _okq = save_quick_schedule(iid, {"enabled": bool(_q_en), "slots": _q_slots})
                 _ok2 = save_signers(iid, {
                     "prepared_by": _prep, "prepared_role": _prep_r,
                     "reviewed_by": _rev, "reviewed_role": _rev_r,
@@ -803,7 +824,7 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
                     report_send_enabled=bool(_any_sched),
                     client=(_client_val or "").strip(),
                 )
-                if _ok1 and _ok2 and _ok3:
+                if _ok1 and _okq and _ok2 and _ok3:
                     st.session_state["rc_saved_tag"] = tag
                     st.rerun()
                 else:

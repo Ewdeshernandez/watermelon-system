@@ -56,6 +56,54 @@ def _review_recipients(override: str = "") -> list:
     return [e.strip() for e in raw.split(",") if e.strip() and "@" in e]
 
 
+def process_quick_reports(dry_run: bool = False) -> int:
+    """Reporte RÁPIDO (1 pág de Live Monitoring) — envío DIRECTO por email +
+    WhatsApp, SIN aprobación, a los activos cuyo slot (día+hora) coincide con
+    AHORA. Se llama en cada corrida horaria del cron. Devuelve # enviados."""
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Bogota"))
+    except Exception:  # noqa: BLE001
+        now = datetime.utcnow()
+
+    from core.briefing_queue import get_quick_schedule, schedule_due
+    from core.instance_state import get_instance, list_instances
+    from core.live_report_builder import build_report_for_instance
+    from core.report_delivery import deliver_report
+
+    sent = 0
+    for r in list_instances() or []:
+        iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
+        if not iid:
+            continue
+        cfg = get_quick_schedule(iid)
+        if not cfg.get("enabled") or not schedule_due(cfg, now=now):
+            continue
+        tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
+        inst = get_instance(iid)
+        pdf, meta = build_report_for_instance(iid, inst)
+        if not pdf:
+            log.warning("Quick %s: sin PDF (%s) — salteado.", tag, meta.get("status"))
+            continue
+        if dry_run:
+            log.info("[DRY-RUN] Quick %s (%s) — %d bytes, no se envía.", tag, iid, len(pdf))
+            sent += 1
+            continue
+        res = deliver_report(inst, pdf, meta={
+            "instance_id": iid, "status": meta.get("status", "—"),
+            "score": meta.get("score"), "alarms": meta.get("alarms", 0)})
+        _dv = res or {}
+        em, wa = _dv.get("email"), _dv.get("whatsapp")
+        log.info("Quick %s → email:%s whatsapp:%s", tag,
+                 "OK" if (em or {}).get("ok") else "—",
+                 "OK" if (wa or {}).get("ok") else "—")
+        if (em and em.get("ok")) or (wa and wa.get("ok")):
+            sent += 1
+    log.info("Quick reports enviados: %d", sent)
+    return sent
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--period", default="Semanal", choices=["Semanal", "Mensual"])
@@ -121,6 +169,13 @@ def main() -> int:
     # punto y genera SOLO los borradores de los activos cuya programación
     # coincide con ahora.
     if args.check_schedule:
+        # Reporte RÁPIDO (1 pág, envío directo) — se procesa en CADA corrida
+        # horaria, independiente del briefing con aprobación.
+        try:
+            process_quick_reports(dry_run=args.dry_run)
+        except Exception as e:  # noqa: BLE001
+            log.error("process_quick_reports falló: %s", e)
+
         # v24: list_schedule_entries devuelve UNA fila por cada programación
         # del activo (Semanal + Mensual pueden coexistir), cada una con su día
         # y hora. schedule_due filtra las que coinciden con AHORA.
@@ -128,7 +183,7 @@ def main() -> int:
         due = [(iid, tag, cfg) for iid, tag, cfg in list_schedule_entries()
                if schedule_due(cfg)]
         if not due:
-            log.info("Ninguna programación coincide ahora — nada que hacer.")
+            log.info("Sin briefing programado ahora (los quick ya se procesaron).")
             return 0
         results = []
         for iid, tag, cfg in due:

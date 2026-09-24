@@ -346,6 +346,38 @@ def list_schedule_entries() -> List[Tuple[str, str, Dict[str, Any]]]:
     return out
 
 
+QUICK_KEY = "quick_report_schedule"  # v24: reporte RÁPIDO 1-pág (envío directo)
+
+
+def get_quick_schedule(instance_id: str) -> Dict[str, Any]:
+    """Programación del reporte RÁPIDO (1 página de Live Monitoring, envío
+    DIRECTO sin aprobación). {enabled, slots:[[dow,hour],…]}."""
+    try:
+        from core.instance_state import get_instance_parameters
+        cfg = get_instance_parameters(instance_id).get(QUICK_KEY)
+        if isinstance(cfg, dict):
+            ce = _clean_entry({"enabled": cfg.get("enabled"),
+                               "slots": cfg.get("slots"),
+                               "days": cfg.get("days"), "hour": cfg.get("hour"),
+                               "period": "Rápido"})
+            return {"enabled": ce["enabled"], "slots": ce["slots"]}
+    except Exception as e:
+        log.warning("get_quick_schedule(%s) falló: %s", instance_id, e)
+    return {"enabled": False, "slots": [[0, 7]]}
+
+
+def save_quick_schedule(instance_id: str, cfg: Dict[str, Any]) -> bool:
+    try:
+        from core.instance_state import update_instance_parameter
+        ce = _clean_entry({"enabled": cfg.get("enabled"), "slots": cfg.get("slots"),
+                           "period": "Rápido"})
+        return update_instance_parameter(
+            instance_id, QUICK_KEY, {"enabled": ce["enabled"], "slots": ce["slots"]})
+    except Exception as e:
+        log.warning("save_quick_schedule(%s) falló: %s", instance_id, e)
+        return False
+
+
 SIGNERS_KEY = "report_signers"       # v24: firmantes por activo
 
 _DEFAULT_SIGNERS = {
@@ -408,5 +440,6 @@ __all__ = ["get_draft", "save_draft", "update_draft", "clear_draft",
            "get_schedule", "get_schedules", "save_schedule", "save_schedules",
            "list_schedules", "list_schedule_entries", "schedule_due",
            "get_signers", "save_signers",
+           "get_quick_schedule", "save_quick_schedule",
            "STATUS_PENDING", "STATUS_APPROVED", "PARAM_KEY", "SCHED_KEY",
-           "SCHEDS_KEY", "SIGNERS_KEY"]
+           "SCHEDS_KEY", "SIGNERS_KEY", "QUICK_KEY"]
