@@ -40,20 +40,20 @@ def _load_revoked_licenses() -> list:
 def render() -> None:
     _user_email = st.session_state.get("auth_email", "")
     if not _user_email.endswith("@sigasas.com"):
-        st.error("🔒 Acceso denegado. Esta sección es solo para administradores "
+        st.error("Acceso denegado. Esta sección es solo para administradores "
                  "de SIGA GROUP.")
         return
 
     _revoked = _load_revoked_licenses()
 
     _k1, _k2 = st.columns(2)
-    _k1.metric("🔒 Licencias revocadas", len(_revoked))
+    _k1.metric("Licencias revocadas", len(_revoked))
     _k2.metric("Endpoint heartbeat", "✓ Activo",
                help="https://yxeqwkhybueelmkrdkgq.supabase.co/functions/v1/license-check")
     st.divider()
 
     # --- Revocar nueva licencia ---
-    st.markdown("### 🔒 Revocar una licencia")
+    st.markdown("### Revocar una licencia")
     st.caption(
         "Pegá el `license_id` (UUID) de la licencia que querés revocar. "
         "Lo encontrás en `tools/licenses_issued/<cliente>/license.json` en "
@@ -82,7 +82,7 @@ def render() -> None:
         _confirm = st.checkbox(
             "✓ Confirmo que esta acción bloqueará la app del cliente al "
             "próximo arranque con internet", key="new_revoke_confirm")
-        _submitted = st.form_submit_button("🔒 REVOCAR LICENCIA", type="primary",
+        _submitted = st.form_submit_button("REVOCAR LICENCIA", type="primary",
                                            use_container_width=True)
 
         if _submitted:
@@ -121,7 +121,7 @@ def render() -> None:
     st.divider()
 
     # --- Licencias actualmente revocadas ---
-    st.markdown("### 📋 Licencias actualmente revocadas")
+    st.markdown("### Licencias actualmente revocadas")
     if not _revoked:
         st.info("No hay ninguna licencia revocada en este momento. "
                 "Todas las licencias emitidas están activas (mientras no estén vencidas).")
@@ -144,14 +144,14 @@ def render() -> None:
                         <span style="background:rgba(239,68,68,0.10);color:#ef4444;
                                      padding:2px 8px;border-radius:5px;font-size:10px;
                                      font-weight:800;letter-spacing:1px;
-                                     text-transform:uppercase;">🔒 Revocada</span>
+                                     text-transform:uppercase;">Revocada</span>
                         <span style="font-size:15px;font-weight:700;color:#0f172a;">{_customer}</span>
                     </div>
                     <div style="font-size:12px;color:#475569;line-height:1.6;">
                         📧 {_email}<br>
-                        🔑 <code style="font-size:10px;">{_lid}</code><br>
+                        <code style="font-size:10px;">{_lid}</code><br>
                         📅 Revocada el {_revoked_at} por {_revoked_by}<br>
-                        📝 <i>{_reason}</i>
+                        <i>{_reason}</i>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)

@@ -84,7 +84,7 @@ def render() -> None:
                  f"del sistema (`{ADMIN_EMAIL}`).")
         return
     if not is_supabase_auth_enabled():
-        st.error("⚠️ **Supabase Auth no está configurado.** Verificá que "
+        st.error("⚠**Supabase Auth no está configurado.** Verificá que "
                  "`st.secrets['supabase']['url']` y `service_key` estén definidos.")
         return
 
@@ -96,7 +96,7 @@ def render() -> None:
         f"""
         <div class="wmu-hero">
             <span class="wmu-pill">🔐 ZONA ADMIN · Solo {ADMIN_EMAIL}</span>
-            <div class="wmu-title">👥 Gestión de Usuarios</div>
+            <div class="wmu-title">Gestión de Usuarios</div>
             <div class="wmu-subtitle">
                 Crear, modificar, bloquear y eliminar usuarios del sistema.
                 Los roles se asignan automáticamente según el dominio del email
@@ -121,7 +121,7 @@ def render() -> None:
     k5.metric("Bloqueados", _n_blocked)
 
     # --- Crear nuevo usuario ---
-    st.markdown('<div class="wmu-section">➕ Crear nuevo usuario <div class="bar"></div></div>',
+    st.markdown('<div class="wmu-section">Crear nuevo usuario <div class="bar"></div></div>',
                 unsafe_allow_html=True)
     with st.expander("Abrir formulario de creación", expanded=False):
         with st.form("new_user_form", clear_on_submit=True):
@@ -144,7 +144,7 @@ def render() -> None:
                                                  f"'{_suggested_role}'. Podés cambiarlo.")
                 new_role = _role_codes[new_role_idx]
                 new_pwd = generate_temp_password()
-                st.caption("🔑 Acceso **sin contraseña**: el usuario ingresará con un "
+                st.caption("Acceso **sin contraseña**: el usuario ingresará con un "
                            "código de un solo uso enviado a su correo.")
 
             _client_target_id: str = ""
@@ -201,7 +201,7 @@ def render() -> None:
                     st.error(f"✗ No se pudo crear: {result.get('error', 'error desconocido')}")
 
     # --- Búsqueda + refresh ---
-    st.markdown('<div class="wmu-section">📋 Usuarios registrados <div class="bar"></div></div>',
+    st.markdown('<div class="wmu-section">Usuarios registrados <div class="bar"></div></div>',
                 unsafe_allow_html=True)
     ctop1, ctop2 = st.columns([0.7, 0.3])
     with ctop1:
@@ -255,7 +255,7 @@ def render() -> None:
                 """, unsafe_allow_html=True)
 
             if is_protected_admin:
-                st.caption("🔒 El administrador único del sistema no puede ser modificado "
+                st.caption("El administrador único del sistema no puede ser modificado "
                            "desde esta UI (protección anti-lockout).")
             else:
                 ac1, ac2, ac3, ac4, ac5 = st.columns(5)
@@ -276,7 +276,7 @@ def render() -> None:
                             else:
                                 st.error(res.get("error", "Falló."))
                 with ac2:
-                    with st.popover("🔑  Reset password", use_container_width=True):
+                    with st.popover("Reset password", use_container_width=True):
                         _temp = st.text_input("Nueva password (auto-generada)",
                                               value=generate_temp_password(), key=f"pwd_reset_{uid}")
                         if st.button("Aplicar reset", key=f"pwd_apply_{uid}",
@@ -289,7 +289,7 @@ def render() -> None:
                                 st.error(res.get("error", "Falló."))
                 with ac3:
                     if is_blocked:
-                        if st.button("✅  Desbloquear", key=f"unblock_{uid}",
+                        if st.button("Desbloquear", key=f"unblock_{uid}",
                                      use_container_width=True):
                             res = unblock_user(uid)
                             if res.get("ok"):
@@ -309,7 +309,7 @@ def render() -> None:
                             else:
                                 st.error(res.get("error", "Falló."))
                 with ac4:
-                    with st.popover("✏️  Editar nombre", use_container_width=True):
+                    with st.popover("Editar nombre", use_container_width=True):
                         _new_name = st.text_input("Nuevo nombre completo", value=full_name,
                                                   key=f"name_edit_{uid}")
                         if st.button("Guardar nombre", key=f"name_save_{uid}",
@@ -322,8 +322,8 @@ def render() -> None:
                             else:
                                 st.error(res.get("error", "Falló."))
                 with ac5:
-                    with st.popover("🗑️  Eliminar", use_container_width=True):
-                        st.warning(f"⚠️ Vas a eliminar **{email}** permanentemente. "
+                    with st.popover("Eliminar", use_container_width=True):
+                        st.warning(f"⚠Vas a eliminar **{email}** permanentemente. "
                                    "Esta acción no se puede deshacer.")
                         _confirm = st.text_input(f"Para confirmar, escribí: **{email}**",
                                                  key=f"del_confirm_{uid}").strip().lower()

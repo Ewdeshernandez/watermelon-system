@@ -41,7 +41,7 @@ def render() -> None:
         _me = ""
 
     # ---------- Subir ----------
-    with st.expander("➕ Subir documento (PDF)", expanded=True):
+    with st.expander("Subir documento (PDF)", expanded=True):
         up = st.file_uploader("PDF (manual, curso o norma)", type=["pdf"],
                               key="kb_pdf")
         c1, c2 = st.columns([2, 1])
@@ -65,7 +65,7 @@ def render() -> None:
                         source_type=src, machine_model=model,
                         filename=up.name, uploaded_by=_me)
                 if res.get("ok"):
-                    st.success(f"✅ Ingestado: {res['n_chunks']} fragmento(s) "
+                    st.success(f"Ingestado: {res['n_chunks']} fragmento(s) "
                                f"indexado(s).")
                     st.rerun()
                 else:

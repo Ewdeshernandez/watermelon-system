@@ -35,24 +35,30 @@ render_user_menu()
 apply_watermelon_page_style()
 require_role(allowed_roles=("admin",))
 
-_NAVY = "#0F1E3D"
-_CYAN = "#1AAEE5"
-_GRAY_LIGHT = "#F4F7FB"
+_NAVY = "#12305e"
+_CYAN = "#274b7d"
 
-# --- Hero ---
-st.markdown(
-    f"""
-    <div style="background:{_NAVY}; color:white; padding:22px 28px;
-         border-radius:14px; margin-bottom:18px;">
-      <div style="font-size:11px; font-weight:700; letter-spacing:0.18em;
-           text-transform:uppercase; color:{_CYAN}; margin-bottom:4px;">
-           SIGA Internal · Administration</div>
-      <div style="font-size:24px; font-weight:800;">Administration Panel</div>
-      <div style="font-size:13px; color:rgba(226,232,240,0.85); margin-top:4px;">
-           Clients &amp; roles · Watermelon Plant Licenses · System users</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
+# --- Look industrial compartido (mismo del Report Center) ---
+from core.ui_industrial import inject_industrial_css, industrial_band
+
+inject_industrial_css()
+
+# KPIs del registro (admins / specialists / clientes) — best-effort.
+_kpis = None
+try:
+    from core.clients import list_admins, list_clients, list_specialists, reload_registry
+    reload_registry()
+    from core.ui_industrial import dot as _dot
+    _kpis = [(f'{_dot("dang")} {len(list_admins() or [])}', "Admins"),
+             (f'{_dot("warn")} {len(list_specialists() or [])}', "Specialists"),
+             (f'{_dot("info")} {len(list_clients() or [])}', "Clientes")]
+except Exception:
+    _kpis = None
+
+industrial_band(
+    "SIGA Internal · Administration", "Administration Panel",
+    "Clientes &amp; roles · Watermelon Plant Licenses · System users · Conocimiento",
+    kpis=_kpis,
 )
 
 # --- Selector tipo pestañas plano con puntos de color (estilo Calibración) ---

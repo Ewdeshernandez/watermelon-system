@@ -71,7 +71,7 @@ def render() -> None:
                 f"{len(specialists_data)} specialists · {len(clients_data)} clientes")
 
     tab_clients, tab_specialists, tab_admins, tab_raw = st.tabs(
-        ["🏭 Clientes", "🛠️ Specialists", "🔑 Admins", "📄 Ver JSON crudo"])
+        ["Clientes", "Specialists", "Admins", "JSON crudo"])
 
     # ---------------- CLIENTES ----------------
     with tab_clients:
@@ -129,10 +129,10 @@ def render() -> None:
 
                 col_save, col_del = st.columns([3, 1])
                 with col_save:
-                    save_clicked = st.form_submit_button("💾 Guardar cliente", type="primary",
+                    save_clicked = st.form_submit_button("Guardar cliente", type="primary",
                                                          use_container_width=True)
                 with col_del:
-                    del_clicked = st.form_submit_button("🗑️ Eliminar", use_container_width=True,
+                    del_clicked = st.form_submit_button("Eliminar", use_container_width=True,
                                                         disabled=(sel_id == "— nuevo —"))
 
                 if save_clicked:
@@ -165,7 +165,7 @@ def render() -> None:
                             new_clients = [_enrich_with_apikey(c) for c in clients_data] + [new_entry]
                         try:
                             save_registry(_build_full_data(admins_data, specialists_data, new_clients))
-                            st.success(f"✅ Cliente '{target_id}' guardado.")
+                            st.success(f"Cliente '{target_id}' guardado.")
                             st.rerun()
                         except Exception as e:  # noqa: BLE001
                             st.error(f"No se pudo guardar: {e}")
@@ -174,7 +174,7 @@ def render() -> None:
                     new_clients = [_enrich_with_apikey(c) for c in clients_data if c["id"] != sel_id]
                     try:
                         save_registry(_build_full_data(admins_data, specialists_data, new_clients))
-                        st.success(f"🗑️ Cliente '{sel_id}' eliminado.")
+                        st.success(f"Cliente '{sel_id}' eliminado.")
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"No se pudo eliminar: {e}")
@@ -215,10 +215,10 @@ def render() -> None:
                                           height=100)
             col_save, col_del = st.columns([3, 1])
             with col_save:
-                save_spec = st.form_submit_button("💾 Guardar specialist", type="primary",
+                save_spec = st.form_submit_button("Guardar specialist", type="primary",
                                                   use_container_width=True)
             with col_del:
-                del_spec = st.form_submit_button("🗑️ Eliminar", use_container_width=True,
+                del_spec = st.form_submit_button("Eliminar", use_container_width=True,
                                                  disabled=(sel_spec == "— nuevo —"))
             if save_spec:
                 if not new_name.strip() or not new_email.strip():
@@ -238,7 +238,7 @@ def render() -> None:
                         save_registry(_build_full_data(
                             admins_data, new_specs,
                             [_enrich_with_apikey(c) for c in clients_data]))
-                        st.success(f"✅ Specialist '{new_entry['name']}' guardado.")
+                        st.success(f"Specialist '{new_entry['name']}' guardado.")
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"No se pudo guardar: {e}")
@@ -248,7 +248,7 @@ def render() -> None:
                     save_registry(_build_full_data(
                         admins_data, new_specs,
                         [_enrich_with_apikey(c) for c in clients_data]))
-                    st.success(f"🗑️ Specialist '{sel_spec}' eliminado.")
+                    st.success(f"Specialist '{sel_spec}' eliminado.")
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
                     st.error(f"No se pudo eliminar: {e}")
@@ -256,7 +256,7 @@ def render() -> None:
     # ---------------- ADMINS ----------------
     with tab_admins:
         st.subheader("Admins")
-        st.warning("⚠️ Cuidado: los admins gestionan TODO el sistema. "
+        st.warning("⚠Cuidado: los admins gestionan TODO el sistema. "
                    "**No te elimines a vos mismo** o perdés acceso a esta página.")
         if admins_data:
             st.dataframe(pd.DataFrame([{
@@ -274,7 +274,7 @@ def render() -> None:
             with col_b:
                 new_phones = st.text_area("WhatsApp numbers (separados por coma)",
                                           placeholder="573185551234", height=100)
-            save_adm = st.form_submit_button("💾 Agregar admin", type="primary")
+            save_adm = st.form_submit_button("Agregar admin", type="primary")
             if save_adm:
                 if not new_name.strip() or not new_email.strip():
                     st.error("Nombre y email son obligatorios.")
@@ -288,7 +288,7 @@ def render() -> None:
                         save_registry(_build_full_data(
                             new_admins, specialists_data,
                             [_enrich_with_apikey(c) for c in clients_data]))
-                        st.success(f"✅ Admin '{new_name}' agregado.")
+                        st.success(f"Admin '{new_name}' agregado.")
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"No se pudo guardar: {e}")
