@@ -254,7 +254,7 @@ def render() -> None:
     # ---------------- ADMINS ----------------
     with tab_admins:
         st.subheader("Admins")
-        st.warning("⚠Cuidado: los admins gestionan TODO el sistema. "
+        st.warning("Cuidado: los admins gestionan TODO el sistema. "
                    "**No te elimines a vos mismo** o perdés acceso a esta página.")
         if admins_data:
             html_table(

@@ -23,35 +23,34 @@ from core.supabase_auth import (
 
 _STYLES = """
 <style>
-.wmu-hero { border-radius:18px; padding:22px 28px; margin-bottom:22px;
-  background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%);
-  border:1px solid rgba(148,163,184,0.16); color:#f8fafc; }
-.wmu-pill { display:inline-block; padding:5px 12px; border-radius:999px;
-  background:rgba(248,113,113,0.15); border:1px solid rgba(248,113,113,0.3);
-  color:#fca5a5; font-size:10px; font-weight:800; letter-spacing:0.18em;
-  text-transform:uppercase; margin-bottom:10px; }
-.wmu-title { font-size:28px; font-weight:800; margin:0 0 6px 0; color:#f8fafc; }
-.wmu-subtitle { color:rgba(226,232,240,0.78); font-size:14px; }
-.wmu-card { background:white; border:1px solid #e6ebf2; border-radius:14px;
-  padding:14px 18px; margin-bottom:10px; }
+.wmu-card { background:#ffffff; border:1px solid #e2e8f2; border-left:3px solid #8090a6;
+  border-radius:14px; padding:14px 18px; margin-bottom:9px;
+  box-shadow:0 1px 2px rgba(11,31,58,.05), 0 6px 18px rgba(11,31,58,.05);
+  transition:box-shadow .18s ease, border-color .18s ease; }
+.wmu-card:hover { box-shadow:0 2px 4px rgba(11,31,58,.08), 0 10px 26px rgba(11,31,58,.10); }
+.wmu-card.role-admin      { border-left-color:#dc3545; }
+.wmu-card.role-specialist { border-left-color:#2563eb; }
+.wmu-card.role-client     { border-left-color:#1f9d55; }
 .wmu-row-head { display:flex; align-items:center; justify-content:space-between; gap:14px; }
-.wmu-email { font-weight:800; color:#0f172a; font-size:15px; }
-.wmu-name { color:#475569; font-size:13px; margin-top:2px; }
-.wmu-meta { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
-  color:#94a3b8; margin-top:6px; }
-.wmu-role { font-size:11px; font-weight:800; padding:4px 10px; border-radius:999px;
-  letter-spacing:0.06em; }
-.wmu-role-admin { background:#fee2e2; color:#b91c1c; }
-.wmu-role-specialist { background:#dbeafe; color:#1d4ed8; }
-.wmu-role-client { background:#d1fae5; color:#047857; }
-.wmu-role-viewer { background:#f1f5f9; color:#475569; }
-.wmu-blocked-pill { display:inline-block; background:#fef3c7; color:#b45309;
-  font-size:10px; font-weight:800; padding:3px 9px; border-radius:999px; margin-left:8px; }
-.wmu-admin-pill { background:linear-gradient(135deg,#ef4444,#dc2626); color:white;
-  font-size:10px; font-weight:800; padding:3px 9px; border-radius:999px; margin-left:8px; }
-.wmu-section { font-size:11px; font-weight:800; letter-spacing:0.18em; text-transform:uppercase;
-  color:#475569; margin:22px 0 10px 0; display:flex; align-items:center; gap:10px; }
-.wmu-section .bar { flex:1; height:1px; background:linear-gradient(90deg,#cbd5e1 0%,transparent 100%); }
+.wmu-email { font:800 15px/1.2 'IBM Plex Sans',sans-serif; color:#0b1f3a; }
+.wmu-name { color:#3a4c66; font:500 13px 'IBM Plex Sans',sans-serif; margin-top:2px; }
+.wmu-meta { font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:11px;
+  color:#8090a6; margin-top:6px; }
+.wmu-role { font:700 11px/1 'IBM Plex Sans'; padding:5px 11px; border-radius:999px;
+  letter-spacing:.06em; }
+.wmu-role-admin { background:#fdeaec; color:#b02a37; border:1px solid #f3c6cc; }
+.wmu-role-specialist { background:#e8f0fe; color:#1c4478; border:1px solid #c8dcf4; }
+.wmu-role-client { background:#e6f6ec; color:#136c37; border:1px solid #bfe6cd; }
+.wmu-role-viewer { background:#f1f5f9; color:#475569; border:1px solid #e2e8f2; }
+.wmu-blocked-pill { display:inline-block; background:#fff4dc; color:#9a6700;
+  font:800 10px 'IBM Plex Sans'; padding:3px 9px; border-radius:999px; margin-left:8px;
+  border:1px solid #f3d58a; }
+.wmu-admin-pill { background:linear-gradient(135deg,#dc3545,#b02a37); color:#fff;
+  font:800 10px 'IBM Plex Sans'; padding:3px 9px; border-radius:999px; margin-left:8px; }
+.wmu-section { font:700 10.5px/1 'IBM Plex Mono',monospace; letter-spacing:.16em;
+  text-transform:uppercase; color:#274b7d; margin:20px 0 10px 0;
+  display:flex; align-items:center; gap:10px; }
+.wmu-section .bar { flex:1; height:1px; background:linear-gradient(90deg,#cbd5e1,transparent); }
 </style>
 """
 
@@ -80,11 +79,11 @@ def _humanize_iso(ts: str) -> str:
 def render() -> None:
     _user = get_current_user() or {}
     if not _user or not is_admin_email(_user.get("email", "")):
-        st.error("🚫 **Acceso denegado.** Esta sección es exclusiva del administrador "
+        st.error("**Acceso denegado.** Esta sección es exclusiva del administrador "
                  f"del sistema (`{ADMIN_EMAIL}`).")
         return
     if not is_supabase_auth_enabled():
-        st.error("⚠**Supabase Auth no está configurado.** Verificá que "
+        st.error("**Supabase Auth no está configurado.** Verificá que "
                  "`st.secrets['supabase']['url']` y `service_key` estén definidos.")
         return
 
@@ -175,22 +174,22 @@ def render() -> None:
                         try:
                             from core.clients import assign_client_to_email
                             if assign_client_to_email(_client_target_id, new_email):
-                                _assigned_msg = (f"\n\n✓ Asignado al cliente "
+                                _assigned_msg = (f"\n\nAsignado al cliente "
                                                  f"**{_client_target_id}** — verá solo los activos "
                                                  "de ese cliente en Live Monitoring.")
                             else:
-                                _assigned_msg = (f"\n\n⚠ No se pudo asignar al cliente "
+                                _assigned_msg = (f"\n\nNo se pudo asignar al cliente "
                                                  f"`{_client_target_id}` — editá data/clients.json "
                                                  f"y agregá `{new_email}` a su owner_emails.")
                         except Exception as _ae:  # noqa: BLE001
-                            _assigned_msg = f"\n\n⚠ Error asignando cliente: {_ae}"
-                    st.success(f"✓ Usuario **{new_email}** creado como **{new_role}**.\n\n"
+                            _assigned_msg = f"\n\nError asignando cliente: {_ae}"
+                    st.success(f"Usuario **{new_email}** creado como **{new_role}**.\n\n"
                                f"Ingresa **sin contraseña**: que entre a la app, escriba "
                                f"**{new_email}** y reciba el código en su correo." + _assigned_msg)
                     st.session_state.pop("_admin_users_cache", None)
                     st.session_state.pop("_new_user_temp_pwd", None)
                 else:
-                    st.error(f"✗ No se pudo crear: {result.get('error', 'error desconocido')}")
+                    st.error(f"No se pudo crear: {result.get('error', 'error desconocido')}")
 
     # --- Búsqueda + refresh ---
     st.markdown('<div class="wmu-section">Usuarios registrados <div class="bar"></div></div>',
@@ -200,7 +199,7 @@ def render() -> None:
         _q = st.text_input("Buscar por email o nombre", placeholder="Buscar...",
                            key="admin_users_search", label_visibility="collapsed").strip().lower()
     with ctop2:
-        if st.button("🔄  Refrescar lista", use_container_width=True, key="refresh_users"):
+        if st.button("Refrescar lista", use_container_width=True, key="refresh_users"):
             _all_users = _load_users(force_refresh=True)
             st.rerun()
 
@@ -225,13 +224,14 @@ def render() -> None:
             is_blocked = u.get("is_blocked", False)
             is_protected_admin = is_admin_email(email)
 
-            blocked_pill = '<span class="wmu-blocked-pill">🚫 BLOQUEADO</span>' if is_blocked else ""
-            admin_pill = '<span class="wmu-admin-pill">🔐 ADMIN ÚNICO</span>' if is_protected_admin else ""
+            blocked_pill = '<span class="wmu-blocked-pill">BLOQUEADO</span>' if is_blocked else ""
+            admin_pill = '<span class="wmu-admin-pill">ADMIN ÚNICO</span>' if is_protected_admin else ""
             role_class = f"wmu-role-{role}" if role in ROLES else "wmu-role-viewer"
+            _card_role = role if role in ROLES else "viewer"
             role_label = ROLES.get(role, role)
             st.markdown(
                 f"""
-                <div class="wmu-card">
+                <div class="wmu-card role-{_card_role}">
                     <div class="wmu-row-head">
                         <div>
                             <div class="wmu-email">{email}{admin_pill}{blocked_pill}</div>
@@ -252,7 +252,7 @@ def render() -> None:
             else:
                 ac1, ac2, ac3, ac4, ac5 = st.columns(5)
                 with ac1:
-                    with st.popover("🎭  Cambiar role", use_container_width=True):
+                    with st.popover("Cambiar role", use_container_width=True):
                         _opts = list(ROLES.keys())
                         _idx = _opts.index(role) if role in _opts else 2
                         new_role_pick = st.selectbox(f"Nuevo role para {email}", options=_opts,
@@ -275,7 +275,7 @@ def render() -> None:
                                      use_container_width=True):
                             res = reset_user_password(uid, _temp)
                             if res.get("ok"):
-                                st.success(f"✓ Password reseteada. Entregale al usuario: `{_temp}`")
+                                st.success(f"Password reseteada. Entregale al usuario: `{_temp}`")
                                 st.session_state.pop("_admin_users_cache", None)
                             else:
                                 st.error(res.get("error", "Falló."))
@@ -291,7 +291,7 @@ def render() -> None:
                             else:
                                 st.error(res.get("error", "Falló."))
                     else:
-                        if st.button("🚫  Bloquear", key=f"block_{uid}",
+                        if st.button("Bloquear", key=f"block_{uid}",
                                      use_container_width=True):
                             res = block_user(uid)
                             if res.get("ok"):
@@ -333,7 +333,7 @@ def render() -> None:
                                 st.error(res.get("error", "Falló."))
 
     st.divider()
-    st.caption(f"📌 Total: {_n_total} usuarios · Roles: admin={_n_admin}, "
+    st.caption(f"Total: {_n_total} usuarios · Roles: admin={_n_admin}, "
                f"specialist={_n_specialist}, client={_n_client}, bloqueados={_n_blocked}. "
                f"Conectado a Supabase como `{_user.get('email', '')}`.")
 

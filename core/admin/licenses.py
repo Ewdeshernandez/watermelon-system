@@ -48,7 +48,7 @@ def render() -> None:
 
     _k1, _k2 = st.columns(2)
     _k1.metric("Licencias revocadas", len(_revoked))
-    _k2.metric("Endpoint heartbeat", "✓ Activo",
+    _k2.metric("Endpoint heartbeat", "Activo",
                help="https://yxeqwkhybueelmkrdkgq.supabase.co/functions/v1/license-check")
     st.divider()
 
@@ -80,7 +80,7 @@ def render() -> None:
                 key="new_revoke_reason")
 
         _confirm = st.checkbox(
-            "✓ Confirmo que esta acción bloqueará la app del cliente al "
+            "Confirmo que esta acción bloqueará la app del cliente al "
             "próximo arranque con internet", key="new_revoke_confirm")
         _submitted = st.form_submit_button("REVOCAR LICENCIA", type="primary",
                                            use_container_width=True)
@@ -111,7 +111,7 @@ def render() -> None:
                     }).execute()
                     st.cache_data.clear()
                     st.success(
-                        f"✓ Licencia `{_lid_clean[:8]}...` REVOCADA. "
+                        f"Licencia `{_lid_clean[:8]}...` REVOCADA. "
                         f"La próxima vez que el cliente abra Watermelon Planta "
                         f"con internet, será bloqueado con tu motivo.")
                     st.rerun()
@@ -121,7 +121,8 @@ def render() -> None:
     st.divider()
 
     # --- Licencias actualmente revocadas ---
-    st.markdown("### Licencias actualmente revocadas")
+    st.markdown('<div class="wi-label">Licencias actualmente revocadas</div>',
+                unsafe_allow_html=True)
     if not _revoked:
         st.info("No hay ninguna licencia revocada en este momento. "
                 "Todas las licencias emitidas están activas (mientras no estén vencidas).")
@@ -136,41 +137,41 @@ def render() -> None:
             _revoked_by = r.get("revoked_by", "")
             st.markdown(
                 f"""
-                <div style="background:#ffffff;border-radius:10px;padding:14px;
-                            border:1px solid rgba(239,68,68,0.25);
-                            border-left:4px solid #ef4444;margin-bottom:12px;
-                            box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                <div style="background:#fff;border:1px solid #f3c6cc;border-left:4px solid #dc3545;
+                            border-radius:12px;padding:14px 16px;margin-bottom:11px;
+                            box-shadow:0 1px 2px rgba(11,31,58,.05),0 6px 18px rgba(11,31,58,.05);
+                            font-family:'IBM Plex Sans',sans-serif;">
                     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-                        <span style="background:rgba(239,68,68,0.10);color:#ef4444;
-                                     padding:2px 8px;border-radius:5px;font-size:10px;
-                                     font-weight:800;letter-spacing:1px;
-                                     text-transform:uppercase;">Revocada</span>
-                        <span style="font-size:15px;font-weight:700;color:#0f172a;">{_customer}</span>
+                        <span style="background:#fdeaec;color:#b02a37;border:1px solid #f3c6cc;
+                                     padding:3px 9px;border-radius:999px;
+                                     font:800 10px 'IBM Plex Sans';letter-spacing:.08em;
+                                     text-transform:uppercase;">● Revocada</span>
+                        <span style="font:800 15px 'IBM Plex Sans';color:#0b1f3a;">{_customer}</span>
                     </div>
-                    <div style="font-size:12px;color:#475569;line-height:1.6;">
-                        📧 {_email}<br>
-                        <code style="font-size:10px;">{_lid}</code><br>
-                        📅 Revocada el {_revoked_at} por {_revoked_by}<br>
+                    <div style="font-size:12px;color:#3a4c66;line-height:1.7;">
+                        {_email}<br>
+                        <code style="font:600 11px 'IBM Plex Mono',monospace;color:#274b7d;">{_lid}</code><br>
+                        <span style="color:#8090a6;">Revocada el {_revoked_at} por {_revoked_by}</span><br>
                         <i>{_reason}</i>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
             _b1, _b2, _b3 = st.columns([1, 1, 4])
             with _b1:
-                if st.button("♻ Reactivar", key=f"reactivate_{_lid}",
+                if st.button("Reactivar", key=f"reactivate_{_lid}",
                              use_container_width=True):
                     try:
                         sb = get_supabase_client()
                         sb.table("revoked_licenses").delete().eq("license_id", _lid).execute()
                         st.cache_data.clear()
-                        st.success(f"✓ Licencia `{_lid[:8]}...` reactivada. "
+                        st.success(f"Licencia `{_lid[:8]}...` reactivada. "
                                    f"Próximo arranque online del cliente → desbloqueado.")
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"Error al reactivar: {e}")
 
     st.divider()
-    with st.expander("ℹ Cómo funciona el sistema de revocación"):
+    with st.expander("Cómo funciona el sistema de revocación"):
         st.markdown(
             """
             **Flujo técnico:**
@@ -187,7 +188,7 @@ def render() -> None:
                conecte. Si pasan **> 30 días sin poder validar** → bloqueo
                automático por seguridad.
 
-            **Reactivación:** click en ♻ borra el `license_id` de la blacklist.
+            **Reactivación:** click en borra el `license_id` de la blacklist.
 
             **Cómo obtener el `license_id`:** output de `tools/license_issue.py`
             o el campo `jti` del `license.token` decodificado en jwt.io.
