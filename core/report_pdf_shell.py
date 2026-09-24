@@ -430,7 +430,7 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
 
     # Firmas
     prepared_by = (meta.get("prepared_by") or "").strip()
-    prepared_role = (meta.get("prepared_role") or "Senior Machinery Diagnostics Engineer · ISO 18436 Cat. III").strip()
+    prepared_role = (meta.get("prepared_role") or "Senior Machinery Diagnostics Engineer").strip()
     prepared_city = (meta.get("prepared_city") or "Cajicá, Cundinamarca · Colombia").strip()
     reviewed_by = (meta.get("reviewed_by") or "").strip()
     reviewed_role = (meta.get("reviewed_role") or "Machinery Diagnostic Champion").strip()

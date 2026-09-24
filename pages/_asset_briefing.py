@@ -473,7 +473,7 @@ for _iid, _tag, _d in _pending:
             _elab = st.text_input("Prepared by", value="Ángel Daniel Leiva",
                                   key=f"bfq_elab_{_iid}")
             _elab_rol = st.text_input("Role (prepared)",
-                                      value="Senior Machinery Diagnostics Engineer · ISO 18436 Cat. III",
+                                      value="Senior Machinery Diagnostics Engineer",
                                       key=f"bfq_elabr_{_iid}",
                                       placeholder="optional")
         with _s2:
