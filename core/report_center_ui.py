@@ -417,8 +417,9 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
             try:
                 import pymupdf  # type: ignore
                 _doc = pymupdf.open(stream=_pdf, filetype="pdf")
-                for _pg in _doc[: min(3, _doc.page_count)]:
-                    _imgs.append(_pg.get_pixmap(matrix=pymupdf.Matrix(1.4, 1.4)).tobytes("png"))
+                # TODAS las páginas (cap de seguridad) a buena resolución.
+                for _pg in _doc[: min(40, _doc.page_count)]:
+                    _imgs.append(_pg.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0)).tobytes("png"))
                 st.session_state[f"rc_prevn_{_iid}"] = _doc.page_count
             except Exception:
                 _imgs = []
@@ -427,8 +428,10 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
         _has_preview = bool(st.session_state.get(f"rc_pdf_{_iid}"))
         _imgs = st.session_state.get(f"rc_prevpng_{_iid}") or []
         if _imgs:
-            with st.expander(f"👁 Report preview — {st.session_state.get(f'rc_prevn_{_iid}', len(_imgs))} "
-                             f"page(s) (showing first {len(_imgs)})", expanded=True):
+            _npag = st.session_state.get(f"rc_prevn_{_iid}", len(_imgs))
+            with st.expander(f"👁 Report preview — {_npag} page(s) "
+                             f"(scroll to review all · download below for full quality)",
+                             expanded=True):
                 for _im in _imgs:
                     st.image(_im, use_container_width=True)
         elif _has_preview:
