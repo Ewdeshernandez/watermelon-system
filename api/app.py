@@ -411,6 +411,47 @@ def create_app() -> "FastAPI":
         }
 
     # =========================================================
+    # Figuras — FUENTE ÚNICA (core.figure_series). Web, reportes y app
+    # consumen las MISMAS series (espectro / onda / órbita). v1.
+    # =========================================================
+    @app.get("/v1/assets/{asset}/points", tags=["figures"],
+             summary="Puntos de medición disponibles (dynamic_raw)")
+    def figure_points(asset: str,
+                      api_key_hash: str = Depends(_api_key_dependency)):
+        from core import figure_series as _fs
+        return {"asset": asset, "items": _fs.list_points(asset)}
+
+    @app.get("/v1/assets/{asset}/spectrum", tags=["figures"],
+             summary="Espectro (FFT Hann) de un sensor")
+    def figure_spectrum(asset: str, token: str = Query(..., description="ej. 1XD, 4XA"),
+                        api_key_hash: str = Depends(_api_key_dependency)):
+        from core import figure_series as _fs
+        out = _fs.spectrum_series(asset, token)
+        if not out:
+            raise HTTPException(status_code=404, detail="Sin datos para ese sensor")
+        return out
+
+    @app.get("/v1/assets/{asset}/waveform", tags=["figures"],
+             summary="Forma de onda de un sensor")
+    def figure_waveform(asset: str, token: str = Query(..., description="ej. 1XD, 4XA"),
+                        api_key_hash: str = Depends(_api_key_dependency)):
+        from core import figure_series as _fs
+        out = _fs.waveform_series(asset, token)
+        if not out:
+            raise HTTPException(status_code=404, detail="Sin datos para ese sensor")
+        return out
+
+    @app.get("/v1/assets/{asset}/orbit", tags=["figures"],
+             summary="Órbita X vs Y de un cojinete")
+    def figure_orbit(asset: str, bearing: str = Query(..., description="ej. 1, BRG1"),
+                     api_key_hash: str = Depends(_api_key_dependency)):
+        from core import figure_series as _fs
+        out = _fs.orbit_series(asset, bearing)
+        if not out:
+            raise HTTPException(status_code=404, detail="Sin datos para ese cojinete")
+        return out
+
+    # =========================================================
     # Manejo global de errores
     # =========================================================
     @app.exception_handler(Exception)
