@@ -483,6 +483,10 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
         ]], colWidths=[8.3 * cm, 8.3 * cm])
         sig_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            # ALIGN CENTER manda sobre el contenido de la celda (la firma
+            # cursiva es un Image; su hAlign propio NO aplica dentro de una
+            # tabla — sin esto quedaba pegada a la izquierda).
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
@@ -499,6 +503,7 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
         sig_tbl = Table([[_cell(label, name, role, city, _sig)]], colWidths=[11.0 * cm])
         sig_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
