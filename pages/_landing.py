@@ -148,7 +148,7 @@ if _my_role in ("admin", "specialist"):
         with _al2:
             if st.button("✅ Go to approve", key="home_goto_briefing",
                          type="primary", use_container_width=True):
-                st.switch_page("pages/_asset_briefing.py")
+                st.switch_page("pages/15_Report_Center.py")
 
 # Toggle para admin/specialist: "Mi actividad" vs "Toda la actividad"
 # Default: "toda" para admin (ven movimiento del equipo entero), "mía"

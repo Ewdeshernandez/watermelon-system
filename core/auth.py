@@ -92,11 +92,9 @@ NAV_GROUPS = [
             {"label": "📈  Trends", "page": "pages/04_Trends.py"},
             # Ciclo 17.27 — AI Assistant Q&A sobre archivo histórico
             {"label": "✧  AI Assistant", "page": "pages/_ai_assistant.py"},
-            # Ciclo 23.350 — "Briefing Mensual" retirado del nav: el nuevo
-            # "Briefing por activo" (Semanal/Mensual, figura-rico) lo reemplaza
-            # por completo. La página y su backend siguen en el repo por
-            # compat de cron/imports, pero ya no se exponen en el menú.
-            {"label": "🍉  Briefing por activo", "page": "pages/_asset_briefing.py"},
+            # "Briefing por activo" (pages/_asset_briefing.py) se movió a la
+            # sección Reports como "Report Center". La página vieja sigue en el
+            # repo por compat de cron/imports, pero ya no se expone en el menú.
         ],
     },
     {
@@ -140,6 +138,10 @@ NAV_GROUPS = [
     {
         "section": "Reports",
         "items": [
+            # Report Center — aprobación/firma/envío + programación de envíos
+            # centralizada (por cliente/activo). Reemplaza el viejo
+            # "Briefing por activo" (que sigue en el repo por compat de cron).
+            {"label": "🍉  Report Center", "page": "pages/15_Report_Center.py"},
             # Ciclo 17.33 — eliminados Phase Analysis y Diagnostics legacy
             {"label": "⎙  Reports", "page": "pages/16_Reports.py"},
         ],
@@ -202,6 +204,9 @@ CLIENT_BLOCKED_PAGES = {
     "pages/_monthly_briefing.py",
     # Ciclo 23.347 — Briefing por activo: herramienta del analista
     "pages/_asset_briefing.py",
+    # Report Center: aprobación/firma/envío + programación de envíos —
+    # trabajo interno del analista. El cliente recibe el reporte, no el módulo.
+    "pages/15_Report_Center.py",
     # Ciclo 23.146 — Modal Analysis es trabajo interno SIGA (EMA + OMA + FEA
     # bajo ISO 7626 / ISO 20816 / API 684). El cliente no debe ver el módulo
     # de adquisición ni los curve fits — solo recibe el reporte final modal
