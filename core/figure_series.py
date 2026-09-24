@@ -55,7 +55,9 @@ def _point_channel(token: str):
 
 
 def _spectrum_xf(v, fs: float, disp: bool):
-    """Transformada canónica (idéntica a la de los reportes)."""
+    """Transformada canónica ÚNICA (misma que la app móvil): Hann + zero-pad a
+    pow2 ≈ ×8 → curva suave de alta resolución; amplitud calibrada a la señal
+    real (n, no nfft). Reportes y app consumen esto = idénticos."""
     import numpy as np
     v = np.asarray(v, float)
     v = v[np.isfinite(v)]
@@ -64,9 +66,12 @@ def _spectrum_xf(v, fs: float, disp: bool):
         return None, None
     w = np.hanning(n)
     vw = (v - v.mean()) * w
-    sp = np.fft.rfft(vw)
-    fr = np.fft.rfftfreq(n, 1.0 / fs)
-    amp = np.abs(sp) * 2.0 / (n * 0.5)
+    nfft = 1
+    while nfft < n * 8:
+        nfft <<= 1
+    sp = np.fft.rfft(vw, n=nfft)                 # zero-pad a nfft
+    fr = np.fft.rfftfreq(nfft, 1.0 / fs)
+    amp = np.abs(sp) * 2.0 / (n * 0.5)           # calibrado a n (no nfft)
     if amp.size:
         amp[0] /= 2.0
     if disp:
