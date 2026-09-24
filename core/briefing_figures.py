@@ -735,16 +735,33 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
     bearings = [b for b in payload.get("bearings", [])
                 if b.get("x_values") and b.get("y_values")]
     # 2026-09-24 (pedido del usuario): la órbita de PROXIMIDAD del gearbox SÍ va
-    # (par 4XD/4YD = órbita válida del eje del reductor). Solo se excluyen los
-    # AUXILIARES del gearbox (bomba/starter) y sensores no-proximidad, que de
-    # todos modos no forman bearings de órbita. Antes (v3.31.414) se excluía todo
-    # el gearbox por plano — se revirtió.
+    # (par 4XD/4YD = órbita válida del eje del reductor). Se admiten SOLO los
+    # planos que tienen sensor de PROXIMIDAD en la config vigente (los únicos que
+    # forman órbita real) → incluye BRG4 (gearbox) y descarta planos fantasma de
+    # configs viejas (ej. "BRG 3" sin par de proximidad, que además inflaba la
+    # escala). Antes (v3.31.414) se excluía TODO el gearbox — revertido.
     import re as _re
     _EXCL = ("REDUCTOR", "BOMBA", "PUMP", "STARTER")
+    _prox_planes: set = set()
+    try:
+        from core.instance_state import get_instance
+        for s in getattr(get_instance(instance_id), "sensors", None) or []:
+            if "proximity" in str(s.get("sensor_type", "")).lower():
+                try:
+                    _prox_planes.add(int(s.get("plane", 0) or 0))
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     def _orbit_ok(b) -> bool:
         lbl = str(b.get("bearing_label", "")).upper()
-        return not any(t in lbl for t in _EXCL)
+        if any(t in lbl for t in _EXCL):
+            return False
+        m = _re.search(r"(\d+)", lbl)
+        if _prox_planes and m and int(m.group(1)) not in _prox_planes:
+            return False
+        return True
 
     bearings = [b for b in bearings if _orbit_ok(b)]
     bearings = sorted(bearings,
