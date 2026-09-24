@@ -734,33 +734,17 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
         return {"png": None, "analysis": ""}
     bearings = [b for b in payload.get("bearings", [])
                 if b.get("x_values") and b.get("y_values")]
-    # v3.31.414 — Órbitas SOLO de turbina y generador (el gearbox y sus
-    # auxiliares no van), en orden físico del tren. Se excluye por token del
-    # label Y por número de plano (labels genéricos tipo "BRG 3": el plano 3
-    # es gearbox según la config del activo).
+    # 2026-09-24 (pedido del usuario): la órbita de PROXIMIDAD del gearbox SÍ va
+    # (par 4XD/4YD = órbita válida del eje del reductor). Solo se excluyen los
+    # AUXILIARES del gearbox (bomba/starter) y sensores no-proximidad, que de
+    # todos modos no forman bearings de órbita. Antes (v3.31.414) se excluía todo
+    # el gearbox por plano — se revirtió.
     import re as _re
-    _EXCL = ("GEARBOX", "REDUCTOR", "BOMBA", "PUMP", "STARTER")
-    _gbx_planes: set = set()
-    try:
-        from core.instance_state import get_instance
-        for s in getattr(get_instance(instance_id), "sensors", None) or []:
-            pl = str(s.get("plane_label", "")).upper()
-            if any(t in pl for t in _EXCL):
-                try:
-                    _gbx_planes.add(int(s.get("plane", 0) or 0))
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    _EXCL = ("REDUCTOR", "BOMBA", "PUMP", "STARTER")
 
     def _orbit_ok(b) -> bool:
         lbl = str(b.get("bearing_label", "")).upper()
-        if any(t in lbl for t in _EXCL):
-            return False
-        m = _re.search(r"(\d+)", lbl)
-        if m and int(m.group(1)) in _gbx_planes:
-            return False
-        return True
+        return not any(t in lbl for t in _EXCL)
 
     bearings = [b for b in bearings if _orbit_ok(b)]
     bearings = sorted(bearings,
