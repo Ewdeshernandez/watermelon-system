@@ -385,6 +385,9 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                                       key=f"rc_aprbr_{_iid}", placeholder="optional")
 
         # --- Gate de aprobación: primero VISTA PREVIA + REVISAR recomendaciones ---
+        st.caption("⏳ La vista previa arma el **reporte completo** (refresca datos del "
+                   "robot y renderiza espectros / onda / órbitas): tarda **~2-4 min**. "
+                   "No cierres la pestaña; al terminar aparece la vista previa aquí.")
         if st.button("👁 Generate report preview", key=f"rc_prev_{_iid}",
                      use_container_width=True):
             try:
