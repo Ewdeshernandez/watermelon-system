@@ -777,7 +777,7 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
         except Exception:
             gx = gy = None
 
-        bearings = bearings[:4]
+        bearings = bearings[:6]          # incluye el gearbox (BRG4), no solo 4
         ncol = min(len(bearings), 2)
         nrow = (len(bearings) + ncol - 1) // ncol
         fig = make_subplots(rows=nrow, cols=ncol,
