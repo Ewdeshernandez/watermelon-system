@@ -6,12 +6,13 @@ Render helpers del **Report Center** (pestaña "Report Center" del nav).
 
 Un solo lugar para todo lo de reportes:
   · render_approval(me_name)  → generar borrador + cola de PENDIENTES +
-    detalle de revisión/firma/aprobación (la lógica que vivía en
-    pages/_asset_briefing.py, ahora compartida).
-  · render_delivery()         → programación de ENVÍOS centralizada por
-    Cliente → Activo: correo(s), WhatsApp(s), horario del briefing
-    (semanal/mensual) y aviso automático por alarma. Reemplaza la config
-    dispersa que estaba en Machinery Library.
+    detalle de revisión/firma/aprobación. Los firmantes se pre-cargan de la
+    config del activo (get_signers).
+  · render_delivery()         → configuración POR MÁQUINA (como la de envío):
+    correo(s), WhatsApp(s), los distintos reportes que le llegan (Semanal /
+    Mensual, cada uno con su día y hora), aviso por alarma, y quién ELABORA /
+    quién REVISA-aprueba. Un solo lugar por cliente/activo. Reemplaza la
+    config dispersa que estaba en Machinery Library.
 
 No hace set_page_config ni auth — eso lo hace la página que lo importa.
 """
@@ -19,67 +20,124 @@ from __future__ import annotations
 
 import streamlit as st
 
+_DIAS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+            "Saturday", "Sunday"]
+_DIAS_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+_REPORT_TYPES = ["Semanal", "Mensual"]
+
 
 # -----------------------------------------------------------------
-# CSS compartido (mismo lenguaje enterprise System1/AMS del briefing)
+# CSS — look industrial / internacional (steel navy + amber accent)
 # -----------------------------------------------------------------
 def inject_css() -> None:
     st.markdown(
         """
         <style>
-        .bf-label {
-            font-size: 10.5px; font-weight: 700; letter-spacing: 0.16em;
-            text-transform: uppercase; color: #94a3b8; margin: 0 0 9px 2px;
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+        :root{
+          --rc-ink:#0b1f3a; --rc-ink2:#3a4c66; --rc-mut:#8090a6;
+          --rc-line:#e2e8f2; --rc-panel:#ffffff; --rc-panel2:#f4f7fb;
+          --rc-navy:#12305e; --rc-steel:#274b7d;
+          --rc-amber:#e8890c; --rc-amber-soft:#fff4e2;
+          --rc-ok:#1f9d55; --rc-warn:#e8890c; --rc-dang:#dc3545; --rc-off:#8a97a8;
+          --rc-shadow:0 1px 2px rgba(11,31,58,.05), 0 8px 24px rgba(11,31,58,.06);
         }
-        .bf-label .bf-accent { color: #e11d48; }
-        div[data-testid="stRadio"] [role="radiogroup"] { gap: 8px; }
-        div[data-testid="stRadio"] [role="radiogroup"] > label {
-            border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 11px;
-            padding: 9px 16px; margin: 0 !important; transition: all .16s ease; cursor: pointer;
+        /* Banda de encabezado por vista */
+        .rc-band{
+          position:relative; border-radius:16px; padding:18px 22px; margin:2px 0 18px;
+          background:linear-gradient(120deg,#0e2547 0%,#12305e 46%,#274b7d 100%);
+          color:#eaf1fb; overflow:hidden; box-shadow:0 10px 30px rgba(12,32,78,.22);
         }
-        div[data-testid="stRadio"] [role="radiogroup"] > label:hover {
-            border-color: #cbd5e1; background: #ffffff;
-        }
-        div[data-testid="stRadio"] [role="radiogroup"] > label > div:first-child { display: none !important; }
-        div[data-testid="stRadio"] [role="radiogroup"] > label p { font-weight: 600; color: #475569; font-size: 0.92rem; }
-        div[data-testid="stRadio"] [role="radiogroup"] > label:has(input:checked) {
-            border-color: #0f1d36; background: linear-gradient(180deg, #0f1d36 0%, #16284a 100%);
-            box-shadow: 0 6px 16px rgba(15,29,54,0.18);
-        }
-        div[data-testid="stRadio"] [role="radiogroup"] > label:has(input:checked) p { color: #f8fafc; }
-        .bf-row {
-            display: flex; align-items: center; gap: 14px;
-            border: 1px solid #e6ecf5; border-left: 4px solid var(--bf-dot, #94a3b8);
-            background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-            border-radius: 14px; padding: 13px 18px; box-shadow: 0 6px 18px rgba(15,23,42,0.04);
-        }
-        .bf-row-main { flex: 1 1 auto; min-width: 0; }
-        .bf-row-tag { font-size: 1.02rem; font-weight: 800; color: #0f172a; letter-spacing: -0.01em; }
-        .bf-row-sev { font-size: 0.85rem; font-weight: 600; color: #475569; }
-        .bf-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; }
-        .bf-chip { border: 1px solid #e2e8f0; background: #f8fafc; color: #334155;
-            border-radius: 999px; padding: 3px 11px; font-size: 0.78rem; font-weight: 600; }
-        .bf-dot { width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto;
-            box-shadow: 0 0 0 4px var(--bf-dot-soft, rgba(148,163,184,0.16)); }
-        .bf-foot { display: flex; align-items: flex-start; gap: 9px;
-            border: 1px solid #e6ecf5; background: #f8fafc; border-radius: 12px;
-            padding: 11px 15px; margin-top: 6px; color: #64748b; font-size: 0.86rem; line-height: 1.5; }
+        .rc-band::after{content:"";position:absolute;inset:0;
+          background:repeating-linear-gradient(135deg,rgba(255,255,255,.045) 0 2px,transparent 2px 9px);
+          pointer-events:none;}
+        .rc-band .kick{font:600 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.28em;
+          text-transform:uppercase;color:#8fb4e6;}
+        .rc-band h2{margin:6px 0 2px;font:700 22px/1.15 'IBM Plex Sans',sans-serif;letter-spacing:-.4px;}
+        .rc-band p{margin:0;color:#b9cbe6;font:500 13px/1.4 'IBM Plex Sans',sans-serif;max-width:70ch;}
+        .rc-band .rc-strip{position:absolute;top:0;right:0;height:100%;width:6px;
+          background:linear-gradient(180deg,var(--rc-amber),#c56f05);}
+        .rc-kpis{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
+        .rc-kpi{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.14);
+          border-radius:11px;padding:8px 14px;min-width:96px;}
+        .rc-kpi .n{font:700 20px/1 'IBM Plex Sans',sans-serif;display:flex;align-items:center;gap:8px;}
+        .rc-kpi .l{font:500 10.5px/1.2 'IBM Plex Sans';color:#a9c1e2;margin-top:4px;
+          text-transform:uppercase;letter-spacing:.05em;}
+
+        .bf-label{font:700 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;
+          text-transform:uppercase;color:var(--rc-mut);margin:0 0 9px 2px;}
+        .bf-label .bf-accent{color:var(--rc-amber);}
+
+        /* Radios como segmented control (más sobrio, steel) */
+        div[data-testid="stRadio"] [role="radiogroup"]{gap:8px;}
+        div[data-testid="stRadio"] [role="radiogroup"] > label{
+          border:1px solid var(--rc-line);background:var(--rc-panel2);border-radius:11px;
+          padding:9px 18px;margin:0 !important;transition:all .16s ease;cursor:pointer;}
+        div[data-testid="stRadio"] [role="radiogroup"] > label:hover{border-color:#c4d2e6;background:#fff;}
+        div[data-testid="stRadio"] [role="radiogroup"] > label > div:first-child{display:none !important;}
+        div[data-testid="stRadio"] [role="radiogroup"] > label p{font-weight:600;color:var(--rc-ink2);font-size:.92rem;}
+        div[data-testid="stRadio"] [role="radiogroup"] > label:has(input:checked){
+          border-color:#12305e;background:linear-gradient(180deg,#12305e 0%,#1c4478 100%);
+          box-shadow:0 6px 16px rgba(18,48,94,.22);}
+        div[data-testid="stRadio"] [role="radiogroup"] > label:has(input:checked) p{color:#f2f7ff;}
+
+        /* Fila de la cola (approval) */
+        .bf-row{display:flex;align-items:center;gap:14px;
+          border:1px solid var(--rc-line);border-left:4px solid var(--bf-dot,#8a97a8);
+          background:linear-gradient(180deg,#ffffff 0%,#fafcff 100%);
+          border-radius:14px;padding:14px 18px;box-shadow:var(--rc-shadow);}
+        .bf-row-main{flex:1 1 auto;min-width:0;}
+        .bf-row-tag{font:800 1.04rem/1 'IBM Plex Sans';color:var(--rc-ink);letter-spacing:-.01em;}
+        .bf-row-sev{font-size:.85rem;font-weight:600;color:var(--rc-ink2);}
+        .bf-chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px;}
+        .bf-chip{border:1px solid var(--rc-line);background:var(--rc-panel2);color:var(--rc-ink2);
+          border-radius:999px;padding:3px 11px;font:600 .76rem/1.3 'IBM Plex Mono',monospace;}
+        .bf-dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;
+          box-shadow:0 0 0 4px var(--bf-dot-soft,rgba(138,151,168,.16));}
+        .bf-foot{display:flex;align-items:flex-start;gap:9px;border:1px solid var(--rc-line);
+          background:var(--rc-panel2);border-radius:12px;padding:12px 16px;margin-top:8px;
+          color:var(--rc-ink2);font-size:.86rem;line-height:1.5;}
+
         /* Delivery center */
-        .dc-client { font-size: 1.05rem; font-weight: 800; color: #0f172a; letter-spacing: -0.01em; }
-        .dc-meta { color: #94a3b8; font-size: 0.82rem; font-weight: 600; }
-        .dc-asset-tag { font-size: 1.0rem; font-weight: 800; color: #0f172a; }
-        .dc-asset-sub { color: #64748b; font-size: 0.82rem; }
+        .dc-client{display:flex;align-items:center;gap:10px;margin:6px 0 2px;}
+        .dc-client .cn{font:800 1.12rem/1 'IBM Plex Sans';color:var(--rc-ink);letter-spacing:-.01em;}
+        .dc-client .cm{font:600 .78rem/1 'IBM Plex Mono',monospace;color:var(--rc-mut);
+          background:var(--rc-panel2);border:1px solid var(--rc-line);border-radius:999px;padding:3px 10px;}
+        .dc-client .rule{flex:1;height:1px;background:linear-gradient(90deg,var(--rc-line),transparent);}
+        .dc-asset{display:flex;align-items:baseline;gap:10px;margin-bottom:2px;}
+        .dc-asset .tg{font:800 1.02rem/1 'IBM Plex Sans';color:var(--rc-ink);
+          padding:2px 0;border-bottom:2px solid var(--rc-amber);}
+        .dc-asset .sb{font:500 .8rem/1 'IBM Plex Mono',monospace;color:var(--rc-mut);}
+        .dc-sec{font:700 10px/1 'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase;
+          color:var(--rc-steel);margin:6px 0 2px;}
+        .dc-badge{display:inline-flex;align-items:center;gap:7px;font:600 .78rem/1 'IBM Plex Sans';
+          border-radius:8px;padding:5px 11px;border:1px solid var(--rc-line);background:var(--rc-panel2);color:var(--rc-ink2);}
+        .dc-badge.wk{background:#eaf1fb;border-color:#c8dcf4;color:#1c4478;}
+        .dc-badge.mo{background:var(--rc-amber-soft);border-color:#f3d9ad;color:#9a5b06;}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-# =================================================================
-# VISTA 1 — APROBACIÓN (generar borrador + cola + detalle)
-# =================================================================
-_DIAS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-            "Saturday", "Sunday"]
+def _band(kick: str, title: str, sub: str, kpis=None) -> None:
+    _k = ""
+    if kpis:
+        cells = "".join(
+            f'<div class="rc-kpi"><div class="n">{n}</div><div class="l">{l}</div></div>'
+            for n, l in kpis)
+        _k = f'<div class="rc-kpis">{cells}</div>'
+    st.markdown(
+        f'<div class="rc-band"><span class="rc-strip"></span>'
+        f'<div class="kick">{kick}</div><h2>{title}</h2><p>{sub}</p>{_k}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _dot(sev: str) -> str:
+    c = {"ok": "#1f9d55", "warn": "#e8890c", "dang": "#dc3545", "off": "#8a97a8"}.get(sev, "#8a97a8")
+    return f'<span style="color:{c};font-size:20px;line-height:0;">●</span>'
 
 
 def _cached_instances():
@@ -92,9 +150,20 @@ def _cached_instances():
     return _inner(get_instances_version())
 
 
+# =================================================================
+# VISTA 1 — APPROVAL
+# =================================================================
 def render_approval(me_name: str = "") -> None:
-    """Panel de generación + cola de pendientes + detalle de aprobación."""
     from core.briefing_queue import list_pending
+
+    if "rc_cache" not in st.session_state:
+        st.session_state["rc_cache"] = list_pending()
+    _pending = st.session_state["rc_cache"]
+
+    _band("Report Center · Approval", "Review, sign &amp; send",
+          "Generate the draft, review the recommendations, sign off and approve — "
+          "the final signed PDF is delivered through each asset's configured channels.",
+          kpis=[(f'{_dot("warn")} {len(_pending)}', "Pending approval")])
 
     # ---- Panel de generación ----
     with st.container(border=True):
@@ -132,8 +201,7 @@ def render_approval(me_name: str = "") -> None:
         _use_ai = st.toggle("Use AI for drafting (grounded in the knowledge base)",
                             value=True, key="rc_use_ai",
                             help="If enabled and credentials are available, the AI improves "
-                                 "the draft (grounded in courses/standards/manuals). Otherwise "
-                                 "the deterministic draft is used (always works).")
+                                 "the draft (grounded in courses/standards/manuals).")
 
     if st.button("📝  Generate report and send it to APPROVAL", type="primary",
                  use_container_width=True, key="rc_gen"):
@@ -158,10 +226,6 @@ def render_approval(me_name: str = "") -> None:
     st.markdown("")
 
     # ---- Cola de pendientes ----
-    if "rc_cache" not in st.session_state:
-        st.session_state["rc_cache"] = list_pending()
-    _pending = st.session_state["rc_cache"]
-
     _qh1, _qh2 = st.columns([4, 1])
     with _qh1:
         st.markdown(f'<div class="bf-label">Pending approval '
@@ -184,8 +248,8 @@ def render_approval(me_name: str = "") -> None:
             _st_txt = (_d.get("kpis") or {}).get("status", "—")
             st.markdown(
                 f"""
-                <div class="bf-row" style="--bf-dot:#94a3b8;">
-                    <span class="bf-dot"></span>
+                <div class="bf-row" style="--bf-dot:#274b7d;">
+                    <span class="bf-dot" style="background:#274b7d;"></span>
                     <div class="bf-row-main">
                         <span class="bf-row-tag">{_tag}</span>
                         &nbsp;<span class="bf-row-sev">· {_d.get('period','Semanal')} report · {_st_txt}</span>
@@ -222,12 +286,11 @@ def render_approval(me_name: str = "") -> None:
 
 
 def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> None:
-    """Detalle editable de un borrador: recomendaciones + firmas + acciones."""
     from datetime import date as _qdate
 
     import pandas as _qpd
 
-    from core.briefing_queue import approve_and_send, list_pending
+    from core.briefing_queue import approve_and_send, get_signers, list_pending
     from core.briefing_recommendations import (
         add_recommendation as _q_add,
         clear_dismissed as _q_cleardis,
@@ -238,6 +301,7 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
 
     _sum = _d.get("summary", "")
     _diag = _d.get("diagnosis", "")
+    _sg = get_signers(_iid)  # firmantes por defecto del activo
     with st.container(border=True):
         with st.expander("👁 Executive summary and diagnosis (read-only)", expanded=False):
             st.markdown(_sum or "_(no summary)_")
@@ -262,8 +326,7 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
         if _props:
             with st.expander(f"💡 System proposals ({len(_props)}) — adopt or dismiss",
                              expanded=True):
-                st.caption("The system proposes recommendations from the current findings. "
-                           "'Adopt' moves it into your editable list; 'Dismiss' hides it.")
+                st.caption("The system proposes recommendations from the current findings.")
                 for _pi, _ptxt in enumerate(_props):
                     _pc1, _pc2, _pc3 = st.columns([0.72, 0.14, 0.14])
                     _pc1.write(_ptxt)
@@ -307,16 +370,18 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
             },
         )
 
+        st.markdown('<div class="bf-label" style="margin-top:6px;">Signatures '
+                    '<span class="bf-accent">·</span> defaults from the asset config</div>',
+                    unsafe_allow_html=True)
         _s1, _s2 = st.columns(2)
         with _s1:
-            _elab = st.text_input("Prepared by", value="Ángel Daniel Leiva", key=f"rc_elab_{_iid}")
-            _elab_rol = st.text_input("Role (prepared)",
-                                      value="Senior Machinery Diagnostics Engineer",
+            _elab = st.text_input("Prepared by", value=_sg.get("prepared_by", ""), key=f"rc_elab_{_iid}")
+            _elab_rol = st.text_input("Role (prepared)", value=_sg.get("prepared_role", ""),
                                       key=f"rc_elabr_{_iid}", placeholder="optional")
         with _s2:
-            _aprb = st.text_input("Reviewed by", value="Ewdes Andrés Hernández",
+            _aprb = st.text_input("Reviewed by", value=_sg.get("reviewed_by", ""),
                                   key=f"rc_aprb_{_iid}", placeholder="required to approve")
-            _aprb_rol = st.text_input("Role (reviewed)", value="Machinery Diagnostics Champion",
+            _aprb_rol = st.text_input("Role (reviewed)", value=_sg.get("reviewed_role", ""),
                                       key=f"rc_aprbr_{_iid}", placeholder="optional")
 
         _b2, _b3 = st.columns([1, 1.6])
@@ -384,13 +449,13 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
 
 
 # =================================================================
-# VISTA 2 — DELIVERY SCHEDULING (por Cliente → Activo)
+# VISTA 2 — DELIVERY SCHEDULING (config por Cliente → Activo)
 # =================================================================
 def render_delivery() -> None:
-    """Programación de envíos centralizada: correo(s), WhatsApp(s), horario del
-    briefing (semanal/mensual) y aviso automático por alarma — por activo,
-    agrupado por cliente. Reemplaza la config dispersa de Machinery Library."""
-    from core.briefing_queue import get_schedule, save_schedule
+    """Config por máquina: destinatarios, los distintos reportes que le llegan
+    (Semanal/Mensual con su día y hora), aviso por alarma, y quién elabora /
+    revisa-aprueba. Un solo lugar (antes disperso en Machinery Library)."""
+    from core.briefing_queue import get_schedules, get_signers, save_schedules, save_signers
     from core.instance_state import get_instance, update_instance_header
 
     _rows = _cached_instances()
@@ -398,7 +463,6 @@ def render_delivery() -> None:
         st.info("No assets registered. Create one in Machinery Library first.")
         return
 
-    # Agrupar por cliente
     groups: dict = {}
     for r in _rows:
         iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
@@ -408,102 +472,136 @@ def render_delivery() -> None:
         client = (r.get("client") if isinstance(r, dict) else getattr(r, "client", "")) or "— Sin cliente —"
         groups.setdefault(client, []).append((iid, tag))
 
-    # Filtro por cliente
+    _n_assets = sum(len(a) for a in groups.values())
+    _band("Report Center · Delivery scheduling", "Per-machine delivery config",
+          "Pick a machine and set who receives its reports, which reports it gets "
+          "(weekly / monthly, each with its own day &amp; time), alarm auto-send, and "
+          "who prepares and who approves. This is the single source the schedulers read.",
+          kpis=[(f'{_dot("ok")} {len(groups)}', "Clients"),
+                (f'{_dot("warn")} {_n_assets}', "Assets")])
+
     _clients = ["All clients"] + sorted(groups.keys())
-    _fc1, _fc2 = st.columns([2, 3])
+    _fc1, _fc2 = st.columns([2, 1])
     with _fc1:
         _fclient = st.selectbox("Client", _clients, key="rc_dc_client")
     with _fc2:
-        st.caption("Set here who receives each asset's reports and when. This is the "
-                   "single source the schedulers read — no longer in Machinery Library.")
+        _tags_all = sorted({t for a in groups.values() for _, t in a})
+        _ftag = st.selectbox("Asset", ["All assets"] + _tags_all, key="rc_dc_tag")
 
     for client, assets in sorted(groups.items()):
         if _fclient != "All clients" and client != _fclient:
             continue
-        st.markdown(f'<div class="dc-client">{client}</div>'
-                    f'<div class="dc-meta">{len(assets)} asset(s)</div>',
-                    unsafe_allow_html=True)
+        _visible = [(iid, tag) for iid, tag in assets
+                    if _ftag == "All assets" or tag == _ftag]
+        if not _visible:
+            continue
+        st.markdown(f'<div class="dc-client"><span class="cn">{client}</span>'
+                    f'<span class="cm">{len(_visible)} asset(s)</span>'
+                    f'<span class="rule"></span></div>', unsafe_allow_html=True)
         st.markdown("")
 
-        for iid, tag in sorted(assets, key=lambda x: x[1]):
-            inst = get_instance(iid)
-            if inst is None:
-                continue
-            _cfg = get_schedule(iid) or {}
-            _emails = getattr(inst, "client_email", "") or ""
-            _wa = getattr(inst, "whatsapp_number", "") or ""
-            _alarm = bool(getattr(inst, "alarm_send_enabled", False))
-
-            with st.container(border=True):
-                st.markdown(f'<span class="dc-asset-tag">{tag}</span> '
-                            f'<span class="dc-asset-sub">· {iid}</span>',
-                            unsafe_allow_html=True)
-
-                # Recipients
-                _rc1, _rc2 = st.columns(2)
-                with _rc1:
-                    _email_in = st.text_input(
-                        "Email recipient(s)", value=_emails, key=f"rc_dc_email_{iid}",
-                        placeholder="a@client.com, b@client.com",
-                        help="Comma / semicolon / newline separated for multiple.")
-                with _rc2:
-                    _wa_in = st.text_input(
-                        "WhatsApp number(s)", value=_wa, key=f"rc_dc_wa_{iid}",
-                        placeholder="573001234567, 573007654321",
-                        help="E.164 without '+'. Comma separated for multiple.")
-
-                # Schedule (weekly/monthly briefing)
-                _sc1, _sc2, _sc3, _sc4 = st.columns([1.1, 2, 1, 1.2])
-                with _sc1:
-                    _en = st.toggle("Scheduled", value=bool(_cfg.get("enabled")),
-                                    key=f"rc_dc_en_{iid}",
-                                    help="Auto-generate the report to the approval queue on the "
-                                         "day/hour below.")
-                with _sc2:
-                    _days_sel = st.multiselect(
-                        "Day(s)", _DIAS_EN,
-                        default=[_DIAS_EN[d] for d in (_cfg.get("days") or [0]) if 0 <= int(d) <= 6],
-                        key=f"rc_dc_days_{iid}")
-                with _sc3:
-                    _hour_sel = st.selectbox("Hour", list(range(24)),
-                                             index=int(_cfg.get("hour", 5)),
-                                             format_func=lambda h: f"{h:02d}:00",
-                                             key=f"rc_dc_hour_{iid}")
-                with _sc4:
-                    _per_sel = st.selectbox(
-                        "Period", ["Semanal", "Mensual"],
-                        index=(1 if str(_cfg.get("period", "")).startswith("Mensual") else 0),
-                        key=f"rc_dc_per_{iid}")
-
-                _ac1, _ac2 = st.columns([2, 1])
-                with _ac1:
-                    _alarm_in = st.toggle(
-                        "Auto-send on alarm / danger (immediate 1-page report)",
-                        value=_alarm, key=f"rc_dc_alarm_{iid}")
-                with _ac2:
-                    if st.button("💾 Save", key=f"rc_dc_save_{iid}", use_container_width=True):
-                        _new_cfg = {
-                            "enabled": bool(_en),
-                            "days": [_DIAS_EN.index(d) for d in (_days_sel or ["Monday"])],
-                            "hour": int(_hour_sel),
-                            "period": _per_sel,
-                        }
-                        _ok1 = save_schedule(iid, _new_cfg)
-                        _ok2 = update_instance_header(
-                            iid,
-                            client_email=_email_in.strip(),
-                            whatsapp_number=_wa_in.strip(),
-                            alarm_send_enabled=bool(_alarm_in),
-                            # mantener consistencia del flag legacy de "envío programado"
-                            report_send_enabled=bool(_en),
-                        )
-                        if _ok1 and _ok2:
-                            st.success(f"Saved delivery config for {tag}.")
-                            # invalidar cache de instancias para reflejar cambios
-                            try:
-                                _cached_instances.clear()  # type: ignore[attr-defined]
-                            except Exception:
-                                pass
-                        else:
-                            st.error("Could not save (check the asset exists).")
+        for iid, tag in sorted(_visible, key=lambda x: x[1]):
+            _render_delivery_asset(iid, tag, get_instance, get_schedules, get_signers,
+                                   save_schedules, save_signers, update_instance_header)
             st.markdown("")
+
+
+def _render_delivery_asset(iid, tag, get_instance, get_schedules, get_signers,
+                           save_schedules, save_signers, update_instance_header) -> None:
+    inst = get_instance(iid)
+    if inst is None:
+        return
+    _entries = {e.get("period", "Semanal"): e for e in (get_schedules(iid) or [])}
+    _sg = get_signers(iid)
+    _emails = getattr(inst, "client_email", "") or ""
+    _wa = getattr(inst, "whatsapp_number", "") or ""
+    _alarm = bool(getattr(inst, "alarm_send_enabled", False))
+
+    with st.container(border=True):
+        st.markdown(f'<div class="dc-asset"><span class="tg">{tag}</span>'
+                    f'<span class="sb">· {iid}</span></div>', unsafe_allow_html=True)
+
+        # --- Recipients ---
+        st.markdown('<div class="dc-sec">Recipients</div>', unsafe_allow_html=True)
+        _rc1, _rc2 = st.columns(2)
+        with _rc1:
+            _email_in = st.text_input("Email recipient(s)", value=_emails, key=f"rc_dc_email_{iid}",
+                                      placeholder="a@client.com, b@client.com",
+                                      help="Comma / semicolon / newline separated for multiple.")
+        with _rc2:
+            _wa_in = st.text_input("WhatsApp number(s)", value=_wa, key=f"rc_dc_wa_{iid}",
+                                   placeholder="573001234567, 573007654321",
+                                   help="E.164 without '+'. Comma separated for multiple.")
+
+        # --- Reports this machine gets (one row per type) ---
+        st.markdown('<div class="dc-sec">Reports this machine receives</div>', unsafe_allow_html=True)
+        _draft_entries = {}
+        for _per in _REPORT_TYPES:
+            _cur = _entries.get(_per, {})
+            _badge = "wk" if _per == "Semanal" else "mo"
+            _plabel = "Weekly" if _per == "Semanal" else "Monthly"
+            st.markdown(f'<span class="dc-badge {_badge}">{_dot("ok")} {_plabel} report</span>',
+                        unsafe_allow_html=True)
+            _pc1, _pc2, _pc3 = st.columns([1.0, 2.2, 1.0])
+            with _pc1:
+                _en = st.toggle("Enabled", value=bool(_cur.get("enabled")),
+                                key=f"rc_dc_en_{iid}_{_per}")
+            with _pc2:
+                _days_sel = st.multiselect(
+                    "Day(s)", _DIAS_EN,
+                    default=[_DIAS_EN[d] for d in (_cur.get("days") or []) if 0 <= int(d) <= 6],
+                    key=f"rc_dc_days_{iid}_{_per}",
+                    help=("Weekly: pick the weekday(s). Monthly: pick the weekday and the cron "
+                          "fires on that day/hour (1st matching of the month per your cron flags)."))
+            with _pc3:
+                _hour_sel = st.selectbox("Hour", list(range(24)),
+                                         index=int(_cur.get("hour", 5)),
+                                         format_func=lambda h: f"{h:02d}:00",
+                                         key=f"rc_dc_hour_{iid}_{_per}")
+            _draft_entries[_per] = {
+                "enabled": bool(_en),
+                "days": [_DIAS_EN.index(d) for d in (_days_sel or [])] or [0],
+                "hour": int(_hour_sel),
+                "period": _per,
+            }
+
+        # --- Alarm ---
+        st.markdown('<div class="dc-sec">Alarm</div>', unsafe_allow_html=True)
+        _alarm_in = st.toggle("Auto-send on alarm / danger (immediate 1-page report, checked every 15 min)",
+                              value=_alarm, key=f"rc_dc_alarm_{iid}")
+
+        # --- Signers (who prepares / who approves) ---
+        st.markdown('<div class="dc-sec">Signatures — who prepares · who approves</div>',
+                    unsafe_allow_html=True)
+        _sc1, _sc2 = st.columns(2)
+        with _sc1:
+            _prep = st.text_input("Prepared by", value=_sg.get("prepared_by", ""),
+                                  key=f"rc_dc_prep_{iid}")
+            _prep_r = st.text_input("Role (prepared)", value=_sg.get("prepared_role", ""),
+                                    key=f"rc_dc_prepr_{iid}", placeholder="optional")
+        with _sc2:
+            _rev = st.text_input("Reviewed / approved by", value=_sg.get("reviewed_by", ""),
+                                 key=f"rc_dc_rev_{iid}")
+            _rev_r = st.text_input("Role (reviewed)", value=_sg.get("reviewed_role", ""),
+                                   key=f"rc_dc_revr_{iid}", placeholder="optional")
+
+        # --- Save ---
+        if st.button("💾 Save machine config", key=f"rc_dc_save_{iid}",
+                     type="primary", use_container_width=True):
+            _ok1 = save_schedules(iid, list(_draft_entries.values()))
+            _ok2 = save_signers(iid, {
+                "prepared_by": _prep, "prepared_role": _prep_r,
+                "reviewed_by": _rev, "reviewed_role": _rev_r,
+            })
+            _any_sched = any(e["enabled"] for e in _draft_entries.values())
+            _ok3 = update_instance_header(
+                iid, client_email=_email_in.strip(),
+                whatsapp_number=_wa_in.strip(),
+                alarm_send_enabled=bool(_alarm_in),
+                report_send_enabled=bool(_any_sched),
+            )
+            if _ok1 and _ok2 and _ok3:
+                st.success(f"Saved config for {tag}.")
+                st.rerun()
+            else:
+                st.error("Could not save (check the asset exists).")

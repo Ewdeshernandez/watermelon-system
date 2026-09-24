@@ -221,58 +221,155 @@ def approve_and_send(instance_id: str, *,
 #   {"enabled": bool, "days": [0..6] (0=Lunes), "hour": 0-23,
 #    "period": "Semanal"|"Mensual"}
 # ---------------------------------------------------------------------------
-SCHED_KEY = "briefing_schedule"
+SCHED_KEY = "briefing_schedule"      # legacy: 1 sola programación (dict)
+SCHEDS_KEY = "briefing_schedules"    # v24: lista de programaciones por activo
 
 _DEFAULT_SCHED = {"enabled": False, "days": [0], "hour": 5, "period": "Semanal"}
 
 
+def _clean_entry(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "enabled": bool(cfg.get("enabled")),
+        "days": sorted({int(d) for d in (cfg.get("days") or [0])
+                        if 0 <= int(d) <= 6}) or [0],
+        "hour": max(0, min(23, int(cfg.get("hour", 5)))),
+        "period": ("Mensual" if str(cfg.get("period", "")).lower().startswith("mensual")
+                   else "Semanal"),
+    }
+
+
 def get_schedule(instance_id: str) -> Dict[str, Any]:
-    """Config de programación DEL ACTIVO (v3.31.402 — por activo, ya no
-    global: cada equipo tiene su día/hora/periodo)."""
+    """Config de programación DEL ACTIVO — legacy (una sola). Devuelve la
+    entrada Semanal si hay lista nueva; si no, la config vieja."""
     try:
-        from core.instance_state import get_instance_parameters
-        cfg = get_instance_parameters(instance_id).get(SCHED_KEY)
-        if isinstance(cfg, dict):
-            return dict(cfg)
+        entries = get_schedules(instance_id)
+        if entries:
+            for e in entries:
+                if str(e.get("period", "")).startswith("Semanal"):
+                    return dict(e)
+            return dict(entries[0])
     except Exception as e:
         log.warning("get_schedule(%s) falló: %s", instance_id, e)
     return dict(_DEFAULT_SCHED)
 
 
+def get_schedules(instance_id: str) -> List[Dict[str, Any]]:
+    """Lista de programaciones del activo (v24). Migra transparentemente la
+    config vieja (SCHED_KEY, un solo dict) a lista de 1 elemento."""
+    try:
+        from core.instance_state import get_instance_parameters
+        params = get_instance_parameters(instance_id) or {}
+        raw = params.get(SCHEDS_KEY)
+        if isinstance(raw, list):
+            return [_clean_entry(e) for e in raw if isinstance(e, dict)]
+        legacy = params.get(SCHED_KEY)
+        if isinstance(legacy, dict):
+            return [_clean_entry(legacy)]
+    except Exception as e:
+        log.warning("get_schedules(%s) falló: %s", instance_id, e)
+    return []
+
+
 def save_schedule(instance_id: str, cfg: Dict[str, Any]) -> bool:
-    """Guarda la programación del activo."""
+    """Guarda UNA programación (legacy). Reemplaza la entrada del mismo periodo
+    en la lista nueva y conserva las demás."""
+    entry = _clean_entry(cfg)
+    others = [e for e in get_schedules(instance_id)
+              if e.get("period") != entry.get("period")]
+    return save_schedules(instance_id, others + [entry])
+
+
+def save_schedules(instance_id: str, entries: List[Dict[str, Any]]) -> bool:
+    """Guarda la LISTA de programaciones del activo. Escribe la clave nueva y
+    espeja la entrada Semanal (o la primera) en SCHED_KEY para compat de
+    lectores viejos."""
     try:
         from core.instance_state import update_instance_parameter
-        clean = {
-            "enabled": bool(cfg.get("enabled")),
-            "days": sorted({int(d) for d in (cfg.get("days") or [0])
-                            if 0 <= int(d) <= 6}) or [0],
-            "hour": max(0, min(23, int(cfg.get("hour", 5)))),
-            "period": ("Mensual" if str(cfg.get("period", "")).lower().startswith("mensual")
-                       else "Semanal"),
-        }
-        return update_instance_parameter(instance_id, SCHED_KEY, clean)
+        clean = [_clean_entry(e) for e in (entries or []) if isinstance(e, dict)]
+        ok = update_instance_parameter(instance_id, SCHEDS_KEY, clean)
+        # Espejo legacy: primera Semanal habilitada, o primera, o default OFF.
+        mirror = next((e for e in clean if e.get("enabled")
+                       and e.get("period", "").startswith("Semanal")), None) \
+            or (clean[0] if clean else dict(_DEFAULT_SCHED))
+        update_instance_parameter(instance_id, SCHED_KEY, dict(mirror))
+        return ok
     except Exception as e:
-        log.warning("save_schedule(%s) falló: %s", instance_id, e)
+        log.warning("save_schedules(%s) falló: %s", instance_id, e)
         return False
 
 
 def list_schedules() -> List[Tuple[str, str, Dict[str, Any]]]:
-    """[(instance_id, tag, cfg)] de todos los activos (para el cron)."""
+    """[(instance_id, tag, cfg)] — legacy, una entrada por activo."""
     out: List[Tuple[str, str, Dict[str, Any]]] = []
     try:
-        from core.instance_state import list_instances, get_instance_parameters
+        from core.instance_state import list_instances
         for r in list_instances() or []:
             iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
             tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
             if not iid:
                 continue
-            cfg = get_instance_parameters(iid).get(SCHED_KEY)
-            if isinstance(cfg, dict):
-                out.append((iid, tag, dict(cfg)))
+            for e in get_schedules(iid):
+                out.append((iid, tag, e))
+                break
     except Exception as e:
         log.warning("list_schedules falló: %s", e)
     return out
+
+
+def list_schedule_entries() -> List[Tuple[str, str, Dict[str, Any]]]:
+    """[(instance_id, tag, cfg)] — UNA fila por CADA programación (v24). El
+    cron itera esto para soportar Semanal + Mensual en el mismo activo."""
+    out: List[Tuple[str, str, Dict[str, Any]]] = []
+    try:
+        from core.instance_state import list_instances
+        for r in list_instances() or []:
+            iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
+            tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
+            if not iid:
+                continue
+            for e in get_schedules(iid):
+                out.append((iid, tag, e))
+    except Exception as e:
+        log.warning("list_schedule_entries falló: %s", e)
+    return out
+
+
+SIGNERS_KEY = "report_signers"       # v24: firmantes por activo
+
+_DEFAULT_SIGNERS = {
+    "prepared_by": "Ángel Daniel Leiva",
+    "prepared_role": "Senior Machinery Diagnostics Engineer",
+    "reviewed_by": "Ewdes Andrés Hernández",
+    "reviewed_role": "Machinery Diagnostics Champion",
+}
+
+
+def get_signers(instance_id: str) -> Dict[str, Any]:
+    """Firmantes por activo: quién ELABORA y quién REVISA/aprueba (nombre +
+    rol). Se configura junto al envío en el Report Center; el Approval los
+    toma por defecto. Si no hay config, usa el default de la casa."""
+    try:
+        from core.instance_state import get_instance_parameters
+        cfg = get_instance_parameters(instance_id).get(SIGNERS_KEY)
+        if isinstance(cfg, dict):
+            out = dict(_DEFAULT_SIGNERS)
+            out.update({k: str(v) for k, v in cfg.items() if k in _DEFAULT_SIGNERS})
+            return out
+    except Exception as e:
+        log.warning("get_signers(%s) falló: %s", instance_id, e)
+    return dict(_DEFAULT_SIGNERS)
+
+
+def save_signers(instance_id: str, cfg: Dict[str, Any]) -> bool:
+    """Guarda los firmantes del activo."""
+    try:
+        from core.instance_state import update_instance_parameter
+        clean = {k: str(cfg.get(k, _DEFAULT_SIGNERS[k]) or "").strip()
+                 for k in _DEFAULT_SIGNERS}
+        return update_instance_parameter(instance_id, SIGNERS_KEY, clean)
+    except Exception as e:
+        log.warning("save_signers(%s) falló: %s", instance_id, e)
+        return False
 
 
 def schedule_due(cfg: Dict[str, Any], now: Optional[datetime] = None) -> bool:
@@ -294,5 +391,8 @@ def schedule_due(cfg: Dict[str, Any], now: Optional[datetime] = None) -> bool:
 
 __all__ = ["get_draft", "save_draft", "update_draft", "clear_draft",
            "new_pending_draft", "list_pending", "approve_and_send",
-           "get_schedule", "save_schedule", "list_schedules", "schedule_due",
-           "STATUS_PENDING", "STATUS_APPROVED", "PARAM_KEY", "SCHED_KEY"]
+           "get_schedule", "get_schedules", "save_schedule", "save_schedules",
+           "list_schedules", "list_schedule_entries", "schedule_due",
+           "get_signers", "save_signers",
+           "STATUS_PENDING", "STATUS_APPROVED", "PARAM_KEY", "SCHED_KEY",
+           "SCHEDS_KEY", "SIGNERS_KEY"]

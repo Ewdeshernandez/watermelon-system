@@ -121,8 +121,11 @@ def main() -> int:
     # punto y genera SOLO los borradores de los activos cuya programación
     # coincide con ahora.
     if args.check_schedule:
-        from core.briefing_queue import list_schedules, schedule_due
-        due = [(iid, tag, cfg) for iid, tag, cfg in list_schedules()
+        # v24: list_schedule_entries devuelve UNA fila por cada programación
+        # del activo (Semanal + Mensual pueden coexistir), cada una con su día
+        # y hora. schedule_due filtra las que coinciden con AHORA.
+        from core.briefing_queue import list_schedule_entries, schedule_due
+        due = [(iid, tag, cfg) for iid, tag, cfg in list_schedule_entries()
                if schedule_due(cfg)]
         if not due:
             log.info("Ninguna programación coincide ahora — nada que hacer.")
