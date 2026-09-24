@@ -521,6 +521,68 @@ def render_delivery() -> None:
             st.markdown("")
 
 
+def _split_items(raw: str):
+    import re
+    return [p for p in re.split(r"[,;\n\r\t ]+", str(raw or "")) if p.strip()]
+
+
+def _valid_email(v: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}", (v or "").strip()))
+
+
+def _valid_phone(v: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"\d{8,15}", (v or "").strip().replace("+", "").replace(" ", "")))
+
+
+def _multi_input(ss_key: str, init_vals, validator, placeholder: str, add_label: str):
+    """Editor de lista: una casilla por ítem, ✓ verde si válido / ✕ rojo si no,
+    botón ✕ para eliminar y '+ añadir'. Devuelve (valid_list, n_invalid)."""
+    ids_key = f"{ss_key}__ids"
+    nxt_key = f"{ss_key}__next"
+    if ids_key not in st.session_state:
+        vals = list(init_vals) or [""]
+        st.session_state[ids_key] = list(range(len(vals)))
+        st.session_state[nxt_key] = len(vals)
+        for i, v in enumerate(vals):
+            st.session_state[f"{ss_key}__v_{i}"] = v
+
+    ids = st.session_state[ids_key]
+    valid_list, n_invalid = [], 0
+    for _id in list(ids):
+        vkey = f"{ss_key}__v_{_id}"
+        st.session_state.setdefault(vkey, "")
+        c1, c2, c3 = st.columns([8, 0.9, 0.9])
+        c1.text_input("item", key=vkey, placeholder=placeholder,
+                      label_visibility="collapsed")
+        cur = (st.session_state.get(vkey, "") or "").strip()
+        if not cur:
+            c2.markdown('<div style="padding-top:8px;color:#8a97a8;">–</div>',
+                        unsafe_allow_html=True)
+        elif validator(cur):
+            c2.markdown('<div style="padding-top:6px;font-size:18px;color:#1f9d55;">✔</div>',
+                        unsafe_allow_html=True)
+            valid_list.append(cur)
+        else:
+            c2.markdown('<div style="padding-top:6px;font-size:18px;color:#dc3545;">✕</div>',
+                        unsafe_allow_html=True)
+            n_invalid += 1
+        if c3.button("✕", key=f"{ss_key}__rm_{_id}", help="Remove"):
+            ids.remove(_id)
+            st.session_state.pop(vkey, None)
+            st.rerun()
+
+    if st.button(add_label, key=f"{ss_key}__add"):
+        nid = st.session_state[nxt_key]
+        st.session_state[nxt_key] = nid + 1
+        st.session_state[ids_key] = ids + [nid]
+        st.session_state[f"{ss_key}__v_{nid}"] = ""
+        st.rerun()
+
+    return valid_list, n_invalid
+
+
 def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, get_signers,
                            save_schedules, save_signers, update_instance_header) -> None:
     inst = get_instance(iid)
@@ -558,17 +620,22 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
             else:
                 _client_val = _client_sel
 
-        # --- Recipients ---
-        st.markdown('<div class="dc-sec">Recipients</div>', unsafe_allow_html=True)
-        _rc1, _rc2 = st.columns(2)
-        with _rc1:
-            _email_in = st.text_input("Email recipient(s)", value=_emails, key=f"rc_dc_email_{iid}",
-                                      placeholder="a@client.com, b@client.com",
-                                      help="Comma / semicolon / newline separated for multiple.")
-        with _rc2:
-            _wa_in = st.text_input("WhatsApp number(s)", value=_wa, key=f"rc_dc_wa_{iid}",
-                                   placeholder="573001234567, 573007654321",
-                                   help="E.164 without '+'. Comma separated for multiple.")
+        # --- Recipients (una casilla por ítem, con validación ✓/✕) ---
+        st.markdown('<div class="dc-sec">Email recipients '
+                    '<span style="color:#8a97a8;font-weight:500;text-transform:none;'
+                    'letter-spacing:0;">· one box each · ✔ valid · ✕ removes</span></div>',
+                    unsafe_allow_html=True)
+        _emails_valid, _em_bad = _multi_input(
+            f"rc_dc_em_{iid}", _split_items(_emails), _valid_email,
+            "name@client.com", "＋ Add email")
+
+        st.markdown('<div class="dc-sec">WhatsApp numbers '
+                    '<span style="color:#8a97a8;font-weight:500;text-transform:none;'
+                    'letter-spacing:0;">· digits only, country code, no +</span></div>',
+                    unsafe_allow_html=True)
+        _wa_valid, _wa_bad = _multi_input(
+            f"rc_dc_wa_{iid}", _split_items(_wa), _valid_phone,
+            "573001234567", "＋ Add number")
 
         # --- Reports this machine gets (one row per type) ---
         st.markdown('<div class="dc-sec">Reports this machine receives</div>', unsafe_allow_html=True)
@@ -623,23 +690,35 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
                                    key=f"rc_dc_revr_{iid}", placeholder="optional")
 
         # --- Save ---
+        if _em_bad or _wa_bad:
+            _bits = []
+            if _em_bad:
+                _bits.append(f"{_em_bad} email(s) missing @ or domain")
+            if _wa_bad:
+                _bits.append(f"{_wa_bad} phone(s) not digits-only")
+            st.warning("Fix or remove: " + " · ".join(_bits)
+                       + ". Invalid entries won't be saved.")
         if st.button("💾 Save machine config", key=f"rc_dc_save_{iid}",
                      type="primary", use_container_width=True):
-            _ok1 = save_schedules(iid, list(_draft_entries.values()))
-            _ok2 = save_signers(iid, {
-                "prepared_by": _prep, "prepared_role": _prep_r,
-                "reviewed_by": _rev, "reviewed_role": _rev_r,
-            })
-            _any_sched = any(e["enabled"] for e in _draft_entries.values())
-            _ok3 = update_instance_header(
-                iid, client_email=_email_in.strip(),
-                whatsapp_number=_wa_in.strip(),
-                alarm_send_enabled=bool(_alarm_in),
-                report_send_enabled=bool(_any_sched),
-                client=(_client_val or "").strip(),
-            )
-            if _ok1 and _ok2 and _ok3:
-                st.success(f"Saved config for {tag}.")
-                st.rerun()
+            if _em_bad or _wa_bad:
+                st.error("There are invalid entries (marked ✕). Fix or remove them "
+                         "before saving.")
             else:
-                st.error("Could not save (check the asset exists).")
+                _ok1 = save_schedules(iid, list(_draft_entries.values()))
+                _ok2 = save_signers(iid, {
+                    "prepared_by": _prep, "prepared_role": _prep_r,
+                    "reviewed_by": _rev, "reviewed_role": _rev_r,
+                })
+                _any_sched = any(e["enabled"] for e in _draft_entries.values())
+                _ok3 = update_instance_header(
+                    iid, client_email=", ".join(_emails_valid),
+                    whatsapp_number=", ".join(_wa_valid),
+                    alarm_send_enabled=bool(_alarm_in),
+                    report_send_enabled=bool(_any_sched),
+                    client=(_client_val or "").strip(),
+                )
+                if _ok1 and _ok2 and _ok3:
+                    st.success(f"Saved config for {tag}.")
+                    st.rerun()
+                else:
+                    st.error("Could not save (check the asset exists).")
