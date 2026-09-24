@@ -543,119 +543,38 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     )
 
             with tab_envio:
+                # Ciclo 24 — la configuración de ENVÍOS (destinatarios, horario,
+                # aviso por alarma) se centralizó en el Report Center. Aquí ya
+                # NO se edita: solo se muestra el estado actual y un acceso.
+                _em = (inst.client_email or "").strip()
+                _wa = (inst.whatsapp_number or "").strip()
+                _sched_on = bool(getattr(inst, "report_send_enabled", False))
+                _alarm_on = bool(getattr(inst, "alarm_send_enabled", False))
                 st.caption(
-                    "Configure who receives the **executive condition report** "
-                    "(1 page, PDF) and when it is sent automatically. It is delivered "
-                    "by email and/or WhatsApp on the chosen day and time. You can also "
-                    "send it manually from Live Monitoring."
+                    "Report delivery (recipients, schedule and alarm auto-send) is now "
+                    "managed in **Report Center → Delivery scheduling**, in one place "
+                    "for every client and asset. This tab is read-only."
                 )
-                _DOW = ["Monday", "Tuesday", "Wednesday", "Thursday",
-                        "Friday", "Saturday", "Sunday"]
-                ev1, ev2 = st.columns(2)
-                with ev1:
-                    new_client_email = st.text_input(
-                        "Client email(s)", value=inst.client_email or "",
-                        help="One or more, separated by COMMA. "
-                             "e.g. boss@client.com, maintenance@client.com",
-                    )
-                with ev2:
-                    new_whatsapp_number = st.text_input(
-                        "Client WhatsApp(s)", value=inst.whatsapp_number or "",
-                        help="One or more separated by COMMA. With country code, without '+'. "
-                             "e.g. 573001234567, 573009998877",
-                    )
-                new_report_enabled = st.checkbox(
-                    "Enable scheduled automatic delivery",
-                    value=bool(getattr(inst, "report_send_enabled", False)),
-                    help="If enabled, the system sends the report only on the chosen days and times.",
+                st.markdown(
+                    f"- **Email:** {_em or '—'}\n"
+                    f"- **WhatsApp:** {_wa or '—'}\n"
+                    f"- **Scheduled delivery:** {'ON' if _sched_on else 'OFF'}\n"
+                    f"- **Auto-send on alarm/danger:** {'ON' if _alarm_on else 'OFF'}"
                 )
-                # Slots explícitos (día + hora) — reemplaza la grilla días×horas.
-                # Permite p.ej. "Mon 07:00, Sat 21:00" sin disparar los 4 cruces
-                # de la grilla. Texto (estable dentro de st.form + st.tabs).
-                _abbr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-                _abbr2dow = {a.lower(): i for i, a in enumerate(_abbr)}
-                _abbr2dow.update({d.lower(): i for i, d in enumerate(_DOW)})  # nombre completo
-
-                def _slots_to_text(slots):
-                    out = []
-                    for s in slots:
-                        try:
-                            out.append(f"{_abbr[int(s[0]) % 7]} {int(s[1]):02d}:00")
-                        except Exception:
-                            continue
-                    return ", ".join(out)
-
-                # Default: slots guardados → sino derivar de la grilla vieja (back-compat)
-                _def_slots = [list(s) for s in (getattr(inst, "report_send_slots", None) or [])]
-                if not _def_slots:
-                    _gd = [int(x) for x in (getattr(inst, "report_send_days", None) or [])] \
-                        or [int(getattr(inst, "report_send_day", 0) or 0)]
-                    _gh = [int(x) for x in (getattr(inst, "report_send_hours", None) or [])] \
-                        or [int(getattr(inst, "report_send_hour", 6) or 6)]
-                    _def_slots = [[d, h] for d in _gd for h in _gh]
-
-                st.markdown("**Delivery schedule** — day + time slots")
-                new_report_slots_raw = st.text_input(
-                    "Slots (e.g. Mon 07:00, Sat 21:00)",
-                    value=_slots_to_text(_def_slots),
-                    help="Each slot = one weekday + one hour. Comma-separated. "
-                         "Days: Mon Tue Wed Thu Fri Sat Sun. e.g. 'Mon 07:00, Sat 21:00' "
-                         "sends Monday 7am and Saturday 9pm. Recommended: 2/week, spread. "
-                         "Offline assets get their own weekly slot (Mon 09:00 by default).",
-                )
-                # Parseo: "Mon 07:00" / "mon 7" / "saturday 21" → (dow, hour)
-                new_report_slots = []
-                import re as _re
-                for _chunk in new_report_slots_raw.split(","):
-                    _c = _chunk.strip()
-                    if not _c:
-                        continue
-                    _m = _re.match(r"([A-Za-z]+)\s+(\d{1,2})", _c)
-                    if not _m:
-                        continue
-                    _dow = _abbr2dow.get(_m.group(1).lower())
-                    _hv = int(_m.group(2))
-                    if _dow is not None and 0 <= _hv <= 23:
-                        new_report_slots.append([_dow, _hv])
-                # dedup preservando orden
-                _seen = set()
-                new_report_slots = [s for s in new_report_slots
-                                    if not (tuple(s) in _seen or _seen.add(tuple(s)))]
-                # Derivar grilla (back-compat para consumidores viejos / display)
-                new_report_days = sorted({s[0] for s in new_report_slots})
-                new_report_hours = sorted({s[1] for s in new_report_slots})
-                if new_report_slots:
-                    st.caption("→ " + "  ·  ".join(
-                        f"{_DOW[s[0]]} {s[1]:02d}:00" for s in new_report_slots))
-                st.divider()
-                new_alarm_enabled = st.checkbox(
-                    "Auto-notify on alarm / danger",
-                    value=bool(getattr(inst, "alarm_send_enabled", False)),
-                    help="If enabled, it sends the report as soon as a channel crosses into "
-                         "Alarm or Danger (checked every 15 min). One notification per episode: "
-                         "it does not repeat until the asset returns to normal or worsens.",
-                )
-
-                if not (inst.client_email or inst.whatsapp_number):
-                    st.info("Enter at least one email or WhatsApp to be able to send.")
+                try:
+                    st.page_link("pages/15_Report_Center.py",
+                                 label="→ Open Report Center (Delivery scheduling)",
+                                 icon="🍉")
+                except Exception:
+                    st.info("Open **Report Center** from the sidebar to configure delivery.")
 
             saved = st.form_submit_button("💾 Update full metadata", width="stretch")
             if saved:
                 update_instance_header(
                     instance_id,
                     tag=new_tag.strip(),
-                    client_email=new_client_email.strip(),
-                    whatsapp_number=new_whatsapp_number.strip().replace("+", "").replace(" ", ""),
-                    report_send_enabled=bool(new_report_enabled),
-                    # Slots (día,hora) = fuente de verdad del envío en línea.
-                    report_send_slots=[[int(s[0]), int(s[1])] for s in new_report_slots],
-                    # Grilla derivada (back-compat / display).
-                    report_send_days=sorted(int(d) for d in new_report_days),
-                    report_send_hours=sorted(int(h) for h in new_report_hours),
-                    # back-compat: el primer día/hora también en los campos single
-                    report_send_day=int(sorted(new_report_days)[0]) if new_report_days else 0,
-                    report_send_hour=int(sorted(new_report_hours)[0]) if new_report_hours else 6,
-                    alarm_send_enabled=bool(new_alarm_enabled),
+                    # Envíos (email/whatsapp/horario/alarma) ya NO se guardan
+                    # desde aquí — se administran en el Report Center.
                     client=new_client.strip(),
                     site=new_site.strip(),
                     asset_class=new_asset_class.strip(),
