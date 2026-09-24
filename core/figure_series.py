@@ -163,6 +163,73 @@ def spectrum_series(instance_id: str, token: str) -> Optional[Dict[str, Any]]:
     }
 
 
+def _nice_ceil(x: float) -> float:
+    """Idéntico al niceCeil de la app móvil (dynraw.ts)."""
+    import math
+    if not (x > 0):
+        return 1.0
+    e = math.floor(math.log10(x))
+    b = 10 ** e
+    for m in (1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10):
+        if x <= m * b + 1e-9:
+            return float(m * b)
+    return float(10 * b)
+
+
+def orbit_series_app(instance_id: str, bearing: str) -> Optional[Dict[str, Any]]:
+    """Órbita en el MISMO shape que la app (computeOrbit de dynraw.ts):
+    banda H/V, filtrada Ho/Vo, keyphasor kphH/kphV, dir, amax. Replica exacto
+    el algoritmo 45R/45L + promedio por vuelta → la app la dibuja idéntica y
+    cualquier cambio de diseño se hace en un solo lugar."""
+    import math
+
+    import numpy as np
+    b = re.sub(r"[^0-9]", "", str(bearing)) or str(bearing)
+    pt = f"BRG{b}" if b.isdigit() else str(bearing)
+    cap = _load_point(instance_id, pt)
+    if cap is None:
+        return None
+    px, py = cap.get("X"), cap.get("Y")
+    if px is None or py is None:
+        return None
+    spr = int(cap.samples_per_rev or 0)
+    if spr < 4:
+        return None
+    px = np.asarray(px, float)
+    py = np.asarray(py, float)
+    n = int(min(px.size, py.size))
+    tx, ty = math.radians(45), math.radians(-45)
+    a, bb, c, d = math.sin(tx), math.cos(tx), math.sin(ty), math.cos(ty)
+    det = (a * d - bb * c) or 1.0
+    H = (d * px[:n] - bb * py[:n]) / det
+    V = (-c * px[:n] + a * py[:n]) / det
+    nrev = n // spr
+    if nrev < 1:
+        return None
+    Hm = H[: nrev * spr].reshape(nrev, spr).mean(axis=0)
+    Vm = V[: nrev * spr].reshape(nrev, spr).mean(axis=0)
+    kphH, kphV = float(Hm[0]), float(Vm[0])
+    gap = max(1, spr // 24)
+    Ho, Vo = Hm[gap:], Vm[gap:]
+    Hc, Vc = np.append(Hm, Hm[0]), np.append(Vm, Vm[0])
+    area = float(np.sum(Hc[:-1] * Vc[1:] - Hc[1:] * Vc[:-1]))
+    dir_ = "↺ CCW" if area > 0 else "↻ CW"
+    ppH = float(Hm.max() - Hm.min())
+    ppV = float(Vm.max() - Vm.min())
+    rad = np.sort(np.hypot(H, V))
+    p99 = float(rad[int(len(rad) * 0.99)]) if len(rad) else 1.0
+    amax = _nice_ceil(max(p99, float(np.abs(Hm).max()), float(np.abs(Vm).max()), 1.0) * 1.12)
+    return {
+        "kind": "orbit", "version": CONTRACT_VERSION, "bearing": pt,
+        "unit": cap.unit_of("X") or "µm", "rpm": cap.rpm,
+        "captured_at": getattr(cap, "captured_at", ""),
+        "H": _finite(H.tolist()), "V": _finite(V.tolist()),
+        "Ho": _finite(Ho.tolist()), "Vo": _finite(Vo.tolist()),
+        "kphH": kphH, "kphV": kphV, "ampPp": max(ppH, ppV),
+        "dir": dir_, "amax": amax, "angX": 45, "angY": 45,
+    }
+
+
 def orbit_series(instance_id: str, bearing: str) -> Optional[Dict[str, Any]]:
     """Órbita X vs Y del cojinete. `bearing` = dígito ('1') o punto ('BRG1')."""
     from core.dynamic_raw import compute_orbit_from_capture

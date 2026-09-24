@@ -446,7 +446,7 @@ def create_app() -> "FastAPI":
     def figure_orbit(asset: str, bearing: str = Query(..., description="ej. 1, BRG1"),
                      api_key_hash: str = Depends(_api_key_dependency)):
         from core import figure_series as _fs
-        out = _fs.orbit_series(asset, bearing)
+        out = _fs.orbit_series_app(asset, bearing)
         if not out:
             raise HTTPException(status_code=404, detail="Sin datos para ese cojinete")
         return out
