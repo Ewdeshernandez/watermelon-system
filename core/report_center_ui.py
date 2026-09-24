@@ -480,13 +480,27 @@ def render_delivery() -> None:
           kpis=[(f'{_dot("ok")} {len(groups)}', "Clients"),
                 (f'{_dot("warn")} {_n_assets}', "Assets")])
 
+    # Catálogo de clientes para ligar activos: registrados + los ya usados.
+    _reg = []
+    try:
+        from core.clients import list_clients
+        _reg = [c.display_name for c in (list_clients() or []) if c.display_name]
+    except Exception:
+        _reg = []
+    _existing = [c for c in groups.keys() if c and c != "— Sin cliente —"]
+    _client_opts = sorted(set(_reg) | set(_existing))
+
     _clients = ["All clients"] + sorted(groups.keys())
     _fc1, _fc2 = st.columns([2, 1])
     with _fc1:
-        _fclient = st.selectbox("Client", _clients, key="rc_dc_client")
+        _fclient = st.selectbox("Filter by client", _clients, key="rc_dc_client")
     with _fc2:
         _tags_all = sorted({t for a in groups.values() for _, t in a})
-        _ftag = st.selectbox("Asset", ["All assets"] + _tags_all, key="rc_dc_tag")
+        _ftag = st.selectbox("Filter by asset", ["All assets"] + _tags_all, key="rc_dc_tag")
+
+    if "— Sin cliente —" in groups:
+        st.info("Some assets are not linked to a client yet — set the **Client** field "
+                "in each card below so you can filter and group them.")
 
     for client, assets in sorted(groups.items()):
         if _fclient != "All clients" and client != _fclient:
@@ -501,12 +515,13 @@ def render_delivery() -> None:
         st.markdown("")
 
         for iid, tag in sorted(_visible, key=lambda x: x[1]):
-            _render_delivery_asset(iid, tag, get_instance, get_schedules, get_signers,
-                                   save_schedules, save_signers, update_instance_header)
+            _render_delivery_asset(iid, tag, _client_opts, get_instance, get_schedules,
+                                   get_signers, save_schedules, save_signers,
+                                   update_instance_header)
             st.markdown("")
 
 
-def _render_delivery_asset(iid, tag, get_instance, get_schedules, get_signers,
+def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, get_signers,
                            save_schedules, save_signers, update_instance_header) -> None:
     inst = get_instance(iid)
     if inst is None:
@@ -516,10 +531,32 @@ def _render_delivery_asset(iid, tag, get_instance, get_schedules, get_signers,
     _emails = getattr(inst, "client_email", "") or ""
     _wa = getattr(inst, "whatsapp_number", "") or ""
     _alarm = bool(getattr(inst, "alarm_send_enabled", False))
+    _cur_client = (getattr(inst, "client", "") or "").strip()
 
     with st.container(border=True):
         st.markdown(f'<div class="dc-asset"><span class="tg">{tag}</span>'
                     f'<span class="sb">· {iid}</span></div>', unsafe_allow_html=True)
+
+        # --- Client link ---
+        st.markdown('<div class="dc-sec">Client</div>', unsafe_allow_html=True)
+        _NEW = "➕ New client…"
+        _opts = list(dict.fromkeys(([_cur_client] if _cur_client else [])
+                                   + client_opts + [_NEW]))
+        _cc1, _cc2 = st.columns([2, 2])
+        with _cc1:
+            _client_sel = st.selectbox("Linked client", _opts,
+                                       index=(_opts.index(_cur_client) if _cur_client in _opts else 0),
+                                       key=f"rc_dc_clientsel_{iid}",
+                                       label_visibility="collapsed")
+        _client_val = _cur_client
+        with _cc2:
+            if _client_sel == _NEW:
+                _client_val = st.text_input("New client name", value="",
+                                            key=f"rc_dc_clientnew_{iid}",
+                                            placeholder="Client name",
+                                            label_visibility="collapsed").strip()
+            else:
+                _client_val = _client_sel
 
         # --- Recipients ---
         st.markdown('<div class="dc-sec">Recipients</div>', unsafe_allow_html=True)
@@ -599,6 +636,7 @@ def _render_delivery_asset(iid, tag, get_instance, get_schedules, get_signers,
                 whatsapp_number=_wa_in.strip(),
                 alarm_send_enabled=bool(_alarm_in),
                 report_send_enabled=bool(_any_sched),
+                client=(_client_val or "").strip(),
             )
             if _ok1 and _ok2 and _ok3:
                 st.success(f"Saved config for {tag}.")

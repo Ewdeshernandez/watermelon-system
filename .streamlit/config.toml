@@ -1,2 +1,7 @@
 [client]
 showSidebarNavigation = false
+
+[theme]
+# Azul acero industrial — reemplaza el rojo por defecto de Streamlit en
+# botones primarios, toggles, foco de inputs y chips de multiselección.
+primaryColor = "#1f4e85"
