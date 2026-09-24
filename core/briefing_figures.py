@@ -784,9 +784,17 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
         fig = make_subplots(rows=nrow, cols=ncol,
                             subplot_titles=[b.get("bearing_label", "") for b in bearings],
                             horizontal_spacing=0.12, vertical_spacing=0.14)
-        # escala compartida
-        rmax = 1e-6
+        # ESCALA POR MÁQUINA (regla de analista): los cojinetes de la MISMA
+        # máquina comparten escala para poder compararlos; se dimensiona a esa
+        # máquina para que la órbita SE VEA (no una escala global que la achica).
+        def _mach(lbl: str) -> str:
+            mm = _re.search(r"(\d+)", lbl or "")
+            n = int(mm.group(1)) if mm else 0
+            return "T" if n in (1, 2) else ("G" if n in (3, 4)
+                   else ("GEN" if n in (5, 6) else "X"))
         HV = []
+        machs = []
+        rmax_m: Dict[str, float] = {}
         for b in bearings:
             px = np.asarray(b["x_values"], float); py = np.asarray(b["y_values"], float)
             n = min(px.size, py.size); px, py = px[:n], py[:n]
@@ -795,8 +803,10 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
             else:
                 H, V = px, py
             HV.append((H, V))
-            rmax = max(rmax, float(np.max(np.abs(H))), float(np.max(np.abs(V))))
-        R = rmax * 1.12
+            mm = _mach(b.get("bearing_label", ""))
+            machs.append(mm)
+            r = max(float(np.max(np.abs(H))), float(np.max(np.abs(V))))
+            rmax_m[mm] = max(rmax_m.get(mm, 1e-6), r)
         findings: List[Dict[str, Any]] = []
         for b, (H, V) in zip(bearings, HV):
             try:
@@ -814,6 +824,7 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
         for idx, (b, (H, V)) in enumerate(zip(bearings, HV)):
             r_ = idx // ncol + 1
             c_ = idx % ncol + 1
+            R = rmax_m.get(machs[idx], 1e-6) * 1.15   # escala de SU máquina
             fig.add_trace(go.Scattergl(x=H, y=V, mode="lines",
                           line=dict(width=1.1, color=_PALETTE[idx % len(_PALETTE)]),
                           showlegend=False), row=r_, col=c_)

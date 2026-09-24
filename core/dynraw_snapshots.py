@@ -188,17 +188,17 @@ def refresh_from_dynamic_raw(instance_id: str, instance_obj: Any = None,
         if spec_sd:
             from core.spectrum_history import save_spectrum_snapshot
             save_spectrum_snapshot(instance_id, sensors_data=spec_sd,
-                                   corrida_label="Robot dynamic_raw (auto)")
+                                   corrida_label="Análisis de condición")
             out["spectrum"] = len(spec_sd)
         if wave_sd:
             from core.waveform_history import save_waveform_snapshot
             save_waveform_snapshot(instance_id, sensors_data=wave_sd,
-                                   corrida_label="Robot dynamic_raw (auto)")
+                                   corrida_label="Análisis de condición")
             out["waveform"] = len(wave_sd)
         if orbit_bd:
             from core.orbit_history import save_orbit_snapshot
             save_orbit_snapshot(instance_id, bearings_data=orbit_bd,
-                                corrida_label="Robot dynamic_raw (auto)")
+                                corrida_label="Análisis de condición")
             out["orbit"] = len(orbit_bd)
         out["ok"] = True
         log.info("dynraw_snapshots(%s): %d espectro / %d onda / %d órbita",
