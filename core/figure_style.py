@@ -36,6 +36,11 @@ COLORS: Dict[str, str] = {
 # Cursores de orden que se marcan en el espectro.
 ORDER_CURSORS = [1, 2, 3, 4, 5]
 
+# Paleta multi-canal de los REPORTES (gráficas apiladas por máquina). Se cicla
+# por canal. Vive aquí para que un cambio de color también sea single-source.
+REPORT_PALETTE = ["#1d4ed8", "#dc2626", "#059669", "#7c3aed", "#d97706",
+                  "#0891b2", "#be185d", "#475569"]
+
 # Convención de amplitud por tipo (desplazamiento en pp; velocidad/acel en pico).
 AMPLITUDE = {"disp": "pp", "vel": "peak", "accel": "peak"}
 
@@ -66,6 +71,7 @@ def as_dict() -> Dict:
         "version": STYLE_VERSION,
         "fmax_cpm": FMAX_CPM,
         "colors": COLORS,
+        "report_palette": REPORT_PALETTE,
         "order_cursors": ORDER_CURSORS,
         "amplitude": AMPLITUDE,
         "orbit_angles": ORBIT_ANGLES,

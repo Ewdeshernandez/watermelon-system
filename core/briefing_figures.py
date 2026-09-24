@@ -28,8 +28,9 @@ from typing import Any, Dict, List, Optional
 log = logging.getLogger(__name__)
 
 _SPEC_FMAX_CPM = 60_000.0
-_PALETTE = ["#1d4ed8", "#dc2626", "#059669", "#7c3aed", "#d97706", "#0891b2",
-            "#be185d", "#475569"]
+# Paleta desde la FUENTE ÚNICA de estilo (core.figure_style) → un cambio de
+# color migra a reportes, web y app.
+from core.figure_style import REPORT_PALETTE as _PALETTE
 
 # Ciclo 23.167 — puntos que giran en un eje distinto al keyphasor (LM6000:
 # el núcleo del gas generator, planos CRF, gira a ~10200 cpm vs 3600 del eje
