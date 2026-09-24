@@ -867,6 +867,21 @@ def build_asset_briefing(
     if not data:
         return None, {"instance_id": instance_id, "status": "Sin datos", "ok": False}
 
+    # ANTES de las figuras: refrescar los snapshots de análisis (espectro/onda/
+    # órbita) desde la onda cruda del ROBOT (dynamic_raw) para que el reporte use
+    # SIEMPRE la data actual y no snapshots viejos guardados a mano. Idempotente
+    # y seguro (si no hay onda nueva, no hace nada; nunca rompe el reporte).
+    try:
+        from core.dynraw_snapshots import refresh_from_dynamic_raw
+        _rr = refresh_from_dynamic_raw(instance_id, instance_obj)
+        if _rr.get("ok") and not _rr.get("skipped"):
+            log.info("briefing(%s): snapshots refrescados desde dynamic_raw "
+                     "(%d espectro/%d onda/%d órbita)", instance_id,
+                     _rr.get("spectrum", 0), _rr.get("waveform", 0),
+                     _rr.get("orbit", 0))
+    except Exception as e:  # noqa: BLE001
+        log.warning("refresh dynamic_raw snapshots falló: %s", e)
+
     # Figuras PRIMERO: la IA necesita saber qué análisis ya trae el reporte
     # (espectro/forma de onda/tendencia/órbita) para no afirmar que faltan.
     # period_label define la ventana de la tendencia (7d Semanal / 30d Mensual).
