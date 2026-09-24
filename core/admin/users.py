@@ -92,19 +92,11 @@ def render() -> None:
     st.session_state.pop("_supabase_admin_client", None)
 
     st.markdown(_STYLES, unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="wmu-hero">
-            <span class="wmu-pill">🔐 ZONA ADMIN · Solo {ADMIN_EMAIL}</span>
-            <div class="wmu-title">Gestión de Usuarios</div>
-            <div class="wmu-subtitle">
-                Crear, modificar, bloquear y eliminar usuarios del sistema.
-                Los roles se asignan automáticamente según el dominio del email
-                (admin · sigasas.com → specialist · otros → client) pero podés
-                sobreescribirlos manualmente.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown('<div class="wi-label">Usuarios del sistema · Solo administradores</div>',
+                unsafe_allow_html=True)
+    st.caption("Crear, modificar, bloquear y eliminar usuarios. El rol se asigna por "
+               "dominio (admin/specialist · sigasas.com → specialist · otros → client) "
+               "y se puede sobreescribir.")
 
     _all_users = _load_users()
     _n_total = len(_all_users)

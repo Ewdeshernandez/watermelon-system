@@ -11,13 +11,13 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-import pandas as pd
 import streamlit as st
 
 from core.clients import (
     list_admins, list_clients, list_specialists, reload_registry, save_registry,
     _load_registry,
 )
+from core.ui_industrial import html_table
 
 
 def _normalize_phone(p: str) -> str:
@@ -80,13 +80,11 @@ def render() -> None:
                    "instance_tag / asset_class / train_description` contengan alguno "
                    "de sus *match_strings* (case-insensitive).")
         if clients_data:
-            st.dataframe(pd.DataFrame([{
-                "ID": c["id"], "Cliente": c["display_name"],
-                "Match": ", ".join(c.get("match_strings", [])),
-                "Assets": ", ".join(c.get("asset_tags", [])),
-                "WhatsApp": ", ".join(c.get("whatsapp_numbers", [])),
-                "Owners": ", ".join(c.get("owner_emails", [])),
-            } for c in clients_data]), use_container_width=True, hide_index=True)
+            html_table(
+                ["ID", "Cliente", "Match", "Assets", "WhatsApp", "Owners"],
+                [[c["id"], c["display_name"], ", ".join(c.get("match_strings", [])),
+                  ", ".join(c.get("asset_tags", [])), ", ".join(c.get("whatsapp_numbers", [])),
+                  ", ".join(c.get("owner_emails", []))] for c in clients_data])
         else:
             st.info("Aún no hay clientes registrados.")
 
@@ -185,10 +183,10 @@ def render() -> None:
         st.caption("Tienen el mismo nivel de visibilidad que admin (ven TODOS los "
                    "activos del archivo) pero NO gestionan clientes.")
         if specialists_data:
-            st.dataframe(pd.DataFrame([{
-                "Nombre": s.get("name", ""), "Email": s.get("email", ""),
-                "WhatsApp": ", ".join(s.get("whatsapp_numbers", [])),
-            } for s in specialists_data]), use_container_width=True, hide_index=True)
+            html_table(
+                ["Nombre", "Email", "WhatsApp"],
+                [[s.get("name", ""), s.get("email", ""),
+                  ", ".join(s.get("whatsapp_numbers", []))] for s in specialists_data])
         else:
             st.info("Aún no hay specialists registrados.")
 
@@ -259,10 +257,10 @@ def render() -> None:
         st.warning("⚠Cuidado: los admins gestionan TODO el sistema. "
                    "**No te elimines a vos mismo** o perdés acceso a esta página.")
         if admins_data:
-            st.dataframe(pd.DataFrame([{
-                "Nombre": a.get("name", ""), "Email": a.get("email", ""),
-                "WhatsApp": ", ".join(a.get("whatsapp_numbers", [])),
-            } for a in admins_data]), use_container_width=True, hide_index=True)
+            html_table(
+                ["Nombre", "Email", "WhatsApp"],
+                [[a.get("name", ""), a.get("email", ""),
+                  ", ".join(a.get("whatsapp_numbers", []))] for a in admins_data])
 
         st.markdown("---")
         st.markdown("### Agregar admin nuevo")

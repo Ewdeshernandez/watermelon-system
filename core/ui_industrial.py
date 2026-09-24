@@ -98,3 +98,38 @@ def dot(sev: str = "ok") -> str:
     c = {"ok": "#1f9d55", "warn": "#e8890c", "dang": "#dc3545",
          "info": "#2563eb", "off": "#8090a6"}.get(sev, "#8090a6")
     return f'<span style="color:{c};font-size:18px;line-height:0;">●</span>'
+
+
+def html_table(columns: List[str], rows: List[List[object]]) -> None:
+    """Tabla estilizada (header navy mono + zebra + marco redondeado), idéntica
+    a las del Report Center. `rows` = lista de filas; cada celda se escapa. Los
+    valores vacíos se muestran como '—'."""
+    import html as _html
+    _css = """
+    <style>
+    .wi-tbl-wrap{overflow-x:auto;border:1px solid #e2e8f2;border-radius:12px;
+      box-shadow:0 1px 2px rgba(11,31,58,.05),0 6px 20px rgba(11,31,58,.05);margin:2px 0 6px;}
+    table.wi-tbl{width:100%;border-collapse:collapse;font-family:'IBM Plex Sans',sans-serif;font-size:13px;}
+    table.wi-tbl th{background:#12305e;color:#fff;text-align:left;padding:11px 14px;
+      font:600 11px/1.3 'IBM Plex Mono',monospace;letter-spacing:.04em;white-space:nowrap;}
+    table.wi-tbl td{padding:10px 14px;border-bottom:1px solid #eef2f7;color:#0b1f3a;vertical-align:top;}
+    table.wi-tbl tr:last-child td{border-bottom:0;}
+    table.wi-tbl tbody tr:nth-child(even) td{background:#f7f9fc;}
+    table.wi-tbl .mono{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#274b7d;}
+    </style>
+    """
+    head = "".join(f"<th>{_html.escape(str(c))}</th>" for c in columns)
+    body = []
+    for r in rows:
+        cells = []
+        for i, cell in enumerate(r):
+            val = "" if cell is None else str(cell)
+            val = _html.escape(val) if val.strip() else "—"
+            cls = ' class="mono"' if i == 0 else ""
+            cells.append(f"<td{cls}>{val}</td>")
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    st.markdown(
+        _css + f'<div class="wi-tbl-wrap"><table class="wi-tbl"><thead><tr>{head}</tr>'
+        f'</thead><tbody>{"".join(body)}</tbody></table></div>',
+        unsafe_allow_html=True,
+    )
