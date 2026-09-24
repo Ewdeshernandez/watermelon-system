@@ -436,104 +436,111 @@ def generate_briefing_pdf(
             _wtbl,
         ]))
 
-    # ---- Figuras ----
-    # Ciclo 23.170 — Tendencias SEPARADAS por sección (CRF-TRF, Generador, ...)
-    # con líneas de alarma/danger, y caption numerado en español (figura,
-    # descripción, fecha, equipo). Fallback al trend único si no hay 'trends'.
+    # ---- Figuras ORGANIZADAS POR MÁQUINA (Turbina → GearBox → Generador) ----
+    # Cada máquina es su propia subsección con TODAS sus gráficas (tendencias,
+    # espectro, forma de onda, órbita) + su análisis, como presenta un analista.
     _trends = (figures or {}).get("trends") or []
     if not _trends and (figures or {}).get("trend"):
         _trends = [{"section": "", "unit": "", "descr": "", "png": figures["trend"]}]
-    _others = [k for k in ("spectrum", "waveform", "orbit") if (figures or {}).get(k)]
-    if _trends or _others:
-        # El título de sección viaja DENTRO del bloque de la primera figura
-        # (KeepTogether) para que nunca quede huérfano al pie de una página.
-        _section_head: List[Any] = [_h2("Figuras y análisis")]
+
+    def _parts(key):
+        raw = (figures or {}).get(f"{key}_pngs")
+        if not raw:
+            return [((figures or {}).get(key), "")] if (figures or {}).get(key) else []
+        out = []
+        for x in raw:
+            if isinstance(x, dict):
+                out.append((x.get("png"), (x.get("name") or "").strip()))
+            elif x:
+                out.append((x, ""))
+        return out
+
+    _spec = _parts("spectrum"); _wave = _parts("waveform"); _orb = _parts("orbit")
+    if _trends or _spec or _wave or _orb:
         _fecha = _fecha_es(meta.get("report_date"))
         _equipo = f"Unidad {tag}"
         _n = 0
-
         st_analysis = ParagraphStyle("bfAnalysis", parent=styles["WMBody"],
-                                     alignment=TA_JUSTIFY, spaceBefore=2,
-                                     spaceAfter=10)
-        # Título de figura CENTRADO. Se clona con el MISMO name "WMTOC2" para
-        # que afterFlowable() del shell lo siga registrando en la TOC (la
-        # detección es por style.name).
-        st_fig_head = ParagraphStyle("WMTOC2", parent=styles["WMTOC2"],
-                                     alignment=TA_CENTER)
+                                     alignment=TA_JUSTIFY, spaceBefore=2, spaceAfter=10)
+        st_fig_head = ParagraphStyle("WMTOC2", parent=styles["WMTOC2"], alignment=TA_CENTER)
 
-        def _add_fig(png, head, big_h, analysis: str = ""):
-            nonlocal _n, _section_head
+        def _add_fig(png, head, big_h, analysis: str = "", lead=None):
+            nonlocal _n
+            if not png:
+                return
             try:
-                img = Image(BytesIO(png), width=17.0 * cm, height=big_h,
-                            kind="proportional")
+                img = Image(BytesIO(png), width=17.0 * cm, height=big_h, kind="proportional")
                 img.hAlign = "CENTER"
                 _n += 1
                 _cap = f"Figura {_n}. {head}"
                 if _fecha:
                     _cap += f", {_fecha}"
                 _cap += f" · {_equipo}"
-                # Título + figura + caption + ANÁLISIS juntos en la misma
-                # página (para leer la figura y su interpretación sin saltar
-                # de hoja). Si el bloque no cabe, KeepTogether lo pasa entero
-                # a la página siguiente; solo si excede una página completa
-                # se permite el corte. El encabezado de sección va dentro del
-                # PRIMER bloque para no dejarlo huérfano.
-                _block = list(_section_head) + [
-                    Paragraph(head, st_fig_head),
-                    img,
-                    Paragraph(_cap, st_cap_fig),
+                _block = list(lead or []) + [
+                    Paragraph(head, st_fig_head), img, Paragraph(_cap, st_cap_fig),
                 ]
-                _section_head = []
                 if analysis:
-                    # El análisis viene en PÁRRAFOS (separados por línea en
-                    # blanco): turbina / generador / veredicto. Se renderiza
-                    # cada uno como Paragraph propio para dar aire al texto.
                     for _para in str(analysis).split("\n\n"):
                         _para = _para.strip()
                         if _para:
-                            _block.append(Paragraph(paragraph_safe(_para),
-                                                    st_analysis))
+                            _block.append(Paragraph(paragraph_safe(_para), st_analysis))
                 body.append(KeepTogether(_block))
             except Exception:
                 pass
 
-        for t in _trends:
-            sec = (t.get("section") or "").strip()
-            descr = (t.get("descr") or "").strip()
-            head = "Tendencia de vibración"
-            if sec:
-                head += f" — {sec}"
-            if descr:
-                head += f" ({descr})"
-            _add_fig(t.get("png"), head, 6.2 * cm,
-                     analysis=(t.get("analysis") or ""))
+        def _mtok(s):
+            s = (s or "").strip().lower()
+            return s.split()[0] if s else ""
 
-        for key in _others:
-            cap = _FIG_CAPTIONS.get(key, key.title())
-            _h = 10.6 * cm if key in ("spectrum", "waveform") else 8.0 * cm
-            # v3.31.412 — apilados troceados: si hay varias partes (>6
-            # canales), cada una es su propia figura "(parte i/n)"; el
-            # análisis va con la última parte.
-            _parts = figures.get(f"{key}_pngs") or [figures[key]]
-            for pi, part in enumerate(_parts, start=1):
-                # v3.31.415 — cada parte es un paquete por máquina con nombre
-                # ({"png","name"}); compat con bytes planos.
-                if isinstance(part, dict):
-                    _png_bytes = part.get("png")
-                    _sfx = (part.get("name") or "").strip()
-                else:
-                    _png_bytes, _sfx = part, ""
-                if not _png_bytes:
-                    continue
-                if _sfx:
-                    _head = f"{cap} — {_sfx}"
-                elif len(_parts) > 1:
-                    _head = f"{cap} ({pi}/{len(_parts)})"
-                else:
-                    _head = cap
-                _an = (figures.get(f"{key}_analysis") or "") \
-                    if pi == len(_parts) else ""
-                _add_fig(_png_bytes, _head, _h, analysis=_an)
+        _MACHINES = ["Turbina", "Gearbox", "Generador"]
+        # ¿en qué máquina (la última que la tenga) va el análisis combinado de
+        # cada tipo? — para que aparezca UNA sola vez, junto a su figura.
+        def _last_machine_with(parts):
+            last = None
+            for m in _MACHINES:
+                if any(m.lower() in (n or "").lower() for _p, n in parts):
+                    last = m
+            return last
+        _sp_last = _last_machine_with(_spec)
+        _wv_last = _last_machine_with(_wave)
+        _ob_last = _last_machine_with(_orb)
+
+        _first = True
+        for machine in _MACHINES:
+            ml = machine.lower()
+            m_tr = [t for t in _trends if _mtok(t.get("section")).startswith(ml[:4])]
+            m_sp = [(p, n) for (p, n) in _spec if ml in (n or "").lower()]
+            m_wv = [(p, n) for (p, n) in _wave if ml in (n or "").lower()]
+            m_ob = [(p, n) for (p, n) in _orb if ml in (n or "").lower()]
+            if not (m_tr or m_sp or m_wv or m_ob):
+                continue
+            # encabezado: "Figuras y análisis" solo la 1ª vez, luego el nombre de
+            # la máquina; viajan con la 1ª figura (KeepTogether) para no quedar
+            # huérfanos al pie de página.
+            _lead = ([_h2("Figuras y análisis")] if _first else []) + [_h2(machine)]
+            _first = False
+            for t in m_tr:
+                head = "Tendencia de vibración"
+                sec = (t.get("section") or "").strip(); descr = (t.get("descr") or "").strip()
+                if sec:
+                    head += f" — {sec}"
+                if descr:
+                    head += f" ({descr})"
+                _add_fig(t.get("png"), head, 6.2 * cm,
+                         analysis=(t.get("analysis") or ""), lead=_lead)
+                _lead = []
+            for (p, _nm) in m_sp:
+                _an = (figures.get("spectrum_analysis") or "") if machine == _sp_last else ""
+                _add_fig(p, f"Espectro — canales apilados — {machine}", 10.6 * cm,
+                         analysis=_an, lead=_lead); _lead = []
+            for (p, _nm) in m_wv:
+                _an = (figures.get("waveform_analysis") or "") if machine == _wv_last else ""
+                _add_fig(p, f"Forma de onda — canales apilados — {machine}", 10.6 * cm,
+                         analysis=_an, lead=_lead); _lead = []
+            for (p, _nm) in m_ob:
+                _an = (figures.get("orbit_analysis") or "") if machine == _ob_last else ""
+                _add_fig(p, f"Órbitas — {machine}", 9.0 * cm,
+                         analysis=_an, lead=_lead); _lead = []
 
     return render_report_pdf(meta, body)
 

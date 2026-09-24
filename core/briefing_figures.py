@@ -779,22 +779,19 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
             gx = gy = None
 
         bearings = bearings[:6]          # incluye el gearbox (BRG4), no solo 4
-        ncol = min(len(bearings), 2)
-        nrow = (len(bearings) + ncol - 1) // ncol
-        fig = make_subplots(rows=nrow, cols=ncol,
-                            subplot_titles=[b.get("bearing_label", "") for b in bearings],
-                            horizontal_spacing=0.12, vertical_spacing=0.14)
-        # ESCALA POR MÁQUINA (regla de analista): los cojinetes de la MISMA
-        # máquina comparten escala para poder compararlos; se dimensiona a esa
-        # máquina para que la órbita SE VEA (no una escala global que la achica).
+
+        # Máquina de cada cojinete (regla de analista: misma máquina, misma
+        # escala; y las órbitas se AGRUPAN por máquina en figuras separadas).
         def _mach(lbl: str) -> str:
             mm = _re.search(r"(\d+)", lbl or "")
             n = int(mm.group(1)) if mm else 0
             return "T" if n in (1, 2) else ("G" if n in (3, 4)
                    else ("GEN" if n in (5, 6) else "X"))
-        HV = []
-        machs = []
-        rmax_m: Dict[str, float] = {}
+        _MACH_NAME = {"T": "Turbina", "G": "Gearbox", "GEN": "Generador"}
+        _MACH_ORDER = ["T", "G", "GEN"]
+
+        groups: Dict[str, list] = {}
+        findings: List[Dict[str, Any]] = []
         for b in bearings:
             px = np.asarray(b["x_values"], float); py = np.asarray(b["y_values"], float)
             n = min(px.size, py.size); px, py = px[:n], py[:n]
@@ -802,46 +799,48 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
                 H, V = _solve_global_xy(px, py, gx, gy)
             else:
                 H, V = px, py
-            HV.append((H, V))
-            mm = _mach(b.get("bearing_label", ""))
-            machs.append(mm)
-            r = max(float(np.max(np.abs(H))), float(np.max(np.abs(V))))
-            rmax_m[mm] = max(rmax_m.get(mm, 1e-6), r)
-        findings: List[Dict[str, Any]] = []
-        for b, (H, V) in zip(bearings, HV):
+            H = np.asarray(H, float); V = np.asarray(V, float)
+            lbl = b.get("bearing_label", "")
+            groups.setdefault(_mach(lbl), []).append((lbl, H, V))
             try:
-                Ha = np.asarray(H, float); Va = np.asarray(V, float)
-                pp_h = float(np.max(Ha) - np.min(Ha))
-                pp_v = float(np.max(Va) - np.min(Va))
+                pp_h = float(np.max(H) - np.min(H)); pp_v = float(np.max(V) - np.min(V))
                 major = max(pp_h, pp_v); minor = min(pp_h, pp_v)
-                findings.append({
-                    "label": b.get("bearing_label", ""),
-                    "pp": major,
-                    "ratio": (minor / major) if major > 1e-12 else 1.0,
-                })
+                findings.append({"label": lbl, "pp": major,
+                                 "ratio": (minor / major) if major > 1e-12 else 1.0})
             except Exception:
                 pass
-        for idx, (b, (H, V)) in enumerate(zip(bearings, HV)):
-            r_ = idx // ncol + 1
-            c_ = idx % ncol + 1
-            R = rmax_m.get(machs[idx], 1e-6) * 1.15   # escala de SU máquina
-            fig.add_trace(go.Scattergl(x=H, y=V, mode="lines",
-                          line=dict(width=1.1, color=_PALETTE[idx % len(_PALETTE)]),
-                          showlegend=False), row=r_, col=c_)
-            # ambos ejes a ±R de SU máquina; scaleanchor mantiene la órbita
-            # circular (1:1). Las celdas se hacen CUADRADAS vía el alto del PNG.
-            fig.update_xaxes(range=[-R, R], scaleanchor=f"y{idx+1 if idx else ''}",
-                             scaleratio=1, showgrid=True, gridcolor="#eef2f7",
-                             zeroline=False, row=r_, col=c_)
-            fig.update_yaxes(range=[-R, R], showgrid=True, gridcolor="#eef2f7",
-                             zeroline=False, row=r_, col=c_)
-        fig.update_layout(plot_bgcolor="white",
-                          paper_bgcolor="white", showlegend=False,
-                          margin=dict(l=40, r=20, t=34, b=30),
-                          font=dict(size=12, color="#334155"))
-        # PNG con celdas cuadradas: ancho fijo 1600 / ncol → alto = cell*nrow
-        _h = int(1600 / max(ncol, 1) * nrow)
-        return {"png": _png(fig, height=_h), "analysis": _orbit_analysis(findings)}
+
+        # UNA figura por máquina (escala propia, celdas cuadradas).
+        pngs: List[Dict[str, Any]] = []
+        for mm in _MACH_ORDER:
+            grp = groups.get(mm)
+            if not grp:
+                continue
+            R = max(max(float(np.max(np.abs(H))), float(np.max(np.abs(V))))
+                    for _l, H, V in grp) * 1.15
+            ncol = min(len(grp), 2); nrow = (len(grp) + ncol - 1) // ncol
+            fig = make_subplots(rows=nrow, cols=ncol,
+                                subplot_titles=[l for l, _h2, _v2 in grp],
+                                horizontal_spacing=0.15, vertical_spacing=0.16)
+            for idx, (lbl, H, V) in enumerate(grp):
+                r_ = idx // ncol + 1; c_ = idx % ncol + 1
+                fig.add_trace(go.Scattergl(x=H, y=V, mode="lines",
+                              line=dict(width=1.1, color=_PALETTE[idx % len(_PALETTE)]),
+                              showlegend=False), row=r_, col=c_)
+                fig.update_xaxes(range=[-R, R], scaleanchor=f"y{idx+1 if idx else ''}",
+                                 scaleratio=1, showgrid=True, gridcolor="#eef2f7",
+                                 zeroline=False, row=r_, col=c_)
+                fig.update_yaxes(range=[-R, R], showgrid=True, gridcolor="#eef2f7",
+                                 zeroline=False, row=r_, col=c_)
+            fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                              showlegend=False, margin=dict(l=40, r=20, t=34, b=30),
+                              font=dict(size=12, color="#334155"))
+            _hh = int(1600 / max(ncol, 1) * nrow)
+            png = _png(fig, height=_hh)
+            if png:
+                pngs.append({"png": png, "name": _MACH_NAME.get(mm, mm)})
+        return {"png": (pngs[0]["png"] if pngs else None), "pngs": pngs,
+                "analysis": _orbit_analysis(findings)}
     except Exception as e:
         log.warning("orbit_bundle: %s", e)
         return {"png": None, "analysis": ""}
@@ -1462,6 +1461,7 @@ def collect_asset_figures(instance_id: str,
         "waveform": wave["png"], "waveform_analysis": wave["analysis"],
         "waveform_pngs": wave.get("pngs") or [],
         "orbit":    orb["png"],  "orbit_analysis": orb["analysis"],
+        "orbit_pngs": orb.get("pngs") or [],
     }
 
 
