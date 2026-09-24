@@ -397,19 +397,21 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                 st.session_state[_q_ss] = _qlist(_iid)
             except Exception:
                 pass
-            with st.spinner("Generating preview…"):
+            with st.spinner("Generating preview… (~2-4 min)"):
                 from core.briefing_builder import build_asset_briefing
+                from core.briefing_queue import build_signed_meta_extra, claim_consecutive
+                # Consecutivo definitivo + firmas cursivas → el PDF de la vista
+                # previa es IDÉNTICO al final (así approve lo reusa, instantáneo).
+                _consec = claim_consecutive(_iid)
+                _meta_extra = build_signed_meta_extra(
+                    _iid, prepared_by=(_elab or me_name), approved_by=_aprb,
+                    prepared_role=_elab_rol, approved_role=_aprb_rol, consecutive=_consec)
                 _pdf, _m = build_asset_briefing(
                     _iid, _d.get("period", "Semanal"), use_ai=False,
                     sections_override={"summary": _sum, "diagnosis": _diag},
-                    meta_extra={
-                        "prepared_by": _elab or me_name, "reviewed_by": _aprb,
-                        "prepared_role": _elab_rol, "reviewed_role": _aprb_rol,
-                        "prepared_label": "Preparado por:", "reviewed_label": "Revisado por:",
-                        "consecutive": _d.get("consecutive", ""),
-                    },
-                )
+                    meta_extra=_meta_extra)
             st.session_state[f"rc_pdf_{_iid}"] = _pdf
+            st.session_state[f"rc_pdfmeta_{_iid}"] = _m
             # Render de páginas para vista previa inline
             _imgs = []
             try:
@@ -460,10 +462,13 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                         st.session_state[_q_ss] = _qlist(_iid)
                     except Exception:
                         pass
-                    with st.spinner("Approving, generating final PDF and sending to client…"):
-                        _res = approve_and_send(_iid, prepared_by=_elab, approved_by=_aprb,
-                                                prepared_role=_elab_rol, approved_role=_aprb_rol,
-                                                send=True)
+                    with st.spinner("Approving and sending to client…"):
+                        _res = approve_and_send(
+                            _iid, prepared_by=_elab, approved_by=_aprb,
+                            prepared_role=_elab_rol, approved_role=_aprb_rol, send=True,
+                            # Reusa el PDF de la vista previa (idéntico) → instantáneo.
+                            prebuilt_pdf=st.session_state.get(f"rc_pdf_{_iid}"),
+                            prebuilt_meta=st.session_state.get(f"rc_pdfmeta_{_iid}"))
                     if _res.get("ok"):
                         _dv = _res.get("delivery") or {}
                         if _dv.get("any_ok"):
@@ -474,7 +479,7 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                                        f"Download the PDF and send it manually.")
                         st.session_state[f"rc_pdf_{_iid}"] = _res.get("pdf")
                         for _k in (f"rc_ack_{_iid}", f"rc_prevpng_{_iid}",
-                                   f"rc_prevn_{_iid}"):
+                                   f"rc_prevn_{_iid}", f"rc_pdfmeta_{_iid}"):
                             st.session_state.pop(_k, None)
                         st.session_state.pop("rc_open", None)
                         st.session_state["rc_cache"] = list_pending()

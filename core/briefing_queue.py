@@ -123,13 +123,65 @@ def list_pending() -> List[Tuple[str, str, Dict[str, Any]]]:
     return out
 
 
+def build_signed_meta_extra(instance_id: str, *, prepared_by: str, approved_by: str,
+                            prepared_role: str = "", approved_role: str = "",
+                            consecutive: str = "") -> Dict[str, Any]:
+    """meta_extra estándar del PDF firmado: firmantes + rótulos + consecutivo +
+    FIRMAS CURSIVAS (PNG generado del nombre). Reutilizable por preview y
+    approve para que el PDF de la vista previa sea IDÉNTICO al final."""
+    me = {
+        "prepared_by": (prepared_by or "").strip(),
+        "reviewed_by": (approved_by or "").strip(),
+        "prepared_label": "Preparado por:",
+        "reviewed_label": "Revisado por:",
+    }
+    if (prepared_role or "").strip():
+        me["prepared_role"] = prepared_role.strip()
+    if (approved_role or "").strip():
+        me["reviewed_role"] = approved_role.strip()
+    if (consecutive or "").strip():
+        me["consecutive"] = consecutive.strip()
+    try:
+        from core.signature_render import render_signature_png
+        _ps = render_signature_png(me["prepared_by"])
+        _rs = render_signature_png(me["reviewed_by"])
+        if _ps:
+            me["prepared_sig"] = _ps
+        if _rs:
+            me["reviewed_sig"] = _rs
+    except Exception as e:  # noqa: BLE001
+        log.warning("firmas cursivas no generadas: %s", e)
+    return me
+
+
+def claim_consecutive(instance_id: str) -> str:
+    """Reclama (o devuelve el ya reclamado) el consecutivo del borrador."""
+    draft = get_draft(instance_id) or {}
+    _c = (draft.get("consecutive") or "").strip()
+    if _c:
+        return _c
+    try:
+        from core.briefing_builder import next_consecutive
+        from core.instance_state import get_instance
+        inst = get_instance(instance_id)
+        return next_consecutive(instance_id, getattr(inst, "tag", "") or "", claim=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("claim_consecutive(%s) falló: %s", instance_id, e)
+        return ""
+
+
 def approve_and_send(instance_id: str, *,
                      prepared_by: str, approved_by: str,
                      prepared_role: str = "", approved_role: str = "",
-                     send: bool = True) -> Dict[str, Any]:
-    """Aprueba el borrador: genera el PDF FINAL firmado (Elaborado por /
-    Aprobado por) con las secciones editadas + recomendaciones vigentes,
-    y si send=True lo envía al cliente por los canales del activo.
+                     send: bool = True,
+                     prebuilt_pdf: Optional[bytes] = None,
+                     prebuilt_meta: Optional[Dict[str, Any]] = None,
+                     ) -> Dict[str, Any]:
+    """Aprueba el borrador y (si send) lo envía al cliente.
+
+    Optimización: si se pasa `prebuilt_pdf` (el PDF de la VISTA PREVIA, idéntico
+    al final porque usa las mismas secciones/firmas/consecutivo), NO se
+    re-genera → aprobar es INSTANTÁNEO. Si no, se construye aquí.
 
     Devuelve {"ok", "pdf", "meta", "delivery", "error"}."""
     out: Dict[str, Any] = {"ok": False, "pdf": None, "meta": {},
@@ -143,37 +195,25 @@ def approve_and_send(instance_id: str, *,
         return out
 
     try:
-        from core.briefing_builder import build_asset_briefing
         from core.instance_state import get_instance
         inst = get_instance(instance_id)
-        meta_extra = {
-            "prepared_by": prepared_by.strip(),
-            "reviewed_by": approved_by.strip(),
-            "prepared_label": "Preparado por:",
-            "reviewed_label": "Revisado por:",
-        }
-        # Consecutivo definitivo: el reclamado al crear el borrador; si el
-        # borrador es viejo y no trae, se reclama uno nuevo aquí.
-        _consec = (draft.get("consecutive") or "").strip()
-        if not _consec:
-            from core.briefing_builder import next_consecutive
-            _consec = next_consecutive(instance_id,
-                                       getattr(inst, "tag", "") or "",
-                                       claim=True)
-        meta_extra["consecutive"] = _consec
-        if (prepared_role or "").strip():
-            meta_extra["prepared_role"] = prepared_role.strip()
-        if (approved_role or "").strip():
-            meta_extra["reviewed_role"] = approved_role.strip()
-        pdf, meta = build_asset_briefing(
-            instance_id, draft.get("period", "Semanal"),
-            instance_obj=inst, use_ai=False,
-            meta_extra=meta_extra,
-            sections_override={
-                "summary": draft.get("summary", ""),
-                "diagnosis": draft.get("diagnosis", ""),
-            },
-        )
+        _consec = claim_consecutive(instance_id)
+        if prebuilt_pdf:
+            # Reusar el PDF de la vista previa — sin re-render (instantáneo).
+            pdf = prebuilt_pdf
+            meta = dict(prebuilt_meta or {})
+            meta.setdefault("status", (draft.get("kpis") or {}).get("status", "—"))
+        else:
+            from core.briefing_builder import build_asset_briefing
+            meta_extra = build_signed_meta_extra(
+                instance_id, prepared_by=prepared_by, approved_by=approved_by,
+                prepared_role=prepared_role, approved_role=approved_role,
+                consecutive=_consec)
+            pdf, meta = build_asset_briefing(
+                instance_id, draft.get("period", "Semanal"),
+                instance_obj=inst, use_ai=False, meta_extra=meta_extra,
+                sections_override={"summary": draft.get("summary", ""),
+                                   "diagnosis": draft.get("diagnosis", "")})
         if not pdf:
             out["error"] = f"No se pudo generar el PDF: {meta.get('status', '?')}"
             return out
