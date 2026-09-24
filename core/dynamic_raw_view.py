@@ -28,9 +28,12 @@ from core.dynamic_raw import (
 _INK = "#0f172a"
 _MUTED = "#64748b"
 _GRID = "rgba(148,163,184,0.16)"
-_X_COLOR = "#2563eb"      # azul — sensor X (horizontal)
-_Y_COLOR = "#ea580c"      # naranja — sensor Y (vertical)
-_KPH_COLOR = "#16a34a"    # verde — keyphasor
+# Colores desde la FUENTE ÚNICA de estilo (core.figure_style) → un cambio ahí
+# migra a web, app y reportes. Los valores canónicos son los de esta web.
+from core.figure_style import COLORS as _WM_COLORS
+_X_COLOR = _WM_COLORS["X"]      # azul — sensor X (horizontal)
+_Y_COLOR = _WM_COLORS["Y"]      # naranja — sensor Y (vertical)
+_KPH_COLOR = _WM_COLORS["keyphasor"]    # verde — keyphasor
 _ORBIT_RAW = "rgba(148,163,184,0.50)"
 _ORBIT_FILT = "#0f172a"
 _ACCENT = "#e11d48"

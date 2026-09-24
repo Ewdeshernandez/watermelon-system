@@ -155,6 +155,15 @@ def spectrum_series(instance_id: str, token: str) -> Optional[Dict[str, Any]]:
     fr, amp = _spectrum_xf(v, cap.fs_hz or 0.0, disp)
     if fr is None:
         return None
+    # Fmax de display desde la FUENTE ÚNICA de estilo (core.figure_style) →
+    # el rango del eje X se define en un solo lugar para web/reportes/app.
+    try:
+        from core.figure_style import fmax_cpm as _fmax_cpm
+        _fmax_hz = _fmax_cpm(unit) / 60.0
+        _cut = next((i for i, f in enumerate(fr) if f > _fmax_hz), len(fr))
+        fr, amp = fr[:_cut], amp[:_cut]
+    except Exception:
+        pass
     return {
         "kind": "spectrum", "version": CONTRACT_VERSION, "token": token,
         "point": pt, "channel": ch, "unit": unit,

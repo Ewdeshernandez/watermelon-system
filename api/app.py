@@ -414,6 +414,12 @@ def create_app() -> "FastAPI":
     # Figuras — FUENTE ÚNICA (core.figure_series). Web, reportes y app
     # consumen las MISMAS series (espectro / onda / órbita). v1.
     # =========================================================
+    @app.get("/v1/figure-style", tags=["figures"],
+             summary="Estilo ÚNICO de los gráficos (colores/rangos/marcadores)")
+    def figure_style(api_key_hash: str = Depends(_api_key_dependency)):
+        from core.figure_style import as_dict
+        return as_dict()
+
     @app.get("/v1/assets/{asset}/points", tags=["figures"],
              summary="Puntos de medición disponibles (dynamic_raw)")
     def figure_points(asset: str,
