@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.67"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.68"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -400,8 +400,32 @@ def main() -> int:
 
         _wrap = QtWidgets.QWidget()
         _wv = QtWidgets.QVBoxLayout(_wrap); _wv.setContentsMargins(0, 0, 0, 0); _wv.setSpacing(0)
-        _wv.addWidget(_hdr); _wv.addWidget(tabs, 1)
+        # --- Stepper de flujo (Fase 1: primero configurar+validar, luego tomar datos) ---
+        acq_state = {"validated": False}
+        _flow = QtWidgets.QFrame(); _flow.setObjectName("wmFlow")
+        _flow.setStyleSheet("QFrame#wmFlow{background:#0c1830;border-bottom:1px solid #23345c;}")
+        _fl = QtWidgets.QHBoxLayout(_flow); _fl.setContentsMargins(16, 5, 16, 5); _fl.setSpacing(6)
+        _step_lbls = {}
+        _STEP_OFF = ("color:#5f77a3;font:600 11px 'Segoe UI';padding:2px 9px;border-radius:6px;")
+        _STEP_ON = ("color:#08243a;background:#1AAEE5;font:800 11px 'Segoe UI';"
+                    "padding:2px 9px;border-radius:6px;")
+        for _si, _s in enumerate(["Configurar", "Validar", "Listo", "Adquirir", "Guardar"]):
+            if _si > 0:
+                _ar = QtWidgets.QLabel("›"); _ar.setStyleSheet("color:#3a4c66;font-size:14px;")
+                _fl.addWidget(_ar)
+            _sl = QtWidgets.QLabel(_s); _sl.setStyleSheet(_STEP_OFF)
+            _step_lbls[_s] = _sl; _fl.addWidget(_sl)
+        _fl.addStretch(1)
+
+        def _set_step(active):
+            for _s, _sl in _step_lbls.items():
+                _sl.setStyleSheet(_STEP_ON if _s == active else _STEP_OFF)
+        _set_step("Configurar")
+
+        _wv.addWidget(_hdr); _wv.addWidget(_flow); _wv.addWidget(tabs, 1)
         win.setCentralWidget(_wrap)
+        act_start.setEnabled(False)          # bloqueado hasta validar (Fase 1)
+        act_start.setToolTip("Valida la configuración (pestaña Validation) antes de iniciar.")
 
         # --- Barra de estado enriquecida (System1: rec · fs · Fmax · alarma · norma · versión) ---
         def _sbcell(txt="—", color="#9fb4d8", bold=False):
@@ -912,6 +936,10 @@ def main() -> int:
                 findings = validate_setup(setup)
             except Exception as e:  # noqa: BLE001
                 val_summary.setText(""); val_out.setHtml(f"<i style='color:#b91c1c'>Error: {e}</i>")
+                # fail-open: un fallo del validador NO debe bloquear la toma de datos
+                if not act_stop.isEnabled():
+                    act_start.setEnabled(True); acq_state["validated"] = True
+                    _set_step("Listo")
                 return
             ne = sum(1 for f in findings if f.level == "error")
             nw = sum(1 for f in findings if f.level == "warn")
@@ -924,6 +952,13 @@ def main() -> int:
             else:
                 val_summary.setText("🟢 Configuration valid — no findings")
                 val_summary.setStyleSheet("font-size:14px;font-weight:800;color:#166534;")
+            # --- Gate de arranque (Fase 1): Start solo con 0 errores ---
+            acq_state["validated"] = (ne == 0)
+            if not act_stop.isEnabled():          # no tocar en medio de una adquisición
+                act_start.setEnabled(ne == 0)
+                act_start.setToolTip("" if ne == 0 else
+                                     "Corrige los errores de Validation antes de iniciar.")
+                _set_step("Listo" if ne == 0 else ("Validar" if (ne or nw) else "Configurar"))
             _ic = {"error": ("🔴", "#b91c1c"), "warn": ("🟡", "#b45309"), "ok": ("🟢", "#166534")}
             rows = []
             for f in findings:
@@ -2586,6 +2621,7 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 rec_state["session"] = None
             act_start.setEnabled(False); act_stop.setEnabled(True)
+            _set_step("Adquirir")
             hdr_status.setText("● Live"); hdr_status.setStyleSheet(
                 "color:#7ff0bd; background:#123a2a; border:1px solid #1f6b47;"
                 "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
@@ -2602,7 +2638,8 @@ def main() -> int:
             rec = rec_state.get("session")
             if rec and getattr(rec, "open", False):
                 rec.stop()
-            act_start.setEnabled(True); act_stop.setEnabled(False)
+            act_start.setEnabled(acq_state.get("validated", True)); act_stop.setEnabled(False)
+            _set_step("Guardar" if rec else "Listo")
             hdr_status.setText("● Standby"); hdr_status.setStyleSheet(
                 "color:#9fb4d8; background:#12233f; border:1px solid #2a3a5c;"
                 "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
@@ -2929,6 +2966,16 @@ def main() -> int:
         for _ti in range(tabs.count()):
             tabs.setTabIcon(_ti, _dot_icon(_dotcols[_ti % len(_dotcols)]))
         tabs.setIconSize(QtCore.QSize(10, 10))
+
+        # Auto-validar al abrir y al entrar a Monitoring → habilita Start si la config sirve
+        def _revalidate(*_):
+            try:
+                _run_validation()
+            except Exception:  # noqa: BLE001
+                pass
+        tabs.currentChanged.connect(
+            lambda *_: _revalidate() if tabs.tabText(tabs.currentIndex()) == "Monitoring" else None)
+        _revalidate()
 
         win._agent = agent
         win._timer = timer
