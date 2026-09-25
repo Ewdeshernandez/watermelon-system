@@ -57,7 +57,7 @@ except Exception:
 
 industrial_band(
     "SIGA Internal · Administration", "Administration Panel",
-    "Clientes &amp; roles · Watermelon Plant Licenses · System users · Conocimiento",
+    "Clientes &amp; roles · Licencias de campo · System users · Conocimiento",
     kpis=_kpis,
 )
 
