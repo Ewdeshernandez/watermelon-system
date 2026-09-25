@@ -529,10 +529,11 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
             except Exception as e:  # noqa: BLE001
                 st.error(f"Error: {e}")
 
-    # Revocar licencia completa
+    # Revocar / Eliminar licencia completa
     with _a4:
-        with st.popover("Revocar", use_container_width=True):
-            st.caption("Bloqueo definitivo de TODA la licencia (todas las máquinas).")
+        with st.popover("Revocar / Eliminar", use_container_width=True):
+            st.caption("Bloqueo definitivo de TODA la licencia (todas las máquinas). "
+                       "Conserva el registro y el historial.")
             _ok = st.checkbox("Confirmo revocar esta licencia", key=f"revk_ok_{lid}")
             if st.button("REVOCAR", key=f"revk_btn_{lid}", type="primary",
                          disabled=not _ok, use_container_width=True):
@@ -542,6 +543,24 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
                     }).eq("id", lid).execute()
                     st.cache_data.clear()
                     st.success("Licencia revocada.")
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Error: {e}")
+
+            st.divider()
+            st.markdown('<span style="color:#b02a37;font-weight:800;font-size:13px;">'
+                        'Eliminar definitivamente</span>', unsafe_allow_html=True)
+            st.caption("Borra la licencia y TODO su historial (activaciones + conexiones). "
+                       "No se puede deshacer. Úsalo cuando el cliente ya no la tendrá.")
+            _del_ok = st.checkbox("Confirmo eliminar por completo esta licencia",
+                                  key=f"del_ok_{lid}")
+            if st.button("ELIMINAR DEFINITIVAMENTE", key=f"del_btn_{lid}",
+                         disabled=not _del_ok, use_container_width=True):
+                try:
+                    sb.table("licenses").delete().eq("id", lid).execute()
+                    st.cache_data.clear()
+                    st.session_state.pop("_lic_created", None)
+                    st.success("Licencia eliminada por completo.")
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Error: {e}")
