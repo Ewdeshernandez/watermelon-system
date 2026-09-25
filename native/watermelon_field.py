@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.65"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.66"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1648,7 +1648,12 @@ def main() -> int:
         def _ordline(col):
             ln = pg.InfiniteLine(angle=90, pen=pg.mkPen(col, width=1, style=QtCore.Qt.DashLine))
             p_spec.addItem(ln); return ln
-        v1x = _ordline(REDL); v2x = _ordline("#8b5cf6"); v3x = _ordline("#2fa36b")
+        v1x = _ordline(REDL); v2x = _ordline(AMBER); v3x = _ordline("#2fa36b")
+        def _ordlbl(txt, col):
+            t = pg.TextItem(txt, color=col, anchor=(0.5, 1.0))
+            t.setFont(QtGui.QFont("Consolas", 8, QtGui.QFont.Bold))
+            p_spec.addItem(t); t.hide(); return t
+        l1x = _ordlbl("1X", REDL); l2x = _ordlbl("2X", AMBER); l3x = _ordlbl("3X", "#2fa36b")
         spec_info = pg.TextItem("", color=NAVY, anchor=(1, 0)); p_spec.addItem(spec_info)
         # Cursor del espectro: mové el mouse y muestra "valor unidad @ CPM"
         spec_data = {}
@@ -2149,8 +2154,9 @@ def main() -> int:
                         return float(mag[b].max()) * kconv if b.any() else 0.0
                     overall = float(sig0.max() - sig0.min()) if kind_s == "prox" else float(np.sqrt(np.mean(sig0 ** 2)))
                     if f1:
-                        for ln, o in ((v1x, 1), (v2x, 2), (v3x, 3)):
+                        for ln, lb, o in ((v1x, l1x, 1), (v2x, l2x, 2), (v3x, l3x, 3)):
                             ln.setPos(o * f1 * 60.0); ln.show()               # órdenes en CPM
+                            lb.setPos(o * f1 * 60.0, ymax * 1.06); lb.show()  # etiqueta 1X/2X/3X
                         spec_info.setText(
                             f"{csel.name}\nOverall {overall:.2f} {csel.units}\n"
                             f"1X  {_ordamp(1):.2f}\n2X  {_ordamp(2):.2f}\n3X  {_ordamp(3):.2f}")
@@ -2158,6 +2164,8 @@ def main() -> int:
                     else:
                         for ln in (v1x, v2x, v3x):
                             ln.hide()
+                        for lb in (l1x, l2x, l3x):
+                            lb.hide()
                         spec_info.setText("")
             elif orb_ok and cur == "Orbit":
                 fk = orb_focus["k"]
