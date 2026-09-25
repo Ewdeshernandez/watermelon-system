@@ -194,6 +194,64 @@ def _send_license_email(to: str, customer: str, key: str, plan: str,
         return {"ok": False, "error": str(e)}
 
 
+def _send_status_email(kind: str, to: str, customer: str, key: str,
+                       reason: str = "", exp_txt: str = "") -> Dict[str, Any]:
+    """Avisa al cliente de un cambio de estado de su licencia.
+    kind: 'suspended' | 'reactivated' | 'renewed'. No lanza."""
+    try:
+        from core.email_sender import send_email
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"email_sender no disponible: {e}"}
+    nombre = (customer or "").strip() or to
+    if kind == "suspended":
+        subject = "Tu licencia de Watermelon System fue suspendida"
+        head = "Licencia suspendida"
+        color = "#dc3545"
+        lead = (f"Hola {nombre}, tu licencia de Watermelon System quedó "
+                f"<b>suspendida</b>.")
+        detail = (reason or "Licencia no renovada por falta de pago")
+        steps = ("Al abrir cualquier módulo con internet verás el aviso y no podrá "
+                 "iniciar. Para restablecerla, regulariza el pago y contáctanos: "
+                 "en cuanto reactivemos, tus equipos vuelven a funcionar solos.")
+    elif kind == "renewed":
+        subject = "Tu licencia de Watermelon System fue renovada"
+        head = "Licencia renovada"
+        color = "#1f9d55"
+        lead = f"Hola {nombre}, tu licencia de Watermelon System fue <b>renovada</b>."
+        detail = f"Nueva vigencia hasta: {exp_txt}" if exp_txt else "Vigencia extendida."
+        steps = ("No tienes que hacer nada: al abrir cualquier módulo con internet, "
+                 "la nueva vigencia se aplica sola.")
+    else:  # reactivated
+        subject = "Tu licencia de Watermelon System fue reactivada"
+        head = "Licencia reactivada"
+        color = "#1f9d55"
+        lead = f"Hola {nombre}, tu licencia de Watermelon System fue <b>reactivada</b>."
+        detail = "Ya puedes volver a usar tus módulos."
+        steps = ("Abre cualquier módulo con internet y volverá a iniciar normalmente. "
+                 "No necesitas re-ingresar la clave.")
+    body_text = (f"{lead}\n\n{detail}\n\n{steps}\n\n"
+                 f"Licencia: {key}\nSoporte: watermelonsystem.app\n— SIGA GROUP SAS")
+    body_html = f"""
+    <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
+      <h2 style="margin:0 0 6px;color:#12305e;">Watermelon System</h2>
+      <div style="background:{color}14;border:0.5px solid {color}55;border-left:4px solid {color};
+                  border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0;">
+        <div style="font:800 13px 'IBM Plex Sans';color:{color};text-transform:uppercase;
+                    letter-spacing:.05em;">{head}</div>
+      </div>
+      <p style="font-size:14px;color:#3a4c66;">{lead}</p>
+      <p style="font-size:14px;color:#3a4c66;"><b>{detail}</b></p>
+      <p style="font-size:14px;color:#3a4c66;line-height:1.7;">{steps}</p>
+      <p style="color:#8090a6;font-size:12px;margin-top:16px;border-top:0.5px solid #e2e8f2;
+                padding-top:12px;">Licencia <code style="color:#274b7d;">{key}</code> ·
+        Soporte: watermelonsystem.app · SIGA GROUP SAS</p>
+    </div>"""
+    try:
+        return send_email(to, subject, body_text, body_html=body_html)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
 # =====================================================================
 # Render
 # =====================================================================
@@ -411,7 +469,13 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
                         "suspended_reason": None, "updated_at": _now_iso(),
                     }).eq("id", lid).execute()
                     st.cache_data.clear()
-                    st.success("Renovada y reactivada.")
+                    _m = ""
+                    if lic.get("account"):
+                        _r = _send_status_email("renewed", lic.get("account"),
+                                                lic.get("customer") or "", key,
+                                                exp_txt=new_exp[:10])
+                        _m = "  ·  ✉ avisado" if _r.get("ok") else "  ·  ⚠ correo falló"
+                    st.success("Renovada y reactivada." + _m)
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Error: {e}")
@@ -424,16 +488,23 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
                 value="Licencia no renovada por falta de pago",
                 key=f"susp_r_{lid}")
             st.caption("Al próximo arranque online, el cliente será bloqueado con este motivo.")
+            _susp_mail = st.checkbox("Avisar al cliente por correo", value=True,
+                                     key=f"susp_mail_{lid}")
             if st.button("SUSPENDER", key=f"susp_btn_{lid}", type="primary",
                          use_container_width=True):
+                _rz = _reason.strip() or "Licencia no renovada por falta de pago"
                 try:
                     sb.table("licenses").update({
-                        "status": "suspended",
-                        "suspended_reason": _reason.strip() or "Licencia no renovada por falta de pago",
+                        "status": "suspended", "suspended_reason": _rz,
                         "updated_at": _now_iso(),
                     }).eq("id", lid).execute()
                     st.cache_data.clear()
-                    st.success("Licencia suspendida.")
+                    _m = ""
+                    if _susp_mail and lic.get("account"):
+                        _r = _send_status_email("suspended", lic.get("account"),
+                                                lic.get("customer") or "", key, reason=_rz)
+                        _m = "  ·  ✉ avisado" if _r.get("ok") else "  ·  ⚠ correo falló"
+                    st.success("Licencia suspendida." + _m)
                     st.rerun()
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Error: {e}")
@@ -448,7 +519,12 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
                     "status": "active", "suspended_reason": None, "updated_at": _now_iso(),
                 }).eq("id", lid).execute()
                 st.cache_data.clear()
-                st.success("Reactivada.")
+                _m = ""
+                if lic.get("account"):
+                    _r = _send_status_email("reactivated", lic.get("account"),
+                                            lic.get("customer") or "", key)
+                    _m = "  ·  ✉ avisado" if _r.get("ok") else "  ·  ⚠ correo falló"
+                st.success("Reactivada." + _m)
                 st.rerun()
             except Exception as e:  # noqa: BLE001
                 st.error(f"Error: {e}")
