@@ -38,10 +38,12 @@ from core.ui_industrial import dot, html_table
 # Paquetes comerciales → features embebidas en el token (informativo; el modelo
 # es de PAQUETE: una activación cubre todos los módulos de campo del PC).
 PLANS: Dict[str, List[str]] = {
-    "Paquete Campo (todo)": ["oma", "ema", "report", "torsional", "balance"],
+    "Paquete completo (todos los módulos)":
+        ["oma", "ema", "report", "torsional", "balance", "rotordynamics"],
     "Modal (OMA/EMA)": ["oma", "ema", "report"],
     "Torsional": ["torsional", "report"],
     "Balanceo": ["balance", "report"],
+    "Rotordynamics (Field)": ["rotordynamics", "report"],
 }
 
 
@@ -136,6 +138,62 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _send_license_email(to: str, customer: str, key: str, plan: str,
+                        seats: int, exp_iso: str) -> Dict[str, Any]:
+    """Envía la clave de licencia al correo del cliente (backend de core.email_sender).
+    Devuelve {ok, ...}. No lanza."""
+    try:
+        from core.email_sender import send_email
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"email_sender no disponible: {e}"}
+    exp_dt = _parse_dt(exp_iso)
+    exp_txt = exp_dt.strftime("%Y-%m-%d") if exp_dt else "—"
+    nombre = customer.strip() or to
+    seat_txt = "1 equipo" if seats == 1 else f"{seats} equipos"
+    subject = "Tu licencia de Watermelon System"
+    body_text = (
+        f"Hola {nombre},\n\n"
+        f"Se generó tu licencia de Watermelon System.\n\n"
+        f"Clave de licencia: {key}\n"
+        f"Paquete: {plan}\n"
+        f"Equipos permitidos: {seat_txt}\n"
+        f"Vigencia hasta: {exp_txt}\n\n"
+        f"Cómo activar:\n"
+        f"1) Instala/abre el módulo de Watermelon System en el equipo.\n"
+        f"2) Cuando pida la clave, ingresa: {key}\n"
+        f"3) Una sola activación habilita los módulos de tu paquete en ese equipo.\n\n"
+        f"Soporte: watermelonsystem.app\n"
+        f"— SIGA GROUP SAS"
+    )
+    body_html = f"""
+    <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
+      <h2 style="margin:0 0 6px;color:#12305e;">Watermelon System</h2>
+      <p>Hola <b>{nombre}</b>, se generó tu licencia.</p>
+      <div style="background:#f3f7fc;border:1px solid #d7e3f2;border-left:4px solid #12305e;
+                  border-radius:10px;padding:14px 16px;margin:14px 0;">
+        <div style="font:600 11px 'IBM Plex Mono',monospace;letter-spacing:.1em;color:#5b6b86;
+                    text-transform:uppercase;">Clave de licencia</div>
+        <div style="font:800 22px 'IBM Plex Mono',monospace;letter-spacing:2px;color:#12305e;">{key}</div>
+      </div>
+      <table style="font-size:14px;color:#3a4c66;border-collapse:collapse;">
+        <tr><td style="padding:2px 12px 2px 0;color:#8090a6;">Paquete</td><td><b>{plan}</b></td></tr>
+        <tr><td style="padding:2px 12px 2px 0;color:#8090a6;">Equipos</td><td>{seat_txt}</td></tr>
+        <tr><td style="padding:2px 12px 2px 0;color:#8090a6;">Vigencia hasta</td><td>{exp_txt}</td></tr>
+      </table>
+      <p style="margin-top:16px;"><b>Cómo activar:</b></p>
+      <ol style="color:#3a4c66;font-size:14px;line-height:1.7;">
+        <li>Instala/abre el módulo de Watermelon System en el equipo.</li>
+        <li>Cuando pida la clave, ingresa: <code style="color:#12305e;">{key}</code></li>
+        <li>Una sola activación habilita los módulos de tu paquete en ese equipo.</li>
+      </ol>
+      <p style="color:#8090a6;font-size:12px;margin-top:18px;">Soporte: watermelonsystem.app · SIGA GROUP SAS</p>
+    </div>"""
+    try:
+        return send_email(to, subject, body_text, body_html=body_html)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
 # =====================================================================
 # Render
 # =====================================================================
@@ -184,6 +242,10 @@ def render() -> None:
 
     # --- Crear licencia ---
     with st.expander("＋  Crear licencia nueva", expanded=(n_total == 0)):
+        _lc = st.session_state.get("_lic_created")
+        if _lc:
+            st.success(f"Licencia creada. Clave del cliente: **{_lc['key']}**"
+                       f"{_lc.get('mail', '')}")
         with st.form("create_license", clear_on_submit=True):
             _c1, _c2 = st.columns(2)
             with _c1:
@@ -199,11 +261,14 @@ def render() -> None:
                                           value=12, step=1)
                 _notes = st.text_input("Notas internas (opcional)",
                                        placeholder="ej: OC-2026-118, contacto Juan")
+            _send_mail = st.checkbox(
+                "Enviar la clave por correo al cliente", value=True,
+                help="Al crear, se envía un correo con la clave e instrucciones de activación.")
             _submit = st.form_submit_button("CREAR LICENCIA", type="primary",
                                             use_container_width=True)
             if _submit:
-                if not _account.strip():
-                    st.error("La cuenta (email del cliente) es obligatoria.")
+                if not _account.strip() or "@" not in _account:
+                    st.error("La cuenta (email del cliente) es obligatoria y debe ser un correo válido.")
                 else:
                     key = _gen_key()
                     exp = (datetime.now(timezone.utc)
@@ -223,8 +288,14 @@ def render() -> None:
                             "updated_at": _now_iso(),
                         }).execute()
                         st.cache_data.clear()
-                        st.success(f"Licencia creada. Clave del cliente: **{key}**  "
-                                   f"— entrégala para activar su equipo.")
+                        _mail = ""
+                        if _send_mail:
+                            _r = _send_license_email(_account.strip(), _customer.strip(),
+                                                     key, _plan, int(_seats), exp)
+                            _mail = ("  ·  ✉ correo enviado a " + _account.strip()) if _r.get("ok") \
+                                else ("  ·  ⚠ no se pudo enviar el correo: "
+                                      + str(_r.get("error", ""))[:90])
+                        st.session_state["_lic_created"] = {"key": key, "mail": _mail}
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"Error al crear: {e}")
