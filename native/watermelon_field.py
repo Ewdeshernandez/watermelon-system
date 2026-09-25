@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.64"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.65"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1560,6 +1560,43 @@ def main() -> int:
         for _n, (_k, _l) in enumerate(_cells):
             _statcell(_k, _l, first=(_n == 0))
         sl.addStretch(1); mon_l.addWidget(strip)
+
+        # --- Panel de cojinetes (System1: zona ISO + 1X amp/fase + gap por cojinete) ---
+        from collections import OrderedDict as _OD
+        _brg_groups = _OD()
+        for _bi, _bc in vib:
+            _brg_groups.setdefault(_bearing_no(_bc.name) or 1, []).append((_bi, _bc))
+        brg_cards = {}
+        if _brg_groups:
+            _blab = QtWidgets.QLabel("BEARINGS")
+            _blab.setStyleSheet("color:#5f77a3; font:700 10px 'Consolas',monospace;"
+                                " letter-spacing:.14em;")
+            _brow = QtWidgets.QHBoxLayout(); _brow.setSpacing(8)
+            for _bn in _brg_groups:
+                _card = QtWidgets.QFrame(); _card.setObjectName("brgCard")
+                _card.setStyleSheet("QFrame#brgCard{background:white;border:1px solid %s;"
+                                    "border-left:3px solid #2fa36b;border-radius:10px;}" % LINE)
+                _cv = QtWidgets.QVBoxLayout(_card)
+                _cv.setContentsMargins(12, 9, 12, 9); _cv.setSpacing(4)
+                _hh = QtWidgets.QHBoxLayout(); _hh.setSpacing(8)
+                _nm = QtWidgets.QLabel(f"Brg {_bn}")
+                _nm.setStyleSheet("border:none;color:#0b1f3a;font:800 13px 'Segoe UI';")
+                _zone = QtWidgets.QLabel("—"); _zone.setAlignment(QtCore.Qt.AlignCenter)
+                _zone.setStyleSheet("border:1px solid #bfe3cf;background:#e6f4ea;color:#166534;"
+                                    "border-radius:999px;padding:1px 9px;font:800 9px 'Segoe UI';")
+                _hh.addWidget(_nm); _hh.addStretch(1); _hh.addWidget(_zone)
+                _v1 = QtWidgets.QLabel("1X  —")
+                _v1.setStyleSheet("border:none;color:#274b7d;font:600 11px 'Consolas',monospace;")
+                _v2 = QtWidgets.QLabel("Gap  —")
+                _v2.setStyleSheet("border:none;color:#8090a6;font:600 11px 'Consolas',monospace;")
+                _cv.addLayout(_hh); _cv.addWidget(_v1); _cv.addWidget(_v2)
+                _brow.addWidget(_card)
+                brg_cards[_bn] = {"zone": _zone, "v1": _v1, "v2": _v2, "card": _card}
+            _brow.addStretch(1)
+            _bwrap = QtWidgets.QVBoxLayout(); _bwrap.setSpacing(5)
+            _bwrap.addWidget(_blab); _bwrap.addLayout(_brow)
+            mon_l.addLayout(_bwrap)
+
         # (Start/Stop/Save/Upload/Delete live in the top toolbar)
         ctl = QtWidgets.QHBoxLayout()
         lbl_disk = QtWidgets.QLabel("Disk: —"); lbl_disk.setStyleSheet("color:#64748b;")
@@ -2013,6 +2050,7 @@ def main() -> int:
                 if rec_state["fn"] % 32 == 0:
                     _refresh_disk()
                 # tabular list
+                _brg_live = {}
                 for r, (i, c) in enumerate(vib):
                     eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
                     eu0 = eu - eu.mean()
@@ -2025,6 +2063,15 @@ def main() -> int:
                         estado, bgc, fgc = "ALERT", "#fdf0d5", "#92400e"
                     else:
                         estado, bgc, fgc = "OK", "#e6f4ea", "#166534"
+                    # agregado por cojinete (peor severidad + mayor 1X + gap) para el panel
+                    _bn = _bearing_no(c.name) or 1
+                    _ag = _brg_live.setdefault(_bn, {"amp": -1.0, "ph": 0.0, "gap": gapv,
+                                                     "sev": 0, "unit": c.units})
+                    _sv = {"OK": 0, "ALERT": 1, "DANGER": 2}[estado]
+                    _ag["sev"] = max(_ag["sev"], _sv)
+                    _ag["gap"] = gapv
+                    if a1 >= _ag["amp"]:
+                        _ag["amp"] = a1; _ag["ph"] = p1; _ag["unit"] = c.units
                     vals = [c.name, f"{gapv:.2f} V", f"{ov:.3g} {c.units}", f"{a1:.3g}",
                             f"{p1:.0f}°", f"{a2:.3g}", f"{p2:.0f}°",
                             f"{al:g}", f"{dg:g}", estado]
@@ -2042,6 +2089,24 @@ def main() -> int:
                             f.setBold(True); it.setFont(f)
                             it.setTextAlignment(QtCore.Qt.AlignCenter)
                         tblt.setItem(r, cc, it)
+                # panel de cojinetes (System1): zona ISO + 1X amp/fase + gap, en vivo
+                _ZC = [("ISO A", "#e6f4ea", "#166534", "#2fa36b"),
+                       ("ISO B", "#fdf0d5", "#92400e", "#e08a1e"),
+                       ("ISO D", "#fde2e2", "#991b1b", "#c0392b")]
+                for _bn, _cd in brg_cards.items():
+                    _ag = _brg_live.get(_bn)
+                    if not _ag:
+                        continue
+                    _z, _bgc, _fgc, _brc = _ZC[_ag["sev"]]
+                    _cd["v1"].setText(f"1X  {_ag['amp']:.3g} {_ag['unit']} ∠ {_ag['ph']:.0f}°")
+                    _cd["v2"].setText(f"Gap  {_ag['gap']:.2f} V")
+                    _cd["zone"].setText(_z)
+                    _cd["zone"].setStyleSheet(
+                        f"border:1px solid {_brc};background:{_bgc};color:{_fgc};"
+                        "border-radius:999px;padding:1px 9px;font:800 9px 'Segoe UI';")
+                    _cd["card"].setStyleSheet(
+                        "QFrame#brgCard{background:white;border:1px solid %s;"
+                        "border-left:3px solid %s;border-radius:10px;}" % (LINE, _brc))
             elif cur == "Waveform":
                 fi = onda_focus["i"]
                 nshow = min(snap.shape[1], int(0.6 * fs))          # 600 ms (estándar)
