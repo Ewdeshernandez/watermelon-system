@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.66"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.67"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -402,6 +402,19 @@ def main() -> int:
         _wv = QtWidgets.QVBoxLayout(_wrap); _wv.setContentsMargins(0, 0, 0, 0); _wv.setSpacing(0)
         _wv.addWidget(_hdr); _wv.addWidget(tabs, 1)
         win.setCentralWidget(_wrap)
+
+        # --- Barra de estado enriquecida (System1: rec · fs · Fmax · alarma · norma · versión) ---
+        def _sbcell(txt="—", color="#9fb4d8", bold=False):
+            _l = QtWidgets.QLabel(txt)
+            _l.setStyleSheet("color:%s;padding:2px 10px;font-family:'Consolas',monospace;"
+                             "font-size:11px;font-weight:%s;" % (color, "700" if bold else "600"))
+            return _l
+        sb_rec = _sbcell("Rec idle"); sb_fs = _sbcell("fs —"); sb_fmax = _sbcell("Fmax —")
+        sb_alarm = _sbcell("Alarma —", "#7ff0bd", True)
+        _sbar = win.statusBar()
+        for _sw in (sb_rec, sb_fs, sb_fmax, sb_alarm,
+                    _sbcell("API 670/684", "#6f86ad"), _sbcell(f"v{__version__}", "#9fb4d8")):
+            _sbar.addPermanentWidget(_sw)
 
         # --- Configuración (editor de máquina simulada — v0.4) ---
         from core.remote_monitoring.sim_machine import (SimMachine, SensorSpec, MODES, PHENOMENA,
@@ -2112,6 +2125,24 @@ def main() -> int:
                     _cd["card"].setStyleSheet(
                         "QFrame#brgCard{background:white;border:1px solid %s;"
                         "border-left:3px solid %s;border-radius:10px;}" % (LINE, _brc))
+                # barra de estado (System1): rec · fs · Fmax · alarma
+                _s2 = rec_state.get("session")
+                if _s2 is not None and getattr(_s2, "open", False):
+                    sb_rec.setText(f"● Rec {_s2.status.duration_s:.0f}s · {_s2.status.size_mb:.1f} MB")
+                    sb_rec.setStyleSheet("color:#7ff0bd;padding:2px 10px;font-family:'Consolas',"
+                                         "monospace;font-size:11px;font-weight:700;")
+                else:
+                    sb_rec.setText("Rec idle")
+                    sb_rec.setStyleSheet("color:#9fb4d8;padding:2px 10px;font-family:'Consolas',"
+                                         "monospace;font-size:11px;font-weight:600;")
+                sb_fs.setText(f"fs {fs/1000:.1f} kS/s" if fs >= 1000 else f"fs {fs:.0f} S/s")
+                sb_fmax.setText(f"Fmax {fs/2560:.1f} kHz")
+                _ws = max((_a["sev"] for _a in _brg_live.values()), default=0)
+                _alz = [("Alarma OK", "#7ff0bd"), ("ALERT", "#f5c451"),
+                        ("DANGER", "#ff8a8a")][_ws]
+                sb_alarm.setText(_alz[0])
+                sb_alarm.setStyleSheet(f"color:{_alz[1]};padding:2px 10px;font-family:'Consolas',"
+                                       "monospace;font-size:11px;font-weight:700;")
             elif cur == "Waveform":
                 fi = onda_focus["i"]
                 nshow = min(snap.shape[1], int(0.6 * fs))          # 600 ms (estándar)
