@@ -156,7 +156,7 @@ NAV_GROUPS = [
         "admin_only": True,
         "items": [
             # v3.31.492 — Hub único de Administración con pestañas de colores
-            # (Clientes · Licencias Planta · Usuarios). Reemplaza los 3 ítems
+            # (Clientes · Licencias · Usuarios). Reemplaza los 3 ítems
             # sueltos; la lógica vive en core/admin/*.py y se renderiza una a la
             # vez (branch). Las páginas viejas quedan como envoltorios.
             {"label": "🛡️  Administración", "page": "pages/20_Administracion.py"},

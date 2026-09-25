@@ -193,30 +193,43 @@ workflow → job `all`, dry-run ✔.
 
 ---
 
-## 10) Cómo CREAR una licencia nueva (para vender a un cliente)
+## 10) Cómo CREAR y GESTIONAR licencias (consola web)
 
-La llave `WM-20E8-517A-65C5` que usamos es **una licencia real de prueba** (seats=3, cuenta
-`ehernandez@sigasas.com`), **NO un demo universal**. **Cada cliente necesita su PROPIA llave.**
+**Consola:** Watermelon System (web) → **Administración → Licencias**. Solo admin
+`@sigasas.com`. Fuente de verdad: tablas Supabase `licenses` + `activations`. No hace
+falta tocar SQL a mano.
 
-En Supabase → **SQL Editor** → New query → (cambia los valores) → Run:
+Desde la consola:
+- **Crear licencia** → nombre de cliente, cuenta (email), paquete, seats, vigencia →
+  genera la clave `WM-XXXX-XXXX-XXXX` y la muestra para entregar al cliente.
+- **Ver dónde vive** → por cada máquina: PC (hostname), IP, ubicación, módulo, VM y
+  última conexión.
+- **Renovar** → extiende la vigencia (y reactiva si estaba suspendida).
+- **Suspender por falta de pago** → `status=suspended`; al próximo arranque online el
+  cliente ve **"Licencia no renovada por falta de pago"** (edge `activate` → `payment_due`,
+  el gate lo muestra de entrada).
+- **Reactivar / Revocar** licencia completa; **Revocar / Reactivar / Liberar cupo** por
+  máquina individual.
+
+Notas:
+- **seats = 1** → esa clave solo activa en **un** PC (compartirla → `no_seats`).
+- **Se aplica** en el próximo arranque online del cliente (gate re-chequea en cada inicio).
+
+**Fallback SQL** (si la consola no está disponible), Supabase → SQL Editor:
 
 ```sql
-insert into public.licenses (key, account, seats, features, expires_at, status)
-values (
-  'WM-XXXX-XXXX-XXXX',              -- inventa una clave única (formato WM-4-4-4)
-  'cliente@empresa.com',           -- a quién pertenece
-  1,                               -- cuántos PCs (1 = una sola máquina)
-  '{oma,ema,report}',              -- funciones habilitadas
-  '2027-12-31T23:59:59Z',          -- vencimiento
-  'active'
-);
+insert into public.licenses (key, account, customer, seats, features, plan, expires_at, status)
+values ('WM-XXXX-XXXX-XXXX', 'cliente@empresa.com', 'Empresa SAS', 1,
+        '{oma,ema,report}', 'Modal (OMA/EMA)', '2027-12-31T23:59:59Z', 'active');
 ```
 
-- **seats = 1** → esa clave solo activa en **un** PC (compartirla no sirve → `no_seats`).
-- Para **generar la clave** `WM-XXXX-...`: cualquier string único sirve; usa mayúsculas y guiones.
-  (Ej. rápido en Mac: `python3 -c "import secrets;print('WM-'+'-'.join(secrets.token_hex(2).upper() for _ in range(3)))"`)
-- **Revocar/matar** una licencia: `activations.revoked=true` (un PC) o `licenses.status='revoked'`
-  (toda la licencia). Se aplica en el próximo arranque del cliente.
+- Suspender por pago: `update licenses set status='suspended',
+  suspended_reason='Licencia no renovada por falta de pago' where key='WM-…';`
+- Revocar todo: `licenses.status='revoked'`. Revocar un PC: `activations.revoked=true`.
+
+**Requisito una sola vez:** aplicar `server/licensing/2026_09_licenses_console.sql`
+(columnas IP/geo/PC/estado comercial) y re-desplegar la edge `activate`
+(`supabase functions deploy activate`).
 
 ---
 

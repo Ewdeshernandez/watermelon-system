@@ -11,7 +11,7 @@ from __future__ import annotations
 
 ADMIN_SECTIONS = [
     ("clientes", "Clientes"),
-    ("licencias", "Licencias Planta"),
+    ("licencias", "Licencias"),
     ("usuarios", "Usuarios"),
     ("conocimiento", "Conocimiento"),
 ]

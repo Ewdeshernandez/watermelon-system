@@ -3,7 +3,7 @@ pages/20_Administracion.py — Hub de Administración (una sola página)
 ===================================================================
 
 Consolida las 3 secciones de administración en pestañas de colores (estilo
-Calibración/Reports): Clientes · Licencias Planta · Usuarios. Solo admin.
+Calibración/Reports): Clientes · Licencias · Usuarios. Solo admin.
 
 Diseño anti-riesgo: el selector es un radio estilizado como barra de pestañas
 y se renderiza SOLO la sección activa (branch, no st.tabs) — así no hay

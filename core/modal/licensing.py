@@ -265,7 +265,8 @@ def activate_with_key(license_key: str, endpoint: Optional[str] = None,
     is_vm, _ = detect_vm()
     body = json.dumps({"license_key": (license_key or "").strip(),
                        "machine_fp": machine_fingerprint(), "is_vm": is_vm,
-                       "hostname": machine_label()}).encode()
+                       "hostname": machine_label(),
+                       "app": os.environ.get("WM_MODULE", "")}).encode()
     import urllib.request
     import urllib.error
     import ssl
@@ -401,7 +402,8 @@ def gate_check(grace_recheck_days: int = 3, hard_offline_days: int = 30) -> Dict
     # Re-chequeo online EN CADA ARRANQUE (kill-switch + expiración inmediatos), con timeout
     # corto para que offline sea ágil. Si el SERVIDOR responde que la máquina fue revocada /
     # la licencia venció → BLOQUEA ya. Si sólo falla la red → se usa el token en caché (gracia).
-    _REVOKE = ("machine_revoked", "invalid_key", "license_expired", "no_seats", "no_active_license")
+    _REVOKE = ("machine_revoked", "invalid_key", "license_expired", "no_seats",
+               "no_active_license", "payment_due", "license_revoked")
     if key:
         rr = activate_with_key(key, timeout=7.0)
         if rr.get("ok"):

@@ -55,6 +55,12 @@ def _reason_text(reason: str, t: Callable[[str, str], str]) -> str:
         "missing_fields": t("Enter a valid license key.", "Ingresa una clave válida."),
         "machine_mismatch": t("This license is bound to another computer.",
                               "Esta licencia está ligada a otro equipo."),
+        "payment_due": t("License not renewed — payment overdue. Contact Watermelon System.",
+                         "Licencia no renovada por falta de pago. Contacta a Watermelon System."),
+        "license_revoked": t("This license was revoked. Contact Watermelon System.",
+                             "Esta licencia fue revocada. Contacta a Watermelon System."),
+        "offline_too_long": t("Please connect to the internet to re-verify your license.",
+                              "Conéctate a internet para re-verificar tu licencia."),
     }
     if r in M:
         return M[r]
@@ -64,8 +70,11 @@ def _reason_text(reason: str, t: Callable[[str, str], str]) -> str:
     return t("Could not activate. ", "No se pudo activar. ") + r
 
 
-def _activation_dialog(lic, *, t, navy, acc, brand_html, app_title) -> bool:
-    """Ventana de activación por CLAVE. True si quedó activada."""
+def _activation_dialog(lic, *, t, navy, acc, brand_html, app_title,
+                       initial_reason: str = "") -> bool:
+    """Ventana de activación por CLAVE. True si quedó activada.
+    `initial_reason` = motivo por el que el gate bloqueó (p.ej. 'payment_due') →
+    se muestra ARRIBA, antes de que el cliente intente nada."""
     dlg = QtWidgets.QDialog()
     dlg.setWindowTitle(t(f"Activate {app_title}", f"Activar {app_title}"))
     dlg.setFixedWidth(500); dlg.setModal(True)
@@ -95,6 +104,13 @@ def _activation_dialog(lic, *, t, navy, acc, brand_html, app_title) -> bool:
 
     msg = QtWidgets.QLabel(""); msg.setWordWrap(True); msg.setAlignment(QtCore.Qt.AlignCenter)
     msg.setStyleSheet("color:#fca5a5; font-size:12px; margin-top:8px;")
+    if initial_reason:
+        # Motivo de bloqueo visible de entrada (falta de pago, vencida, revocada…).
+        _amber = str(initial_reason).startswith(("payment_due", "license_expired",
+                                                 "offline_too_long"))
+        msg.setStyleSheet("color:%s; font-size:13px; font-weight:700; margin-top:8px;"
+                          % ("#fbbf24" if _amber else "#fca5a5"))
+        msg.setText(_reason_text(initial_reason, t))
     v.addWidget(msg); v.addSpacing(20)
     row = QtWidgets.QHBoxLayout()
     b_quit = QtWidgets.QPushButton(t("Quit", "Salir"))
@@ -169,5 +185,10 @@ def run_license_gate(app, *, t, navy, acc, brand_html, app_title) -> bool:
         return False
     if g.get("allowed"):
         return True
+    # Bloqueado: si el servidor dio un motivo comercial (falta de pago, vencida,
+    # revocada), se muestra de entrada en el diálogo — el cliente ve el letrero.
+    _reason = "" if g.get("needs_activation") and g.get("reason") in (None, "no_license") \
+        else str(g.get("reason") or "")
     return _activation_dialog(lic, t=t, navy=navy, acc=acc,
-                              brand_html=brand_html, app_title=app_title)
+                              brand_html=brand_html, app_title=app_title,
+                              initial_reason=_reason)
