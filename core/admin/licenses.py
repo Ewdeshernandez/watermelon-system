@@ -107,18 +107,29 @@ def _lic_state(lic: Dict[str, Any]) -> tuple[str, str, str]:
 
 
 @st.cache_data(ttl=15)
-def _load() -> tuple[list, list]:
-    """(licenses, activations) desde Supabase."""
+def _load() -> tuple[list, list, list]:
+    """(licenses, activations, events) desde Supabase."""
     sb = get_supabase_client()
     if sb is None:
-        return [], []
+        return [], [], []
     try:
         lic = sb.table("licenses").select("*").order("created_at", desc=True).execute()
         act = sb.table("activations").select("*").execute()
-        return list(lic.data or []), list(act.data or [])
+        evt = []
+        try:
+            evt = list((sb.table("license_events").select("*")
+                        .order("created_at", desc=True).limit(1000).execute()).data or [])
+        except Exception:  # noqa: BLE001 — tabla puede no existir aún
+            evt = []
+        return list(lic.data or []), list(act.data or []), evt
     except Exception as e:  # noqa: BLE001
         st.warning(f"No se pudo leer licencias/activaciones: {e}")
-        return [], []
+        return [], [], []
+
+
+def _fmt_dt(s: Any) -> str:
+    dt = _parse_dt(s)
+    return dt.strftime("%Y-%m-%d %H:%M") if dt else "—"
 
 
 def _now_iso() -> str:
@@ -139,12 +150,17 @@ def render() -> None:
         st.error("Supabase no configurado (falta SUPABASE_URL / SUPABASE_SERVICE_KEY).")
         return
 
-    licenses, activations = _load()
+    licenses, activations, events = _load()
 
     # --- Índice de activaciones por licencia ---
     by_lic: Dict[str, List[Dict[str, Any]]] = {}
     for a in activations:
         by_lic.setdefault(a.get("license_id"), []).append(a)
+
+    # --- Índice de eventos (historial de conexiones) por licencia ---
+    ev_lic: Dict[str, List[Dict[str, Any]]] = {}
+    for e in events:
+        ev_lic.setdefault(e.get("license_id"), []).append(e)
 
     # --- KPIs ---
     n_total = len(licenses)
@@ -219,12 +235,26 @@ def render() -> None:
         st.info("No hay licencias todavía. Crea la primera arriba.")
         return
 
+    # --- Actividad reciente (todas las licencias) ---
+    if events:
+        with st.expander(f"Actividad reciente · últimas conexiones ({len(events)})"):
+            _cust = {l.get("id"): (l.get("customer") or l.get("account") or "—")
+                     for l in licenses}
+            rows = [[
+                _fmt_dt(e.get("created_at")), _cust.get(e.get("license_id"), "—"),
+                e.get("app") or "—", e.get("hostname") or "—",
+                e.get("ip") or "—", e.get("ip_geo") or "—",
+            ] for e in events[:60]]
+            html_table(["Fecha/hora", "Cliente", "Módulo", "PC", "IP", "Ubicación"], rows)
+
     # --- Lista de licencias ---
     for lic in licenses:
-        _render_license_card(sb, lic, by_lic.get(lic.get("id"), []))
+        _render_license_card(sb, lic, by_lic.get(lic.get("id"), []),
+                             ev_lic.get(lic.get("id"), []))
 
 
-def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]]) -> None:
+def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
+                         evts: List[Dict[str, Any]] | None = None) -> None:
     lid = lic.get("id")
     key = lic.get("key") or "—"
     customer = lic.get("customer") or lic.get("account") or "—"
@@ -281,6 +311,15 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]]) ->
             rows)
     else:
         st.caption("Sin máquinas activadas todavía con esta clave.")
+
+    # --- Historial de conexiones (Nivel B) ---
+    if evts:
+        with st.expander(f"Historial de conexiones ({len(evts)})"):
+            hrows = [[
+                _fmt_dt(e.get("created_at")), e.get("app") or "—",
+                e.get("hostname") or "—", e.get("ip") or "—", e.get("ip_geo") or "—",
+            ] for e in evts[:40]]
+            html_table(["Fecha/hora", "Módulo", "PC", "IP", "Ubicación"], hrows)
 
     # --- Acciones ---
     _a1, _a2, _a3, _a4, _a5 = st.columns([1.1, 1.4, 1.1, 1.1, 1.4])

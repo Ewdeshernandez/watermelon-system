@@ -4174,6 +4174,7 @@ def _license_gate(app) -> bool:
     diagnosticable. Sólo devuelve True con licencia válida (o activación exitosa)."""
     if not _LICENSING_ENABLED:
         return True
+    os.environ["WM_MODULE"] = "Modal"   # historial de licencias: identifica el módulo
     try:
         from core.modal import licensing as lic
     except Exception:  # noqa: BLE001  — módulo de seguridad ausente en la build → BLOQUEA

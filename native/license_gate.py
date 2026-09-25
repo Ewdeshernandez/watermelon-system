@@ -172,6 +172,11 @@ def run_license_gate(app, *, t, navy, acc, brand_html, app_title) -> bool:
     El estado vive en ~/.watermelon/wm_license.json → una activación cubre todos los módulos."""
     if not LICENSING_ENABLED:
         return True
+    # Nivel A: identifica el módulo para el historial de licencias (columna `app`
+    # + license_events). Cada app pasa su app_title; se manda al servidor en activate.
+    _MOD = {"Watermelon Torsional": "Torsional", "Watermelon Balancing": "Balanceo",
+            "Watermelon Modal": "Modal", "Watermelon Rotordynamics": "Rotordynamics"}
+    os.environ["WM_MODULE"] = _MOD.get(app_title, (app_title or "").replace("Watermelon ", "").strip())
     try:
         from core.modal import licensing as lic
     except Exception:  # noqa: BLE001 — módulo de seguridad ausente en la build → BLOQUEA

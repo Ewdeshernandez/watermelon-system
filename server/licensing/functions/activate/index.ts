@@ -86,6 +86,16 @@ Deno.serve(async (req) => {
     }
     await admin.from("activations").upsert(row, { onConflict: "license_id,machine_fp" });
 
+    // Historial (Nivel B): una fila por arranque → traza de auditoría (módulo/IP/hora).
+    // Best-effort: nunca hace fallar la activación.
+    try {
+      await admin.from("license_events").insert({
+        license_id: lic.id, account: lic.account, machine_fp,
+        hostname: hostname || null, app: app || null,
+        ip: ip || null, ip_geo: (row.ip_geo as string) || existing?.ip_geo || null,
+      });
+    } catch (_e) { /* ignore */ }
+
     const exp = Math.min(Date.now() / 1000 + 30 * 86400, new Date(lic.expires_at).getTime() / 1000);
     const token = await signToken({ account: lic.account, machine_fp, exp, seat: lic.seats,
       features: lic.features, iat: Date.now() / 1000 });
