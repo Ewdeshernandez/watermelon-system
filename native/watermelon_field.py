@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.63"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.64"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -373,7 +373,35 @@ def main() -> int:
         tb.addWidget(lbl_machine)
 
         # ---------------- Pestañas ----------------
-        tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
+        tabs = QtWidgets.QTabWidget()
+
+        # --- Banda de marca (chrome industrial · familia Torsional/Modal/Balanceo) ---
+        _hdr = QtWidgets.QFrame(); _hdr.setObjectName("wmBrandBar")
+        _hdr.setStyleSheet(
+            "QFrame#wmBrandBar{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #0b1730, stop:0.6 #0F1E3D, stop:1 #16294d);"
+            "border-bottom:1px solid #23345c;}")
+        _hb = QtWidgets.QHBoxLayout(_hdr); _hb.setContentsMargins(16, 8, 14, 8); _hb.setSpacing(12)
+        _brand = QtWidgets.QLabel(
+            "<span style='color:#eaf1fb;font-weight:800;letter-spacing:2px;'>WATERMELON</span>"
+            "<span style='color:#1AAEE5;font-weight:800;letter-spacing:2px;'>&nbsp;ROTORDYNAMICS</span>")
+        _brand.setTextFormat(QtCore.Qt.RichText)
+        _brand.setStyleSheet("font-size:15px;")
+        _hb.addWidget(_brand)
+        _mach = QtWidgets.QLabel(f"·  {args.machine}")
+        _mach.setStyleSheet("color:#9fb4d8; font-family:'Consolas',monospace; font-size:12px;")
+        _hb.addWidget(_mach)
+        _hb.addStretch(1)
+        hdr_status = QtWidgets.QLabel("● Standby")
+        hdr_status.setStyleSheet(
+            "color:#9fb4d8; background:#12233f; border:1px solid #2a3a5c;"
+            "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
+        _hb.addWidget(hdr_status)
+
+        _wrap = QtWidgets.QWidget()
+        _wv = QtWidgets.QVBoxLayout(_wrap); _wv.setContentsMargins(0, 0, 0, 0); _wv.setSpacing(0)
+        _wv.addWidget(_hdr); _wv.addWidget(tabs, 1)
+        win.setCentralWidget(_wrap)
 
         # --- Configuración (editor de máquina simulada — v0.4) ---
         from core.remote_monitoring.sim_machine import (SimMachine, SensorSpec, MODES, PHENOMENA,
@@ -2454,6 +2482,9 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 rec_state["session"] = None
             act_start.setEnabled(False); act_stop.setEnabled(True)
+            hdr_status.setText("● Live"); hdr_status.setStyleSheet(
+                "color:#7ff0bd; background:#123a2a; border:1px solid #1f6b47;"
+                "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
             lbl_state.setText("● capturing data (from the start)")
             timer.start(90)     # ~11 fps: smooth and lighter on CPU/RAM (modest PCs)
 
@@ -2468,6 +2499,9 @@ def main() -> int:
             if rec and getattr(rec, "open", False):
                 rec.stop()
             act_start.setEnabled(True); act_stop.setEnabled(False)
+            hdr_status.setText("● Standby"); hdr_status.setStyleSheet(
+                "color:#9fb4d8; background:#12233f; border:1px solid #2a3a5c;"
+                "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
             lbl_rec.setText("")
             if rec:
                 lbl_state.setText(f"stopped · {rec.status.duration_s:.0f}s · "
@@ -2779,6 +2813,18 @@ def main() -> int:
         _uchk.found.connect(_show_update_banner)
         _uchk.start()
         win._uchk = _uchk          # mantener referencia (evita GC del QThread)
+
+        # --- Puntos de color en las pestañas principales (sin emojis, familia WM) ---
+        def _dot_icon(hexcol: str):
+            pm = QtGui.QPixmap(12, 12); pm.fill(QtCore.Qt.transparent)
+            _p = QtGui.QPainter(pm); _p.setRenderHint(QtGui.QPainter.Antialiasing)
+            _p.setBrush(QtGui.QColor(hexcol)); _p.setPen(QtCore.Qt.NoPen)
+            _p.drawEllipse(1, 1, 10, 10); _p.end()
+            return QtGui.QIcon(pm)
+        _dotcols = ["#2f6fb0", "#e08a1e", "#2fa36b", "#c0392b", "#7c5cbf", "#12467f", "#c99a1e"]
+        for _ti in range(tabs.count()):
+            tabs.setTabIcon(_ti, _dot_icon(_dotcols[_ti % len(_dotcols)]))
+        tabs.setIconSize(QtCore.QSize(10, 10))
 
         win._agent = agent
         win._timer = timer
