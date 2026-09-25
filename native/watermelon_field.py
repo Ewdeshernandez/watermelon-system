@@ -248,6 +248,33 @@ def main() -> int:
     app = QtWidgets.QApplication(sys.argv)
     QtCore.QLocale.setDefault(QtCore.QLocale(QtCore.QLocale.C))   # punto decimal SIEMPRE
 
+    # --- Gate de licencia (modelo PAQUETE: una activación cubre todos los módulos de
+    # campo, incluido este). FAIL-CLOSED en producción; WM_LICENSING=0 lo salta (dev). ---
+    import traceback as _tb
+    _here = os.path.dirname(os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)          # que 'license_gate' sea importable (script y .exe)
+    try:
+        from license_gate import run_license_gate
+        _brand = ("<span style='color:#fff;font-weight:800;letter-spacing:3px;font-size:22px;'>WATERMELON</span>"
+                  "<span style='color:#1AAEE5;font-weight:800;letter-spacing:3px;font-size:22px;'>&nbsp;ROTORDYNAMICS</span>")
+        if not run_license_gate(app, t=lambda en, es: en, navy=NAVY, acc=ACC,
+                                brand_html=_brand, app_title="Watermelon Rotordynamics"):
+            return 0                        # el usuario cerró la activación → salir limpio
+    except SystemExit:
+        raise
+    except Exception:  # noqa: BLE001 — fallo de la capa de licencia
+        if os.environ.get("WM_LICENSING", "1") == "0":
+            pass                            # modo dev: sin gate
+        else:                              # producción: FAIL-CLOSED
+            _e = _tb.format_exc()
+            try:
+                QtWidgets.QMessageBox.critical(None, "Watermelon Rotordynamics",
+                    "Licensing error — the app cannot start.\n\n" + _e[-800:])
+            except Exception:  # noqa: BLE001
+                print(_e)
+            return 1
+
     # --- Auto-ajuste a la pantalla: deriva una escala de UI del tamaño de pantalla ---
     ui_scale = {"v": 1.0}
 
