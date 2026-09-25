@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.69"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.70"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -3016,6 +3016,102 @@ def main() -> int:
         _uchk.start()
         win._uchk = _uchk          # mantener referencia (evita GC del QThread)
 
+        # --- Sessions (Fase 3: gestor de sesiones · local vs nube + auto-subida) ---
+        sess_w = QtWidgets.QWidget(); sess_l = QtWidgets.QVBoxLayout(sess_w)
+        _ssh = QtWidgets.QHBoxLayout()
+        _ssh.addWidget(QtWidgets.QLabel("<b>Sessions</b> <i style='color:#64748b'>— capturas "
+                                        "locales y su estado en la nube</i>"))
+        _ssh.addStretch(1)
+        btn_sess_ref = QtWidgets.QPushButton("↻ Refrescar")
+        btn_sess_up = QtWidgets.QPushButton("↑ Subir todas")
+        _ssh.addWidget(btn_sess_ref); _ssh.addWidget(btn_sess_up)
+        sess_l.addLayout(_ssh)
+        sess_tbl = QtWidgets.QTableWidget(0, 4)
+        sess_tbl.setHorizontalHeaderLabels(["Run", "Fecha/hora", "Tamaño", "Estado"])
+        sess_tbl.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+        sess_tbl.verticalHeader().setVisible(False)
+        sess_tbl.setAlternatingRowColors(True); sess_tbl.setShowGrid(False)
+        sess_tbl.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        sess_tbl.setFocusPolicy(QtCore.Qt.NoFocus)
+        sess_l.addWidget(sess_tbl, 1)
+        sess_l.addWidget(QtWidgets.QLabel(
+            "<i style='color:#64748b'>● Local = en disco (sin subir) · ● En la nube = subida ✓ · "
+            "● En línea = streaming. Auto-sube los pendientes al haber red.</i>"))
+
+        _SBADGE = {"LOCAL": ("● LOCAL", "#f6ecd8", "#8a5a13"),
+                   "CLOUD": ("● EN LA NUBE", "#e6f4ea", "#166534"),
+                   "ONLINE": ("● EN LÍNEA", "#e7f0fb", "#215a97")}
+
+        def _refresh_sessions(*_):
+            try:
+                from core.remote_monitoring.recorder import (list_recordings, is_synced,
+                                                             _dir_size)
+                recs = list_recordings(agent.instance_id)
+            except Exception:  # noqa: BLE001
+                recs = []
+            rows = []
+            if rec_state.get("online") and act_stop.isEnabled():
+                rows.append(("(streaming)", "ahora", "—", "ONLINE"))
+            import datetime as _dd
+            for m in recs:
+                _d = m.get("_dir", "")
+                try:
+                    _sz = _dir_size(_d) / 1e6
+                except Exception:  # noqa: BLE001
+                    _sz = 0.0
+                try:
+                    _sy = is_synced(_d)
+                except Exception:  # noqa: BLE001
+                    _sy = False
+                _ts = m.get("started", 0)
+                try:
+                    _fe = _dd.datetime.fromtimestamp(_ts).strftime("%Y-%m-%d %H:%M") if _ts else "—"
+                except Exception:  # noqa: BLE001
+                    _fe = "—"
+                rows.append((m.get("rec_id", "—"), _fe, f"{_sz:.1f} MB",
+                             "CLOUD" if _sy else "LOCAL"))
+            sess_tbl.setRowCount(len(rows))
+            for _r, (_run, _fe, _sz, _st) in enumerate(rows):
+                for _cc, _v in enumerate((_run, _fe, _sz, "")):
+                    if _cc == 3:
+                        _tx, _bg, _fg = _SBADGE.get(_st, ("—", "#eef2f7", "#64748b"))
+                        _it = QtWidgets.QTableWidgetItem(_tx)
+                        _it.setBackground(QtGui.QColor(_bg)); _it.setForeground(QtGui.QColor(_fg))
+                        _f = _it.font(); _f.setBold(True); _it.setFont(_f)
+                        _it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    else:
+                        _it = QtWidgets.QTableWidgetItem(_v)
+                        if _cc == 0:
+                            _it.setForeground(QtGui.QColor(CORN))
+                            _f = _it.font(); _f.setBold(True); _it.setFont(_f)
+                    sess_tbl.setItem(_r, _cc, _it)
+
+        btn_sess_ref.clicked.connect(_refresh_sessions)
+        btn_sess_up.clicked.connect(lambda: (do_sync(), _refresh_sessions()))
+        tabs.addTab(sess_w, "Sessions")
+
+        # Auto-subida de pendientes (hilo de fondo; no congela la UI; no sube adquiriendo)
+        def _auto_upload():
+            if act_stop.isEnabled():
+                return
+            def _w():
+                try:
+                    from core.remote_monitoring.recorder import (_sb_client, list_recordings,
+                                                                 is_synced, upload_recording)
+                    if _sb_client() is None:
+                        return
+                    _pend = [m for m in list_recordings(agent.instance_id)
+                             if not is_synced(m["_dir"])]
+                    _did = any(upload_recording(m["_dir"]).get("ok") for m in _pend)
+                    if _did:
+                        QtCore.QTimer.singleShot(0, _refresh_sessions)
+                except Exception:  # noqa: BLE001
+                    pass
+            threading.Thread(target=_w, daemon=True).start()
+        _auto_timer = QtCore.QTimer(); _auto_timer.timeout.connect(_auto_upload)
+        _auto_timer.start(60000)          # cada 60 s intenta subir pendientes
+        win._auto_timer = _auto_timer
+
         # --- Puntos de color en las pestañas principales (sin emojis, familia WM) ---
         def _dot_icon(hexcol: str):
             pm = QtGui.QPixmap(12, 12); pm.fill(QtCore.Qt.transparent)
@@ -3034,9 +3130,14 @@ def main() -> int:
                 _run_validation()
             except Exception:  # noqa: BLE001
                 pass
-        tabs.currentChanged.connect(
-            lambda *_: _revalidate() if tabs.tabText(tabs.currentIndex()) == "Monitoring" else None)
-        _revalidate()
+        def _on_tab(*_):
+            _t = tabs.tabText(tabs.currentIndex())
+            if _t == "Monitoring":
+                _revalidate()
+            elif _t == "Sessions":
+                _refresh_sessions()
+        tabs.currentChanged.connect(_on_tab)
+        _revalidate(); _refresh_sessions()
 
         win._agent = agent
         win._timer = timer
