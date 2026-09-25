@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.68"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.69"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -365,6 +365,13 @@ def main() -> int:
         lbl_modo = QtWidgets.QLabel(" Mode: "); lbl_modo.setStyleSheet("color:white;")
         tb.addWidget(lbl_modo)
         cb_run = QtWidgets.QComboBox(); cb_run.addItems(_mode_labels); tb.addWidget(cb_run)
+        tb.addSeparator()
+        _lbl_dest = QtWidgets.QLabel(" Destino: "); _lbl_dest.setStyleSheet("color:white;")
+        tb.addWidget(_lbl_dest)
+        cb_dest = QtWidgets.QComboBox(); cb_dest.addItems(["Captura local", "Monitoreo en línea"])
+        cb_dest.setToolTip("Captura local: graba en el disco del PC (subes después).\n"
+                           "Monitoreo en línea: envía lecturas en vivo a Watermelon System.")
+        tb.addWidget(cb_dest)
         spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                                            QtWidgets.QSizePolicy.Preferred)
         tb.addWidget(spacer)
@@ -2032,6 +2039,34 @@ def main() -> int:
         # ---------------- Lógica ----------------
         from core.remote_monitoring.keyphasor import one_x_vector
 
+        def _publish_online(snap, fs, f1):
+            """Fase 2: envía lecturas en vivo a Watermelon System (best-effort, nunca crashea)."""
+            try:
+                from core import live_readings as _lr
+                from datetime import datetime as _DT, timezone as _TZ
+                now = _DT.now(_TZ.utc)
+                rds = []
+                for _pi, _pc in vib:
+                    _e0 = snap[_pi] * 1000.0 / (_pc.sensitivity_mv_per_eu or 1.0)
+                    _e0 = _e0 - _e0.mean()
+                    _ov, _a1, _p1, _a2, _p2 = _amp3(_e0, fs, f1, _ckind(_pc))
+                    _base = dict(instance_id=agent.instance_id, variable=_pc.name,
+                                 sensor_label=_pc.name, unit=_pc.units, captured_at=now)
+                    rds.append(_lr.LiveReading(metric="Direct", value=float(_ov), **_base))
+                    if f1:
+                        rds.append(_lr.LiveReading(metric="1X_Ampl", value=float(_a1), **_base))
+                        rds.append(_lr.LiveReading(metric="1X_Phase", value=float(_p1), **_base))
+                    if _ckind(_pc) == "prox":
+                        rds.append(_lr.LiveReading(metric="Gap",
+                                                   value=float(snap[_pi].mean()), **_base))
+                n = _lr.ingest_batch(rds)
+                sb_rec.setText(f"↑ Nube {n}" if n > 0 else "Nube ✕ sin conexión")
+                sb_rec.setStyleSheet("color:%s;padding:2px 10px;font-family:'Consolas',monospace;"
+                                     "font-size:11px;font-weight:700;"
+                                     % ("#8fc3ef" if n > 0 else "#ff8a8a"))
+            except Exception:  # noqa: BLE001
+                pass
+
         def update():
             # indicador en vivo de captura (se graba desde Iniciar) — así se ve que NO se pierde data
             _sess = rec_state.get("session")
@@ -2049,6 +2084,11 @@ def main() -> int:
                     rpm = float(fr0[band][np.argmax(mag0[band])] * 60.0)
             lbl_rpm.setText(f"RPM: {rpm:.0f}" if rpm else "RPM: —")
             f1 = (rpm / 60.0) if rpm else None
+            # Monitoreo en línea (Fase 2): publica lecturas ~cada 5 s, corra cual corra la pestaña
+            if rec_state.get("online") and act_stop.isEnabled():
+                rec_state["pub_n"] = rec_state.get("pub_n", 0) + 1
+                if rec_state["pub_n"] % 55 == 1:      # ~5 s a 11 fps
+                    _publish_online(snap, fs, f1)
             # Alimentar el capturador de transitorio para Bode/Polar/Cascada. Con el sim
             # ya a tiempo real, cada ~4 refrescos (~0.36 s) da muchos puntos en el arranque.
             rec_state["fn"] = rec_state.get("fn", 0) + 1
@@ -2161,8 +2201,11 @@ def main() -> int:
                         "QFrame#brgCard{background:white;border:1px solid %s;"
                         "border-left:3px solid %s;border-radius:10px;}" % (LINE, _brc))
                 # barra de estado (System1): rec · fs · Fmax · alarma
+                # (en modo online, sb_rec lo maneja el publicador de nube → no lo pisamos)
                 _s2 = rec_state.get("session")
-                if _s2 is not None and getattr(_s2, "open", False):
+                if rec_state.get("online"):
+                    pass
+                elif _s2 is not None and getattr(_s2, "open", False):
                     sb_rec.setText(f"● Rec {_s2.status.duration_s:.0f}s · {_s2.status.size_mb:.1f} MB")
                     sb_rec.setStyleSheet("color:#7ff0bd;padding:2px 10px;font-family:'Consolas',"
                                          "monospace;font-size:11px;font-weight:700;")
@@ -2597,8 +2640,26 @@ def main() -> int:
         btn_diag_cloud.clicked.connect(do_upload_report)
 
         def do_start():
-            # Pide nombre/consecutivo de la corrida y GRABA DESDE EL INICIO a disco
-            # (así no se pierde nada, aunque guardes/subas después).
+            # Intención (Fase 2): captura local (disco) vs monitoreo en línea (nube).
+            _online = (cb_dest.currentIndex() == 1)
+            rec_state["online"] = _online
+            if _online:
+                try:
+                    agent.start()
+                except Exception as e:  # noqa: BLE001
+                    QtWidgets.QMessageBox.critical(win, "Error", f"Could not start: {e}")
+                    return
+                agent.on_block = None
+                rec_state["session"] = None; rec_state["saved"] = True; rec_state["pub_n"] = 0
+                act_start.setEnabled(False); act_stop.setEnabled(True)
+                _set_step("Adquirir")
+                hdr_status.setText("● Online"); hdr_status.setStyleSheet(
+                    "color:#8fc3ef; background:#122a44; border:1px solid #2a4a6c;"
+                    "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
+                lbl_state.setText("● live monitoring → Watermelon System")
+                timer.start(90)
+                return
+            # --- Captura local: pide nombre/consecutivo y GRABA a disco desde el inicio ---
             import time as _t
             default = f"{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}"
             tag, ok = QtWidgets.QInputDialog.getText(
