@@ -21,6 +21,8 @@ import threading
 
 import numpy as np
 
+__version__ = "0.5.63"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.remote_monitoring.agent import AcqAgent
@@ -332,6 +334,8 @@ def main() -> int:
             m_file.addAction(a)
         m_file.addSeparator(); m_file.addAction(act_quit)
         act_about = QtGui.QAction("About Watermelon Rotordynamics", win)
+        act_update = QtGui.QAction("Check for updates…", win)
+        m_help.addAction(act_update)
         m_help.addAction(act_about)
 
         # View → UI scale (auto-ajuste a la pantalla; el usuario puede forzar una escala)
@@ -2689,8 +2693,92 @@ def main() -> int:
         _refresh_disk()
         act_quit.triggered.connect(win.close)
         act_about.triggered.connect(lambda: QtWidgets.QMessageBox.about(
-            win, "Watermelon Rotordynamics", "Watermelon Rotordynamics — native acquisition module.\n"
+            win, "Watermelon Rotordynamics",
+            f"Watermelon Rotordynamics v{__version__} — native acquisition module.\n"
             "Rotordynamics API 670/684 · integrated cloud.\n© SIGA"))
+
+        # ---------------- Auto-actualización (Releases GitHub `field-v*`) ----------------
+        # Igual que Modal/Torsional/Balanceo: chequeo silencioso al arrancar + botón
+        # manual en Help. Si hay release más nuevo → descarga el instalador y lo aplica.
+        class _UpdateChecker(QtCore.QThread):
+            found = QtCore.Signal(object)
+
+            def __init__(self, ver, parent=None):
+                super().__init__(parent); self._ver = ver
+
+            def run(self):
+                try:
+                    from core.field.updater import check_for_update
+                    info = check_for_update(self._ver)
+                    if info:
+                        self.found.emit(info)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        def _download_and_apply(info):
+            try:
+                from core.field import updater
+                url = info.get("setup_url") or info.get("zip_url")
+                if not url:
+                    if info.get("html_url"):
+                        QtGui.QDesktopServices.openUrl(QtCore.QUrl(info["html_url"]))
+                    return
+                dlg = QtWidgets.QProgressDialog("Downloading update…", "Cancel", 0, 100, win)
+                dlg.setWindowTitle("Updating"); dlg.setModal(True)
+                dlg.setMinimumDuration(0); dlg.show()
+
+                def _prog(fr):
+                    dlg.setValue(int(fr * 100)); QtWidgets.QApplication.processEvents()
+                path = updater.download_file(url, on_progress=_prog)
+                dlg.close()
+                if not path:
+                    QtWidgets.QMessageBox.warning(win, "Update", "Could not download the update.")
+                    return
+                if path.lower().endswith("setup.exe"):
+                    updater.launch_installer(path)
+                    QtWidgets.QApplication.quit()      # el instalador reemplaza y relanza
+                else:
+                    QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _show_update_banner(info):
+            try:
+                ver = info.get("version", "?")
+                box = QtWidgets.QMessageBox(win)
+                box.setWindowTitle("Watermelon Rotordynamics — update available")
+                box.setIcon(QtWidgets.QMessageBox.Information)
+                box.setText(f"<b>A newer version is available: v{ver}</b>")
+                box.setInformativeText(
+                    "Update now? The installer will be downloaded and applied over the "
+                    "current installation. The app will close to finish.\n\n"
+                    + (info.get("notes", "") or "")[:400])
+                b_now = box.addButton("Update now", QtWidgets.QMessageBox.AcceptRole)
+                box.addButton("Later", QtWidgets.QMessageBox.RejectRole)
+                box.exec()
+                if box.clickedButton() is b_now:
+                    _download_and_apply(info)
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _manual_check():
+            try:
+                from core.field.updater import diagnose
+                info, msg = diagnose(__version__)
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "Check for updates",
+                                              f"Update check failed:\n{e}")
+                return
+            if info:
+                _show_update_banner(info)
+            else:
+                QtWidgets.QMessageBox.information(win, "Check for updates", msg)
+
+        act_update.triggered.connect(_manual_check)
+        _uchk = _UpdateChecker(__version__, win)
+        _uchk.found.connect(_show_update_banner)
+        _uchk.start()
+        win._uchk = _uchk          # mantener referencia (evita GC del QThread)
 
         win._agent = agent
         win._timer = timer

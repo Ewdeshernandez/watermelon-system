@@ -65,6 +65,7 @@ jobs:
             --hidden-import core.remote_monitoring._cloud_config \
             --hidden-import license_gate \
             --hidden-import core.modal.licensing \
+            --hidden-import core.field.updater \
             --hidden-import cryptography \
             --hidden-import certifi \
             --add-data "assets/watermelon_logo.png;assets" \
