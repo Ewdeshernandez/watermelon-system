@@ -184,13 +184,34 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
             "x2_amp": _a(v.get("2X_Ampl")) if harm_ok else "—",
         })
 
+    # FUERA DE LÍNEA: la lectura MÁS RECIENTE (_asof_dt) es vieja → activo parado
+    # o sin enlace. NO presentar datos viejos como la condición del periodo; se
+    # marca honesto (último estado conocido). Umbral WM_OFFLINE_THRESHOLD_H (26 h).
+    _offline = False
+    _off_since = _off_age = ""
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        import os as _os
+        _thr_h = float(_os.environ.get("WM_OFFLINE_THRESHOLD_H", "26"))
+        if _asof_dt is not None:
+            if (_dt.now(_tz.utc) - _asof_dt).total_seconds() > _thr_h * 3600.0:
+                _offline = True
+                _off_age = _format_age(_asof_dt)
+                _off_since = tabular_asof
+    except Exception:  # noqa: BLE001
+        pass
+    if _offline:
+        status = "Fuera de línea"; zone = "Fuera de línea"; zcolor = "#475569"
+
     return {
         "health": {"score": score, "zone": zone, "color": zcolor},
-        "kpis": {"status": status, "speed": speed_txt, "alarms": n_danger + n_alarm},
+        "kpis": {"status": status, "speed": speed_txt, "alarms": n_danger + n_alarm,
+                 "offline": _offline, "offline_since": _off_since, "offline_age": _off_age},
         "channels": channels,
         "severity_summary": severity_summary,
         "n_alarm": n_alarm, "n_danger": n_danger,
         "tabular_asof": tabular_asof,
+        "offline": _offline, "offline_since": _off_since, "offline_age": _off_age,
     }
 
 
@@ -198,6 +219,31 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
 # 2) Redacción: borrador determinístico + mejora IA opcional
 # ---------------------------------------------------------------------------
 def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    # FUERA DE LÍNEA — el activo no reportó datos en el periodo (parado/sin enlace).
+    # Redacción HONESTA: no se afirma condición actual; se cita el último dato.
+    if data.get("offline"):
+        _since = data.get("offline_since") or "—"
+        _age = data.get("offline_age") or "—"
+        return {
+            "summary": (
+                f"{tag} NO reportó datos de monitoreo en línea durante el periodo "
+                f"evaluado. La última lectura válida es de {_since} (hace {_age}). "
+                "El activo está parado o sin enlace de comunicación, por lo que la "
+                "condición vigente NO puede confirmarse. Los valores mostrados "
+                "corresponden al ÚLTIMO estado conocido, no a la condición actual."),
+            "diagnosis": (
+                f"Sin datos en el periodo. No es posible diagnosticar la condición "
+                f"actual de {tag}: la última medición disponible es de {_since} "
+                f"(hace {_age}). Restablecer el enlace de monitoreo para retomar el "
+                "seguimiento; hasta entonces este reporte solo refleja el histórico."),
+            "recommendations": [
+                "Verificar por qué el activo dejó de reportar (parada, energía, red "
+                "o el equipo de adquisición) y restablecer el monitoreo en línea.",
+                "Al reconectar, confirmar que las lecturas retoman antes de emitir un "
+                "nuevo diagnóstico de condición.",
+            ],
+        }
+
     zone = data["health"].get("zone", "—")
     speed = data["kpis"].get("speed", "—")
     n_alarm = data.get("n_alarm", 0)

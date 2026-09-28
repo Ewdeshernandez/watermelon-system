@@ -335,6 +335,20 @@ def build_report_for_instance(
     meta = {"instance_id": instance_id, "status": status, "score": score,
             "zone": zone, "alarms": n_danger + n_alarm}
 
+    # AUTO-detección de FUERA DE LÍNEA: si la lectura MÁS RECIENTE es vieja, el
+    # activo está parado/sin enlace → NO presentar datos viejos como condición
+    # actual. Umbral WM_OFFLINE_THRESHOLD_H (default 26 h; el monitoreo en línea
+    # reporta continuo). El caller puede forzar con offline_age_min.
+    if offline_age_min is None:
+        try:
+            import os as _os
+            _thr_min = float(_os.environ.get("WM_OFFLINE_THRESHOLD_H", "26")) * 60.0
+            _newest_age_min = min(_seconds_since(r.get("captured_at")) for r in latest) / 60.0
+            if _newest_age_min > _thr_min:
+                offline_age_min = _newest_age_min
+        except Exception:  # noqa: BLE001
+            pass
+
     # FUERA DE LÍNEA — activo con servicio contratado pero sin reportar.
     # Reusa los ÚLTIMOS datos medidos; solo cambia banner/estado a gris honesto.
     if offline_age_min is not None:
