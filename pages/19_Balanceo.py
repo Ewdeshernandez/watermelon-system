@@ -42,6 +42,7 @@ from core.balance.ui import (
     bal_hero_card, bal_section_header, bal_kpi_row, bal_status_banner,
     bal_footer_norms,
 )
+from core.ui_industrial import dot, html_table
 from core.balance.rotorface import rotor_face_svg, build_planes_1p, build_planes_2p
 
 
@@ -143,7 +144,7 @@ def _bal_capture_cb(iid: str, targets: List[Tuple[str, str, str]]) -> None:
     for lbl, mag_key, ang_key in targets:
         v = res.get(lbl) if lbl else None
         if v is None:
-            warn.append(f"⚠ no live 1X for {lbl or '—'}")
+            warn.append(f"no live 1X for {lbl or '—'}")
             continue
         mag, ph, _unit, _ts = v
         st.session_state[mag_key] = float(mag)
@@ -194,7 +195,7 @@ def _trial_weight_suggester(prefix: str, mag_key: str,
                   args=(f"{prefix}_sw", f"{prefix}_sn", f"{prefix}_sr",
                         f"{prefix}_sk", mag_key))
         if st.session_state.get("_bal_tw_msg"):
-            st.caption("✅ " + st.session_state["_bal_tw_msg"])
+            st.caption(st.session_state["_bal_tw_msg"])
 
 
 def _machine_and_planes(key: str):
@@ -273,7 +274,7 @@ with tab_1p:
         f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "")
     st.markdown(rotor_face_svg(_planes1, rotation=st.session_state.get("b1_rot", "CCW")),
                 unsafe_allow_html=True)
-    st.caption("🔴 Measured vibration (V0)   ·   🔷 Correction weight to install (appears on calculation)")
+    st.markdown("<div style='font-size:13px;color:#64748b'><span style='color:#dc3545'>●</span> Measured vibration (V0) &nbsp;·&nbsp; <span style='color:#2563eb'>●</span> Correction weight to install (appears on calculation)</div>", unsafe_allow_html=True)
 
     top = st.columns([1, 1, 1])
     with top[0]:
@@ -313,7 +314,7 @@ with tab_1p:
                           on_click=_bal_capture_cb,
                           args=(iid, [(sensor, "b1_vf_mag", "b1_vf_ang")]))
                 if st.session_state.get("_bal_msg"):
-                    st.caption("📡 " + st.session_state["_bal_msg"])
+                    st.caption(st.session_state["_bal_msg"])
 
     _trial_weight_suggester("b1_tw", "b1_tw_mag")
 
@@ -376,7 +377,7 @@ with tab_2p:
         _planes2 = build_planes_2p(_vibA, _vibB, _u2, None, "", None, "")
     st.markdown(rotor_face_svg(_planes2, rotation=st.session_state.get("b2_rot", "CCW")),
                 unsafe_allow_html=True)
-    st.caption("🔴 Initial vibration (A0/B0)   ·   🔷 Correction weights (appear on calculation)")
+    st.markdown("<div style='font-size:13px;color:#64748b'><span style='color:#dc3545'>●</span> Initial vibration (A0/B0) &nbsp;·&nbsp; <span style='color:#2563eb'>●</span> Correction weights (appear on calculation)</div>", unsafe_allow_html=True)
 
     top = st.columns([1, 1, 1])
     with top[0]:
@@ -425,7 +426,7 @@ with tab_2p:
                           args=(iid, [(sA, "b2_a2_mag", "b2_a2_ang"),
                                       (sB, "b2_b2_mag", "b2_b2_ang")]))
                 if st.session_state.get("_bal_msg"):
-                    st.caption("📡 " + st.session_state["_bal_msg"])
+                    st.caption(st.session_state["_bal_msg"])
 
     with st.container(border=True):
         st.markdown("**Run 0 — initial**")
@@ -522,16 +523,17 @@ with tab_iso:
     else:
         bal_status_banner("Complies (basic quality)", ev["summary_label"], "warning")
 
-    rows = []
+    _iso_cols = ["Grade", "e_per [µm]", "U_per [g·mm]", "U_res/U_per", "Cumple"]
+    _iso_rows = []
     for g in ev["results"]:
-        rows.append({
-            "Grade": f"G{g['G']:g}",
-            "e_per [µm]": round(g["e_per"], 3),
-            "U_per [g·mm]": round(g["U_per"], 1),
-            "U_res/U_per": round(g["ratio"], 2) if g["ratio"] < 900 else "—",
-            "Complies": "✅" if g["pass"] else "❌",
-        })
-    st.dataframe(rows, hide_index=True, use_container_width=True)
+        _iso_rows.append([
+            f"G{g['G']:g}",
+            round(g["e_per"], 3),
+            round(g["U_per"], 1),
+            round(g["ratio"], 2) if g["ratio"] < 900 else "—",
+            f"{dot('ok')} Sí" if g["pass"] else f"{dot('dang')} No",
+        ])
+    html_table(_iso_cols, _iso_rows, raw_cols=[4])
 
 
 # ---------------------------------------------------------------------
@@ -649,7 +651,7 @@ with tab_rep:
             import re as _re
             _fn = "Balanceo_" + _re.sub(r"[^A-Za-z0-9]+", "_",
                                         (rep_asset or "activo")).strip("_") + ".pdf"
-            st.download_button("⬇ Download PDF", data=st.session_state["bal_pdf"],
+            st.download_button("Download PDF", data=st.session_state["bal_pdf"],
                                file_name=_fn, mime="application/pdf")
 
 

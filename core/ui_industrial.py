@@ -100,11 +100,17 @@ def dot(sev: str = "ok") -> str:
     return f'<span style="color:{c};font-size:18px;line-height:0;">●</span>'
 
 
-def html_table(columns: List[str], rows: List[List[object]]) -> None:
+def html_table(columns: List[str], rows: List[List[object]],
+               raw_cols: Optional[List[int]] = None) -> None:
     """Tabla estilizada (header navy mono + zebra + marco redondeado), idéntica
     a las del Report Center. `rows` = lista de filas; cada celda se escapa. Los
-    valores vacíos se muestran como '—'."""
+    valores vacíos se muestran como '—'.
+
+    `raw_cols`: índices de columnas cuyo contenido YA es HTML seguro (p.ej. `dot()`
+    o pills) y NO debe escaparse — para poner indicadores de color de estado.
+    Úsalo solo con HTML que tú generas, nunca con entrada de usuario sin sanear."""
     import html as _html
+    _raw = set(raw_cols or [])
     _css = """
     <style>
     .wi-tbl-wrap{overflow-x:auto;border:1px solid #e2e8f2;border-radius:12px;
@@ -124,7 +130,10 @@ def html_table(columns: List[str], rows: List[List[object]]) -> None:
         cells = []
         for i, cell in enumerate(r):
             val = "" if cell is None else str(cell)
-            val = _html.escape(val) if val.strip() else "—"
+            if i in _raw:
+                val = val if val.strip() else "—"          # HTML crudo (dots/pills)
+            else:
+                val = _html.escape(val) if val.strip() else "—"
             cls = ' class="mono"' if i == 0 else ""
             cells.append(f"<td{cls}>{val}</td>")
         body.append("<tr>" + "".join(cells) + "</tr>")

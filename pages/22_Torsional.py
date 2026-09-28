@@ -84,7 +84,7 @@ def _inject_theme():
     <style>
       @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
       html, body, [class*="css"] { font-family:'IBM Plex Sans',system-ui,sans-serif; }
-      .block-container { padding-top: 0.8rem; max-width: 1200px; }
+      .block-container { padding-top: 0.8rem; padding-left: 2.2rem; padding-right: 2.2rem; }
       /* KPI cards */
       .wm-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:10px 0 4px; }
       .wm-kpi { background:#fff; border:1px solid #e6ecf5; border-radius:11px; padding:10px 14px;
@@ -339,7 +339,7 @@ page_header("Watermelon Torsional",
             "Shaft torque & torsional vibration — TorqueTrak 10K · NI 9229 · analysis only")
 _inject_theme()
 
-with st.expander("⚙  Data source & scaling", expanded=False):
+with st.expander("Data source & scaling", expanded=False):
     c1, c2 = st.columns([1, 1])
     with c1:
         source = st.radio("Source", ["Cloud runs (field)", "Simulated demo", "Upload run (.npz)"],
@@ -423,7 +423,7 @@ if isinstance(run, dict) and run.get("kind") == "monitor":
     ])
     _bad = float(pay.get("bad_seconds", 0.0))
     if _bad > 0:
-        st.warning(f"⚠ Signal was dead for ~{_bad/3600.0:.2f} h of the campaign "
+        st.warning(f"Signal was dead for ~{_bad/3600.0:.2f} h of the campaign "
                    "(TX10K battery/cable). Fatigue reflects only the live-signal periods.")
     # tendencia (par pp vs tiempo)
     if trend_m:
@@ -450,7 +450,7 @@ if isinstance(run, dict) and run.get("kind") == "monitor":
     # --- PDF de monitoreo 24h ---
     _mlang = st.radio("Language", ["Español", "English"], horizontal=True, key="mon_rep_lang")
     _mes = (_mlang == "Español")
-    if st.button(("📄 Generar reporte de monitoreo 24h (PDF)" if _mes else "📄 Generate 24h monitor report (PDF)"),
+    if st.button(("Generar reporte de monitoreo 24h (PDF)" if _mes else "Generate 24h monitor report (PDF)"),
                  type="primary", key="mon_pdf"):
         with st.spinner("…"):
             from core.torsional.report import build_torsional_pdf, plotly_to_png
@@ -495,7 +495,7 @@ if isinstance(run, dict) and run.get("kind") == "monitor":
             st.session_state["_mon_pdf"] = pdf
         st.success("Reporte listo." if _mes else "Report ready.")
     if st.session_state.get("_mon_pdf"):
-        st.download_button(("⬇ Descargar reporte 24h (PDF)" if _mes else "⬇ Download 24h report (PDF)"),
+        st.download_button(("Descargar reporte 24h (PDF)" if _mes else "Download 24h report (PDF)"),
                            st.session_state["_mon_pdf"], file_name="watermelon_torsional_monitor_24h.pdf",
                            mime="application/pdf", type="primary")
     st.stop()
@@ -514,7 +514,7 @@ elif m.ripple_pct < 25:
     _chip, _cls = "MODERATE RIPPLE", "wm-rev"
 else:
     _chip, _cls = "HIGH RIPPLE", "wm-nogo"
-_src = "☁ Field run" if run.get("field") else "⚪ Simulated dataset"
+_src = "Field run" if run.get("field") else "Simulated dataset"
 ripple_txt = "∞" if m.ripple_pct == float("inf") else f"{m.ripple_pct:.1f}%"
 st.markdown(f"""
 <div class="wm-hero">
@@ -817,12 +817,12 @@ elif nav == T_REPORT:
                                   (1.0, 2.0, 3.0, 4.0, 6.0), bands=[band],
                                   mode_labels=[f"TNF{i+1}" for i in range(len(naturals))])
     if not measured:
-        st.warning("⚠ Esta corrida no es un run-up: las frecuencias naturales torsionales NO se "
+        st.warning("Esta corrida no es un run-up: las frecuencias naturales torsionales NO se "
                    "midieron aquí. El Campbell y las conclusiones de resonancia del reporte son "
                    "ilustrativos, no un diagnóstico de resonancia de este activo. Sube una corrida "
                    "de run-up / coast-down para el veredicto API 684."
                    if st.session_state.get("tors_rep_lang", "Español") == "Español" else
-                   "⚠ This run is not a run-up: torsional naturals were NOT measured here. The "
+                   "This run is not a run-up: torsional naturals were NOT measured here. The "
                    "report's Campbell and resonance conclusions are illustrative, not a resonance "
                    "diagnosis of this asset. Upload a run-up / coast-down for the API 684 verdict.")
     coincid = [c for c in crossings if c.severity == "coincidence"]
@@ -954,7 +954,7 @@ elif nav == T_REPORT:
     st.caption("Incrustado en el PDF: onda de par · espectro de órdenes · Campbell (API 684) · fatiga rainflow · tablas de órdenes y cruces." if _es
                else "Embedded in the PDF: torque waveform · order spectrum · Campbell (API 684) · rainflow fatigue · order & crossing tables.")
 
-    if st.button(("📄 Generar reporte completo (PDF)" if _es else "📄 Generate full report (PDF)"),
+    if st.button(("Generar reporte completo (PDF)" if _es else "Generate full report (PDF)"),
                  type="primary", key="tors_pdf_gen"):
         with st.spinner("Renderizando figuras y armando el reporte SIGA…" if _es else "Rendering figures & building the SIGA report…"):
             from core.torsional.report import build_torsional_pdf, plotly_to_png
@@ -1029,7 +1029,7 @@ elif nav == T_REPORT:
         st.success("Reporte SIGA listo." if _es else "SIGA report ready.")
 
     if st.session_state.get("_tors_pdf"):
-        st.download_button(("⬇ Descargar reporte SIGA (PDF)" if _es else "⬇ Download SIGA report (PDF)"),
+        st.download_button(("Descargar reporte SIGA (PDF)" if _es else "Download SIGA report (PDF)"),
                            st.session_state["_tors_pdf"],
                            file_name=f"{st.session_state.get('_tors_pdf_name','watermelon_torsional_report')}.pdf",
                            mime="application/pdf", type="primary")
