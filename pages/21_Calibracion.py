@@ -216,7 +216,7 @@ def _proximity_tab() -> None:
                "Typical API 670 increment: 10 mil / 250 µm.")
     xs, ys = cal_input_table("px_rows", gcol, ocol,
                              defaults=[(g, None) for g in spec["grid"]],
-                             c1_step=10.0, c2_step=0.01, c1_fmt="%.1f", c2_fmt="%.3f")
+                             c1_step=10.0, c2_step=0.01, c1_fmt="%.1f", c2_fmt="%.2f")
     if len(xs) < 2:
         st.info("Enter at least 2 points (gap, output) to see the curve.")
         return
@@ -313,7 +313,7 @@ def _amplitude_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
 
     xs, ys = cal_input_table(f"{prefix}_amp_rows", lcol, ocol,
                              defaults=[(lv, None) for lv in spec["levels"]],
-                             c1_step=1.0, c2_step=0.01, c1_fmt="%.2f", c2_fmt="%.3f")
+                             c1_step=1.0, c2_step=0.01, c1_fmt="%.2f", c2_fmt="%.2f")
     if len(xs) < 2:
         st.info("Enter at least 2 levels (level, output) to see the curve.")
         return

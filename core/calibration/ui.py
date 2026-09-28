@@ -32,6 +32,15 @@ def cal_input_table(key: str, col1: str, col2: str, defaults,
     `defaults`: lista de (x, y|None) inicial. Estado en st.session_state[key].
     Solo UI de entrada — la matemática la hace core.calibration con (xs, ys)."""
     _ensure_fonts()
+    if not st.session_state.get("_cal_no_step"):
+        st.session_state["_cal_no_step"] = True
+        st.markdown(
+            "<style>"
+            "button[data-testid='stNumberInputStepUp'],"
+            "button[data-testid='stNumberInputStepDown']{display:none!important;}"
+            "div[data-testid='stNumberInput'] input{text-align:right;"
+            "font-family:'IBM Plex Mono',monospace;}"
+            "</style>", unsafe_allow_html=True)
     if key not in st.session_state:
         st.session_state[key] = [
             [None if x is None else float(x), None if y is None else float(y)]
