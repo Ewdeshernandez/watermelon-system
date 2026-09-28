@@ -171,6 +171,10 @@ class Instance:
     last_executive_severity: str = ""   # texto literal del PDF
     last_executive_summary: str = ""    # frase ejecutiva resumen
     last_report_date: str = ""          # ISO timestamp del último PDF
+    # Últimas recomendaciones emitidas (del informe previo). Se muestran en el
+    # reporte FUERA DE LÍNEA para dar continuidad ("última guía técnica dada").
+    last_recommendations: List[str] = field(default_factory=list)
+    last_recommendations_date: str = ""  # fecha (YYYY-MM-DD) del informe fuente
 
     # Ciclo 23.150 — Envío automático del reporte ejecutivo al cliente.
     # Config por activo: a quién, por qué canal y cuándo. El cron headless
@@ -276,6 +280,8 @@ class Instance:
             last_executive_severity=_f("last_executive_severity"),
             last_executive_summary=_f("last_executive_summary"),
             last_report_date=_f("last_report_date"),
+            last_recommendations=list(data.get("last_recommendations", []) or []),
+            last_recommendations_date=_f("last_recommendations_date"),
             # Ciclo 23.150 — envío automático
             client_email=_f("client_email"),
             whatsapp_number=_f("whatsapp_number"),
@@ -464,6 +470,7 @@ def update_instance_header(
         "override_justification",
         # Ciclo 17.13 — severidad ejecutiva persistida
         "last_executive_severity", "last_executive_summary", "last_report_date",
+        "last_recommendations", "last_recommendations_date",
         # Ciclo 23.150 — envío automático del reporte
         "client_email", "whatsapp_number", "report_send_enabled",
         "report_send_day", "report_send_hour",
@@ -486,6 +493,7 @@ def update_instance_executive_severity(
     severity: str,
     summary: str = "",
     report_date: str = "",
+    recommendations: Optional[List[str]] = None,
 ) -> bool:
     """Ciclo 17.13 — Helper específico para persistir el resultado del
     último análisis ejecutivo desde el PDF generator.
@@ -499,12 +507,15 @@ def update_instance_executive_severity(
     """
     if not report_date:
         report_date = datetime.now().isoformat(timespec="seconds")
-    return update_instance_header(
-        instance_id,
+    _kw = dict(
         last_executive_severity=(severity or "").strip(),
         last_executive_summary=(summary or "").strip(),
         last_report_date=report_date,
     )
+    if recommendations:
+        _kw["last_recommendations"] = [str(r).strip() for r in recommendations if str(r).strip()]
+        _kw["last_recommendations_date"] = (report_date or "")[:10]
+    return update_instance_header(instance_id, **_kw)
 
 
 def compose_train_description(inst: Instance) -> str:

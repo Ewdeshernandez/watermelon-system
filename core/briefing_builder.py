@@ -203,6 +203,24 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
     if _offline:
         status = "Fuera de línea"; zone = "Fuera de línea"; zcolor = "#475569"
 
+    # Continuidad para el reporte fuera de línea: últimas recomendaciones (del
+    # informe previo) + últimas alarmas registradas CON FECHA.
+    _last_recs = list(getattr(instance_obj, "last_recommendations", []) or [])
+    _last_recs_date = getattr(instance_obj, "last_recommendations_date", "") or ""
+    _last_alarms: List[str] = []
+    try:
+        from core.severity_events import list_recent
+        for e in (list_recent(instance_id, limit=10) or []):
+            if str(e.get("to_status") or "").lower() in ("alarma", "danger"):
+                _ea = _parse_captured_at(e.get("crossed_at"))
+                _eds = _ea.strftime("%d/%m/%Y %H:%M") if _ea else "—"
+                _sl = e.get("sensor_label") or "—"
+                _last_alarms.append(f"{_eds} · {_sl} → {e.get('to_status')}")
+            if len(_last_alarms) >= 6:
+                break
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "health": {"score": score, "zone": zone, "color": zcolor},
         "kpis": {"status": status, "speed": speed_txt, "alarms": n_danger + n_alarm,
@@ -212,6 +230,8 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         "n_alarm": n_alarm, "n_danger": n_danger,
         "tabular_asof": tabular_asof,
         "offline": _offline, "offline_since": _off_since, "offline_age": _off_age,
+        "last_recommendations": _last_recs, "last_recommendations_date": _last_recs_date,
+        "last_alarms": _last_alarms,
     }
 
 
@@ -224,24 +244,41 @@ def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict
     if data.get("offline"):
         _since = data.get("offline_since") or "—"
         _age = data.get("offline_age") or "—"
+        _alarms = data.get("last_alarms") or []
+        _recs = data.get("last_recommendations") or []
+        _recs_date = data.get("last_recommendations_date") or ""
+        _diag = (
+            f"Sin datos en el periodo. No es posible diagnosticar la condición actual "
+            f"de {tag}: la última medición disponible (tabular abajo) es de {_since} "
+            f"(hace {_age}). Restablecer el enlace de monitoreo para retomar el "
+            "seguimiento; hasta entonces este reporte refleja el ÚLTIMO estado conocido.")
+        if _alarms:
+            _diag += ("\n\nÚltimas alarmas registradas (con fecha): "
+                      + "; ".join(_alarms) + ".")
+        else:
+            _diag += "\n\nSin alarmas registradas en el histórico reciente."
+        # Recomendaciones: las ÚLTIMAS emitidas (informe previo) + retomar monitoreo.
+        if _recs:
+            _rec_out = [(f"[Informe {_recs_date}] " if _recs_date else "") + r for r in _recs[:5]]
+            _rec_out.append("Restablecer el monitoreo en línea; al reconectar, confirmar "
+                            "que las lecturas retoman antes de emitir nuevo diagnóstico.")
+        else:
+            _rec_out = [
+                "Verificar por qué el activo dejó de reportar (parada, energía, red o "
+                "el equipo de adquisición) y restablecer el monitoreo en línea.",
+                "Al reconectar, confirmar que las lecturas retoman antes de emitir un "
+                "nuevo diagnóstico de condición.",
+            ]
         return {
             "summary": (
                 f"{tag} NO reportó datos de monitoreo en línea durante el periodo "
                 f"evaluado. La última lectura válida es de {_since} (hace {_age}). "
                 "El activo está parado o sin enlace de comunicación, por lo que la "
-                "condición vigente NO puede confirmarse. Los valores mostrados "
-                "corresponden al ÚLTIMO estado conocido, no a la condición actual."),
-            "diagnosis": (
-                f"Sin datos en el periodo. No es posible diagnosticar la condición "
-                f"actual de {tag}: la última medición disponible es de {_since} "
-                f"(hace {_age}). Restablecer el enlace de monitoreo para retomar el "
-                "seguimiento; hasta entonces este reporte solo refleja el histórico."),
-            "recommendations": [
-                "Verificar por qué el activo dejó de reportar (parada, energía, red "
-                "o el equipo de adquisición) y restablecer el monitoreo en línea.",
-                "Al reconectar, confirmar que las lecturas retoman antes de emitir un "
-                "nuevo diagnóstico de condición.",
-            ],
+                "condición vigente NO puede confirmarse. Los valores y la tabular "
+                "mostrados corresponden al ÚLTIMO estado conocido, no a la condición "
+                "actual."),
+            "diagnosis": _diag,
+            "recommendations": _rec_out,
         }
 
     zone = data["health"].get("zone", "—")
@@ -976,6 +1013,14 @@ def build_asset_briefing(
         log.warning("briefing recomendaciones falló (se usa borrador): %s", e)
         _stored = []
     recommendations = (_stored if _stored else sections["recommendations"])
+    # Reporte FUERA DE LÍNEA: conserva las últimas recomendaciones gestionadas
+    # (última guía técnica dada) y agrega la acción de retomar el monitoreo.
+    if data.get("offline"):
+        _reconn = ("Restablecer el monitoreo en línea del activo; al reconectar, "
+                   "confirmar que las lecturas retoman antes de emitir un nuevo "
+                   "diagnóstico de condición.")
+        if _reconn not in recommendations:
+            recommendations = list(recommendations) + [_reconn]
 
     sensor_map_png = _render_sensor_map(instance_obj, data["channels"], instance_id)
 
