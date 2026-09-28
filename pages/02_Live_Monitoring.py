@@ -3870,7 +3870,12 @@ def main() -> None:
     # Build mapping instance_id → display label "TAG · Cliente"
     inst_meta = {i.get("instance_id"): i for i in instances if i.get("instance_id")}
     options = sorted(inst_meta.keys())
-    default_idx = options.index("tes1") if "tes1" in options else 0
+    # Default: primer activo EN SERVICIO (preferir SGT300B de Parex). tes1 quedó
+    # fuera de servicio, ya no debe ser el activo por defecto.
+    _in_svc = [o for o in options if inst_meta.get(o, {}).get("in_service", True)]
+    _pref = next((o for o in _in_svc if "sgt300_b" in o or "sgt300b" in o), None) \
+        or (_in_svc[0] if _in_svc else options[0])
+    default_idx = options.index(_pref)
 
     # Deep-link desde el globo del Home: ?instance=<id> preselecciona el
     # activo (consume-once: borramos el query param para no fijarlo en reruns
@@ -3901,8 +3906,9 @@ def main() -> None:
         tag = meta.get("tag", "") or iid.upper()
         client = meta.get("client", "")
         base = f"{tag}  ·  {client}" if client else tag
-        # Marca DEMO solo para el equipo interno (admin/specialist)
-        if _current_role in ("admin", "specialist") and _is_demo_asset(iid, meta):
+        if not meta.get("in_service", True):
+            base += "   ·   FUERA DE SERVICIO"       # activo dado de baja (no se reporta)
+        elif _current_role in ("admin", "specialist") and _is_demo_asset(iid, meta):
             base += "   ·   DEMO"
         return base
 
@@ -4057,6 +4063,20 @@ def main() -> None:
 
     if not instance_id:
         return
+
+    # Badge GRIS para activos fuera de servicio (dados de baja, no se reportan).
+    if not inst_meta.get(instance_id, {}).get("in_service", True):
+        st.markdown(
+            "<div style=\"background:#eef1f5;border:1px solid #d3d9e2;"
+            "border-left:4px solid #8a97a8;border-radius:10px;padding:9px 14px;"
+            "margin:4px 0 10px;font-family:'IBM Plex Sans',sans-serif;display:flex;"
+            "align-items:center;gap:9px;\">"
+            "<span style='color:#8a97a8;font-size:16px;line-height:1;'>&#9679;</span>"
+            "<span style=\"font:700 12px 'IBM Plex Sans';color:#5b6675;"
+            "letter-spacing:.04em;text-transform:uppercase;\">Fuera de servicio</span>"
+            "<span style='color:#8a97a8;font-size:12px;'>&mdash; activo dado de baja "
+            "&middot; no entra en briefings ni reportes autom&aacute;ticos.</span></div>",
+            unsafe_allow_html=True)
 
     instance_obj = get_instance(instance_id)
     sensor_lookup = _build_sensor_lookup(instance_obj)

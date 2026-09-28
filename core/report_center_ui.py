@@ -728,6 +728,15 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
         st.markdown(f'<div class="dc-asset"><span class="tg">{tag}</span>'
                     f'<span class="sb">· {iid}</span></div>', unsafe_allow_html=True)
 
+        # --- Estado comercial: en servicio / fuera de servicio ---
+        _in_service = st.toggle(
+            "En servicio", value=bool(getattr(inst, "in_service", True)),
+            key=f"rc_dc_svc_{iid}",
+            help="Apágalo para dar de baja el activo (cliente antiguo/demo): sigue "
+                 "en el sistema pero NO entra en briefings, reportes ni avisos por alarma.")
+        if not _in_service:
+            st.caption("Fuera de servicio — excluido de reportes automáticos y alarmas.")
+
         # --- Client link ---
         st.markdown('<div class="dc-sec">Client</div>', unsafe_allow_html=True)
         _NEW = "➕ New client…"
@@ -872,6 +881,7 @@ def _render_delivery_asset(iid, tag, client_opts, get_instance, get_schedules, g
                     alarm_send_enabled=bool(_alarm_in),
                     report_send_enabled=bool(_any_sched),
                     client=(_client_val or "").strip(),
+                    in_service=bool(_in_service),
                 )
                 if _ok1 and _okq and _ok2 and _ok3:
                     st.session_state["rc_saved_tag"] = tag

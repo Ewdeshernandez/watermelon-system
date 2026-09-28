@@ -470,6 +470,8 @@ def update_instance_header(
         "report_send_days", "report_send_hours", "report_send_slots",
         # Ciclo 23.151 — envío por alarma
         "alarm_send_enabled", "alarm_alert_level",
+        # Estado comercial (fuera de servicio → excluido de reportes)
+        "in_service",
     }
     for key, val in kwargs.items():
         if key in allowed and val is not None:
