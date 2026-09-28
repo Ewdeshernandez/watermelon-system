@@ -233,9 +233,12 @@ def main() -> int:
         log.error("Sin destinatario de revisión (WM_BRIEFING_REVIEW_EMAIL).")
         return 1
 
-    lines = [f"• {m.get('tag', m.get('instance_id'))}: {m.get('status','—')} · "
-             f"salud {m.get('score','—')} · {m.get('alarms',0)} alarma(s)"
-             for m in ok]
+    def _line(m):
+        _s = m.get("score")
+        _salud = f"salud {_s} · " if _s is not None else ""   # offline → sin "salud"
+        return (f"• {m.get('tag', m.get('instance_id'))}: {m.get('status','—')} · "
+                f"{_salud}{m.get('alarms', 0)} alarma(s)")
+    lines = [_line(m) for m in ok]
 
     subject = (f"Briefing {args.period} — {len(ok)} borrador(es) PENDIENTES "
                f"de aprobación")

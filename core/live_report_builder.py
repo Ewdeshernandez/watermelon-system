@@ -358,11 +358,11 @@ def build_report_for_instance(
             age_txt = f"hace {_format_age(newest.get('captured_at'))}"
         except Exception:
             since_txt, age_txt = "", f"hace {offline_age_min/60.0:.1f} h"
-        health = {"score": score, "zone": "Fuera de línea", "color": "#475569"}
+        health = {"score": None, "zone": "Fuera de línea", "color": "#475569"}
         kpis.update({"status": "Fuera de línea", "offline": True,
                      "offline_since": since_txt, "offline_age": age_txt,
                      "last": age_txt})
-        meta.update({"status": "Fuera de línea", "offline": True})
+        meta.update({"status": "Fuera de línea", "offline": True, "score": None})
 
     # Canales con 1X/2X
     vec: Dict[str, Dict[str, Any]] = {}

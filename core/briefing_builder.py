@@ -202,6 +202,7 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         pass
     if _offline:
         status = "Fuera de línea"; zone = "Fuera de línea"; zcolor = "#475569"
+        score = None       # sin datos actuales → salud no aplica (no "100")
 
     # Continuidad para el reporte fuera de línea: últimas recomendaciones (del
     # informe previo) + últimas alarmas registradas CON FECHA.
