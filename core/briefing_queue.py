@@ -108,7 +108,7 @@ def list_pending() -> List[Tuple[str, str, Dict[str, Any]]]:
     pendiente de aprobación."""
     out: List[Tuple[str, str, Dict[str, Any]]] = []
     try:
-        from core.instance_state import list_instances
+        from core.instance_state import list_reportable_instances as list_instances
         for r in list_instances() or []:
             iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
             tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
@@ -354,7 +354,7 @@ def list_schedules() -> List[Tuple[str, str, Dict[str, Any]]]:
     """[(instance_id, tag, cfg)] — legacy, una entrada por activo."""
     out: List[Tuple[str, str, Dict[str, Any]]] = []
     try:
-        from core.instance_state import list_instances
+        from core.instance_state import list_reportable_instances as list_instances
         for r in list_instances() or []:
             iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
             tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
@@ -373,7 +373,7 @@ def list_schedule_entries() -> List[Tuple[str, str, Dict[str, Any]]]:
     cron itera esto para soportar Semanal + Mensual en el mismo activo."""
     out: List[Tuple[str, str, Dict[str, Any]]] = []
     try:
-        from core.instance_state import list_instances
+        from core.instance_state import list_reportable_instances as list_instances
         for r in list_instances() or []:
             iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
             tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid

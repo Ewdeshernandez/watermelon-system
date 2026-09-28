@@ -118,7 +118,7 @@ def _has_recipient(inst) -> bool:
 
 
 def process(only_instance: str = "", force: bool = False, dry_run: bool = False) -> int:
-    from core.instance_state import list_instances, get_instance
+    from core.instance_state import list_reportable_instances as list_instances, get_instance
     from core.live_report_builder import build_report_for_instance
     from core.report_delivery import deliver_report
 

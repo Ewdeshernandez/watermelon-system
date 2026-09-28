@@ -131,6 +131,7 @@ class LocalFilesystemRepository:
                     "notes": data.get("notes", ""),
                     "created_at": data.get("created_at", ""),
                     "updated_at": data.get("updated_at", ""),
+                    "in_service": bool(data.get("in_service", True)),
                     "n_documents": len(data.get("documents", [])),
                     "n_parameters": len(data.get("captured_parameters", {})),
                 })
@@ -260,6 +261,7 @@ class SupabaseRepository:
                 "notes": md.get("notes", ""),
                 "created_at": md.get("created_at", ""),
                 "updated_at": md.get("updated_at", row.get("updated_at", "")),
+                "in_service": bool(md.get("in_service", True)),
                 "n_documents": len(md.get("documents", [])),
                 "n_parameters": len(md.get("captured_parameters", {})),
             })

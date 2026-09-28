@@ -68,7 +68,7 @@ def process_quick_reports(dry_run: bool = False) -> int:
         now = datetime.utcnow()
 
     from core.briefing_queue import get_quick_schedule, schedule_due
-    from core.instance_state import get_instance, list_instances
+    from core.instance_state import get_instance, list_reportable_instances as list_instances
     from core.live_report_builder import build_report_for_instance
     from core.report_delivery import deliver_report
 

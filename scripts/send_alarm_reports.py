@@ -151,7 +151,7 @@ def _push_live_alarm(inst, tag: str, status: str, iid: str) -> None:
 
 
 def process(only_instance: str = "", force: bool = False, dry_run: bool = False) -> int:
-    from core.instance_state import list_instances, get_instance, update_instance_header
+    from core.instance_state import list_reportable_instances as list_instances, get_instance, update_instance_header
     from core.live_report_builder import current_severity_level, build_report_for_instance
     from core.report_delivery import deliver_report
 

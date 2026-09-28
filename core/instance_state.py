@@ -200,6 +200,12 @@ class Instance:
     alarm_send_enabled: bool = False    # activar aviso automático por alarma/peligro
     alarm_alert_level: int = 0          # nivel ya avisado (0/1/2) — estado interno
 
+    # Estado comercial del activo. False = fuera de servicio (cliente antiguo/demo
+    # que ya no paga): SIGUE registrado y visible, pero se EXCLUYE de briefings,
+    # reportes automáticos y avisos por alarma. El único mecanismo para no reportar
+    # máquinas dadas de baja sin borrarlas.
+    in_service: bool = True
+
     # Datos capturados ad-hoc (legacy, sigue funcionando)
     captured_parameters: Dict[str, Any] = field(default_factory=dict)
     documents: List[Dict[str, Any]] = field(default_factory=list)
@@ -283,6 +289,7 @@ class Instance:
                                if isinstance(s, (list, tuple)) and len(s) >= 2],
             alarm_send_enabled=bool(_f("alarm_send_enabled", False)),
             alarm_alert_level=int(_f("alarm_alert_level", 0) or 0),
+            in_service=bool(_f("in_service", True)),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
             documents=list(data.get("documents", []) or []),
             created_at=_f("created_at"),
@@ -312,6 +319,15 @@ def list_instances() -> List[Dict[str, Any]]:
     ordenadas por fecha de actualización descendente.
     """
     return get_active_repository().list_instances()
+
+
+def list_reportable_instances() -> List[Dict[str, Any]]:
+    """Solo las instances EN SERVICIO (in_service != False) — para briefings,
+    reportes automáticos y avisos por alarma. NO incluye clientes fuera de
+    servicio (antiguos/demo). Live Monitoring y admin usan list_instances()."""
+    return [r for r in (list_instances() or [])
+            if (r.get("in_service", True) if isinstance(r, dict)
+                else getattr(r, "in_service", True))]
 
 
 def get_instance(instance_id: str) -> Optional[Instance]:

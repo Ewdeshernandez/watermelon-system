@@ -1171,7 +1171,7 @@ def system_recommendation_proposals(instance_id: str,
 def build_all_drafts(period_label: str = "Semanal",
                      use_ai: bool = True) -> List[Dict[str, Any]]:
     """Borrador pendiente para cada activo con datos (cron F4)."""
-    from core.instance_state import list_instances, get_instance
+    from core.instance_state import list_reportable_instances as list_instances, get_instance
     out: List[Dict[str, Any]] = []
     try:
         instances = list_instances() or []
@@ -1201,7 +1201,7 @@ def build_all_briefings(
 ) -> List[Tuple[str, Optional[bytes], Dict[str, Any]]]:
     """Genera el briefing de cada activo con datos. Devuelve lista de
     (instance_id, pdf_bytes|None, meta)."""
-    from core.instance_state import list_instances, get_instance
+    from core.instance_state import list_reportable_instances as list_instances, get_instance
     out: List[Tuple[str, Optional[bytes], Dict[str, Any]]] = []
     try:
         instances = list_instances() or []
