@@ -211,15 +211,15 @@ def _proximity_tab() -> None:
     if st.session_state.get("px_grid_unit") != xunit:
         # (re)inicializa la grilla al cambiar de unidad
         st.session_state["px_df"] = _default_df(
-            {gcol: spec["grid"], ocol: [None] * len(spec["grid"])})
+            {gcol: spec["grid"], ocol: [float('nan')] * len(spec["grid"])})
         st.session_state["px_grid_unit"] = xunit
 
     st.caption("Enter the oscillator-demodulator output (V) for each gap. "
                "Typical API 670 increment: 10 mil / 250 µm.")
     edited = st.data_editor(
         st.session_state.get("px_df", _default_df(
-            {gcol: spec["grid"], ocol: [None] * len(spec["grid"])})),
-        num_rows="dynamic", use_container_width=True, key="px_editor",
+            {gcol: spec["grid"], ocol: [float('nan')] * len(spec["grid"])})),
+        num_rows="dynamic", use_container_width=True, hide_index=True, key="px_editor",
         column_config={
             gcol: st.column_config.NumberColumn(format="%.1f"),
             ocol: st.column_config.NumberColumn(format="%.3f"),
@@ -323,9 +323,9 @@ def _amplitude_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
     dkey = f"{prefix}_amp_df"
     if dkey not in st.session_state:
         st.session_state[dkey] = _default_df(
-            {lcol: spec["levels"], ocol: [None] * len(spec["levels"])})
+            {lcol: spec["levels"], ocol: [float('nan')] * len(spec["levels"])})
     edited = st.data_editor(st.session_state[dkey], num_rows="dynamic",
-                            use_container_width=True, key=f"{prefix}_amp_editor")
+                            use_container_width=True, hide_index=True, key=f"{prefix}_amp_editor")
     xs, ys = _parse_xy(edited, lcol, ocol)
     if len(xs) < 2:
         st.info("Enter at least 2 levels (level, output) to see the curve.")
@@ -370,7 +370,7 @@ def _frequency_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
     dkey = f"{prefix}_fr_df"
     if dkey not in st.session_state:
         st.session_state[dkey] = _default_df(
-            {fcol: spec["freq_points"], scol: [None] * len(spec["freq_points"])})
+            {fcol: spec["freq_points"], scol: [float('nan')] * len(spec["freq_points"])})
     edited = st.data_editor(st.session_state[dkey], num_rows="dynamic",
                             use_container_width=True, key=f"{prefix}_fr_editor")
     xs, ys = _parse_xy(edited, fcol, scol)

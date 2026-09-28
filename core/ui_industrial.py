@@ -67,9 +67,14 @@ def inject_industrial_css() -> None:
         div[data-testid="stTabs"] button[role="tab"]:nth-of-type(4)::before{color:#8090a6;}
         div[data-testid="stTabs"] div[data-baseweb="tab-highlight"]{display:none;}
 
-        /* Tablas (dataframe) con marco navy + esquinas suaves */
-        div[data-testid="stDataFrame"]{border:1px solid var(--wi-line);border-radius:12px;overflow:hidden;
+        /* Tablas (dataframe) + editores (data_editor) con marco navy + esquinas suaves */
+        div[data-testid="stDataFrame"],
+        div[data-testid="stDataFrameResizable"],
+        div[data-testid="stDataEditor"]{border:1px solid var(--wi-line);border-radius:12px;overflow:hidden;
           box-shadow:0 1px 2px rgba(11,31,58,.05),0 6px 20px rgba(11,31,58,.05);}
+        /* Editor (glide grid): quita el borde interno duplicado */
+        div[data-testid="stDataEditor"] div[data-testid="stDataFrameResizable"]{
+          border:none;border-radius:12px;box-shadow:none;}
         /* Subheaders → tipografía industrial */
         .stMarkdown h2, .stMarkdown h3{font-family:'IBM Plex Sans',sans-serif !important;
           letter-spacing:-.3px;color:var(--wi-ink);}
