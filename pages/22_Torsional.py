@@ -171,13 +171,13 @@ PILL_GREEN = ("#16a34a", "#eaf7ef"); PILL_AMBER = ("#b45309", "#fef3e2")
 PILL_RED = ("#dc2626", "#fdeaea"); PILL_SLATE = ("#64748b", "#eef2f8")
 
 
-# Nav con bolitas de color (emojis de círculo, como el Modal)
-T_OVR = "🟢  Overview"
-T_SPEC = "🟡  Spectrum & orders"
-T_ORD = "🔵  Order tracking"
-T_CAMP = "🟤  Campbell"
-T_FAT = "🔴  Fatigue"
-T_REPORT = "⚪  Report"
+# Nav — etiquetas limpias (sin emojis; el color vive en el contenido y los plots)
+T_OVR = "Overview"
+T_SPEC = "Spectrum & orders"
+T_ORD = "Order tracking"
+T_CAMP = "Campbell"
+T_FAT = "Fatigue"
+T_REPORT = "Report"
 
 
 # =====================================================================
