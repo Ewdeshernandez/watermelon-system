@@ -179,14 +179,27 @@ def generate_briefing_pdf(
 
     # ==== 1. Introducción y alcance (estilo reporte OMA) ====
     _n_pts = len([c for c in (channels or []) if c.get("value") is not None])
-    _intro = (
-        f"Se presenta el seguimiento de condición del tren {tag}"
-        + (f" ({paragraph_safe(train)})" if train else "")
-        + f" para el periodo {period_label.lower()}, evaluando {_n_pts} punto(s) "
-        "de medición de vibración distribuidos a lo largo del tren de máquinas, "
-        "conforme a ISO 20816 y API 670, a partir de los datos del monitoreo en "
-        "línea. A continuación se presentan los hallazgos, las recomendaciones y "
-        "el desarrollo técnico del servicio.")
+    if bool(kpis.get("offline")):
+        _since = kpis.get("offline_since") or "—"
+        _age = kpis.get("offline_age") or "—"
+        _intro = (
+            f"El activo {tag}"
+            + (f" ({paragraph_safe(train)})" if train else "")
+            + f" NO reportó datos de monitoreo en línea durante el periodo "
+            f"{period_label.lower()}. La última lectura válida es de {_since} "
+            f"(hace {_age}); el activo está parado o sin enlace de comunicación. "
+            "Este informe presenta el ÚLTIMO estado conocido y las últimas "
+            "recomendaciones emitidas — la condición vigente NO puede confirmarse "
+            "hasta restablecer el monitoreo.")
+    else:
+        _intro = (
+            f"Se presenta el seguimiento de condición del tren {tag}"
+            + (f" ({paragraph_safe(train)})" if train else "")
+            + f" para el periodo {period_label.lower()}, evaluando {_n_pts} punto(s) "
+            "de medición de vibración distribuidos a lo largo del tren de máquinas, "
+            "conforme a ISO 20816 y API 670, a partir de los datos del monitoreo en "
+            "línea. A continuación se presentan los hallazgos, las recomendaciones y "
+            "el desarrollo técnico del servicio.")
     body.append(_h1("Introducción y alcance"))
     body.append(Paragraph(_intro, st_body))
 

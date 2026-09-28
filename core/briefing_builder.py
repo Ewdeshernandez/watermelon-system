@@ -977,7 +977,9 @@ def build_asset_briefing(
         figures = {}
 
     sections = _deterministic_sections(tag, period_label, data)
-    if use_ai:
+    # FUERA DE LÍNEA: NO pasar por la IA — se conserva el texto honesto (sin datos
+    # en el periodo, último estado conocido). La IA lo reescribiría como si operara.
+    if use_ai and not data.get("offline"):
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
         # Comentario de figura nivel Cat. IV (IA + RAG): sobrescribe el análisis
@@ -1182,7 +1184,7 @@ def build_asset_draft(
         figures = {}
 
     sections = _deterministic_sections(tag, period_label, data)
-    if use_ai:
+    if use_ai and not data.get("offline"):       # offline → texto honesto, sin IA
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
 
