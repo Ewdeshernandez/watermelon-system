@@ -968,13 +968,19 @@ def build_asset_briefing(
     # Figuras PRIMERO: la IA necesita saber qué análisis ya trae el reporte
     # (espectro/forma de onda/tendencia/órbita) para no afirmar que faltan.
     # period_label define la ventana de la tendencia (7d Semanal / 30d Mensual).
-    try:
-        from core.briefing_figures import collect_asset_figures
-        figures = collect_asset_figures(instance_id, instance_obj,
-                                        period_label=period_label)
-    except Exception as e:
-        log.warning("briefing figures falló: %s", e)
+    # FUERA DE LÍNEA → reporte COMPACTO: sin figuras ni análisis por-figura (serían
+    # de datos viejos, presentados como actuales → deshonesto). Solo portada +
+    # aviso + tabular fechada + alarmas + recomendaciones.
+    if data.get("offline"):
         figures = {}
+    else:
+        try:
+            from core.briefing_figures import collect_asset_figures
+            figures = collect_asset_figures(instance_id, instance_obj,
+                                            period_label=period_label)
+        except Exception as e:
+            log.warning("briefing figures falló: %s", e)
+            figures = {}
 
     sections = _deterministic_sections(tag, period_label, data)
     # FUERA DE LÍNEA: NO pasar por la IA — se conserva el texto honesto (sin datos
@@ -1044,9 +1050,11 @@ def build_asset_briefing(
 
     # Tablas históricas (v3.31.408): métricas de forma de onda (últimos 10
     # snapshots) + matriz de overall diario (últimos 10 días, semáforo).
+    wf_history = []
     try:
-        from core.briefing_figures import waveform_history_table
-        wf_history = waveform_history_table(instance_id)
+        if not data.get("offline"):    # compacto: sin métricas de forma de onda si offline
+            from core.briefing_figures import waveform_history_table
+            wf_history = waveform_history_table(instance_id)
         # Los snapshots no guardan la unidad → completarla desde la config
         # de canales: match por plane_label y fallback por tipo de medida.
         _unit_by_family = {}
@@ -1069,7 +1077,8 @@ def build_asset_briefing(
     except Exception as e:
         log.warning("wf_history falló: %s", e)
         wf_history = []
-    overall_history = _overall_history_matrix(instance_id, data["channels"])
+    overall_history = ({} if data.get("offline")
+                       else _overall_history_matrix(instance_id, data["channels"]))
 
     # Fecha del reporte = SOLO fecha (sin hora), Bogotá. El usuario pidió
     # quitar el timestamp de la portada del reporte semanal.
