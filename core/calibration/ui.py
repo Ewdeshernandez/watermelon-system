@@ -21,6 +21,63 @@ from core.balance.ui import (  # noqa: F401  (re-export para la página)
 )
 
 
+def cal_input_table(key: str, col1: str, col2: str, defaults,
+                    c1_step: float = 10.0, c2_step: float = 0.01,
+                    c1_fmt: str = "%.1f", c2_fmt: str = "%.3f",
+                    dynamic: bool = True):
+    """Tabla de ENTRADA hermosa (reemplaza el data_editor default de Streamlit):
+    encabezado navy + una fila de number_inputs (estilo de la familia) por punto,
+    con agregar/quitar. Devuelve (xs, ys) con los pares numéricos completos.
+
+    `defaults`: lista de (x, y|None) inicial. Estado en st.session_state[key].
+    Solo UI de entrada — la matemática la hace core.calibration con (xs, ys)."""
+    _ensure_fonts()
+    if key not in st.session_state:
+        st.session_state[key] = [
+            [None if x is None else float(x), None if y is None else float(y)]
+            for x, y in defaults]
+    rows = st.session_state[key]
+
+    st.markdown(
+        f"""
+        <div style="display:grid; grid-template-columns:1fr 1fr 42px; overflow:hidden;
+             border:1px solid {LINE}; border-bottom:none; border-radius:12px 12px 0 0;
+             font-family:{_SANS}; background:{NAVY};
+             box-shadow:0 1px 2px rgba(11,31,58,.05);">
+          <div style="padding:10px 14px; color:#fff; font:600 11px {_MONO};
+               letter-spacing:.04em; text-transform:uppercase;">{col1}</div>
+          <div style="padding:10px 14px; color:#fff; font:600 11px {_MONO};
+               letter-spacing:.04em; text-transform:uppercase;
+               border-left:1px solid rgba(255,255,255,.14);">{col2}</div>
+          <div style="background:{NAVY};"></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    xs, ys = [], []
+    _del = None
+    for i, (x, y) in enumerate(rows):
+        c = st.columns([1, 1, 0.30])
+        with c[0]:
+            nx = st.number_input(col1, value=x, step=c1_step, format=c1_fmt,
+                                 key=f"{key}_x{i}", label_visibility="collapsed")
+        with c[1]:
+            ny = st.number_input(col2, value=y, step=c2_step, format=c2_fmt,
+                                 key=f"{key}_y{i}", label_visibility="collapsed")
+        with c[2]:
+            if dynamic and len(rows) > 1 and st.button("✕", key=f"{key}_d{i}",
+                                                       help="Quitar punto"):
+                _del = i
+        rows[i] = [nx, ny]
+        if nx is not None and ny is not None:
+            xs.append(float(nx)); ys.append(float(ny))
+    if _del is not None:
+        rows.pop(_del); st.rerun()
+    if dynamic:
+        if st.button("＋  Agregar punto", key=f"{key}_add", use_container_width=True):
+            rows.append([None, None]); st.rerun()
+    return xs, ys
+
+
 def cal_hero_card(asset_name: str = "(sin activo)", client: str = "",
                   site: str = "", mode: str = "—") -> None:
     """Banda del módulo Calibración: identidad + activo + tipo de ensayo."""
@@ -94,7 +151,7 @@ def cal_footer_norms(version: Optional[str] = None) -> None:
 
 __all__ = [
     "cal_hero_card", "cal_footer_norms", "cal_section_header", "cal_kpi_row",
-    "cal_status_banner",
+    "cal_status_banner", "cal_input_table",
     "NAVY", "STEEL", "CYAN", "CYAN_DARK", "AMBER", "GREEN", "RED", "GRAY",
     "GRAY_LIGHT", "LINE",
 ]

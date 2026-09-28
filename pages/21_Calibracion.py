@@ -38,7 +38,7 @@ from core.calibration import (
 from core.calibration.curve import linearity_curve_svg
 from core.calibration.ui import (
     cal_hero_card, cal_section_header, cal_kpi_row, cal_status_banner,
-    cal_footer_norms,
+    cal_footer_norms, cal_input_table,
 )
 
 
@@ -209,23 +209,14 @@ def _proximity_tab() -> None:
     ocol = "Output [V]"
 
     if st.session_state.get("px_grid_unit") != xunit:
-        # (re)inicializa la grilla al cambiar de unidad
-        st.session_state["px_df"] = _default_df(
-            {gcol: spec["grid"], ocol: [float('nan')] * len(spec["grid"])})
+        st.session_state.pop("px_rows", None)     # re-inicia la grilla al cambiar de unidad
         st.session_state["px_grid_unit"] = xunit
 
     st.caption("Enter the oscillator-demodulator output (V) for each gap. "
                "Typical API 670 increment: 10 mil / 250 µm.")
-    edited = st.data_editor(
-        st.session_state.get("px_df", _default_df(
-            {gcol: spec["grid"], ocol: [float('nan')] * len(spec["grid"])})),
-        num_rows="dynamic", use_container_width=True, hide_index=True, key="px_editor",
-        column_config={
-            gcol: st.column_config.NumberColumn(format="%.1f"),
-            ocol: st.column_config.NumberColumn(format="%.3f"),
-        })
-
-    xs, ys = _parse_xy(edited, gcol, ocol)
+    xs, ys = cal_input_table("px_rows", gcol, ocol,
+                             defaults=[(g, None) for g in spec["grid"]],
+                             c1_step=10.0, c2_step=0.01, c1_fmt="%.1f", c2_fmt="%.3f")
     if len(xs) < 2:
         st.info("Enter at least 2 points (gap, output) to see the curve.")
         return
@@ -320,13 +311,9 @@ def _amplitude_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
     tol = cc[1].number_input("Amplitude tolerance [%FS]", value=float(spec["ampl_tol_pct"]),
                              key=f"{prefix}_amp_tol", step=0.5, format="%.1f")
 
-    dkey = f"{prefix}_amp_df"
-    if dkey not in st.session_state:
-        st.session_state[dkey] = _default_df(
-            {lcol: spec["levels"], ocol: [float('nan')] * len(spec["levels"])})
-    edited = st.data_editor(st.session_state[dkey], num_rows="dynamic",
-                            use_container_width=True, hide_index=True, key=f"{prefix}_amp_editor")
-    xs, ys = _parse_xy(edited, lcol, ocol)
+    xs, ys = cal_input_table(f"{prefix}_amp_rows", lcol, ocol,
+                             defaults=[(lv, None) for lv in spec["levels"]],
+                             c1_step=1.0, c2_step=0.01, c1_fmt="%.2f", c2_fmt="%.3f")
     if len(xs) < 2:
         st.info("Enter at least 2 levels (level, output) to see the curve.")
         return
@@ -367,13 +354,9 @@ def _frequency_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
     tol = cc[1].number_input("Tolerance [dB]", value=float(spec["freq_tol_db"]),
                              key=f"{prefix}_fr_tol", step=0.5, format="%.1f")
 
-    dkey = f"{prefix}_fr_df"
-    if dkey not in st.session_state:
-        st.session_state[dkey] = _default_df(
-            {fcol: spec["freq_points"], scol: [float('nan')] * len(spec["freq_points"])})
-    edited = st.data_editor(st.session_state[dkey], num_rows="dynamic",
-                            use_container_width=True, key=f"{prefix}_fr_editor")
-    xs, ys = _parse_xy(edited, fcol, scol)
+    xs, ys = cal_input_table(f"{prefix}_fr_rows", fcol, scol,
+                             defaults=[(f, None) for f in spec["freq_points"]],
+                             c1_step=1.0, c2_step=0.1, c1_fmt="%.0f", c2_fmt="%.2f")
     if len(xs) < 2:
         st.info("Enter at least 2 frequencies (frequency, sensitivity).")
         return
