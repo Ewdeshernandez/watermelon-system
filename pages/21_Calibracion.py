@@ -30,6 +30,7 @@ from core.auth import (
     require_login, render_user_menu, get_current_user, is_page_allowed_for_role,
 )
 from core.ui_theme import apply_watermelon_page_style
+from core.ui_industrial import inject_industrial_css
 from core.calibration import (
     analyze_proximity_linearity, analyze_amplitude_linearity,
     analyze_frequency_response, get_default_spec, MANUFACTURERS,
@@ -53,6 +54,7 @@ st.set_page_config(
 require_login()
 render_user_menu()
 apply_watermelon_page_style()
+inject_industrial_css()          # puntos de color en pestañas + tablas navy (familia)
 
 _user = get_current_user() or {}
 _role = str(_user.get("role", "")).lower()
@@ -132,7 +134,7 @@ if st.session_state.pop("_cal_recovered", None):
             "data). If you had photos, upload them again.")
 
 _cal_ts = st.session_state.get("_cal_autosave_ts")
-st.caption("🟢 Autosave active — the report is recovered if the session drops"
+st.caption("Autosave active — the report is recovered if the session drops"
            + (f" · last saved: {_cal_ts}" if _cal_ts else "."))
 
 
@@ -589,7 +591,7 @@ def _report_tab() -> None:
         fn = "Calibracion_" + _re.sub(r"[^A-Za-z0-9]+", "_",
                                       (st.session_state.get("cal_asset") or "sensores")
                                       ).strip("_") + ".pdf"
-        st.download_button("⬇ Download PDF", data=st.session_state["cal_pdf"],
+        st.download_button("Download PDF", data=st.session_state["cal_pdf"],
                            file_name=fn, mime="application/pdf")
 
 
@@ -597,7 +599,7 @@ def _report_tab() -> None:
 # Tabs
 # =====================================================================
 tab_px, tab_ac, tab_ve, tab_rep = st.tabs(
-    ["🔵  Proximity", "🟢  Accelerometer", "🟡  Velomitor", "📄  Report"])
+    ["Proximity", "Accelerometer", "Velomitor", "Report"])
 
 with tab_px:
     _proximity_tab()

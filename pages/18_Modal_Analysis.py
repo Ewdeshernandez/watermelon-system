@@ -548,18 +548,18 @@ _n_new = sum(1 for r in _runs if _is_new(r))
 def _run_label(r):
     _who = (r.get("client") or r.get("account") or "").strip()
     _who = f" · {_who}" if _who else ""
-    return f"☁ {r.get('name','run')}{_who} · {str(r.get('updated_at',''))[:16]}"
+    return f"{r.get('name','run')}{_who} · {str(r.get('updated_at',''))[:16]}"
 _opts = {_run_label(r): r.get("id") for r in _runs}
-_labels = ["⚪ Sample dataset (demo)"] + list(_opts.keys())
+_labels = ["Sample dataset (demo)"] + list(_opts.keys())
 _sc1, _sc2 = st.columns([3, 1])
 with _sc1:
     _choice = st.selectbox("Data source", _labels, index=(1 if _opts else 0),
                            help="Field captures uploaded to the cloud appear here automatically.")
 with _sc2:
-    if st.button("🔄 Refresh runs", use_container_width=True):
+    if st.button("Refresh runs", use_container_width=True):
         st.rerun()
 if _n_new:
-    st.success(f"🔔 {_n_new} corrida(s) nueva(s) del campo en las últimas 24 h — aparece(n) arriba en la lista.")
+    st.success(f"{_n_new} corrida(s) nueva(s) del campo en las últimas 24 h — aparece(n) arriba en la lista.")
 if _cloud_err:
     st.warning(f"Could not reach the cloud to list field runs ({_cloud_err}). "
                "Check your connection — showing only the sample dataset below, not real data.")
@@ -569,14 +569,14 @@ if _choice != _labels[0] and _opts:
     _payload = load_run(_rid) if _rid else None
     if _payload:
         D = _build_cloud_D(_payload)
-        st.caption(f"☁ Showing field run — {D['name']} · {len(D['oma_modes'])} OMA modes")
+        st.caption(f"Showing field run — {D['name']} · {len(D['oma_modes'])} OMA modes")
     else:
         D = _build_demo_D()
         st.warning("Could not load that cloud run — showing the sample dataset.")
 else:
     D = _build_demo_D()
     if _opts:
-        st.caption("Showing the sample dataset. Pick a ☁ field run above to see real data.")
+        st.caption("Showing the sample dataset. Pick a field run above to see real data.")
     else:
         st.caption("No field runs in the cloud yet — showing a sample dataset. "
                    "Capture in the field and upload; it will appear here when online.")
@@ -740,7 +740,7 @@ st.markdown(f"""
   </div>
   <div style="text-align:right">
     <span class="wm-chip {_cls}">{_chip}</span>
-    <div class="meta" style="margin-top:8px">{'☁ Field run' if D['source']=='cloud' else '⚪ Sample dataset'}</div>
+    <div class="meta" style="margin-top:8px">{'Field run' if D['source']=='cloud' else 'Sample dataset'}</div>
   </div>
 </div>
 <div class="wm-kpis">
@@ -755,18 +755,18 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-T_OMA = "🟡  Spectral density (FDD)"
+T_OMA = "Spectral density (FDD)"
 T_SHAPES = "⚫  Mode shapes"
-T_ODS = "🔵  ODS (operating)"
+T_ODS = "ODS (operating)"
 T_SSI = "🟠  SSI (subspace)"
 T_MAC = "🔷  MAC / validation"
-T_CAMP = "🟤  Campbell"
-T_EMA = "🟢  Impact test (EMA)"
+T_CAMP = "Campbell"
+T_EMA = "Impact test (EMA)"
 T_MODES = "🟣  Modes (EMA)"
-T_CMP = "🔴  Comparative"
-T_TREND = "🔵  Trend / Compare"
-T_GEOM = "🟢  Geometry"
-T_REPORT = "⚪  Report"
+T_CMP = "Comparative"
+T_TREND = "Trend / Compare"
+T_GEOM = "Geometry"
+T_REPORT = "Report"
 _NAVOPTS = [T_OMA, T_SSI, T_MAC, T_CAMP, T_SHAPES, T_GEOM, T_ODS, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
 
 # Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
@@ -993,7 +993,7 @@ if nav == T_OMA:
     # --- Registro de verificación de sensores (del software de campo) ---
     _scr = (D.get("payload") or {}).get("sensor_check")
     if _scr:
-        with st.expander(f"🔴 Sensor verification record — {_scr.get('n_ok','?')}/{_scr.get('n_total','?')} "
+        with st.expander(f"Sensor verification record — {_scr.get('n_ok','?')}/{_scr.get('n_total','?')} "
                          f"channels OK ({str(_scr.get('ts',''))[:16]})", expanded=False):
             _png = _scr.get("png_b64")
             if _png:
@@ -1289,7 +1289,7 @@ if nav == T_SHAPES:
                 else:
                     st.warning("Could not render the video. Try again.")
             if _has_shape and st.session_state.get("_ms_gif"):
-                st.download_button("⬇ Download", data=st.session_state["_ms_gif"],
+                st.download_button("Download", data=st.session_state["_ms_gif"],
                                    file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
                                    mime="image/gif", use_container_width=True)
 
@@ -1404,7 +1404,7 @@ if nav == T_GEOM:
 
         _bc = st.columns(3)
         _apply = _bc[0].button("✓ Apply to shapes", use_container_width=True, type="primary")
-        _cloud = _bc[1].button("☁ Save to cloud", use_container_width=True)
+        _cloud = _bc[1].button("Save to cloud", use_container_width=True)
         _reset = _bc[2].button("↺ Reset to field", use_container_width=True)
 
     # --- Geometría final (sensores del campo + estructura), ids → índices ---
@@ -1831,7 +1831,7 @@ if nav == T_REPORT:
         def _conf_of(_m):
             return _mode_conf(_m.get("fn", 0), _m.get("zeta", 0), _m.get("complexity", 0),
                               _m.get("cls", _m.get("class", "natural")), _ssi_f, _rpm_r)
-        if st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
+        if st.button("Generate full report (PDF)", type="primary", key="rep_gen"):
             try:
                 from core.modal.run_report import build_report_from_run
                 import base64 as _b64m
@@ -1980,12 +1980,12 @@ if nav == T_REPORT:
         if _pdf:
             dl = st.columns([1, 1])
             with dl[0]:
-                st.download_button("⬇ Download PDF", data=_pdf,
+                st.download_button("Download PDF", data=_pdf,
                                    file_name=f"{(_consec or 'OMA').replace(' ', '_')}.pdf",
                                    mime="application/pdf", use_container_width=True)
             with dl[1]:
                 _share = st.checkbox("Share with client", key="rep_share")
-                if st.button("✅ Approve & store", key="rep_archive", use_container_width=True):
+                if st.button("Approve & store", key="rep_archive", use_container_width=True):
                     try:
                         from core.reports_archive import archive_report_pdf
                         r = archive_report_pdf(pdf_bytes=_pdf,
@@ -2024,7 +2024,7 @@ if nav == T_REPORT:
                 cols[0].markdown(f"**{_am.get('consecutive','—')}** · {_am.get('client','')}")
                 cols[1].write(_am.get("asset", ""))
                 cols[2].write(str(_a.get("archived_at", ""))[:16])
-                if cols[3].button("⬇", key=f"dl_{_cid}"):
+                if cols[3].button("↓ PDF", key=f"dl_{_cid}"):
                     try:
                         _bytes = get_archived_pdf_bytes(_cid, _user.get("email", ""), _my_role)
                         if _bytes:
