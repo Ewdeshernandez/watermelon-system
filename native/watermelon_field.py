@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.70"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.71"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2644,6 +2644,28 @@ def main() -> int:
             _online = (cb_dest.currentIndex() == 1)
             rec_state["online"] = _online
             if _online:
+                # Guard espejo: el id del activo en campo debe coincidir con el de la
+                # web, o las lecturas entran a la nube pero no se muestran bajo el
+                # activo esperado. Fail-open: si no hay lista (sin red), no estorba.
+                try:
+                    from core.instance_state import list_reportable_instances as _lri
+                    _known = {str(r.get("instance_id", "")).strip().lower()
+                              for r in (_lri() or [])}
+                    _known.discard("")
+                    if _known and str(agent.instance_id).strip().lower() not in _known:
+                        _ans = QtWidgets.QMessageBox.question(
+                            win, "Asset ID check",
+                            f"This machine's ID is “{agent.instance_id}”, which does not "
+                            f"match any asset registered in Watermelon System:\n\n"
+                            f"  {', '.join(sorted(_known))}\n\n"
+                            "If you continue, the live data WILL upload but may not appear "
+                            "under the expected asset on the web. Continue anyway?",
+                            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                            QtWidgets.QMessageBox.No)
+                        if _ans != QtWidgets.QMessageBox.Yes:
+                            return
+                except Exception:  # noqa: BLE001
+                    pass
                 try:
                     agent.start()
                 except Exception as e:  # noqa: BLE001

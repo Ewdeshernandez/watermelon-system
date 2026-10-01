@@ -146,8 +146,32 @@ def _get_supabase_client() -> Any:
         except Exception:
             pass
 
+    # Campo (.exe headless, sin Streamlit): mismas credenciales que usa el
+    # subidor de grabaciones — WM_SUPABASE_URL/WM_SUPABASE_KEY o el módulo
+    # _cloud_config embebido en el build. Sin esto, "Monitoreo en línea"
+    # (Fase 2) descartaba en silencio cada batch en el .exe empaquetado.
+    if not url:
+        _u = (os.environ.get("WM_SUPABASE_URL", "") or "").strip()
+        if _u and "TU-PROYECTO" not in _u and "TU_PROYECTO" not in _u:
+            url = _u
+    if not key:
+        _k = (os.environ.get("WM_SUPABASE_KEY", "") or "").strip()
+        if _k and not any(p in _k for p in ("TU_SERVICE", "TU-SERVICE", "AQUI")):
+            key = _k
     if not url or not key:
-        log.info("live_readings: Supabase no configurado (faltan SUPABASE_URL / SUPABASE_SERVICE_KEY)")
+        try:
+            from core.remote_monitoring import _cloud_config as _cc
+            url = url or str(getattr(_cc, "SUPABASE_URL", "") or "").strip()
+            key = key or str(getattr(_cc, "SUPABASE_KEY", "") or "").strip()
+        except Exception:  # noqa: BLE001
+            pass
+    if url and not url.startswith("http"):
+        url = "https://" + url
+    url = url.rstrip("/")
+
+    if not url or not key:
+        log.info("live_readings: Supabase no configurado (faltan SUPABASE_URL / SUPABASE_SERVICE_KEY "
+                 "ni WM_SUPABASE_URL / _cloud_config embebido)")
         return None
 
     try:
