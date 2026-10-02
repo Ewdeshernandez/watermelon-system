@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.95"
+__version__ = "0.9.96"
 
 
 def _run_trace_tags():
@@ -4186,6 +4186,23 @@ def _license_gate(app) -> bool:
         _license_block_dialog(app, "gate_check() raised:\n" + traceback.format_exc())
         return False
     if g.get("allowed"):
+        # Enforcement por módulo: Modal requiere 'oma' o 'ema' en el token.
+        # FAIL-OPEN: token viejo sin features → abre.
+        _feats = {str(x).strip().lower() for x in (g.get("features") or [])}
+        if _feats and not (_feats & {"oma", "ema"}):
+            try:
+                box = QtWidgets.QMessageBox(app)
+                box.setIcon(QtWidgets.QMessageBox.Warning)
+                box.setWindowTitle("WATERMELON MODAL")
+                box.setText("Módulo no incluido en tu licencia")
+                box.setInformativeText(
+                    "Tu licencia no incluye el módulo “Modal”.\n\n"
+                    "Contacta a Watermelon System (SIGA GROUP) para habilitarlo.")
+                box.setStandardButtons(QtWidgets.QMessageBox.Close)
+                box.exec()
+            except Exception:  # noqa: BLE001
+                print("LICENSE MODULE BLOCK: Modal")
+            return False
         return True
     return _activation_dialog(app, lic)
 
