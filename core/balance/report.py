@@ -240,6 +240,22 @@ def build_balance_pdf(
         body.append(Spacer(1, 0.2 * cm))
         body.append(_p(f"Calidad del modelo: <b>{r.get('quality', '—')}</b> · "
                        f"cond(M) = {_fmt(r.get('cond'), 1)}", styles, "WMBody"))
+        # Diagramas polares por sonda (vibración antes/después) — como en 1 plano.
+        _imgs = []
+        for _lbl, _v0key, _afterkey in (("A", "a0", "A_after"), ("B", "b0", "B_after")):
+            _png = polar_png(f"Plano {_lbl} — sonda {_lbl} (antes / después)",
+                             two_plane.get(_v0key), _to_mag(r.get(_afterkey)), u)
+            if _png:
+                _imgs.append(Image(io.BytesIO(_png), width=7.6 * cm, height=7.6 * cm))
+        if _imgs:
+            body.append(Spacer(1, 0.3 * cm))
+            if len(_imgs) == 2:
+                _it = Table([[_imgs[0], _imgs[1]]], colWidths=[8.1 * cm, 8.1 * cm])
+                _it.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                         ("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+                body.append(_it)
+            else:
+                body.append(_imgs[0])
         body.append(Spacer(1, 0.5 * cm))
 
     # ---- Validación ISO ----------------------------------------------
