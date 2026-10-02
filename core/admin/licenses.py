@@ -455,7 +455,6 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
     _ver = (version or "").strip()
     subject = f"Nueva versión de {app_name}" + (f" ({_ver}) disponible" if _ver else " disponible")
     _wn = (whats_new or "").strip()
-    _dl_line = (f"\nDescarga directa (opcional): {dl_url}\n" if dl_url else "")
     _date_txt = f" (publicada el {date})" if date else ""
     body_text = (
         f"Hola {nombre},\n\n"
@@ -466,7 +465,6 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
         f"1) Abre {app_name} en tu equipo.\n"
         f"2) El actualizador te ofrecerá la nueva versión.\n"
         f"3) Acepta y listo — se actualiza sola.\n"
-        + _dl_line +
         "\nSoporte: watermelonsystem.app\n— SIGA GROUP SAS"
     )
     _wn_html = ""
@@ -480,25 +478,12 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
             'color:#5b6b86;text-transform:uppercase;margin:18px 0 4px;">Qué trae</div>'
             f'<ul style="font-size:14px;color:#3a4c66;line-height:1.6;margin:0;'
             f'padding-left:20px;">{_lis}</ul>')
-    _dl_html = (
-        f'<p style="margin-top:14px;font-size:13px;">O descarga directa: '
-        f'<a href="{_html.escape(dl_url)}" style="color:#12305e;">{_html.escape(app_name)} Setup</a></p>'
-        ) if dl_url else ""
     _ver_badge = (
         f'<span style="background:#12305e;color:#fff;border-radius:999px;padding:3px 12px;'
         f'font:800 12px \'IBM Plex Mono\',monospace;letter-spacing:1px;">{_html.escape(_ver)}</span>'
         ) if _ver else ""
     _date_html = (f'<span style="color:#8090a6;font-size:13px;margin-left:8px;">'
                   f'publicada el {_html.escape(date)}</span>') if date else ""
-    _btn_url = release_url or dl_url
-    _btn_html = (
-        f'<table role="presentation" cellpadding="0" cellspacing="0" '
-        f'style="margin:6px 0 4px;"><tr><td align="center" bgcolor="#e8890c" '
-        f'style="border-radius:10px;">'
-        f'<a href="{_html.escape(_btn_url)}" style="display:inline-block;padding:13px 30px;'
-        f'font:800 15px \'IBM Plex Sans\',Arial,sans-serif;color:#ffffff;text-decoration:none;'
-        f'border-radius:10px;letter-spacing:.02em;">Actualizar ahora &nbsp;&rarr;</a>'
-        f'</td></tr></table>') if _btn_url else ""
     body_html = f"""
     <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
       <div style="background-color:#12305e;
@@ -525,8 +510,8 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
           <li>Acepta y listo — se actualiza sola.</li>
         </ol>
       </div>
-      {_btn_html}
-      {_dl_html}
+      <p style="font-size:13px;color:#8090a6;margin-top:4px;">No necesitas descargar
+        nada ni ingresar ninguna clave — la actualización es automática dentro de la app.</p>
       <p style="color:#8090a6;font-size:12px;margin-top:18px;border-top:0.5px solid #e2e8f2;
                 padding-top:12px;">Soporte: watermelonsystem.app · SIGA GROUP SAS</p>
     </div>"""
