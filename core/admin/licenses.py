@@ -431,11 +431,16 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
         ) if _ver else ""
     body_html = f"""
     <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
-      <div style="background:linear-gradient(135deg,#12305e,#1b4a86);border-radius:12px;
-                  padding:22px 20px;color:#eaf2fb;">
-        <div style="font:700 12px 'IBM Plex Mono',monospace;letter-spacing:.14em;
-                    color:#9fc3ef;text-transform:uppercase;">Watermelon System</div>
-        <div style="font:800 22px 'IBM Plex Sans';margin-top:4px;">Nueva versión disponible</div>
+      <div style="background:linear-gradient(135deg,#0d2b5e 0%,#1b4a86 55%,#2f74bd 100%);
+                  border-radius:14px;padding:28px 24px;
+                  box-shadow:0 10px 26px rgba(13,43,94,.28);">
+        <div style="font:700 12px 'IBM Plex Mono',monospace;letter-spacing:.18em;
+                    color:#ffd79a;text-transform:uppercase;">Watermelon System</div>
+        <div style="font:800 30px 'IBM Plex Sans',Arial,sans-serif;color:#ffffff;
+                    margin-top:8px;line-height:1.08;text-shadow:0 1px 2px rgba(0,0,0,.18);">
+          Nueva versión disponible</div>
+        <div style="height:4px;width:68px;background:#e8890c;border-radius:999px;
+                    margin-top:14px;"></div>
       </div>
       <p style="margin:16px 0 4px;">Hola <b>{nombre}</b>,</p>
       <p style="font-size:15px;color:#1b2b45;">Ya puedes actualizar
