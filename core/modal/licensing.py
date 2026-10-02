@@ -423,6 +423,7 @@ def gate_check(grace_recheck_days: int = 3, hard_offline_days: int = 30) -> Dict
                     "account": payload.get("account"), "exp": exp}
         return {"allowed": True, "reason": why, "needs_activation": False,
                 "account": payload.get("account"), "exp": exp,
+                "features": payload.get("features") or [],
                 "recheck_soon": (exp - now) < grace_recheck_days * 86400}
     # inválido: expirado / otra máquina / firma mala → exige (re)activación
     return {"allowed": False, "reason": why, "needs_activation": True,

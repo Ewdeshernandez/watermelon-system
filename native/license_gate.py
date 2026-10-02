@@ -148,6 +148,25 @@ def _activation_dialog(lic, *, t, navy, acc, brand_html, app_title,
     return state["ok"]
 
 
+def _module_block_dialog(module: str, *, t, app_title) -> None:
+    """Licencia válida pero SIN este módulo aprobado. Letrero comercial claro."""
+    try:
+        box = QtWidgets.QMessageBox()
+        box.setIcon(QtWidgets.QMessageBox.Warning)
+        box.setWindowTitle(app_title.upper())
+        box.setText(t("Module not included in your license",
+                      "Módulo no incluido en tu licencia"))
+        box.setInformativeText(
+            t("Your license does not include the “%s” module.\n\n"
+              "Contact Watermelon System (SIGA GROUP) to enable it." % module,
+              "Tu licencia no incluye el módulo “%s”.\n\n"
+              "Contacta a Watermelon System (SIGA GROUP) para habilitarlo." % module))
+        box.setStandardButtons(QtWidgets.QMessageBox.Close)
+        box.exec()
+    except Exception:  # noqa: BLE001
+        print("LICENSE MODULE BLOCK:", module)
+
+
 def _block_dialog(detail: str, *, t, app_title) -> None:
     """FAIL-CLOSED: la capa de licencia no pudo verificar → NO se abre la app."""
     try:
@@ -189,6 +208,18 @@ def run_license_gate(app, *, t, navy, acc, brand_html, app_title) -> bool:
         _block_dialog("gate_check() raised:\n" + traceback.format_exc(), t=t, app_title=app_title)
         return False
     if g.get("allowed"):
+        # Enforcement por módulo: el token lleva `features`. Cada módulo exige su
+        # código; si el token trae features y NO incluye este módulo → bloquea con
+        # letrero claro. FAIL-OPEN: token viejo sin features → abre (no rompe a
+        # clientes existentes). Modal acepta 'oma' o 'ema'.
+        _REQ = {"Rotordynamics": {"rotordynamics"}, "Torsional": {"torsional"},
+                "Balanceo": {"balance"}, "Modal": {"oma", "ema"}}
+        _mod = os.environ.get("WM_MODULE", "")
+        _need = _REQ.get(_mod)
+        _feats = {str(x).strip().lower() for x in (g.get("features") or [])}
+        if _need and _feats and not (_feats & _need):
+            _module_block_dialog(_mod, t=t, app_title=app_title)
+            return False
         return True
     # Bloqueado: si el servidor dio un motivo comercial (falta de pago, vencida,
     # revocada), se muestra de entrada en el diálogo — el cliente ve el letrero.
