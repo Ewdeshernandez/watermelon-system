@@ -49,7 +49,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.5.6"
+__version__ = "0.5.7"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -671,7 +671,18 @@ def build_app(simulated: bool = True):
                             "GO" if r.get("quality") == "GOOD" else "REVIEW",
                             T(f"Correction {r['corr_mass_g']:,.1f} g ∠ {r['corr_ang_deg']:.0f}°",
                               f"Corrección {r['corr_mass_g']:,.1f} g ∠ {r['corr_ang_deg']:.0f}°")))
+            _figs1 = []
+            try:
+                from core.balance.report import polar_png as _ppng
+                _after1 = r1p.get("vf") or (r.get("pred_mag"), r.get("pred_ang"))
+                _p1 = _ppng(T("Vibration (before/after)", "Vibración (antes/después)"),
+                            r1p.get("v0"), _after1, u)
+                if _p1:
+                    _figs1 = [(T("Single plane", "Un plano"), _p1)]
+            except Exception:  # noqa: BLE001
+                pass
             sections.append({"title": T("Single plane (ISO 21940-12)", "Un plano (ISO 21940-12)"),
+                "figures": _figs1,
                 "table": {"headers": [T("Measurement", "Medición"), T("Vector", "Vector")],
                           "rows": [[T("V0 — initial", "V0 — inicial"), _vec(r1p.get("v0"))],
                                    [T("Trial weight", "Peso de prueba"), _vec(r1p.get("trial"), "g")],
@@ -688,7 +699,19 @@ def build_app(simulated: bool = True):
                             "GO" if r.get("quality") == "GOOD" else "REVIEW",
                             T(f"A {wa[0]:,.1f} g ∠ {wa[1]:.0f}° · B {wb[0]:,.1f} g ∠ {wb[1]:.0f}°",
                               f"A {wa[0]:,.1f} g ∠ {wa[1]:.0f}° · B {wb[0]:,.1f} g ∠ {wb[1]:.0f}°")))
+            _figs2 = []
+            try:
+                from core.balance.report import polar_png as _ppng
+                _pa = _ppng(T("Plane A — probe A (before/after)", "Plano A — sonda A (antes/después)"),
+                            r2p.get("a0"), aa, u)
+                _pb = _ppng(T("Plane B — probe B (before/after)", "Plano B — sonda B (antes/después)"),
+                            r2p.get("b0"), ba, u)
+                _figs2 = [(c, p) for c, p in
+                          ((T("Plane A", "Plano A"), _pa), (T("Plane B", "Plano B"), _pb)) if p]
+            except Exception:  # noqa: BLE001
+                pass
             sections.append({"title": T("Two planes (ISO 21940-12)", "Dos planos (ISO 21940-12)"),
+                "figures": _figs2,
                 "table": {"headers": [T("Item", "Ítem"), T("Value", "Valor")],
                           "rows": [[T("Plane A correction", "Corrección plano A"), f"{wa[0]:,.2f} g ∠ {wa[1]:.0f}°"],
                                    [T("Plane B correction", "Corrección plano B"), f"{wb[0]:,.2f} g ∠ {wb[1]:.0f}°"],
