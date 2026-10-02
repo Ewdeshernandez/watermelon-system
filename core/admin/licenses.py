@@ -26,6 +26,7 @@ y apunta al sistema de campo real.
 from __future__ import annotations
 
 import html as _html
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -95,15 +96,24 @@ _UPDATE_HIGHLIGHTS: Dict[str, str] = {
 }
 
 
+_LOGO_URL = (f"https://raw.githubusercontent.com/{_RELEASE_REPO}/main/"
+             "assets/watermelon_logo.png")
+# Ruido que NO debe aparecer en el changelog del cliente.
+_CHANGELOG_SKIP = ("merge", "bump", "wip", "typo", "lint", "ci(", "chore(release")
+# Prefijos de conventional commits a limpiar.
+_CC_PREFIX = re.compile(
+    r"^(feat|fix|perf|refactor|style|docs|test|build|chore)(\([^)]*\))?[:!]\s*", re.I)
+
+
 @st.cache_data(ttl=600, show_spinner=False)
-def _latest_version(module: str) -> str:
-    """Última versión publicada del módulo (tag `prefijo-vX.Y.Z` → 'X.Y.Z'),
-    en vivo desde GitHub Releases. Cacheada 10 min. '' si no se pudo leer."""
+def _latest_release_info(module: str) -> Dict[str, Any]:
+    """Info del último release del módulo (en vivo, cacheado 10 min):
+    {version, tag, prev_tag, date, html_url}. {} si no se pudo leer."""
     import json as _json
     import urllib.request as _ur
     pre = _MODULE_RELEASE.get(module, {}).get("tag")
     if not pre:
-        return ""
+        return {}
     try:
         url = f"https://api.github.com/repos/{_RELEASE_REPO}/releases?per_page=100"
         req = _ur.Request(url, headers={"User-Agent": "WM-Console",
@@ -111,17 +121,58 @@ def _latest_version(module: str) -> str:
         with _ur.urlopen(req, timeout=6.0) as r:
             rels = _json.load(r)
     except Exception:  # noqa: BLE001
-        return ""
-    best = None
+        return {}
+    ranked = []
     for rel in rels or []:
         tag = rel.get("tag_name", "") or ""
         if not tag.startswith(pre) or rel.get("draft"):
             continue
-        import re as _re
-        nums = tuple(int(x) for x in _re.findall(r"\d+", tag[len(pre):])[:3])
-        if nums and (best is None or nums > best[0]):
-            best = (nums, tag[len(pre):])
-    return best[1] if best else ""
+        nums = tuple(int(x) for x in re.findall(r"\d+", tag[len(pre):])[:3])
+        if nums:
+            ranked.append((nums, tag, rel))
+    if not ranked:
+        return {}
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    _, tag, rel = ranked[0]
+    prev_tag = ranked[1][1] if len(ranked) > 1 else ""
+    return {"version": tag[len(pre):], "tag": tag, "prev_tag": prev_tag,
+            "date": (rel.get("published_at") or "")[:10],
+            "html_url": rel.get("html_url") or ""}
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _release_changes(prev_tag: str, tag: str) -> List[str]:
+    """Bullets de cambios REALES entre dos tags (GitHub compare API), limpiados a
+    lenguaje cliente: quita prefijos de commit, ruido y recorta. [] si falla."""
+    if not tag or not prev_tag:
+        return []
+    import json as _json
+    import urllib.request as _ur
+    try:
+        url = (f"https://api.github.com/repos/{_RELEASE_REPO}/compare/"
+               f"{prev_tag}...{tag}")
+        req = _ur.Request(url, headers={"User-Agent": "WM-Console",
+                                        "Accept": "application/vnd.github+json"})
+        with _ur.urlopen(req, timeout=7.0) as r:
+            data = _json.load(r)
+    except Exception:  # noqa: BLE001
+        return []
+    out: List[str] = []
+    seen: set = set()
+    for c in data.get("commits", []) or []:
+        msg = ((c.get("commit") or {}).get("message") or "").splitlines()[0].strip()
+        low = msg.lower()
+        if not msg or any(k in low for k in _CHANGELOG_SKIP):
+            continue
+        clean = _CC_PREFIX.sub("", msg).strip()
+        if not clean:
+            continue
+        clean = clean[0].upper() + clean[1:]
+        if clean.lower() in seen:
+            continue
+        seen.add(clean.lower())
+        out.append(clean)
+    return out[:6]
 
 
 def _module_entitlements(lic: Dict[str, Any]) -> List[tuple]:
@@ -392,7 +443,8 @@ def _send_status_email(kind: str, to: str, customer: str, key: str,
 
 def _send_update_email(to: str, customer: str, module: str, app_name: str,
                        version: str, whats_new: str,
-                       dl_url: str = "") -> Dict[str, Any]:
+                       dl_url: str = "", date: str = "",
+                       release_url: str = "") -> Dict[str, Any]:
     """Aviso HERMOSO de nueva versión disponible (envío manual desde la consola).
     No lanza."""
     try:
@@ -404,10 +456,11 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
     subject = f"Nueva versión de {app_name}" + (f" ({_ver}) disponible" if _ver else " disponible")
     _wn = (whats_new or "").strip()
     _dl_line = (f"\nDescarga directa (opcional): {dl_url}\n" if dl_url else "")
+    _date_txt = f" (publicada el {date})" if date else ""
     body_text = (
         f"Hola {nombre},\n\n"
         f"Ya está disponible una nueva versión de {app_name}"
-        f"{(' ' + _ver) if _ver else ''}.\n\n"
+        f"{(' ' + _ver) if _ver else ''}{_date_txt}.\n\n"
         + (f"Qué trae:\n{_wn}\n\n" if _wn else "")
         + "Cómo actualizar (automático):\n"
         f"1) Abre {app_name} en tu equipo.\n"
@@ -435,8 +488,23 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
         f'<span style="background:#12305e;color:#fff;border-radius:999px;padding:3px 12px;'
         f'font:800 12px \'IBM Plex Mono\',monospace;letter-spacing:1px;">{_html.escape(_ver)}</span>'
         ) if _ver else ""
+    _date_html = (f'<span style="color:#8090a6;font-size:13px;margin-left:8px;">'
+                  f'publicada el {_html.escape(date)}</span>') if date else ""
+    _btn_url = release_url or dl_url
+    _btn_html = (
+        f'<table role="presentation" cellpadding="0" cellspacing="0" '
+        f'style="margin:6px 0 4px;"><tr><td align="center" bgcolor="#e8890c" '
+        f'style="border-radius:10px;">'
+        f'<a href="{_html.escape(_btn_url)}" style="display:inline-block;padding:13px 30px;'
+        f'font:800 15px \'IBM Plex Sans\',Arial,sans-serif;color:#ffffff;text-decoration:none;'
+        f'border-radius:10px;letter-spacing:.02em;">Actualizar ahora &nbsp;&rarr;</a>'
+        f'</td></tr></table>') if _btn_url else ""
     body_html = f"""
     <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
+      <div style="text-align:center;padding:4px 0 14px;">
+        <img src="{_LOGO_URL}" alt="Watermelon System" width="44" height="44"
+             style="display:inline-block;vertical-align:middle;border:0;"/>
+      </div>
       <div style="background-color:#12305e;
                   background-image:linear-gradient(135deg,#0d2b5e 0%,#1b4a86 55%,#2f74bd 100%);
                   border-radius:14px;padding:28px 24px;">
@@ -449,7 +517,7 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
       </div>
       <p style="margin:16px 0 4px;">Hola <b>{nombre}</b>,</p>
       <p style="font-size:15px;color:#1b2b45;">Ya puedes actualizar
-        <b>{_html.escape(app_name)}</b> &nbsp;{_ver_badge}</p>
+        <b>{_html.escape(app_name)}</b> &nbsp;{_ver_badge}{_date_html}</p>
       {_wn_html}
       <div style="background:#f3f7fc;border:1px solid #d7e3f2;border-left:4px solid #1f9d55;
                   border-radius:10px;padding:14px 16px;margin:16px 0;">
@@ -461,6 +529,7 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
           <li>Acepta y listo — se actualiza sola.</li>
         </ol>
       </div>
+      {_btn_html}
       {_dl_html}
       <p style="color:#8090a6;font-size:12px;margin-top:18px;border-top:0.5px solid #e2e8f2;
                 padding-top:12px;">Soporte: watermelonsystem.app · SIGA GROUP SAS</p>
@@ -612,15 +681,25 @@ def render() -> None:
         _u1, _u2 = st.columns([1.2, 1])
         with _u1:
             _mod = st.selectbox("Módulo", ["Todos"] + _MODULE_ORDER, key="upd_mod")
-        # Auto: última versión (en vivo) + resumen cliente por módulo. Keys por
-        # módulo → al cambiar de módulo se re-rellena solo; editable.
-        _auto_ver = _latest_version(_mod) if _mod != "Todos" else ""
+        # Auto: última versión + fecha + url (en vivo). "Qué trae" = resumen
+        # redactado por módulo (preciso y profesional). En monorepo el compare
+        # entre tags mezcla commits de TODOS los módulos, así que solo se usa
+        # como respaldo si no hay resumen. Keys por módulo → re-rellena; editable.
+        _info = _latest_release_info(_mod) if _mod != "Todos" else {}
+        _auto_ver = _info.get("version", "")
+        _date = _info.get("date", "")
+        _rel_url = _info.get("html_url", "")
         _auto_wn = _UPDATE_HIGHLIGHTS.get(_mod, "")
+        if not _auto_wn and _info:
+            _chg = _release_changes(_info.get("prev_tag", ""), _info.get("tag", ""))
+            _auto_wn = "\n".join("• " + c for c in _chg)
         with _u2:
             _ver = st.text_input("Versión (auto)", value=_auto_ver,
                                  placeholder="ej: 0.12.9", key=f"upd_ver_{_mod}")
-        _wn = st.text_area("Qué trae (se muestra al cliente · editable)",
-                           value=_auto_wn, key=f"upd_wn_{_mod}", height=110)
+        _wn = st.text_area("Qué trae (auto desde el release · editable)",
+                           value=_auto_wn, key=f"upd_wn_{_mod}", height=130)
+        if _date:
+            st.caption(f"Release {_auto_ver} · publicado {_date}")
         # Link de descarga directo (solo si es un módulo puntual con versión)
         _dl = ""
         if _mod != "Todos" and _ver.strip():
@@ -640,7 +719,7 @@ def render() -> None:
                          use_container_width=True, disabled=not _test.strip()):
                 _r = _send_update_email(_test.strip(), "Equipo SIGA", _mod or "Todos",
                                         _appname or "Watermelon System", _ver.strip(),
-                                        _wn, _dl)
+                                        _wn, _dl, date=_date, release_url=_rel_url)
                 st.success(f"Prueba enviada a {_test.strip()}.") if _r.get("ok") \
                     else st.error(f"Falló: {_r.get('error','—')}")
         with _tc2:
@@ -652,7 +731,8 @@ def render() -> None:
                 for _acc, _cust in _rcp:
                     _r = _send_update_email(_acc, _cust, _mod or "Todos",
                                             _appname or "Watermelon System",
-                                            _ver.strip(), _wn, _dl)
+                                            _ver.strip(), _wn, _dl,
+                                            date=_date, release_url=_rel_url)
                     if _r.get("ok"):
                         _ok += 1
                     else:
