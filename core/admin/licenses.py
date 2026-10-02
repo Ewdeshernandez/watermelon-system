@@ -71,6 +71,58 @@ _MODULE_RELEASE: Dict[str, Dict[str, Any]] = {
 }
 _RELEASE_REPO = "Ewdeshernandez/watermelon-system"
 
+# Resumen CLIENTE (bien redactado, sin jerga interna) de lo que trae la versión
+# vigente de cada módulo. Al sacar una versión nueva, se actualiza aquí.
+_UPDATE_HIGHLIGHTS: Dict[str, str] = {
+    "Rotordynamics": (
+        "• Monitoreo en línea más confiable: las lecturas en vivo llegan a "
+        "Watermelon System de forma continua.\n"
+        "• Verificación automática del activo antes de iniciar el monitoreo, "
+        "para que los datos siempre queden en el equipo correcto.\n"
+        "• Mejoras de estabilidad."),
+    "Modal": (
+        "• Mejoras de estabilidad y rendimiento.\n"
+        "• Validación de licencia más robusta."),
+    "Torsional": (
+        "• Mejoras de estabilidad y rendimiento.\n"
+        "• Validación de licencia más robusta."),
+    "Balanceo": (
+        "• Mejoras de estabilidad y rendimiento.\n"
+        "• Validación de licencia más robusta."),
+    "Todos": (
+        "• Nueva versión disponible con mejoras de estabilidad y seguridad de "
+        "licencia en tus módulos de Watermelon System."),
+}
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _latest_version(module: str) -> str:
+    """Última versión publicada del módulo (tag `prefijo-vX.Y.Z` → 'X.Y.Z'),
+    en vivo desde GitHub Releases. Cacheada 10 min. '' si no se pudo leer."""
+    import json as _json
+    import urllib.request as _ur
+    pre = _MODULE_RELEASE.get(module, {}).get("tag")
+    if not pre:
+        return ""
+    try:
+        url = f"https://api.github.com/repos/{_RELEASE_REPO}/releases?per_page=100"
+        req = _ur.Request(url, headers={"User-Agent": "WM-Console",
+                                        "Accept": "application/vnd.github+json"})
+        with _ur.urlopen(req, timeout=6.0) as r:
+            rels = _json.load(r)
+    except Exception:  # noqa: BLE001
+        return ""
+    best = None
+    for rel in rels or []:
+        tag = rel.get("tag_name", "") or ""
+        if not tag.startswith(pre) or rel.get("draft"):
+            continue
+        import re as _re
+        nums = tuple(int(x) for x in _re.findall(r"\d+", tag[len(pre):])[:3])
+        if nums and (best is None or nums > best[0]):
+            best = (nums, tag[len(pre):])
+    return best[1] if best else ""
+
 
 def _module_entitlements(lic: Dict[str, Any]) -> List[tuple]:
     """Lista [(módulo, incluido_bool)] en orden canónico, derivada de features.
@@ -550,11 +602,15 @@ def render() -> None:
         _u1, _u2 = st.columns([1.2, 1])
         with _u1:
             _mod = st.selectbox("Módulo", ["Todos"] + _MODULE_ORDER, key="upd_mod")
+        # Auto: última versión (en vivo) + resumen cliente por módulo. Keys por
+        # módulo → al cambiar de módulo se re-rellena solo; editable.
+        _auto_ver = _latest_version(_mod) if _mod != "Todos" else ""
+        _auto_wn = _UPDATE_HIGHLIGHTS.get(_mod, "")
         with _u2:
-            _ver = st.text_input("Versión", placeholder="ej: 0.12.9", key="upd_ver")
-        _wn = st.text_area("Qué trae (se muestra al cliente)",
-                           placeholder="ej: Bloqueo por módulo + mejoras de estabilidad.",
-                           key="upd_wn", height=80)
+            _ver = st.text_input("Versión (auto)", value=_auto_ver,
+                                 placeholder="ej: 0.12.9", key=f"upd_ver_{_mod}")
+        _wn = st.text_area("Qué trae (se muestra al cliente · editable)",
+                           value=_auto_wn, key=f"upd_wn_{_mod}", height=110)
         # Link de descarga directo (solo si es un módulo puntual con versión)
         _dl = ""
         if _mod != "Todos" and _ver.strip():
