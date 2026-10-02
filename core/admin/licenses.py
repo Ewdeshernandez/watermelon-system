@@ -58,6 +58,19 @@ _FEATURE_LABELS: Dict[str, str] = {
 _MODULE_ORDER = ["Rotordynamics", "Modal", "Torsional", "Balanceo"]
 
 
+def _module_entitlements(lic: Dict[str, Any]) -> List[tuple]:
+    """Lista [(módulo, incluido_bool)] en orden canónico, derivada de features.
+    Modal se incluye si está 'oma' o 'ema'. Sirve para mostrar al cliente qué
+    tiene aprobado y qué no."""
+    feats = {str(f).strip().lower() for f in (lic.get("features") or [])}
+    return [
+        ("Rotordynamics", "rotordynamics" in feats),
+        ("Modal", bool(feats & {"oma", "ema"})),
+        ("Torsional", "torsional" in feats),
+        ("Balanceo", "balance" in feats),
+    ]
+
+
 def _plan_label(lic: Dict[str, Any]) -> str:
     """Nombre legible del paquete para el cliente (correo + tarjeta). NUNCA
     devuelve los códigos crudos (oma/ema/report). Deriva los módulos desde
@@ -170,9 +183,11 @@ def _now_iso() -> str:
 
 
 def _send_license_email(to: str, customer: str, key: str, plan: str,
-                        seats: int, exp_iso: str) -> Dict[str, Any]:
+                        seats: int, exp_iso: str,
+                        entitlements: "List[tuple] | None" = None) -> Dict[str, Any]:
     """Envía la clave de licencia al correo del cliente (backend de core.email_sender).
-    Devuelve {ok, ...}. No lanza."""
+    `entitlements` = [(módulo, incluido_bool)] para mostrar qué tiene aprobado y
+    qué no. Devuelve {ok, ...}. No lanza."""
     try:
         from core.email_sender import send_email
     except Exception as e:  # noqa: BLE001
@@ -182,13 +197,38 @@ def _send_license_email(to: str, customer: str, key: str, plan: str,
     nombre = customer.strip() or to
     seat_txt = "1 equipo" if seats == 1 else f"{seats} equipos"
     subject = "Tu licencia de Watermelon System"
+
+    # Matriz de módulos aprobados / no aprobados (texto + HTML)
+    _ent = entitlements or []
+    _mod_text = ""
+    _mod_html = ""
+    if _ent:
+        _mod_text = "\nMódulos de tu licencia:\n" + "\n".join(
+            f"  {'[incluido]    ' if inc else '[no incluido] '} {name}"
+            for name, inc in _ent) + "\n"
+        _rows = "".join(
+            f'<tr>'
+            f'<td style="padding:5px 10px;border-bottom:1px solid #eef2f8;">{name}</td>'
+            f'<td style="padding:5px 10px;border-bottom:1px solid #eef2f8;text-align:right;'
+            f'font-weight:700;color:{"#1f9d55" if inc else "#9aa6ba"};">'
+            f'<span style="font-size:15px;">●</span> '
+            f'{"Incluido" if inc else "No incluido"}</td></tr>'
+            for name, inc in _ent)
+        _mod_html = (
+            '<div style="font:600 11px \'IBM Plex Mono\',monospace;letter-spacing:.1em;'
+            'color:#5b6b86;text-transform:uppercase;margin:16px 0 6px;">Módulos de tu licencia</div>'
+            '<table style="width:100%;max-width:360px;font-size:14px;color:#3a4c66;'
+            'border-collapse:collapse;border:1px solid #e2e8f2;border-radius:8px;">'
+            + _rows + '</table>')
+
     body_text = (
         f"Hola {nombre},\n\n"
         f"Se generó tu licencia de Watermelon System.\n\n"
         f"Clave de licencia: {key}\n"
         f"Paquete: {plan}\n"
         f"Equipos permitidos: {seat_txt}\n"
-        f"Vigencia hasta: {exp_txt}\n\n"
+        f"Vigencia hasta: {exp_txt}\n"
+        f"{_mod_text}\n"
         f"Cómo activar:\n"
         f"1) Instala/abre el módulo de Watermelon System en el equipo.\n"
         f"2) Cuando pida la clave, ingresa: {key}\n"
@@ -211,6 +251,7 @@ def _send_license_email(to: str, customer: str, key: str, plan: str,
         <tr><td style="padding:2px 12px 2px 0;color:#8090a6;">Equipos</td><td>{seat_txt}</td></tr>
         <tr><td style="padding:2px 12px 2px 0;color:#8090a6;">Vigencia hasta</td><td>{exp_txt}</td></tr>
       </table>
+      {_mod_html}
       <p style="margin-top:16px;"><b>Cómo activar:</b></p>
       <ol style="color:#3a4c66;font-size:14px;line-height:1.7;">
         <li>Instala/abre el módulo de Watermelon System en el equipo.</li>
@@ -379,8 +420,10 @@ def render() -> None:
                         st.cache_data.clear()
                         _mail = ""
                         if _send_mail:
-                            _r = _send_license_email(_account.strip(), _customer.strip(),
-                                                     key, _plan, int(_seats), exp)
+                            _r = _send_license_email(
+                                _account.strip(), _customer.strip(), key, _plan,
+                                int(_seats), exp,
+                                entitlements=_module_entitlements({"features": PLANS[_plan]}))
                             _mail = ("  ·  ✉ correo enviado a " + _account.strip()) if _r.get("ok") \
                                 else ("  ·  ⚠ no se pudo enviar el correo: "
                                       + str(_r.get("error", ""))[:90])
@@ -450,6 +493,18 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
           </div>
         </div>
         """, unsafe_allow_html=True)
+
+    # --- Módulos aprobados / no aprobados ---
+    _chips = "".join(
+        f'<span style="display:inline-block;margin:0 6px 6px 0;padding:3px 10px;'
+        f'border-radius:999px;font:700 11px \'IBM Plex Sans\';'
+        f'background:{"#e8f6ee" if inc else "#f1f4f9"};'
+        f'color:{"#1f9d55" if inc else "#9aa6ba"};'
+        f'border:1px solid {"#b7e4c7" if inc else "#e2e8f2"};">'
+        f'● {name}{"" if inc else " · no incluido"}</span>'
+        for name, inc in _module_entitlements(lic))
+    st.markdown(
+        f'<div style="margin:-2px 0 10px;">{_chips}</div>', unsafe_allow_html=True)
 
     # --- Máquinas (dónde vive la licencia) ---
     if acts:
@@ -582,7 +637,8 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
                     _r = _send_license_email(
                         _dest, lic.get("customer") or "", key,
                         str(plan), seats,
-                        lic.get("expires_at") or "")
+                        lic.get("expires_at") or "",
+                        entitlements=_module_entitlements(lic))
                     if _r.get("ok"):
                         # Si corrigieron el correo, deja el nuevo como el de la licencia.
                         if _dest != (lic.get("account") or ""):
