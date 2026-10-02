@@ -451,7 +451,7 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
             html_table(["Fecha/hora", "Módulo", "PC", "IP", "Ubicación"], hrows)
 
     # --- Acciones ---
-    _a1, _a2, _a3, _a4, _a5 = st.columns([1.1, 1.4, 1.1, 1.1, 1.4])
+    _a1, _a2, _a3, _aR, _a4, _a5 = st.columns([1.0, 1.3, 1.0, 1.2, 1.1, 1.3])
 
     # Renovar
     with _a1:
@@ -528,6 +528,43 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
                 st.rerun()
             except Exception as e:  # noqa: BLE001
                 st.error(f"Error: {e}")
+
+    # Reenviar la clave por correo (cliente perdió/olvidó el correo original)
+    with _aR:
+        with st.popover("Reenviar clave", use_container_width=True):
+            st.caption("Vuelve a enviar el correo con la clave de activación "
+                       "(mismo contenido que al crearla). Puedes corregir el "
+                       "destinatario si el correo registrado estaba mal.")
+            _to = st.text_input("Enviar a", value=(lic.get("account") or ""),
+                                key=f"resend_to_{lid}")
+            st.markdown(
+                f"<div style='font-size:12px;color:#3a4c66;line-height:1.8'>"
+                f"Clave <code style='color:#12305e'>{_html.escape(key)}</code> · "
+                f"{_html.escape(str(plan))} · {seats} equipo(s) · vence {exp_txt}</div>",
+                unsafe_allow_html=True)
+            if st.button("Reenviar correo", key=f"resend_btn_{lid}",
+                         type="primary", use_container_width=True):
+                _dest = (_to or "").strip()
+                if "@" not in _dest:
+                    st.error("Correo destino inválido.")
+                else:
+                    _r = _send_license_email(
+                        _dest, lic.get("customer") or "", key,
+                        lic.get("plan") or str(plan), seats,
+                        lic.get("expires_at") or "")
+                    if _r.get("ok"):
+                        # Si corrigieron el correo, deja el nuevo como el de la licencia.
+                        if _dest != (lic.get("account") or ""):
+                            try:
+                                sb.table("licenses").update(
+                                    {"account": _dest, "updated_at": _now_iso()}
+                                ).eq("id", lid).execute()
+                                st.cache_data.clear()
+                            except Exception:  # noqa: BLE001
+                                pass
+                        st.success(f"Clave reenviada a {_dest}.")
+                    else:
+                        st.error(f"No se pudo enviar: {_r.get('error', '—')}")
 
     # Revocar / Eliminar licencia completa
     with _a4:
