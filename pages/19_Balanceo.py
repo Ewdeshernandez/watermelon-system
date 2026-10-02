@@ -223,6 +223,24 @@ tab_tw, tab_1p, tab_2p, tab_iso, tab_rep = st.tabs([
     "Trial weight", "1 plane", "2 planes", "ISO validation", "Report",
 ])
 
+# Flujo guiado (paridad con el campo, que deshabilita pestañas): la validación
+# ISO y el reporte quedan BLOQUEADOS hasta completar un balanceo (1 o 2 planos).
+# Streamlit no deshabilita tabs → se bloquea el contenido + stepper de progreso.
+_has_result = bool(st.session_state.get("bal_r1p") or st.session_state.get("bal_r2p"))
+_has_iso = bool(st.session_state.get("bal_iso")) and _has_result
+_has_pdf = bool(st.session_state.get("bal_pdf"))
+_flow_steps = [("1 · Datos", True), ("2 · Cálculo", _has_result),
+               ("3 · Validación ISO", _has_iso), ("4 · Reporte", _has_pdf)]
+_flow_html = " ".join(
+    f"<span style='color:{'#10b981' if _d else '#cbd5e1'};font-size:15px'>●</span>"
+    f"<span style='color:{'#0b1f3a' if _d else '#94a3b8'};"
+    f"font-weight:{700 if _d else 500};font-size:13px;margin:0 16px 0 5px'>{_lbl}</span>"
+    for _lbl, _d in _flow_steps)
+st.markdown(f"<div style='margin:6px 0 12px'>{_flow_html}</div>", unsafe_allow_html=True)
+if not _has_result:
+    st.caption("La validación ISO y el reporte se desbloquean al completar un "
+               "balanceo (pestaña **1 plano** o **2 planos**).")
+
 
 # ---------------------------------------------------------------------
 # 1) Peso de prueba (API 684)
@@ -493,47 +511,52 @@ with tab_iso:
                        "e_per = 9549·G/N  ·  U_per = e_per·W. The residual is "
                        "evaluated against ISO 21940 grades.",
                        "ISO 21940-11", "✅")
-    with st.container(border=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            W_iso = _num("iso_w", "Rotor weight W [kg]", 11000.0,
-                         min_value=0.0, step=10.0, format="%.1f")
-            rpm_iso = _num("iso_rpm", "Speed N [rpm]", 3600.0,
-                           min_value=0.0, step=10.0, format="%.0f")
-        with c2:
-            modo = st.radio("Residual U_res", ["Enter U_res [g·mm]",
-                                               "Compute from mass·radius"], key="iso_mode")
-            if modo.startswith("Enter"):
-                U_res = _num("iso_ures", "U_res [g·mm]", 0.0, min_value=0.0,
-                             step=1.0, format="%.1f")
-            else:
-                mr = _num("iso_resmass", "Residual mass [g]", 0.0, min_value=0.0,
-                          step=0.1, format="%.2f")
-                rr = _num("iso_resrad", "Radius [mm]", 420.0, min_value=0.0,
-                          step=1.0, format="%.1f")
-                U_res = calc_U_trial(mr, rr)
-                st.caption(f"U_res computed = **{U_res:,.1f} g·mm**")
-
-    ev = evaluate_iso_grades(W_iso, rpm_iso, U_res)
-    st.session_state["bal_iso"] = ev
-    if ev["status_code"] == "FAIL":
-        bal_status_banner("Does not comply", ev["summary_label"], "fail")
-    elif ev["best_grade"] is not None and ev["best_grade"] <= 2.5:
-        bal_status_banner("Complies", ev["summary_label"], "ok")
+    if not _has_result:
+        bal_status_banner("Paso bloqueado",
+                          "Completa un balanceo (1 plano o 2 planos) para validar "
+                          "el residual contra ISO 21940.", "warning")
     else:
-        bal_status_banner("Complies (basic quality)", ev["summary_label"], "warning")
+        with st.container(border=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                W_iso = _num("iso_w", "Rotor weight W [kg]", 11000.0,
+                             min_value=0.0, step=10.0, format="%.1f")
+                rpm_iso = _num("iso_rpm", "Speed N [rpm]", 3600.0,
+                               min_value=0.0, step=10.0, format="%.0f")
+            with c2:
+                modo = st.radio("Residual U_res", ["Enter U_res [g·mm]",
+                                                   "Compute from mass·radius"], key="iso_mode")
+                if modo.startswith("Enter"):
+                    U_res = _num("iso_ures", "U_res [g·mm]", 0.0, min_value=0.0,
+                                 step=1.0, format="%.1f")
+                else:
+                    mr = _num("iso_resmass", "Residual mass [g]", 0.0, min_value=0.0,
+                              step=0.1, format="%.2f")
+                    rr = _num("iso_resrad", "Radius [mm]", 420.0, min_value=0.0,
+                              step=1.0, format="%.1f")
+                    U_res = calc_U_trial(mr, rr)
+                    st.caption(f"U_res computed = **{U_res:,.1f} g·mm**")
 
-    _iso_cols = ["Grade", "e_per [µm]", "U_per [g·mm]", "U_res/U_per", "Cumple"]
-    _iso_rows = []
-    for g in ev["results"]:
-        _iso_rows.append([
-            f"G{g['G']:g}",
-            round(g["e_per"], 3),
-            round(g["U_per"], 1),
-            round(g["ratio"], 2) if g["ratio"] < 900 else "—",
-            f"{dot('ok')} Sí" if g["pass"] else f"{dot('dang')} No",
-        ])
-    html_table(_iso_cols, _iso_rows, raw_cols=[4])
+        ev = evaluate_iso_grades(W_iso, rpm_iso, U_res)
+        st.session_state["bal_iso"] = ev
+        if ev["status_code"] == "FAIL":
+            bal_status_banner("Does not comply", ev["summary_label"], "fail")
+        elif ev["best_grade"] is not None and ev["best_grade"] <= 2.5:
+            bal_status_banner("Complies", ev["summary_label"], "ok")
+        else:
+            bal_status_banner("Complies (basic quality)", ev["summary_label"], "warning")
+
+        _iso_cols = ["Grade", "e_per [µm]", "U_per [g·mm]", "U_res/U_per", "Cumple"]
+        _iso_rows = []
+        for g in ev["results"]:
+            _iso_rows.append([
+                f"G{g['G']:g}",
+                round(g["e_per"], 3),
+                round(g["U_per"], 1),
+                round(g["ratio"], 2) if g["ratio"] < 900 else "—",
+                f"{dot('ok')} Sí" if g["pass"] else f"{dot('dang')} No",
+            ])
+        html_table(_iso_cols, _iso_rows, raw_cols=[4])
 
 
 # ---------------------------------------------------------------------
@@ -542,6 +565,12 @@ with tab_iso:
 with tab_rep:
     bal_section_header("Report", "Session summary and branded "
                        "Watermelon/SIGA PDF.", "ISO 21940 · API 684", "⎙")
+
+    if not _has_result:
+        bal_status_banner("Paso bloqueado",
+                          "Completa un balanceo (1 plano o 2 planos) antes de "
+                          "generar el reporte.", "warning")
+        st.stop()
 
     r1 = st.session_state.get("bal_r1p")
     r2 = st.session_state.get("bal_r2p")
