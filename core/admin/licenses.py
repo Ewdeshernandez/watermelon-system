@@ -501,10 +501,6 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
         f'</td></tr></table>') if _btn_url else ""
     body_html = f"""
     <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
-      <div style="text-align:center;padding:4px 0 14px;">
-        <img src="{_LOGO_URL}" alt="Watermelon System" width="44" height="44"
-             style="display:inline-block;vertical-align:middle;border:0;"/>
-      </div>
       <div style="background-color:#12305e;
                   background-image:linear-gradient(135deg,#0d2b5e 0%,#1b4a86 55%,#2f74bd 100%);
                   border-radius:14px;padding:28px 24px;">
