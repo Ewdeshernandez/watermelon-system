@@ -416,11 +416,17 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
         + _dl_line +
         "\nSoporte: watermelonsystem.app\n— SIGA GROUP SAS"
     )
-    _wn_html = (
-        f'<div style="font:600 11px \'IBM Plex Mono\',monospace;letter-spacing:.1em;'
-        f'color:#5b6b86;text-transform:uppercase;margin:16px 0 4px;">Qué trae</div>'
-        f'<div style="font-size:14px;color:#3a4c66;line-height:1.7;white-space:pre-wrap;">'
-        f'{_html.escape(_wn)}</div>') if _wn else ""
+    _wn_html = ""
+    if _wn:
+        _items = [ln.strip().lstrip("•").strip()
+                  for ln in _wn.splitlines() if ln.strip()]
+        _lis = "".join(
+            f'<li style="margin:4px 0;">{_html.escape(it)}</li>' for it in _items)
+        _wn_html = (
+            '<div style="font:600 11px \'IBM Plex Mono\',monospace;letter-spacing:.1em;'
+            'color:#5b6b86;text-transform:uppercase;margin:18px 0 4px;">Qué trae</div>'
+            f'<ul style="font-size:14px;color:#3a4c66;line-height:1.6;margin:0;'
+            f'padding-left:20px;">{_lis}</ul>')
     _dl_html = (
         f'<p style="margin-top:14px;font-size:13px;">O descarga directa: '
         f'<a href="{_html.escape(dl_url)}" style="color:#12305e;">{_html.escape(app_name)} Setup</a></p>'
@@ -431,15 +437,14 @@ def _send_update_email(to: str, customer: str, module: str, app_name: str,
         ) if _ver else ""
     body_html = f"""
     <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
-      <div style="background:linear-gradient(135deg,#0d2b5e 0%,#1b4a86 55%,#2f74bd 100%);
-                  border-radius:14px;padding:28px 24px;
-                  box-shadow:0 10px 26px rgba(13,43,94,.28);">
+      <div style="background-color:#12305e;
+                  background-image:linear-gradient(135deg,#0d2b5e 0%,#1b4a86 55%,#2f74bd 100%);
+                  border-radius:14px;padding:28px 24px;">
         <div style="font:700 12px 'IBM Plex Mono',monospace;letter-spacing:.18em;
                     color:#ffd79a;text-transform:uppercase;">Watermelon System</div>
         <div style="font:800 30px 'IBM Plex Sans',Arial,sans-serif;color:#ffffff;
-                    margin-top:8px;line-height:1.08;text-shadow:0 1px 2px rgba(0,0,0,.18);">
-          Nueva versión disponible</div>
-        <div style="height:4px;width:68px;background:#e8890c;border-radius:999px;
+                    margin-top:8px;line-height:1.08;">Nueva versión disponible</div>
+        <div style="height:4px;width:68px;background-color:#e8890c;border-radius:999px;
                     margin-top:14px;"></div>
       </div>
       <p style="margin:16px 0 4px;">Hola <b>{nombre}</b>,</p>
