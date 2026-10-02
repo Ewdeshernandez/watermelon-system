@@ -57,6 +57,20 @@ _FEATURE_LABELS: Dict[str, str] = {
 # Orden canónico de los módulos de campo para presentación.
 _MODULE_ORDER = ["Rotordynamics", "Modal", "Torsional", "Balanceo"]
 
+# Metadata por módulo para anuncios de actualización (prefijo de tag del release,
+# nombre del instalador, y código(s) de feature que identifican a quién le aplica).
+_MODULE_RELEASE: Dict[str, Dict[str, Any]] = {
+    "Rotordynamics": {"tag": "field-v", "app": "Watermelon Rotordynamics",
+                      "exe": "WatermelonRotordynamics-Setup.exe", "feat": {"rotordynamics"}},
+    "Modal": {"tag": "modal-v", "app": "Watermelon Modal",
+              "exe": "WatermelonModal-Setup.exe", "feat": {"oma", "ema"}},
+    "Torsional": {"tag": "torsional-v", "app": "Watermelon Torsional",
+                  "exe": "WatermelonTorsional-Setup.exe", "feat": {"torsional"}},
+    "Balanceo": {"tag": "balance-v", "app": "Watermelon Balancing",
+                 "exe": "WatermelonBalancing-Setup.exe", "feat": {"balance"}},
+}
+_RELEASE_REPO = "Ewdeshernandez/watermelon-system"
+
 
 def _module_entitlements(lic: Dict[str, Any]) -> List[tuple]:
     """Lista [(módulo, incluido_bool)] en orden canónico, derivada de features.
@@ -324,6 +338,99 @@ def _send_status_email(kind: str, to: str, customer: str, key: str,
         return {"ok": False, "error": str(e)}
 
 
+def _send_update_email(to: str, customer: str, module: str, app_name: str,
+                       version: str, whats_new: str,
+                       dl_url: str = "") -> Dict[str, Any]:
+    """Aviso HERMOSO de nueva versión disponible (envío manual desde la consola).
+    No lanza."""
+    try:
+        from core.email_sender import send_email
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"email_sender no disponible: {e}"}
+    nombre = (customer or "").strip() or to
+    _ver = (version or "").strip()
+    subject = f"Nueva versión de {app_name}" + (f" ({_ver}) disponible" if _ver else " disponible")
+    _wn = (whats_new or "").strip()
+    _dl_line = (f"\nDescarga directa (opcional): {dl_url}\n" if dl_url else "")
+    body_text = (
+        f"Hola {nombre},\n\n"
+        f"Ya está disponible una nueva versión de {app_name}"
+        f"{(' ' + _ver) if _ver else ''}.\n\n"
+        + (f"Qué trae:\n{_wn}\n\n" if _wn else "")
+        + "Cómo actualizar (automático):\n"
+        f"1) Abre {app_name} en tu equipo.\n"
+        f"2) El actualizador te ofrecerá la nueva versión.\n"
+        f"3) Acepta y listo — se actualiza sola.\n"
+        + _dl_line +
+        "\nSoporte: watermelonsystem.app\n— SIGA GROUP SAS"
+    )
+    _wn_html = (
+        f'<div style="font:600 11px \'IBM Plex Mono\',monospace;letter-spacing:.1em;'
+        f'color:#5b6b86;text-transform:uppercase;margin:16px 0 4px;">Qué trae</div>'
+        f'<div style="font-size:14px;color:#3a4c66;line-height:1.7;white-space:pre-wrap;">'
+        f'{_html.escape(_wn)}</div>') if _wn else ""
+    _dl_html = (
+        f'<p style="margin-top:14px;font-size:13px;">O descarga directa: '
+        f'<a href="{_html.escape(dl_url)}" style="color:#12305e;">{_html.escape(app_name)} Setup</a></p>'
+        ) if dl_url else ""
+    _ver_badge = (
+        f'<span style="background:#12305e;color:#fff;border-radius:999px;padding:3px 12px;'
+        f'font:800 12px \'IBM Plex Mono\',monospace;letter-spacing:1px;">{_html.escape(_ver)}</span>'
+        ) if _ver else ""
+    body_html = f"""
+    <div style="font-family:'IBM Plex Sans',Arial,sans-serif;color:#0b1f3a;max-width:560px;">
+      <div style="background:linear-gradient(135deg,#12305e,#1b4a86);border-radius:12px;
+                  padding:22px 20px;color:#eaf2fb;">
+        <div style="font:700 12px 'IBM Plex Mono',monospace;letter-spacing:.14em;
+                    color:#9fc3ef;text-transform:uppercase;">Watermelon System</div>
+        <div style="font:800 22px 'IBM Plex Sans';margin-top:4px;">Nueva versión disponible</div>
+      </div>
+      <p style="margin:16px 0 4px;">Hola <b>{nombre}</b>,</p>
+      <p style="font-size:15px;color:#1b2b45;">Ya puedes actualizar
+        <b>{_html.escape(app_name)}</b> &nbsp;{_ver_badge}</p>
+      {_wn_html}
+      <div style="background:#f3f7fc;border:1px solid #d7e3f2;border-left:4px solid #1f9d55;
+                  border-radius:10px;padding:14px 16px;margin:16px 0;">
+        <div style="font:800 13px 'IBM Plex Sans';color:#12305e;margin-bottom:6px;">
+          Cómo actualizar — automático</div>
+        <ol style="color:#3a4c66;font-size:14px;line-height:1.7;margin:0;padding-left:18px;">
+          <li>Abre <b>{_html.escape(app_name)}</b> en tu equipo.</li>
+          <li>El actualizador te ofrecerá la nueva versión.</li>
+          <li>Acepta y listo — se actualiza sola.</li>
+        </ol>
+      </div>
+      {_dl_html}
+      <p style="color:#8090a6;font-size:12px;margin-top:18px;border-top:0.5px solid #e2e8f2;
+                padding-top:12px;">Soporte: watermelonsystem.app · SIGA GROUP SAS</p>
+    </div>"""
+    try:
+        return send_email(to, subject, body_text, body_html=body_html)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+
+
+def _update_recipients(licenses: List[Dict[str, Any]], module: str) -> List[tuple]:
+    """[(account, customer)] únicos de licencias ACTIVAS a las que aplica el módulo.
+    module == 'Todos' → todas las activas. Si no → las que incluyen el feature del
+    módulo (o, fail-open, las que no tengan features declaradas)."""
+    need = _MODULE_RELEASE.get(module, {}).get("feat")
+    seen: set = set()
+    out: List[tuple] = []
+    for l in licenses:
+        if str(l.get("status") or "").lower() != "active":
+            continue
+        acc = (l.get("account") or "").strip()
+        if not acc or "@" not in acc or acc.lower() in seen:
+            continue
+        if module != "Todos" and need is not None:
+            feats = {str(f).strip().lower() for f in (l.get("features") or [])}
+            if feats and not (feats & need):
+                continue  # tiene features y NO incluye este módulo → no le aplica
+        seen.add(acc.lower())
+        out.append((acc, (l.get("customer") or "").strip()))
+    return out
+
+
 # =====================================================================
 # Render
 # =====================================================================
@@ -437,6 +544,55 @@ def render() -> None:
     if not licenses:
         st.info("No hay licencias todavía. Crea la primera arriba.")
         return
+
+    # --- Anunciar nueva versión (correo manual a clientes activos) ---
+    with st.expander("Anunciar nueva versión a clientes"):
+        _u1, _u2 = st.columns([1.2, 1])
+        with _u1:
+            _mod = st.selectbox("Módulo", ["Todos"] + _MODULE_ORDER, key="upd_mod")
+        with _u2:
+            _ver = st.text_input("Versión", placeholder="ej: 0.12.9", key="upd_ver")
+        _wn = st.text_area("Qué trae (se muestra al cliente)",
+                           placeholder="ej: Bloqueo por módulo + mejoras de estabilidad.",
+                           key="upd_wn", height=80)
+        # Link de descarga directo (solo si es un módulo puntual con versión)
+        _dl = ""
+        if _mod != "Todos" and _ver.strip():
+            _meta = _MODULE_RELEASE.get(_mod, {})
+            _dl = (f"https://github.com/{_RELEASE_REPO}/releases/download/"
+                   f"{_meta.get('tag','')}{_ver.strip()}/{_meta.get('exe','')}")
+        _rcp = _update_recipients(licenses, _mod)
+        _appname = (_MODULE_RELEASE.get(_mod, {}).get("app")
+                    if _mod != "Todos" else "Watermelon System")
+        st.caption(f"Destinatarios (clientes activos): **{len(_rcp)}**"
+                   + (f"  ·  descarga: {_dl}" if _dl else ""))
+        _test = st.text_input("Enviarme solo a mí primero (prueba, opcional)",
+                              value=_user_email, key="upd_test")
+        _tc1, _tc2 = st.columns(2)
+        with _tc1:
+            if st.button("Enviar prueba a mí", key="upd_send_test",
+                         use_container_width=True, disabled=not _test.strip()):
+                _r = _send_update_email(_test.strip(), "Equipo SIGA", _mod or "Todos",
+                                        _appname or "Watermelon System", _ver.strip(),
+                                        _wn, _dl)
+                st.success(f"Prueba enviada a {_test.strip()}.") if _r.get("ok") \
+                    else st.error(f"Falló: {_r.get('error','—')}")
+        with _tc2:
+            _conf = st.checkbox(f"Confirmo enviar a {len(_rcp)} cliente(s)",
+                                key="upd_confirm", disabled=not _rcp)
+            if st.button("ENVIAR ANUNCIO", key="upd_send_all", type="primary",
+                         use_container_width=True, disabled=not (_conf and _rcp)):
+                _ok = _fail = 0
+                for _acc, _cust in _rcp:
+                    _r = _send_update_email(_acc, _cust, _mod or "Todos",
+                                            _appname or "Watermelon System",
+                                            _ver.strip(), _wn, _dl)
+                    if _r.get("ok"):
+                        _ok += 1
+                    else:
+                        _fail += 1
+                st.success(f"Anuncio enviado a {_ok} cliente(s)."
+                           + (f"  ·  {_fail} fallaron." if _fail else ""))
 
     # --- Actividad reciente (todas las licencias) ---
     if events:
