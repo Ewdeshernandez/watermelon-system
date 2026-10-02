@@ -28,6 +28,7 @@ from core.balance.engine import (  # noqa: F401
     calc_U_trial,
     calc_U_res_auto,
     pct_reduction,
+    pct_change,
     ISO_GRADES,
     evaluate_iso_grades,
     status_from_ratio,
@@ -37,13 +38,18 @@ from core.balance.engine import (  # noqa: F401
     # Diagnóstico
     status_level,
     diagnose_static_couple,
+    diagnose_1plane,
+    diagnose_2plane,
+    iso_residual_sanity,
 )
 
 __all__ = [
     "to_complex", "to_polar", "norm360", "polar_to_complex", "complex_to_polar",
     "umax_api684_gmm", "recommend_trial_weight_g",
     "calc_e_per", "calc_U_per", "calc_U_trial", "calc_U_res_auto",
-    "pct_reduction", "ISO_GRADES", "evaluate_iso_grades", "status_from_ratio",
+    "pct_reduction", "pct_change", "ISO_GRADES", "evaluate_iso_grades",
+    "status_from_ratio",
     "solve_1plane", "solve_2plane",
     "status_level", "diagnose_static_couple",
+    "diagnose_1plane", "diagnose_2plane", "iso_residual_sanity",
 ]

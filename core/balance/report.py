@@ -262,6 +262,25 @@ def build_balance_pdf(
             col_widths=[2.6 * cm, 3.4 * cm, 3.8 * cm, 3.2 * cm, 3.2 * cm]))
         body.append(Spacer(1, 0.5 * cm))
 
+    # ---- Avisos de auditoría (guards) --------------------------------
+    _warns = list((one_plane or {}).get("warnings") or [])
+    _warns += list((two_plane or {}).get("warnings") or [])
+    if _warns:
+        _n2 = (4 if iso and iso.get("results") else 3) if (one_plane or two_plane) else 2
+        body.append(_section(f"{_n2}. Validación técnica y advertencias", styles))
+        body.append(_p(
+            "Chequeos automáticos de confiabilidad del balanceo. Un aviso CRÍTICO "
+            "indica que la corrección puede no ser válida (respuesta al peso de "
+            "prueba insuficiente, corrección desproporcionada, o un plano que "
+            "empeoró) — revisar antes de aceptar el servicio como exitoso.",
+            styles, "WMBody"))
+        _lab = {"crit": "CRÍTICO", "warn": "REVISAR", "info": "NOTA"}
+        _wrows = [[_lab.get(w.get("severity"), "REVISAR"),
+                   f"{w.get('title','')}. {w.get('msg','')}"] for w in _warns]
+        body.append(_grid_table(["Nivel", "Hallazgo"], _wrows, styles,
+                                col_widths=[2.8 * cm, 13.4 * cm]))
+        body.append(Spacer(1, 0.5 * cm))
+
     body.append(_p(
         "Reporte generado por Watermelon System · módulo Balanceo. Cálculo por "
         "coeficiente de influencia bajo ISO 21940-11/12 y API 684. Convención "

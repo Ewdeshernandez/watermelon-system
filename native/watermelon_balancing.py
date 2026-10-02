@@ -27,14 +27,29 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from core.balance.engine import (
     solve_1plane, solve_2plane, recommend_trial_weight_g,
     evaluate_iso_grades, to_complex, to_polar, calc_U_trial, calc_U_res_auto,
+    diagnose_1plane, diagnose_2plane,
 )
+
+
+def _warn_html(warns) -> str:
+    """Avisos de auditoría del balanceo → bloque HTML con color por severidad."""
+    if not warns:
+        return ""
+    _c = {"crit": "#dc2626", "warn": "#e8890c", "info": "#2563eb"}
+    rows = "".join(
+        f"<div style='margin-top:8px;border-left:4px solid {_c.get(w['severity'],'#e8890c')};"
+        f"padding:4px 10px;background:#f8fafc;'>"
+        f"<b style='color:{_c.get(w['severity'],'#e8890c')}'>● {w['title']}</b><br>"
+        f"<span style='color:#334155;font-size:12px'>{w['msg']}</span></div>"
+        for w in warns)
+    return f"<div style='margin-top:10px'>{rows}</div>"
 from core.balance.ni_balance import (
     extract_1x, one_x_accel_to_velocity, VibChannel, NIBalanceConfig, NIBalanceSource,
     keyphasor_power_note,
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.5.5"
+__version__ = "0.5.6"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -481,13 +496,19 @@ def build_app(simulated: bool = True):
                      "trial": (twm.value(), twa.value()), "vt": (vtm.value(), vta.value()),
                      "vf": ((vfm.value(), vfa.value()) if vfm.value() > 0 else None), "result": r}
         u = st["unit"]
+        _vf = (vfm.value(), vfa.value()) if vfm.value() > 0 else (None, None)
+        _warns = diagnose_1plane(r, v0m.value(), v0a.value(), vtm.value(), vta.value(),
+                                 twm.value(), twa.value(),
+                                 Vf_mag=_vf[0], Vf_ang=_vf[1])
+        st["r1p"]["warnings"] = _warns
+        _wh = _warn_html(_warns)
         out1.setText(T(
             f"<b>Correction weight:</b> {r['corr_mass_g']:,.2f} g ∠ {r['corr_ang_deg']:.1f}°<br>"
             f"Predicted residual: {r['pred_mag']:.3f} {u} · model {r['quality']}<br>"
-            f"<span style='color:#64748b'>{r['note']}</span>",
+            f"<span style='color:#64748b'>{r['note']}</span>{_wh}",
             f"<b>Peso de corrección:</b> {r['corr_mass_g']:,.2f} g ∠ {r['corr_ang_deg']:.1f}°<br>"
             f"Residual predicho: {r['pred_mag']:.3f} {u} · modelo {r['quality']}<br>"
-            f"<span style='color:#64748b'>{r['note']}</span>"))
+            f"<span style='color:#64748b'>{r['note']}</span>{_wh}"))
 
     def _demo1():
         v0m.setValue(8.60); v0a.setValue(63.0); twm.setValue(10.0); twa.setValue(0.0)
@@ -566,13 +587,20 @@ def build_app(simulated: bool = True):
                      "wa": (wam.value(), waa.value()), "wb": (wbm.value(), wba.value()), "result": r}
         wca_m, wca_a = to_polar(r["WA_corr"]); wcb_m, wcb_a = to_polar(r["WB_corr"])
         aa_m, _ = to_polar(r["A_after"]); ba_m, _ = to_polar(r["B_after"]); u = st["unit"]
+        _warns = diagnose_2plane(
+            r, cx(a0m.value(), a0a.value()), cx(b0m.value(), b0a.value()),
+            cx(a1m.value(), a1a.value()), cx(b1m.value(), b1a.value()),
+            cx(a2m.value(), a2a.value()), cx(b2m.value(), b2a.value()),
+            cx(wam.value(), waa.value()), cx(wbm.value(), wba.value()))
+        st["r2p"]["warnings"] = _warns
+        _wh = _warn_html(_warns)
         out2.setText(T(
             f"<b>Plane A correction:</b> {wca_m:,.2f} g ∠ {wca_a:.1f}°<br>"
             f"<b>Plane B correction:</b> {wcb_m:,.2f} g ∠ {wcb_a:.1f}°<br>"
-            f"Predicted residual: A {aa_m:.3f} · B {ba_m:.3f} {u} · model {r['quality']}",
+            f"Predicted residual: A {aa_m:.3f} · B {ba_m:.3f} {u} · model {r['quality']}{_wh}",
             f"<b>Corrección plano A:</b> {wca_m:,.2f} g ∠ {wca_a:.1f}°<br>"
             f"<b>Corrección plano B:</b> {wcb_m:,.2f} g ∠ {wcb_a:.1f}°<br>"
-            f"Residual predicho: A {aa_m:.3f} · B {ba_m:.3f} {u} · modelo {r['quality']}"))
+            f"Residual predicho: A {aa_m:.3f} · B {ba_m:.3f} {u} · modelo {r['quality']}{_wh}"))
     btn2.clicked.connect(_solve2)
 
     def _demo2():
@@ -673,6 +701,21 @@ def build_app(simulated: bool = True):
             quality.append((T("ISO 21940 quality", "Calidad ISO 21940"),
                             "GO" if (_bg is not None and _bg <= 6.3) else "REVIEW", iso.get("summary_label", "—")))
             findings.append(T(f"ISO 21940: {iso.get('summary_label','—')}.", f"ISO 21940: {iso.get('summary_label','—')}."))
+        # Avisos de auditoría (guards): van al reporte como hallazgos + estado.
+        _bw = list((r1p or {}).get("warnings") or []) + list((r2p or {}).get("warnings") or [])
+        if _bw:
+            _crit = [w for w in _bw if w.get("severity") == "crit"]
+            quality.append((
+                T("Reliability check", "Validación de confiabilidad"),
+                "REVIEW" if _crit else "GO",
+                T(f"{len(_crit)} critical · {len(_bw) - len(_crit)} note(s)" if _crit
+                  else f"{len(_bw)} note(s)",
+                  f"{len(_crit)} crítico(s) · {len(_bw) - len(_crit)} aviso(s)" if _crit
+                  else f"{len(_bw)} aviso(s)")))
+            _pref = {"crit": "CRÍTICO", "warn": "REVISAR", "info": "NOTA"}
+            for w in _bw:
+                findings.append(f"[{_pref.get(w.get('severity'), '')}] "
+                                f"{w.get('title', '')}: {w.get('msg', '')}")
         analysis = [T("Influence-coefficient balancing: H=(Vt−V0)/Wt, Wc=−V0/H (ISO 21940-12).",
                       "Balanceo por coef. de influencia: H=(Vt−V0)/Wt, Wc=−V0/H (ISO 21940-12).")]
         recs = [T("Install the correction weight(s) and run a verification to confirm the residual.",

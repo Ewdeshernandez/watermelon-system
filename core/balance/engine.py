@@ -409,3 +409,206 @@ def diagnose_static_couple(S_mag: float, C1_mag: float, C2_mag: float) -> Dict[s
         "actions": actions,
         "checklist": checklist,
     }
+
+
+# =========================================================
+# Guardas de validación del balanceo (auditoría — no cambian el cálculo)
+# =========================================================
+# Umbrales calibrados contra campo (caso Tes#1 Termosuria: el punto dominante
+# respondió ~9% al trial y la corrección fue ~11× el peso de prueba → ambos
+# debían marcarse). Son escala-conscientes: `cond` solo mide la FORMA de la
+# matriz, no la MAGNITUD de la respuesta, por eso se chequea aparte.
+TRIAL_RESP_OK = 0.30        # respuesta del punto dominante ≥30% = confiable
+TRIAL_RESP_MARGINAL = 0.15  # 15–30% = marginal; <15% = no confiable
+CORR_SCALE_WARN = 4.0       # |corrección| / |peso prueba|
+CORR_SCALE_CRIT = 8.0
+WORSEN_MARGIN = 1.05        # un plano "empeora" si final > 1.05× inicial
+
+
+def pct_change(before: float, after: float) -> float:
+    """% de CAMBIO con signo: + = reducción (mejora), − = aumento (empeoró).
+    A diferencia de pct_reduction (que recorta a 0), este NUNCA oculta que un
+    plano empeoró."""
+    b = max(1e-12, float(before))
+    a = max(0.0, float(after))
+    return (b - a) / b * 100.0
+
+
+def _dphase_deg(z0: complex, z1: complex) -> float:
+    """Diferencia de fase entre dos vectores, en [0, 180]°."""
+    d = abs(float(np.rad2deg(np.angle(z1) - np.angle(z0)))) % 360.0
+    return min(d, 360.0 - d)
+
+
+def _resp_ratio(v0: complex, v1: complex) -> float:
+    """|Δvector| / |vector inicial| (sensibilidad relativa del punto)."""
+    base = max(1e-9, float(abs(v0)))
+    return float(abs(v1 - v0)) / base
+
+
+def _w(code: str, severity: str, title: str, msg: str) -> Dict[str, str]:
+    return {"code": code, "severity": severity, "title": title, "msg": msg}
+
+
+def diagnose_2plane(
+    result: Dict[str, Any],
+    A0: complex, B0: complex, A1: complex, B1: complex,
+    A2: complex, B2: complex, WA_trial: complex, WB_trial: complex,
+    Vf_A: complex = None, Vf_B: complex = None,
+) -> List[Dict[str, str]]:
+    """Auditoría del balanceo 2 planos. Devuelve lista de avisos
+    {code, severity('crit'|'warn'|'info'), title, msg}. NO altera el cálculo."""
+    out: List[Dict[str, str]] = []
+
+    # Punto dominante = el de mayor vibración inicial (el que hay que corregir).
+    dom, v0_dom = ("B", B0) if abs(B0) >= abs(A0) else ("A", A0)
+    if dom == "B":
+        dom_resp = max(_resp_ratio(B0, B1), _resp_ratio(B0, B2))
+    else:
+        dom_resp = max(_resp_ratio(A0, A1), _resp_ratio(A0, A2))
+
+    # G1 — respuesta del punto dominante al peso de prueba
+    if dom_resp < TRIAL_RESP_MARGINAL:
+        out.append(_w(
+            "weak_trial", "crit", "Respuesta al peso de prueba muy baja",
+            f"El punto dominante ({dom}, {abs(v0_dom):.3f}) cambió solo "
+            f"{dom_resp*100:.0f}% con el peso de prueba (mínimo confiable "
+            f"{TRIAL_RESP_OK*100:.0f}%). El coeficiente de influencia NO es "
+            f"confiable y la corrección puede ser ficticia. Probablemente el "
+            f"problema NO es desbalance másico."))
+    elif dom_resp < TRIAL_RESP_OK:
+        out.append(_w(
+            "marginal_trial", "warn", "Respuesta al peso de prueba marginal",
+            f"El punto dominante ({dom}) cambió {dom_resp*100:.0f}% (ideal "
+            f"≥{TRIAL_RESP_OK*100:.0f}%). Usar un peso de prueba mayor o revisar "
+            f"repetibilidad; la solución es sensible al ruido."))
+
+    # G5 — corrección desproporcionada vs peso de prueba
+    for plane, wc_key, wt in (("A", "WA_corr", WA_trial), ("B", "WB_corr", WB_trial)):
+        wt_abs = max(1e-9, float(abs(wt)))
+        scale = float(abs(result.get(wc_key, 0))) / wt_abs
+        if scale >= CORR_SCALE_CRIT:
+            out.append(_w(
+                "corr_scale", "crit", f"Corrección plano {plane} desproporcionada",
+                f"La corrección del plano {plane} es {scale:.0f}× el peso de "
+                f"prueba ({float(abs(result.get(wc_key,0))):.0f} vs {wt_abs:.0f} g). "
+                f"El trial fue insuficiente o el plano es insensible: no instales "
+                f"esa masa a ciegas."))
+        elif scale >= CORR_SCALE_WARN:
+            out.append(_w(
+                "corr_scale", "warn", f"Corrección plano {plane} grande",
+                f"La corrección del plano {plane} es {scale:.0f}× el peso de "
+                f"prueba. Considera un trial mayor y re-medir."))
+
+    # G2 — empeoramiento por plano (medido si hay Vf; si no, predicho)
+    for plane, v0, vf, after_key in (("A", A0, Vf_A, "A_after"),
+                                     ("B", B0, Vf_B, "B_after")):
+        measured = vf is not None and float(abs(vf)) > 0
+        v_final = float(abs(vf)) if measured else float(abs(result.get(after_key, 0)))
+        if measured and v_final > float(abs(v0)) * WORSEN_MARGIN:
+            out.append(_w(
+                "worsened", "crit", f"Plano {plane} empeoró",
+                f"El plano {plane} pasó de {abs(v0):.3f} a {v_final:.3f} "
+                f"({pct_change(abs(v0), v_final):+.0f}%). El balanceo degradó este "
+                f"plano — no reportar como mejora global."))
+        elif (not measured) and v_final > float(abs(v0)) * WORSEN_MARGIN:
+            out.append(_w(
+                "worsened_pred", "warn", f"Plano {plane} empeora (predicho)",
+                f"El modelo predice que el plano {plane} sube de {abs(v0):.3f} a "
+                f"{v_final:.3f}. Revisa antes de instalar."))
+
+    # G4 — discriminador: síntomas no consistentes con desbalance puro
+    weak = any(x["code"] == "weak_trial" for x in out)
+    big = any(x["code"] == "corr_scale" and x["severity"] == "crit" for x in out)
+    if weak or big:
+        out.append(_w(
+            "not_unbalance", "info", "¿Es realmente desbalance?",
+            "Respuesta débil al trial y/o corrección desproporcionada. Antes de "
+            "balancear, verifica alineación (frío/caliente), solturas mecánicas, "
+            "2X/armónicos y dependencia con temperatura/tiempo. El desbalance "
+            "másico no se corrige con masa si el origen es alineación o térmico."))
+    return out
+
+
+def diagnose_1plane(
+    result: Dict[str, Any],
+    V0_mag: float, V0_ang: float, Vt_mag: float, Vt_ang: float,
+    trial_mass_g: float, trial_ang_deg: float,
+    Vf_mag: float = None, Vf_ang: float = None,
+) -> List[Dict[str, str]]:
+    """Auditoría del balanceo 1 plano. Mismos criterios que 2 planos."""
+    out: List[Dict[str, str]] = []
+    V0 = to_complex(V0_mag, V0_ang)
+    Vt = to_complex(Vt_mag, Vt_ang)
+    Wt = to_complex(trial_mass_g, trial_ang_deg)
+
+    resp = _resp_ratio(V0, Vt)
+    dph = _dphase_deg(V0, Vt)
+    if resp < TRIAL_RESP_MARGINAL and dph < 20.0:
+        out.append(_w(
+            "weak_trial", "crit", "Respuesta al peso de prueba muy baja",
+            f"La vibración cambió solo {resp*100:.0f}% y {dph:.0f}° con el peso "
+            f"de prueba (mínimo confiable {TRIAL_RESP_OK*100:.0f}%). Coeficiente "
+            f"no confiable; probablemente NO es desbalance másico."))
+    elif resp < TRIAL_RESP_OK:
+        out.append(_w(
+            "marginal_trial", "warn", "Respuesta al peso de prueba marginal",
+            f"La vibración cambió {resp*100:.0f}% (ideal ≥{TRIAL_RESP_OK*100:.0f}%). "
+            f"Usar un peso mayor o revisar repetibilidad."))
+
+    wt_abs = max(1e-9, float(abs(Wt)))
+    scale = float(result.get("corr_mass_g", 0)) / (trial_mass_g if trial_mass_g else 1e-9)
+    scale = abs(scale)
+    if scale >= CORR_SCALE_CRIT:
+        out.append(_w(
+            "corr_scale", "crit", "Corrección desproporcionada",
+            f"La corrección es {scale:.0f}× el peso de prueba. Trial insuficiente "
+            f"o plano insensible."))
+    elif scale >= CORR_SCALE_WARN:
+        out.append(_w(
+            "corr_scale", "warn", "Corrección grande",
+            f"La corrección es {scale:.0f}× el peso de prueba. Considera un trial mayor."))
+
+    v0a = float(V0_mag)
+    if Vf_mag is not None and float(Vf_mag) > 0:
+        if float(Vf_mag) > v0a * WORSEN_MARGIN:
+            out.append(_w(
+                "worsened", "crit", "El plano empeoró",
+                f"La vibración pasó de {v0a:.3f} a {float(Vf_mag):.3f} "
+                f"({pct_change(v0a, float(Vf_mag)):+.0f}%)."))
+    else:
+        if float(result.get("pred_mag", 0)) > v0a * WORSEN_MARGIN:
+            out.append(_w(
+                "worsened_pred", "warn", "Empeora (predicho)",
+                f"El modelo predice subir de {v0a:.3f} a {float(result.get('pred_mag',0)):.3f}."))
+
+    if any(x["code"] == "weak_trial" for x in out) or \
+       any(x["code"] == "corr_scale" and x["severity"] == "crit" for x in out):
+        out.append(_w(
+            "not_unbalance", "info", "¿Es realmente desbalance?",
+            "Verifica alineación, solturas, 2X/armónicos y dependencia térmica "
+            "antes de balancear con masa."))
+    return out
+
+
+def iso_residual_sanity(
+    U_res_used: float, V0_dom: float, Vf_dom: float, U_trial: float
+) -> List[Dict[str, str]]:
+    """Avisa si el U_res usado para el grado ISO está desacoplado de la vibración
+    final real. Compara con el estimado U_res ≈ (Vf/V0)·U_trial."""
+    out: List[Dict[str, str]] = []
+    if not (V0_dom and V0_dom > 0) or U_trial <= 0:
+        return out
+    est = calc_U_res_auto(V0_dom, Vf_dom, U_trial)
+    used = max(0.0, float(U_res_used))
+    # Si el residual usado es mucho menor que el estimado desde la vibración real,
+    # el grado ISO queda sobrestimado (demasiado bueno).
+    if est > 0 and used < 0.5 * est:
+        out.append(_w(
+            "iso_optimistic", "warn", "Grado ISO posiblemente sobrestimado",
+            f"El U_res usado ({used:.1f} g·mm) es mucho menor que el estimado "
+            f"desde la vibración final ({est:.1f} g·mm). Si la máquina sigue "
+            f"vibrando, el grado ISO (p.ej. G0.4) no refleja el estado real. "
+            f"Usar el residual derivado de los vectores finales o etiquetarlo "
+            f"'estimado/manual'."))
+    return out

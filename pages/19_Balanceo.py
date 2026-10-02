@@ -34,9 +34,10 @@ from core.ui_theme import apply_watermelon_page_style
 from core.balance import (
     to_complex, to_polar,
     umax_api684_gmm, recommend_trial_weight_g,
-    calc_U_trial, pct_reduction,
+    calc_U_trial, pct_reduction, pct_change,
     evaluate_iso_grades,
     solve_1plane, solve_2plane,
+    diagnose_1plane, diagnose_2plane, iso_residual_sanity,
 )
 from core.balance.ui import (
     bal_hero_card, bal_section_header, bal_kpi_row, bal_status_banner,
@@ -242,6 +243,16 @@ if not _has_result:
                "balanceo (pestaña **1 plano** o **2 planos**).")
 
 
+def _render_bal_warnings(warns):
+    """Muestra los avisos de auditoría del balanceo (crit/warn/info)."""
+    if not warns:
+        return
+    _sev = {"crit": "fail", "warn": "warning", "info": "ok"}
+    for w in warns:
+        bal_status_banner(w.get("title", ""), w.get("msg", ""),
+                          _sev.get(w.get("severity"), "warning"))
+
+
 # ---------------------------------------------------------------------
 # 1) Peso de prueba (API 684)
 # ---------------------------------------------------------------------
@@ -347,11 +358,17 @@ with tab_1p:
 
     if st.button("Calculate single-plane balancing", key="b1_calc", type="primary"):
         try:
-            st.session_state["bal_r1p"] = solve_1plane(v0m, v0a, vtm, vta, twm, twa)
+            _res1 = solve_1plane(v0m, v0a, vtm, vta, twm, twa)
+            st.session_state["bal_r1p"] = _res1
+            _vfm = st.session_state.get("b1_vf_mag")
+            st.session_state["bal_r1p_warn"] = diagnose_1plane(
+                _res1, v0m, v0a, vtm, vta, twm, twa,
+                Vf_mag=_vfm, Vf_ang=st.session_state.get("b1_vf_ang"))
             st.rerun()
         except ValueError as e:
             st.error(str(e))
             st.session_state.pop("bal_r1p", None)
+            st.session_state.pop("bal_r1p_warn", None)
 
     r = st.session_state.get("bal_r1p")
     if r:
@@ -363,11 +380,18 @@ with tab_1p:
         ])
         sev, detail, tag = _quality_severity(r["quality"])
         bal_status_banner(f"Model quality: {tag}", f"{detail}. {r['note']}", sev)
+        _render_bal_warnings(st.session_state.get("bal_r1p_warn"))
         with st.expander("Validate against final measurement (optional)"):
             vfm, _vfa = _vector_inputs("b1_vf", "Vf — measured final vibration", unit1)
             if vfm > 0:
-                bal_kpi_row([(f"{pct_reduction(v0m, vfm):,.1f} %",
-                              "Vibration reduction", "V0 → Vf", "green")])
+                _chg = pct_change(v0m, vfm)
+                bal_kpi_row([(f"{_chg:+,.1f} %",
+                              "Vibration change", "V0 → Vf (− = worse)",
+                              "green" if _chg >= 0 else "red")])
+                if _chg < 0:
+                    bal_status_banner("Final vibration worsened",
+                                      f"Vf ({vfm:.3f}) > V0 ({v0m:.3f}). This plane "
+                                      "degraded — do not report as improvement.", "fail")
 
 
 # ---------------------------------------------------------------------
@@ -476,16 +500,23 @@ with tab_2p:
 
     if st.button("Calculate two-plane balancing", key="b2_calc", type="primary"):
         try:
-            st.session_state["bal_r2p"] = solve_2plane(
-                to_complex(a0m, a0a), to_complex(b0m, b0a),
-                to_complex(a1m, a1a), to_complex(b1m, b1a),
-                to_complex(a2m, a2a), to_complex(b2m, b2a),
-                to_complex(wam, waa), to_complex(wbm, wba),
-            )
+            _cA0, _cB0 = to_complex(a0m, a0a), to_complex(b0m, b0a)
+            _cA1, _cB1 = to_complex(a1m, a1a), to_complex(b1m, b1a)
+            _cA2, _cB2 = to_complex(a2m, a2a), to_complex(b2m, b2a)
+            _cWA, _cWB = to_complex(wam, waa), to_complex(wbm, wba)
+            _res2 = solve_2plane(_cA0, _cB0, _cA1, _cB1, _cA2, _cB2, _cWA, _cWB)
+            st.session_state["bal_r2p"] = _res2
+            _vfa = st.session_state.get("b2_vfa_mag")
+            _vfb = st.session_state.get("b2_vfb_mag")
+            st.session_state["bal_r2p_warn"] = diagnose_2plane(
+                _res2, _cA0, _cB0, _cA1, _cB1, _cA2, _cB2, _cWA, _cWB,
+                Vf_A=to_complex(_vfa, st.session_state.get("b2_vfa_ang") or 0) if _vfa else None,
+                Vf_B=to_complex(_vfb, st.session_state.get("b2_vfb_ang") or 0) if _vfb else None)
             st.rerun()
         except ValueError as e:
             st.error(str(e))
             st.session_state.pop("bal_r2p", None)
+            st.session_state.pop("bal_r2p_warn", None)
 
     r = st.session_state.get("bal_r2p")
     if r:
@@ -501,6 +532,22 @@ with tab_2p:
         sev, detail, tag = _quality_severity(r["quality"])
         bal_status_banner(f"Model quality: {tag}",
                           f"{detail}. cond(M) = {r['cond']:.1f}. {r['note']}", sev)
+        _render_bal_warnings(st.session_state.get("bal_r2p_warn"))
+        with st.expander("Validate against final measurement (optional)"):
+            cvA, cvB = st.columns(2)
+            with cvA:
+                _vfam, _ = _vector_inputs("b2_vfa", "Final A — measured", unit2)
+            with cvB:
+                _vfbm, _ = _vector_inputs("b2_vfb", "Final B — measured", unit2)
+            for _lbl, _v0, _vf in (("A", a0m, _vfam), ("B", b0m, _vfbm)):
+                if _vf and _vf > 0:
+                    _c = pct_change(_v0, _vf)
+                    _tone = "ok" if _c >= 0 else "fail"
+                    bal_status_banner(
+                        f"Plane {_lbl}: {_c:+.0f}%",
+                        f"{_v0:.3f} → {_vf:.3f} {unit2}"
+                        + ("" if _c >= 0 else "  ·  WORSENED — not an improvement"),
+                        _tone)
 
 
 # ---------------------------------------------------------------------
@@ -545,6 +592,22 @@ with tab_iso:
             bal_status_banner("Complies", ev["summary_label"], "ok")
         else:
             bal_status_banner("Complies (basic quality)", ev["summary_label"], "warning")
+
+        # Guard ISO: un grado casi perfecto (≤G1) con la máquina aún vibrando =
+        # U_res desacoplado del estado final real → grado sobrestimado.
+        _ss = st.session_state
+        _dom_v0 = max([v for v in (_ss.get("b2_b0_mag"), _ss.get("b2_a0_mag"),
+                                   _ss.get("b1_v0_mag")) if v], default=0.0)
+        _dom_vf = max([v for v in (_ss.get("b2_vfb_mag"), _ss.get("b2_vfa_mag"),
+                                   _ss.get("b1_vf_mag")) if v], default=0.0)
+        if (ev["best_grade"] is not None and ev["best_grade"] <= 1.0
+                and _dom_v0 and _dom_vf and (_dom_vf / _dom_v0) > 0.25):
+            bal_status_banner(
+                "Grado ISO posiblemente sobrestimado",
+                f"El grado G{ev['best_grade']:g} implica un residual casi nulo, "
+                f"pero la vibración final medida es {(_dom_vf/_dom_v0)*100:.0f}% de "
+                f"la inicial ({_dom_vf:.3f} vs {_dom_v0:.3f}). Verifica que el U_res "
+                f"provenga del estado final real, no de un valor manual.", "warning")
 
         _iso_cols = ["Grade", "e_per [µm]", "U_per [g·mm]", "U_res/U_per", "Cumple"]
         _iso_rows = []
@@ -645,14 +708,16 @@ with tab_rep:
         vf = vf if (vf and vf[0] > 0) else None
         one_plane = {"unit": st.session_state.get("b1_unit", "µm pk-pk"),
                      "v0": _pair("b1_v0"), "trial": _pair("b1_tw"),
-                     "vt": _pair("b1_vt"), "vf": vf, "result": r1}
+                     "vt": _pair("b1_vt"), "vf": vf, "result": r1,
+                     "warnings": st.session_state.get("bal_r1p_warn") or []}
     two_plane = None
     if r2:
         two_plane = {"unit": st.session_state.get("b2_unit", "µm pk-pk"),
                      "a0": _pair("b2_a0"), "b0": _pair("b2_b0"),
                      "a1": _pair("b2_a1"), "b1": _pair("b2_b1"),
                      "a2": _pair("b2_a2"), "b2": _pair("b2_b2"),
-                     "wa": _pair("b2_wa"), "wb": _pair("b2_wb"), "result": r2}
+                     "wa": _pair("b2_wa"), "wb": _pair("b2_wb"), "result": r2,
+                     "warnings": st.session_state.get("bal_r2p_warn") or []}
 
     if not (one_plane or two_plane or ev):
         st.info("Run at least one balancing or ISO validation to generate the PDF.")
