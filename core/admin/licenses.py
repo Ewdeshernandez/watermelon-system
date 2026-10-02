@@ -46,6 +46,37 @@ PLANS: Dict[str, List[str]] = {
     "Rotordynamics (Field)": ["rotordynamics", "report"],
 }
 
+# Código interno de feature → nombre de módulo para mostrar al cliente.
+# 'report' es interno (motor de reportes), no es un módulo vendible → no se lista.
+_FEATURE_LABELS: Dict[str, str] = {
+    "rotordynamics": "Rotordynamics",
+    "oma": "Modal", "ema": "Modal",
+    "torsional": "Torsional",
+    "balance": "Balanceo",
+}
+# Orden canónico de los módulos de campo para presentación.
+_MODULE_ORDER = ["Rotordynamics", "Modal", "Torsional", "Balanceo"]
+
+
+def _plan_label(lic: Dict[str, Any]) -> str:
+    """Nombre legible del paquete para el cliente (correo + tarjeta). NUNCA
+    devuelve los códigos crudos (oma/ema/report). Deriva los módulos desde
+    'features'; si están todos → 'Paquete completo'. Cae a 'plan' guardado o '—'."""
+    feats = lic.get("features") or []
+    mods: List[str] = []
+    for f in feats:
+        name = _FEATURE_LABELS.get(str(f).strip().lower())
+        if name and name not in mods:
+            mods.append(name)
+    mods.sort(key=lambda m: _MODULE_ORDER.index(m) if m in _MODULE_ORDER else 99)
+    if set(mods) >= set(_MODULE_ORDER):
+        return "Paquete completo — " + " · ".join(_MODULE_ORDER)
+    if mods:
+        return " · ".join(mods)
+    # Sin features utilizables: usa el plan guardado si existe.
+    _p = (lic.get("plan") or "").strip()
+    return _p or "—"
+
 
 # =====================================================================
 # Helpers
@@ -388,7 +419,7 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
     key = lic.get("key") or "—"
     customer = lic.get("customer") or lic.get("account") or "—"
     account = lic.get("account") or "—"
-    plan = lic.get("plan") or ", ".join(lic.get("features") or []) or "—"
+    plan = _plan_label(lic)
     seats = int(lic.get("seats") or 1)
     used = sum(1 for a in acts if not a.get("revoked"))
     dl = _days_left(lic.get("expires_at"))
@@ -550,7 +581,7 @@ def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],
                 else:
                     _r = _send_license_email(
                         _dest, lic.get("customer") or "", key,
-                        lic.get("plan") or str(plan), seats,
+                        str(plan), seats,
                         lic.get("expires_at") or "")
                     if _r.get("ok"):
                         # Si corrigieron el correo, deja el nuevo como el de la licencia.
