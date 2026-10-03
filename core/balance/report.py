@@ -170,6 +170,7 @@ def build_balance_pdf(
         ("Unidad de vibración", unit),
         ("Sentido de giro", f"{meta.get('rotation', 'CCW')} · ángulos medidos "
                             "contra el sentido de giro"),
+        ("Fuente de datos", meta.get("data_source", "Datos manuales (escritos)")),
         ("Norma", "ISO 21940-11 / 21940-12 · API 684"),
     ], styles))
     if meta.get("notes"):
@@ -200,6 +201,15 @@ def build_balance_pdf(
              ["Calidad del modelo", r.get("quality", "—")]],
             styles, col_widths=[7.0 * cm, 9.2 * cm]))
         v0 = one_plane.get("v0")
+        _vf1 = one_plane.get("vf")
+        if v0 and _vf1 and _vf1[0] and _vf1[0] > 0:
+            _ch1 = (v0[0] - _vf1[0]) / max(1e-9, v0[0]) * 100.0
+            _t1 = (f"Vibración final medida: <b>{_fmt(_vf1[0], 3)} {u}</b> · "
+                   f"cambio {_ch1:+.0f}% (V0 {_fmt(v0[0], 3)} {u})")
+            if _ch1 < 0:
+                _t1 += " — <b>EL PLANO EMPEORÓ</b>, no es una mejora."
+            body.append(Spacer(1, 0.2 * cm))
+            body.append(_p(_t1, styles, "WMBody"))
         if v0:
             after = one_plane.get("vf") or (r.get("pred_mag"), r.get("pred_ang"))
             png = polar_png("Vector 1 plano (antes / después)", v0, after, u)
@@ -237,14 +247,36 @@ def build_balance_pdf(
               f"{_fmt(abs(r.get('A_after', 0)), 3)} {u}",
               f"{_fmt(abs(r.get('B_after', 0)), 3)} {u}"]],
             styles, col_widths=[4.0 * cm, 6.1 * cm, 6.1 * cm]))
+        # Vibración final medida (si existe): muestra el cambio honesto por plano.
+        _vfa = two_plane.get("vf_a"); _vfb = two_plane.get("vf_b")
+        _a0 = two_plane.get("a0"); _b0 = two_plane.get("b0")
+        _has_final = ((_vfa and _vfa[0] and _vfa[0] > 0) or (_vfb and _vfb[0] and _vfb[0] > 0))
+        if _has_final:
+            def _chg_cell(v0, vf):
+                if not (v0 and vf and vf[0] and vf[0] > 0):
+                    return "—"
+                _c = (v0[0] - vf[0]) / max(1e-9, v0[0]) * 100.0
+                _s = f"{_fmt(vf[0], 3)} {u} ({_c:+.0f}%)"
+                return _s + (" EMPEORÓ" if _c < 0 else "")
+            body.append(Spacer(1, 0.2 * cm))
+            body.append(_grid_table(
+                ["Medición final", "Plano A (sonda A)", "Plano B (sonda B)"],
+                [["Inicial V0", _vec(_a0, u), _vec(_b0, u)],
+                 ["Final medida (cambio)", _chg_cell(_a0, _vfa), _chg_cell(_b0, _vfb)]],
+                styles, col_widths=[4.0 * cm, 6.1 * cm, 6.1 * cm]))
         body.append(Spacer(1, 0.2 * cm))
         body.append(_p(f"Calidad del modelo: <b>{r.get('quality', '—')}</b> · "
                        f"cond(M) = {_fmt(r.get('cond'), 1)}", styles, "WMBody"))
         # Diagramas polares por sonda (vibración antes/después) — como en 1 plano.
         _imgs = []
-        for _lbl, _v0key, _afterkey in (("A", "a0", "A_after"), ("B", "b0", "B_after")):
-            _png = polar_png(f"Plano {_lbl} — sonda {_lbl} (antes / después)",
-                             two_plane.get(_v0key), _to_mag(r.get(_afterkey)), u)
+        for _lbl, _v0key, _afterkey, _vfkey in (("A", "a0", "A_after", "vf_a"),
+                                                ("B", "b0", "B_after", "vf_b")):
+            _vf = two_plane.get(_vfkey)
+            _after = _vf if (_vf and _vf[0] and _vf[0] > 0) else _to_mag(r.get(_afterkey))
+            _ptitle = (f"Plano {_lbl} — sonda {_lbl} (antes / final medido)"
+                       if (_vf and _vf[0] and _vf[0] > 0)
+                       else f"Plano {_lbl} — sonda {_lbl} (antes / después)")
+            _png = polar_png(_ptitle, two_plane.get(_v0key), _after, u)
             if _png:
                 _imgs.append(Image(io.BytesIO(_png), width=7.6 * cm, height=7.6 * cm))
         if _imgs:

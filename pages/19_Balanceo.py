@@ -60,6 +60,14 @@ require_login()
 render_user_menu()
 apply_watermelon_page_style()
 
+# Quitar las flechas +/- de TODOS los number_input de esta página (el usuario no
+# las quiere). Se teclea el valor directo.
+st.markdown("""<style>
+button[data-testid="stNumberInputStepUp"],
+button[data-testid="stNumberInputStepDown"]{display:none !important;}
+div[data-testid="stNumberInput"] input{text-align:left;}
+</style>""", unsafe_allow_html=True)
+
 _user = get_current_user() or {}
 _role = str(_user.get("role", "")).lower()
 if not is_page_allowed_for_role("pages/19_Balanceo.py", _role):
@@ -218,18 +226,16 @@ def _plane_label(p) -> str:
 
 
 # =====================================================================
-# Tabs
+# Navegación por pasos — BLOQUEO REAL del flujo (paridad con el campo)
 # =====================================================================
-tab_tw, tab_1p, tab_2p, tab_iso, tab_rep = st.tabs([
-    "Trial weight", "1 plane", "2 planes", "ISO validation", "Report",
-])
-
-# Flujo guiado (paridad con el campo, que deshabilita pestañas): la validación
-# ISO y el reporte quedan BLOQUEADOS hasta completar un balanceo (1 o 2 planos).
-# Streamlit no deshabilita tabs → se bloquea el contenido + stepper de progreso.
+# Streamlit no deshabilita st.tabs, así que se usa un control por pasos que SOLO
+# ofrece los pasos desbloqueados: ISO y Reporte no aparecen hasta completar un
+# balanceo (1 o 2 planos). No se puede saltar el flujo.
 _has_result = bool(st.session_state.get("bal_r1p") or st.session_state.get("bal_r2p"))
 _has_iso = bool(st.session_state.get("bal_iso")) and _has_result
 _has_pdf = bool(st.session_state.get("bal_pdf"))
+
+# Stepper de progreso (visual): muestra los 4 pasos; gris = bloqueado.
 _flow_steps = [("1 · Datos", True), ("2 · Cálculo", _has_result),
                ("3 · Validación ISO", _has_iso), ("4 · Reporte", _has_pdf)]
 _flow_html = " ".join(
@@ -237,10 +243,21 @@ _flow_html = " ".join(
     f"<span style='color:{'#0b1f3a' if _d else '#94a3b8'};"
     f"font-weight:{700 if _d else 500};font-size:13px;margin:0 16px 0 5px'>{_lbl}</span>"
     for _lbl, _d in _flow_steps)
-st.markdown(f"<div style='margin:6px 0 12px'>{_flow_html}</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='margin:6px 0 8px'>{_flow_html}</div>", unsafe_allow_html=True)
+
+_NAV = ["Trial weight", "1 plane", "2 planes"] + (
+    ["ISO validation", "Report"] if _has_result else [])
 if not _has_result:
-    st.caption("La validación ISO y el reporte se desbloquean al completar un "
-               "balanceo (pestaña **1 plano** o **2 planos**).")
+    st.caption("ISO y Reporte se habilitan al completar un balanceo "
+               "(1 plano o 2 planos).")
+if hasattr(st, "segmented_control"):
+    _active = st.segmented_control(
+        "Paso", _NAV, key="bal_nav", label_visibility="collapsed")
+else:
+    _active = st.radio("Paso", _NAV, key="bal_nav", horizontal=True,
+                       label_visibility="collapsed")
+if _active not in _NAV:
+    _active = "Trial weight"
 
 
 def _render_bal_warnings(warns):
@@ -253,10 +270,30 @@ def _render_bal_warnings(warns):
                           _sev.get(w.get("severity"), "warning"))
 
 
+def _source_label(src: str) -> str:
+    """Etiqueta legible de la fuente de datos."""
+    return {"Manual": "Datos manuales (escritos)",
+            "Live Monitoring": "Monitoreo en línea (1X en vivo)",
+            "Campo": "Enviado de campo"}.get(src, src or "—")
+
+
+def _source_badge(src: str) -> None:
+    """Chip visible con el ORIGEN de los datos (manual / en línea / campo)."""
+    _c = {"Manual": ("#12305e", "#e8eefb", "#c7d7f0"),
+          "Live Monitoring": ("#166534", "#e8f6ee", "#b7e4c7"),
+          "Campo": ("#8a5a00", "#fdf2e0", "#f3d9ad")}
+    fg, bg, bd = _c.get(src, ("#475569", "#f1f5f9", "#e2e8f2"))
+    st.markdown(
+        f"<div style='display:inline-block;margin:2px 0 8px;padding:4px 12px;"
+        f"border-radius:999px;background:{bg};color:{fg};border:1px solid {bd};"
+        f"font:700 12px \"IBM Plex Sans\",sans-serif;'>● Fuente: "
+        f"{_source_label(src)}</div>", unsafe_allow_html=True)
+
+
 # ---------------------------------------------------------------------
 # 1) Peso de prueba (API 684)
 # ---------------------------------------------------------------------
-with tab_tw:
+if _active == "Trial weight":
     bal_section_header("Trial weight", "Starting mass to produce a measurable "
                        "vector change.", "API 684 · Umax = 6350·W/N", "⚙️")
     with st.container(border=True):
@@ -288,7 +325,7 @@ with tab_tw:
 # ---------------------------------------------------------------------
 # 2) Balanceo en 1 plano
 # ---------------------------------------------------------------------
-with tab_1p:
+if _active == "1 plane":
     bal_section_header("Single-plane balancing",
                        "H = (Vt − V0) / Wt  ·  Wcorr = −V0 / H",
                        "ISO 21940-12 · influence coefficient", "🎯")
@@ -315,6 +352,7 @@ with tab_1p:
     with top[2]:
         source1 = st.radio("Data source", ["Manual", "Live Monitoring"],
                            key="b1_source", horizontal=True)
+    _source_badge(source1)
 
     if source1 == "Live Monitoring":
         with st.container(border=True):
@@ -360,6 +398,7 @@ with tab_1p:
         try:
             _res1 = solve_1plane(v0m, v0a, vtm, vta, twm, twa)
             st.session_state["bal_r1p"] = _res1
+            st.session_state["bal_src"] = st.session_state.get("b1_source", "Manual")
             _vfm = st.session_state.get("b1_vf_mag")
             st.session_state["bal_r1p_warn"] = diagnose_1plane(
                 _res1, v0m, v0a, vtm, vta, twm, twa,
@@ -380,7 +419,11 @@ with tab_1p:
         ])
         sev, detail, tag = _quality_severity(r["quality"])
         bal_status_banner(f"Model quality: {tag}", f"{detail}. {r['note']}", sev)
-        _render_bal_warnings(st.session_state.get("bal_r1p_warn"))
+        _vfm1 = st.session_state.get("b1_vf_mag")
+        _w1 = diagnose_1plane(r, v0m, v0a, vtm, vta, twm, twa,
+                              Vf_mag=_vfm1, Vf_ang=st.session_state.get("b1_vf_ang"))
+        st.session_state["bal_r1p_warn"] = _w1
+        _render_bal_warnings(_w1)
         with st.expander("Validate against final measurement (optional)"):
             vfm, _vfa = _vector_inputs("b1_vf", "Vf — measured final vibration", unit1)
             if vfm > 0:
@@ -397,7 +440,7 @@ with tab_1p:
 # ---------------------------------------------------------------------
 # 3) Balanceo en 2 planos
 # ---------------------------------------------------------------------
-with tab_2p:
+if _active == "2 planes":
     bal_section_header("Two-plane balancing",
                        "2×2 influence coefficient matrix · runs "
                        "0 (initial) · 1 (trial A) · 2 (trial B).",
@@ -431,6 +474,7 @@ with tab_2p:
     with top[2]:
         source2 = st.radio("Data source", ["Manual", "Live Monitoring"],
                            key="b2_source", horizontal=True)
+    _source_badge(source2)
 
     if source2 == "Live Monitoring":
         with st.container(border=True):
@@ -506,6 +550,7 @@ with tab_2p:
             _cWA, _cWB = to_complex(wam, waa), to_complex(wbm, wba)
             _res2 = solve_2plane(_cA0, _cB0, _cA1, _cB1, _cA2, _cB2, _cWA, _cWB)
             st.session_state["bal_r2p"] = _res2
+            st.session_state["bal_src"] = st.session_state.get("b2_source", "Manual")
             _vfa = st.session_state.get("b2_vfa_mag")
             _vfb = st.session_state.get("b2_vfb_mag")
             st.session_state["bal_r2p_warn"] = diagnose_2plane(
@@ -532,7 +577,19 @@ with tab_2p:
         sev, detail, tag = _quality_severity(r["quality"])
         bal_status_banner(f"Model quality: {tag}",
                           f"{detail}. cond(M) = {r['cond']:.1f}. {r['note']}", sev)
-        _render_bal_warnings(st.session_state.get("bal_r2p_warn"))
+        # Recalcula los avisos con el Vf actual (si ya se midió el final), así
+        # "plano empeoró" aparece y entra al reporte sin recalcular el balanceo.
+        _vfa = st.session_state.get("b2_vfa_mag")
+        _vfb = st.session_state.get("b2_vfb_mag")
+        _w2 = diagnose_2plane(
+            r, to_complex(a0m, a0a), to_complex(b0m, b0a),
+            to_complex(a1m, a1a), to_complex(b1m, b1a),
+            to_complex(a2m, a2a), to_complex(b2m, b2a),
+            to_complex(wam, waa), to_complex(wbm, wba),
+            Vf_A=to_complex(_vfa, st.session_state.get("b2_vfa_ang") or 0) if _vfa else None,
+            Vf_B=to_complex(_vfb, st.session_state.get("b2_vfb_ang") or 0) if _vfb else None)
+        st.session_state["bal_r2p_warn"] = _w2
+        _render_bal_warnings(_w2)
         with st.expander("Validate against final measurement (optional)"):
             cvA, cvB = st.columns(2)
             with cvA:
@@ -553,7 +610,7 @@ with tab_2p:
 # ---------------------------------------------------------------------
 # 4) Validación ISO 21940-11
 # ---------------------------------------------------------------------
-with tab_iso:
+if _active == "ISO validation":
     bal_section_header("ISO validation",
                        "e_per = 9549·G/N  ·  U_per = e_per·W. The residual is "
                        "evaluated against ISO 21940 grades.",
@@ -625,7 +682,7 @@ with tab_iso:
 # ---------------------------------------------------------------------
 # 5) Reporte
 # ---------------------------------------------------------------------
-with tab_rep:
+if _active == "Report":
     bal_section_header("Report", "Session summary and branded "
                        "Watermelon/SIGA PDF.", "ISO 21940 · API 684", "⎙")
 
@@ -717,6 +774,7 @@ with tab_rep:
                      "a1": _pair("b2_a1"), "b1": _pair("b2_b1"),
                      "a2": _pair("b2_a2"), "b2": _pair("b2_b2"),
                      "wa": _pair("b2_wa"), "wb": _pair("b2_wb"), "result": r2,
+                     "vf_a": _pair("b2_vfa"), "vf_b": _pair("b2_vfb"),
                      "warnings": st.session_state.get("bal_r2p_warn") or []}
 
     if not (one_plane or two_plane or ev):
@@ -734,6 +792,7 @@ with tab_rep:
                             or st.session_state.get("tw_rpm")),
                     "rotation": (st.session_state.get("b1_rot")
                                  or st.session_state.get("b2_rot") or "CCW"),
+                    "data_source": _source_label(st.session_state.get("bal_src", "Manual")),
                     "notes": rep_notes,
                 }
                 st.session_state["bal_pdf"] = build_balance_pdf(
