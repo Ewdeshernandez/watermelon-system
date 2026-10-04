@@ -102,8 +102,24 @@ _hero()
 # Helpers de UI
 # =====================================================================
 def _num(key: str, label: str, default: float = 0.0, **kw) -> float:
-    st.session_state.setdefault(key, float(default))
-    return st.number_input(label, key=key, **kw)
+    # Persistencia entre pasos: con navegación condicional Streamlit PURGA el
+    # estado de los widgets no renderizados. Se guarda una copia en una clave
+    # "sombra" (no-widget) y se restaura al re-montar el widget.
+    _sk = f"_keep_{key}"
+    if key not in st.session_state:
+        st.session_state[key] = float(st.session_state.get(_sk, default))
+    val = st.number_input(label, key=key, **kw)
+    st.session_state[_sk] = val
+    return val
+
+
+def _persist_get(key: str, default=None):
+    """Lee una clave de widget con fallback a su copia persistente (_keep_),
+    por si el widget fue purgado al estar en otro paso."""
+    v = st.session_state.get(key)
+    if v is None:
+        v = st.session_state.get(f"_keep_{key}", default)
+    return v
 
 
 def _vector_inputs(prefix: str, title: str, unit: str):
@@ -904,11 +920,10 @@ if _active == "Validación ISO":
 
         # Guard ISO: un grado casi perfecto (≤G1) con la máquina aún vibrando =
         # U_res desacoplado del estado final real → grado sobrestimado.
-        _ss = st.session_state
-        _dom_v0 = max([v for v in (_ss.get("b2_b0_mag"), _ss.get("b2_a0_mag"),
-                                   _ss.get("b1_v0_mag")) if v], default=0.0)
-        _dom_vf = max([v for v in (_ss.get("b2_vfb_mag"), _ss.get("b2_vfa_mag"),
-                                   _ss.get("b1_vf_mag")) if v], default=0.0)
+        _dom_v0 = max([v for v in (_persist_get("b2_b0_mag"), _persist_get("b2_a0_mag"),
+                                   _persist_get("b1_v0_mag")) if v], default=0.0)
+        _dom_vf = max([v for v in (_persist_get("b2_vfb_mag"), _persist_get("b2_vfa_mag"),
+                                   _persist_get("b1_vf_mag")) if v], default=0.0)
         if (ev["best_grade"] is not None and ev["best_grade"] <= 1.0
                 and _dom_v0 and _dom_vf and (_dom_vf / _dom_v0) > 0.25):
             bal_status_banner(
@@ -1006,10 +1021,10 @@ if _active == "Reporte":
             rep_notes = st.text_area("Notes", key="rep_notes", height=80)
 
     def _pair(prefix: str):
-        m = st.session_state.get(f"{prefix}_mag")
+        m = _persist_get(f"{prefix}_mag")
         if m is None:
             return None
-        return (float(m), float(st.session_state.get(f"{prefix}_ang") or 0.0))
+        return (float(m), float(_persist_get(f"{prefix}_ang") or 0.0))
 
     one_plane = None
     if r1:
