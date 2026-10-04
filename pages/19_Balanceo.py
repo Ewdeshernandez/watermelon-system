@@ -122,6 +122,131 @@ def _persist_get(key: str, default=None):
     return v
 
 
+# =====================================================================
+# Persistencia multi-día — BORRADOR en la nube (un balanceo dura días)
+# =====================================================================
+# El session_state de Streamlit es efímero (se pierde al cerrar/recargar). Para
+# que un balanceo sobreviva días, se guarda un BORRADOR en Supabase (balance_runs,
+# nombre "DRAFT …", por usuario+activo) y se puede reanudar al volver.
+_DRAFT_SCALARS = ["bal_source", "bal_cfg", "bal_src", "bal_r1p", "bal_r2p",
+                  "bal_iso", "bal_r1p_warn", "bal_r2p_warn"]
+
+
+def _enc(o):
+    """Codifica a JSON-safe: complejos → {'__c__':[re,im]}, numpy → nativo."""
+    import numpy as _np
+    if isinstance(o, complex):
+        return {"__c__": [float(o.real), float(o.imag)]}
+    if isinstance(o, _np.ndarray):
+        return [_enc(x) for x in o.tolist()]
+    if isinstance(o, _np.floating):
+        return float(o)
+    if isinstance(o, _np.integer):
+        return int(o)
+    if isinstance(o, dict):
+        return {k: _enc(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_enc(v) for v in o]
+    return o
+
+
+def _dec(o):
+    """Revierte _enc: {'__c__':[re,im]} → complejo."""
+    if isinstance(o, dict):
+        if set(o.keys()) == {"__c__"}:
+            _v = o["__c__"]
+            return complex(_v[0], _v[1])
+        return {k: _dec(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_dec(v) for v in o]
+    return o
+
+
+def _user_key() -> str:
+    return (str(_user.get("email") or _user.get("full_name") or "user")).strip().lower()
+
+
+def _draft_snapshot() -> dict:
+    """Estado serializable del balanceo en curso (config + vectores + resultados)."""
+    keeps = {k: st.session_state[k] for k in list(st.session_state.keys())
+             if isinstance(k, str) and k.startswith("_keep_")}
+    data = {"kind": "balance_draft", "keeps": keeps}
+    for k in _DRAFT_SCALARS:
+        if k in st.session_state:
+            data[k] = st.session_state[k]
+    return _enc(data)
+
+
+def _restore_draft(payload: dict) -> None:
+    """Restaura un borrador a la sesión (vectores + config + resultados)."""
+    payload = _dec(payload)
+    for k, v in (payload.get("keeps") or {}).items():
+        st.session_state[k] = v                       # _num leerá de _keep_
+    for k in _DRAFT_SCALARS:
+        if k in payload:
+            st.session_state[k] = payload[k]
+    st.session_state["bal_cfg_ok"] = bool(payload.get("bal_cfg"))
+    _cfg = payload.get("bal_cfg") or {}
+    if _cfg:
+        _apply_cfg(_cfg)
+    st.session_state["bal_nav"] = ("Balanceo" if st.session_state["bal_cfg_ok"]
+                                   else "Origen")
+
+
+def _reset_balance() -> None:
+    """Limpia el balanceo en curso de la sesión (no borra borradores en nube)."""
+    for k in list(st.session_state.keys()):
+        if isinstance(k, str) and (
+                k.startswith("_keep_") or k.startswith("b1_") or k.startswith("b2_")
+                or k.startswith("iso_") or k.startswith("rep_") or k.startswith("cfg_")
+                or k in _DRAFT_SCALARS or k in (
+                    "bal_cfg_ok", "bal_pdf", "bal_nav", "_draft_hash", "_draft_id")):
+            del st.session_state[k]
+
+
+def _maybe_autosave() -> None:
+    """Auto-guardado silencioso: escribe el borrador en la nube solo si el estado
+    cambió desde la última escritura (no martilla Supabase)."""
+    cfg = st.session_state.get("bal_cfg") or {}
+    asset = (cfg.get("asset") or "").strip()
+    if not asset:                                     # sin activo aún, nada que guardar
+        return
+    snap = _draft_snapshot()
+    import json as _json
+    try:
+        _h = hash(_json.dumps(snap, sort_keys=True, default=str))
+    except Exception:  # noqa: BLE001
+        return
+    if _h == st.session_state.get("_draft_hash"):
+        return
+    from core.balance import cloud
+    import re as _re
+    _did = st.session_state.get("_draft_id") or (
+        "draft_" + _re.sub(r"[^a-z0-9]+", "-", f"{_user_key()}-{asset}".lower()).strip("-"))
+    st.session_state["_draft_id"] = _did
+    r = cloud.save_run(name=f"DRAFT {asset}", payload=snap, run_id=_did,
+                       account=_user_key(), tag=asset)
+    if r.get("ok"):
+        st.session_state["_draft_hash"] = _h
+        st.session_state["_draft_saved_at"] = _now_hhmm()
+
+
+def _now_hhmm() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%H:%M")
+
+
+def _list_my_drafts() -> list:
+    try:
+        from core.balance import cloud
+        _me = _user_key()
+        return [r for r in (cloud.list_runs() or [])
+                if str(r.get("name", "")).startswith("DRAFT")
+                and (r.get("account") or "").lower() == _me]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _vector_inputs(prefix: str, title: str, unit: str):
     st.markdown(f"<div style='font-weight:700;color:#0F1E3D;font-size:13px;"
                 f"margin-bottom:2px;'>{title}</div>", unsafe_allow_html=True)
@@ -257,13 +382,15 @@ _has_result = bool(st.session_state.get("bal_r1p") or st.session_state.get("bal_
 _has_iso = bool(st.session_state.get("bal_iso")) and _has_result
 _has_pdf = bool(st.session_state.get("bal_pdf"))
 
-_NAV = ["Origen"]
-if _src:
-    _NAV.append("Configuración")
-if _cfg_ok:
-    _NAV += ["Peso prueba", "1 plano", "2 planos"]
-if _has_result:
-    _NAV += ["Validación ISO", "Reporte"]
+# Planos definidos UNA sola vez en Configuración; el flujo sigue esa elección.
+_two = (st.session_state.get("bal_cfg") or {}).get("planes") == "2 planes"
+# Origen se oculta una vez elegido+configurado (no se cambia la fuente a mitad).
+if not _cfg_ok:
+    _NAV = ["Origen"] + (["Configuración"] if _src else [])
+else:
+    _NAV = ["Configuración", "Balanceo"]
+    if _has_result:
+        _NAV += ["Validación ISO", "Reporte"]
 
 # Stepper visual (muestra las etapas; gris = bloqueada).
 _steps_vis = [("1 · Origen", True), ("2 · Configuración", bool(_src)),
@@ -284,6 +411,26 @@ else:
                        label_visibility="collapsed")
 if _active not in _NAV:
     _active = _NAV[-1] if _NAV else "Origen"
+
+
+def _draft_indicator() -> None:
+    """Indicador de borrador (persistencia multi-día) + guardar manual."""
+    if not (st.session_state.get("bal_cfg") or {}).get("asset"):
+        return
+    _dc1, _dc2 = st.columns([4, 1])
+    with _dc1:
+        _sv = st.session_state.get("_draft_saved_at")
+        st.caption("● Borrador guardado automáticamente en la nube"
+                   + (f" · {_sv}" if _sv else "")
+                   + ". Puedes cerrar y reanudar después (dura días).")
+    with _dc2:
+        if st.button("Guardar ahora", use_container_width=True, key="draft_save_now"):
+            st.session_state["_draft_hash"] = None      # fuerza reescritura
+            try:
+                _maybe_autosave()
+                st.toast("Borrador guardado.")
+            except Exception:  # noqa: BLE001
+                st.warning("No se pudo guardar el borrador.")
 
 
 def _render_bal_warnings(warns):
@@ -331,6 +478,32 @@ def _render_origen() -> None:
     bal_section_header("Origen de los datos",
                        "Elige de dónde vienen los datos del balanceo.",
                        "Paso 1", "●")
+
+    # Reanudar un balanceo guardado (puede durar días).
+    _drafts = _list_my_drafts()
+    if _drafts:
+        with st.container(border=True):
+            st.markdown("<div style='font-weight:700;color:#0F1E3D'>Reanudar un "
+                        "balanceo guardado</div>", unsafe_allow_html=True)
+            _do = {d.get("id"): f"{d.get('tag') or '—'}  ·  guardado "
+                               f"{(d.get('updated_at') or '')[:16]}" for d in _drafts}
+            _pick = st.selectbox("Borradores", list(_do.keys()),
+                                 format_func=lambda x: _do.get(x, x), key="resume_pick")
+            rc1, rc2 = st.columns([1, 3])
+            with rc1:
+                if st.button("Reanudar", type="primary", key="resume_btn"):
+                    from core.balance import cloud
+                    _pl = cloud.load_run(_pick)
+                    if _pl:
+                        _restore_draft(_pl)
+                        st.session_state["_draft_id"] = _pick
+                        st.success("Balanceo reanudado.")
+                        st.rerun()
+                    else:
+                        st.error("No se pudo cargar el borrador.")
+            with rc2:
+                st.caption("O empieza uno nuevo eligiendo un origen abajo.")
+
     _opts = [
         ("Manual", "Datos manuales",
          "Tú escribes la configuración de la máquina y los vectores de vibración."),
@@ -432,6 +605,14 @@ def _render_config() -> None:
     _source_badge(src)
     cfg = st.session_state.get("bal_cfg") or {}
 
+    with st.expander("Reiniciar balanceo (cambiar origen / empezar de cero)"):
+        st.caption("Vuelve a elegir el origen y limpia los datos de esta sesión. "
+                   "Lo guardado como borrador no se borra.")
+        if st.checkbox("Confirmo reiniciar", key="cfg_reset_ok") and \
+                st.button("Reiniciar ahora", type="secondary"):
+            _reset_balance()
+            st.rerun()
+
     # ---- Campo: cargar una corrida subida desde el equipo ----
     if src == "Campo":
         bal_section_header("Configuración — Enviado de campo",
@@ -440,7 +621,8 @@ def _render_config() -> None:
                            "Paso 2", "●")
         try:
             from core.balance import cloud
-            runs = cloud.list_runs() or []
+            runs = [r for r in (cloud.list_runs() or [])
+                    if not str(r.get("name", "")).startswith("DRAFT")]
         except Exception as e:  # noqa: BLE001
             st.error(f"No se pudo leer la nube: {e}")
             return
@@ -460,6 +642,7 @@ def _render_config() -> None:
                     return
                 _load_field_payload(payload)
                 st.session_state["bal_cfg_ok"] = True
+                st.session_state["bal_nav"] = "Balanceo"
                 st.success("Corrida cargada. Revisa el balanceo y el reporte.")
                 st.rerun()
             except Exception as e:  # noqa: BLE001
@@ -546,15 +729,17 @@ def _render_config() -> None:
             st.session_state["bal_cfg"] = _cfg
             st.session_state["bal_src"] = "Live" if src == "Live" else "Manual"
             st.session_state["bal_cfg_ok"] = True
+            st.session_state["bal_nav"] = "Balanceo"
             _apply_cfg(_cfg)
-            st.success("Configuración validada. Continúa en **Peso prueba** / "
-                       "**1 plano** / **2 planos**.")
+            st.success("Configuración validada. Continúa en **Balanceo**.")
             st.rerun()
 
 
 # ---------------------------------------------------------------------
 # Pasos 1 y 2 — Origen + Configuración
 # ---------------------------------------------------------------------
+_draft_indicator()
+
 if _active == "Origen":
     _render_origen()
 
@@ -597,7 +782,7 @@ if _active == "Peso prueba":
 # ---------------------------------------------------------------------
 # 2) Balanceo en 1 plano
 # ---------------------------------------------------------------------
-if _active == "1 plano":
+if _active == "Balanceo" and not _two:
     bal_section_header("Single-plane balancing",
                        "H = (Vt − V0) / Wt  ·  Wcorr = −V0 / H",
                        "ISO 21940-12 · influence coefficient", "🎯")
@@ -710,7 +895,7 @@ if _active == "1 plano":
 # ---------------------------------------------------------------------
 # 3) Balanceo en 2 planos
 # ---------------------------------------------------------------------
-if _active == "2 planos":
+if _active == "Balanceo" and _two:
     bal_section_header("Two-plane balancing",
                        "2×2 influence coefficient matrix · runs "
                        "0 (initial) · 1 (trial A) · 2 (trial B).",
@@ -1074,5 +1259,11 @@ if _active == "Reporte":
             st.download_button("Download PDF", data=st.session_state["bal_pdf"],
                                file_name=_fn, mime="application/pdf")
 
+
+# Auto-guardado silencioso del borrador (al final, tras renderizar todo el paso).
+try:
+    _maybe_autosave()
+except Exception:  # noqa: BLE001
+    pass
 
 bal_footer_norms()
