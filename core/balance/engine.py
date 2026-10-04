@@ -612,3 +612,97 @@ def iso_residual_sanity(
             f"Usar el residual derivado de los vectores finales o etiquetarlo "
             f"'estimado/manual'."))
     return out
+
+
+# =========================================================
+# Reparto de peso a posiciones fijas / álabes (Angular Mass Split)
+# =========================================================
+def split_to_positions(W_mag: float, W_ang: float,
+                       positions_deg: List[float]) -> List[Dict[str, Any]]:
+    """Reparte una corrección W∠θ en las POSICIONES FIJAS disponibles (huecos,
+    slots, álabes). Devuelve 1 peso si θ coincide con una posición, o 2 pesos en
+    las posiciones que bordean θ cuya suma vectorial = W∠θ.
+
+    Resuelve  C = Wa·e^{iα} + Wb·e^{iβ}  (masas reales; positivas cuando θ está
+    en el arco menor entre α y β — caso de posiciones adyacentes)."""
+    pos = sorted({round(float(p) % 360.0, 6) for p in positions_deg})
+    if not pos:
+        return []
+    th = float(W_ang) % 360.0
+    for p in pos:                                   # coincide con una posición
+        if abs(((th - p + 180.0) % 360.0) - 180.0) < 1e-6:
+            return [{"angle": p, "mass": float(W_mag)}]
+    if len(pos) == 1:                               # una sola posición → todo ahí
+        return [{"angle": pos[0], "mass": float(W_mag)}]
+    ext = pos + [pos[0] + 360.0]                    # cierre circular
+    lo = hi = None
+    for i in range(len(pos)):
+        a, b = ext[i], ext[i + 1]
+        if a <= th < b or a <= th + 360.0 < b:
+            lo, hi = a % 360.0, b % 360.0
+            break
+    if lo is None:                                  # θ cae en el arco de cierre
+        lo, hi = pos[-1], pos[0]
+    C = to_complex(W_mag, W_ang)
+    A = np.array([[np.cos(np.radians(lo)), np.cos(np.radians(hi))],
+                  [np.sin(np.radians(lo)), np.sin(np.radians(hi))]])
+    try:
+        sol = np.linalg.solve(A, np.array([C.real, C.imag]))
+    except np.linalg.LinAlgError:
+        return [{"angle": float(W_ang) % 360.0, "mass": float(W_mag)}]
+    return [{"angle": float(lo), "mass": float(sol[0])},
+            {"angle": float(hi), "mass": float(sol[1])}]
+
+
+def bucket_angles(n: int, offset_deg: float = 0.0,
+                  clockwise: bool = False) -> List[Dict[str, Any]]:
+    """Ángulos de N álabes/buckets numerados 1..N, igualmente espaciados. El #1 va
+    en `offset_deg`; el sentido de numeración puede ser horario o antihorario."""
+    n = max(1, int(n))
+    step = 360.0 / n
+    s = -1.0 if clockwise else 1.0
+    return [{"bucket": k + 1, "angle": (offset_deg + s * k * step) % 360.0}
+            for k in range(n)]
+
+
+def split_to_buckets(W_mag: float, W_ang: float, n: int, offset_deg: float = 0.0,
+                     clockwise: bool = False) -> List[Dict[str, Any]]:
+    """Reparte la corrección W∠θ a los álabes/buckets (posiciones discretas).
+    Devuelve [{bucket, angle, mass}] en 1 o 2 buckets."""
+    bk = bucket_angles(n, offset_deg, clockwise)
+    ang2bk = {round(b["angle"], 6): b["bucket"] for b in bk}
+    out = split_to_positions(W_mag, W_ang, [b["angle"] for b in bk])
+    for o in out:
+        o["bucket"] = ang2bk.get(round(o["angle"], 6))
+    return out
+
+
+def combine_weights(weights: List[Tuple[float, float]]) -> Tuple[float, float]:
+    """Resultante (mag, ang°) de varios pesos (masa, ángulo°) — suma vectorial.
+    Útil para reemplazar varios pesos por uno solo, o verificar una repartición."""
+    z = sum((to_complex(m, a) for m, a in (weights or [])), 0j)
+    return to_polar(z)
+
+
+# =========================================================
+# Nomograma ISO 21940-11 (excentricidad permisible vs velocidad)
+# =========================================================
+def iso_nomogram_lines(grades: List[float] = None,
+                       rpm_min: float = 100.0, rpm_max: float = 100000.0,
+                       pts: int = 60) -> Dict[str, Any]:
+    """Datos para la carta ISO 21940-11: para cada grado G, e_per[µm] = 9549·G/n
+    sobre un rango de velocidad (log). Para graficar las líneas de grado."""
+    gs = grades or ISO_GRADES
+    rpm = list(np.geomspace(max(1.0, rpm_min), max(rpm_min + 1.0, rpm_max), int(pts)))
+    lines = {f"G{g:g}": [calc_e_per(g, n) * 1000.0 for n in rpm] for g in gs}  # mm→µm
+    return {"rpm": rpm, "lines": lines, "grades": list(gs)}
+
+
+def iso_operating_point(W_kg: float, U_res_gmm: float, rpm: float) -> Dict[str, Any]:
+    """Punto de operación del rotor en la carta: excentricidad real e = U_res/W
+    [µm] a la velocidad `rpm`, y el mejor grado que cumple."""
+    W = max(1e-9, float(W_kg))
+    e_um = float(U_res_gmm) / W            # g·mm/kg = µm
+    ev = evaluate_iso_grades(W_kg, rpm, U_res_gmm)
+    return {"rpm": float(rpm), "e_um": e_um, "best_grade": ev.get("best_grade"),
+            "summary": ev.get("summary_label", "")}

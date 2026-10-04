@@ -453,6 +453,39 @@ def _render_bal_warnings(warns):
                           _sev.get(w.get("severity"), "warning"))
 
 
+def _render_split(W_mag: float, W_ang: float, title: str) -> None:
+    """Reparte la corrección a las POSICIONES INSTALABLES (álabes/buckets o huecos
+    fijos) definidas en Configuración. Angular Mass Split — como iRotorBalance."""
+    cfg = st.session_state.get("bal_cfg") or {}
+    mode = cfg.get("pos_mode", "Ángulo libre")
+    if mode == "Ángulo libre" or not W_mag or W_mag <= 0:
+        return
+    from core.balance.engine import (split_to_buckets, split_to_positions,
+                                      combine_weights)
+    with st.container(border=True):
+        st.markdown(f"<div style='font-weight:700;color:#0F1E3D'>Repartir {title}: "
+                    f"<b>{W_mag:,.2f} g ∠ {W_ang:.1f}°</b> → posiciones instalables"
+                    f"</div>", unsafe_allow_html=True)
+        if mode.startswith("Álabes"):
+            res = split_to_buckets(W_mag, W_ang, int(cfg.get("n_buckets") or 24),
+                                   float(cfg.get("pos_offset") or 0.0),
+                                   bool(cfg.get("pos_cw", False)))
+            rows = [[f"#{o.get('bucket')}", f"{o['angle']:.1f}°",
+                     f"{o['mass']:,.2f} g"] for o in res]
+            html_table(["Álabe / Bucket", "Ángulo", "Peso a instalar"], rows)
+        else:
+            step = float(cfg.get("hole_step") or 30.0)
+            off = float(cfg.get("pos_offset") or 0.0)
+            poss = [(off + i * step) % 360.0 for i in range(int(round(360.0 / step)))]
+            res = split_to_positions(W_mag, W_ang, poss)
+            rows = [[f"{o['angle']:.1f}°", f"{o['mass']:,.2f} g"] for o in res]
+            html_table(["Posición (hueco)", "Peso a instalar"], rows)
+        if res:
+            _rc = combine_weights([(o["mass"], o["angle"]) for o in res])
+            st.caption(f"Verificación: la suma vectorial de esos pesos = "
+                       f"{_rc[0]:,.2f} g ∠ {_rc[1]:.1f}° (igual a la corrección pedida).")
+
+
 def _source_label(src: str) -> str:
     """Etiqueta legible de la fuente de datos."""
     return {"Manual": "Datos manuales (escritos)",
@@ -742,6 +775,31 @@ def _render_config() -> None:
             _unit = st.selectbox("Unidad de vibración", UNITS,
                                  index=UNITS.index(cfg.get("unit"))
                                  if cfg.get("unit") in UNITS else 0)
+
+        st.markdown("<div style='font-weight:700;color:#0F1E3D;margin-top:6px'>"
+                    "Posiciones de corrección (dónde se pueden instalar los pesos)"
+                    "</div>", unsafe_allow_html=True)
+        _pm_opts = ["Ángulo libre", "Álabes / buckets (N)", "Huecos cada X°"]
+        p1, p2, p3 = st.columns(3)
+        with p1:
+            _pos_mode = st.selectbox("Modo", _pm_opts,
+                                     index=_pm_opts.index(cfg.get("pos_mode"))
+                                     if cfg.get("pos_mode") in _pm_opts else 0)
+        with p2:
+            _n_buckets = st.number_input("N álabes / buckets",
+                                         value=int(cfg.get("n_buckets") or 24),
+                                         min_value=2, max_value=400, step=1)
+            _hole_step = st.number_input("Paso de huecos [°]",
+                                         value=float(cfg.get("hole_step") or 30.0),
+                                         min_value=1.0, max_value=180.0, step=1.0,
+                                         format="%.0f")
+        with p3:
+            _pos_offset = st.number_input("Ref. #1 / primer hueco [°]",
+                                          value=float(cfg.get("pos_offset") or 0.0),
+                                          min_value=0.0, max_value=360.0, step=1.0,
+                                          format="%.0f")
+            _pos_cw = st.checkbox("Numerar en sentido horario",
+                                  value=bool(cfg.get("pos_cw", False)))
         _ok = st.form_submit_button("Validar configuración y continuar",
                                     type="primary", use_container_width=True)
     if _ok:
@@ -763,7 +821,10 @@ def _render_config() -> None:
                     "location": _location.strip(), "specialist": _specialist.strip(),
                     "rpm": float(_rpm), "rotor_mass": float(_mass),
                     "radius": float(_radius), "trial_k": float(_k),
-                    "iso_g": _iso_g, "planes": _planes, "rotation": _rot, "unit": _unit}
+                    "iso_g": _iso_g, "planes": _planes, "rotation": _rot, "unit": _unit,
+                    "pos_mode": _pos_mode, "n_buckets": int(_n_buckets),
+                    "hole_step": float(_hole_step), "pos_offset": float(_pos_offset),
+                    "pos_cw": bool(_pos_cw)}
             st.session_state["bal_cfg"] = _cfg
             st.session_state["bal_src"] = "Live" if src == "Live" else "Manual"
             st.session_state["bal_cfg_ok"] = True
@@ -917,6 +978,7 @@ if _active == "Balanceo" and not _two:
                               Vf_mag=_vfm1, Vf_ang=st.session_state.get("b1_vf_ang"))
         st.session_state["bal_r1p_warn"] = _w1
         _render_bal_warnings(_w1)
+        _render_split(r["corr_mass_g"], r["corr_ang_deg"], "corrección")
         with st.expander("Validate against final measurement (optional)"):
             vfm, _vfa = _vector_inputs("b1_vf", "Vf — measured final vibration", unit1)
             if vfm > 0:
@@ -1081,6 +1143,24 @@ if _active == "Balanceo" and _two:
             Vf_B=to_complex(_vfb, st.session_state.get("b2_vfb_ang") or 0) if _vfb else None)
         st.session_state["bal_r2p_warn"] = _w2
         _render_bal_warnings(_w2)
+        # Estático / par: descompone las correcciones en S=(A+B)/2 y C=(A−B)/2.
+        try:
+            from core.balance.engine import diagnose_static_couple
+            _S = (r["WA_corr"] + r["WB_corr"]) / 2.0
+            _C = (r["WA_corr"] - r["WB_corr"]) / 2.0
+            _sc = diagnose_static_couple(abs(_S), abs(_C), abs(_C))
+            _kmap = {"STATIC": "Estático (ambos planos en fase)",
+                     "COUPLE": "De par / dinámico (planos opuestos)",
+                     "MIXED": "Mixto"}
+            bal_status_banner(
+                f"Tipo de desbalance: {_kmap.get(_sc.get('kind'), _sc.get('kind', '—'))}",
+                f"Estático |S| = {abs(_S):,.2f} g · par |C| = {abs(_C):,.2f} g "
+                f"(ratio C/S = {_sc.get('ratio_C_over_S', 0):.2f}). "
+                + (_sc.get('actions', [''])[0] if _sc.get('actions') else ""), "ok")
+        except Exception:  # noqa: BLE001
+            pass
+        _render_split(wa_mag, wa_ang, "Plano A")
+        _render_split(wb_mag, wb_ang, "Plano B")
         with st.expander("Validate against final measurement (optional)"):
             cvA, cvB = st.columns(2)
             with cvA:
@@ -1167,6 +1247,39 @@ if _active == "Validación ISO":
                 f"{dot('ok')} Sí" if g["pass"] else f"{dot('dang')} No",
             ])
         html_table(_iso_cols, _iso_rows, raw_cols=[4])
+
+        # --- Nomograma ISO 21940-11 (carta gráfica) ---
+        with st.expander("Nomograma ISO 21940-11 (carta de grados de calidad)",
+                         expanded=True):
+            try:
+                import plotly.graph_objects as _go
+                from core.balance.engine import (iso_nomogram_lines,
+                                                  iso_operating_point)
+                _nl = iso_nomogram_lines(rpm_min=100.0, rpm_max=60000.0)
+                _fig = _go.Figure()
+                for _g, _ys in _nl["lines"].items():
+                    _fig.add_trace(_go.Scatter(
+                        x=_nl["rpm"], y=_ys, mode="lines", name=_g,
+                        hovertemplate=_g + ": %{y:.2f} µm @ %{x:.0f} rpm<extra></extra>"))
+                _op = iso_operating_point(W_iso, U_res, rpm_iso)
+                _fig.add_trace(_go.Scatter(
+                    x=[_op["rpm"]], y=[max(_op["e_um"], 1e-3)], mode="markers+text",
+                    name="Este rotor", text=["● rotor"], textposition="top center",
+                    marker=dict(size=13, color="#e8890c", line=dict(width=1, color="#7a4a00")),
+                    hovertemplate="Rotor: %{y:.2f} µm @ %{x:.0f} rpm<extra></extra>"))
+                _fig.update_xaxes(type="log", title="Velocidad de servicio [rpm]",
+                                  gridcolor="#e2e8f2")
+                _fig.update_yaxes(type="log", title="Excentricidad permisible e_per [µm]",
+                                  gridcolor="#e2e8f2")
+                _fig.update_layout(height=430, margin=dict(l=10, r=10, t=10, b=10),
+                                   legend=dict(orientation="h", y=1.08),
+                                   plot_bgcolor="white", paper_bgcolor="white")
+                st.plotly_chart(_fig, use_container_width=True)
+                st.caption(f"El punto ámbar es este rotor: e = {_op['e_um']:.2f} µm "
+                           f"@ {_op['rpm']:.0f} rpm → {_op['summary']}. Cae por debajo "
+                           "de la línea del grado que cumple.")
+            except Exception as _e:  # noqa: BLE001
+                st.caption(f"No se pudo dibujar el nomograma: {_e}")
 
 
 # ---------------------------------------------------------------------

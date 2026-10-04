@@ -41,6 +41,13 @@ from core.balance.engine import (  # noqa: F401
     diagnose_1plane,
     diagnose_2plane,
     iso_residual_sanity,
+    # Split / álabes / nomograma
+    split_to_positions,
+    split_to_buckets,
+    bucket_angles,
+    combine_weights,
+    iso_nomogram_lines,
+    iso_operating_point,
 )
 
 __all__ = [
@@ -52,4 +59,6 @@ __all__ = [
     "solve_1plane", "solve_2plane",
     "status_level", "diagnose_static_couple",
     "diagnose_1plane", "diagnose_2plane", "iso_residual_sanity",
+    "split_to_positions", "split_to_buckets", "bucket_angles", "combine_weights",
+    "iso_nomogram_lines", "iso_operating_point",
 ]
