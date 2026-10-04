@@ -898,6 +898,49 @@ if _active == "Balanceo" and not _two:
                 unsafe_allow_html=True)
     st.markdown("<div style='font-size:13px;color:#64748b'><span style='color:#dc3545'>●</span> Measured vibration (V0) &nbsp;·&nbsp; <span style='color:#2563eb'>●</span> Correction weight to install (appears on calculation)</div>", unsafe_allow_html=True)
 
+    # --- Método SIN FASE (4 corridas) — cuando no hay keyphasor ---
+    with st.expander("Método sin fase (4 corridas · solo amplitudes, sin keyphasor)"):
+        st.caption("Para rotores sin marca de fase: se mide SOLO la amplitud con "
+                   "el mismo peso de prueba en varios ángulos (≥3; típico 0°, 120°, "
+                   "240°). El sistema reconstruye el coeficiente y la corrección.")
+        _unp = st.session_state.get("b1_unit", "µm pk-pk")
+        npc = st.columns(3)
+        with npc[0]:
+            _np_v0 = _num("np_v0", f"V0 — inicial [{_unp}]", 0.0,
+                          min_value=0.0, step=0.1, format="%.3f")
+        with npc[1]:
+            _np_wt = _num("np_wt", "Peso de prueba [g]", 0.0,
+                          min_value=0.0, step=1.0, format="%.2f")
+        with npc[2]:
+            _np_n = st.number_input("# corridas de prueba", min_value=3, max_value=8,
+                                    value=int(st.session_state.get("np_n", 3)), key="np_n")
+        _np_trials = []
+        for _i in range(int(_np_n)):
+            _rc = st.columns(2)
+            with _rc[0]:
+                _ang = _num(f"np_ang_{_i}", f"Ángulo peso #{_i+1} [°]",
+                            float([0, 120, 240, 60, 180, 300, 90, 270][_i] if _i < 8 else 0),
+                            min_value=0.0, max_value=360.0, step=1.0, format="%.0f")
+            with _rc[1]:
+                _amp = _num(f"np_amp_{_i}", f"Amplitud #{_i+1} [{_unp}]", 0.0,
+                            min_value=0.0, step=0.1, format="%.3f")
+            if _amp > 0:
+                _np_trials.append((_ang, _amp))
+        if st.button("Calcular (sin fase)", key="np_calc", type="primary"):
+            from core.balance.engine import solve_1plane_nophase
+            try:
+                _nr = solve_1plane_nophase(_np_v0, _np_wt, _np_trials)
+                st.session_state["bal_r1p"] = _nr
+                st.session_state["bal_src"] = st.session_state.get("bal_source", "Manual")
+                st.session_state["b1_v0_mag"] = _np_v0
+                st.session_state["b1_v0_ang"] = 0.0
+                st.session_state["_keep_b1_v0_mag"] = _np_v0
+                st.session_state["bal_r1p_warn"] = []
+                st.success("Corrección (sin fase) calculada abajo.")
+                st.rerun()
+            except ValueError as _e:
+                st.error(str(_e))
+
     top = st.columns([1, 1])
     with top[0]:
         unit1 = st.selectbox("Vibration unit", UNITS, key="b1_unit")
@@ -979,8 +1022,8 @@ if _active == "Balanceo" and not _two:
         st.session_state["bal_r1p_warn"] = _w1
         _render_bal_warnings(_w1)
         _render_split(r["corr_mass_g"], r["corr_ang_deg"], "corrección")
-        with st.expander("Validate against final measurement (optional)"):
-            vfm, _vfa = _vector_inputs("b1_vf", "Vf — measured final vibration", unit1)
+        with st.expander("Validate against final measurement + trim (optional)"):
+            vfm, vfa = _vector_inputs("b1_vf", "Vf — measured final vibration", unit1)
             if vfm > 0:
                 _chg = pct_change(v0m, vfm)
                 bal_kpi_row([(f"{_chg:+,.1f} %",
@@ -990,6 +1033,18 @@ if _active == "Balanceo" and not _two:
                     bal_status_banner("Final vibration worsened",
                                       f"Vf ({vfm:.3f}) > V0 ({v0m:.3f}). This plane "
                                       "degraded — do not report as improvement.", "fail")
+                # Trim: peso de ajuste con el mismo coeficiente H
+                from core.balance.engine import trim_1plane
+                try:
+                    _tr = trim_1plane(r, vfm, vfa)
+                    bal_status_banner(
+                        f"Peso de ajuste (trim): {_tr['trim_mass_g']:,.2f} g ∠ "
+                        f"{_tr['trim_ang_deg']:.1f}°",
+                        "Instala este trim (además de la corrección) para acercar más "
+                        "el residual. Usa el mismo coeficiente de influencia.", "ok")
+                    _render_split(_tr["trim_mass_g"], _tr["trim_ang_deg"], "trim")
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 # ---------------------------------------------------------------------
@@ -1161,12 +1216,12 @@ if _active == "Balanceo" and _two:
             pass
         _render_split(wa_mag, wa_ang, "Plano A")
         _render_split(wb_mag, wb_ang, "Plano B")
-        with st.expander("Validate against final measurement (optional)"):
+        with st.expander("Validate against final measurement + trim (optional)"):
             cvA, cvB = st.columns(2)
             with cvA:
-                _vfam, _ = _vector_inputs("b2_vfa", "Final A — measured", unit2)
+                _vfam, _vfaa = _vector_inputs("b2_vfa", "Final A — measured", unit2)
             with cvB:
-                _vfbm, _ = _vector_inputs("b2_vfb", "Final B — measured", unit2)
+                _vfbm, _vfba = _vector_inputs("b2_vfb", "Final B — measured", unit2)
             for _lbl, _v0, _vf in (("A", a0m, _vfam), ("B", b0m, _vfbm)):
                 if _vf and _vf > 0:
                     _c = pct_change(_v0, _vf)
@@ -1176,6 +1231,19 @@ if _active == "Balanceo" and _two:
                         f"{_v0:.3f} → {_vf:.3f} {unit2}"
                         + ("" if _c >= 0 else "  ·  WORSENED — not an improvement"),
                         _tone)
+            if _vfam and _vfam > 0 and _vfbm and _vfbm > 0:
+                from core.balance.engine import trim_2plane
+                try:
+                    _t2 = trim_2plane(r, to_complex(_vfam, _vfaa), to_complex(_vfbm, _vfba))
+                    bal_status_banner(
+                        "Pesos de ajuste (trim)",
+                        f"Plano A: {_t2['WA_trim_mag']:,.2f} g ∠ {_t2['WA_trim_ang']:.1f}° · "
+                        f"Plano B: {_t2['WB_trim_mag']:,.2f} g ∠ {_t2['WB_trim_ang']:.1f}°. "
+                        "Instálalos además de la corrección para afinar el residual.", "ok")
+                    _render_split(_t2["WA_trim_mag"], _t2["WA_trim_ang"], "trim A")
+                    _render_split(_t2["WB_trim_mag"], _t2["WB_trim_ang"], "trim B")
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 # ---------------------------------------------------------------------

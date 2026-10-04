@@ -706,3 +706,74 @@ def iso_operating_point(W_kg: float, U_res_gmm: float, rpm: float) -> Dict[str, 
     ev = evaluate_iso_grades(W_kg, rpm, U_res_gmm)
     return {"rpm": float(rpm), "e_um": e_um, "best_grade": ev.get("best_grade"),
             "summary": ev.get("summary_label", "")}
+
+
+# =========================================================
+# Trim runs — corrección adicional tras medir el residual
+# =========================================================
+def trim_1plane(result: Dict[str, Any], Vf_mag: float, Vf_ang: float) -> Dict[str, Any]:
+    """Peso de ajuste (trim) en 1 plano: tras instalar la corrección y medir la
+    vibración final Vf, usa el MISMO coeficiente H para un pase extra:
+    Wtrim = −Vf / H."""
+    H = result.get("H")
+    if H is None or abs(H) < 1e-12:
+        raise ValueError("No hay coeficiente H válido para el trim.")
+    Vf = to_complex(Vf_mag, Vf_ang)
+    Wtrim = -Vf / H
+    cm, ca = to_polar(Wtrim)
+    return {"Wtrim": Wtrim, "trim_mass_g": cm, "trim_ang_deg": ca}
+
+
+def trim_2plane(result: Dict[str, Any], Af: complex, Bf: complex) -> Dict[str, Any]:
+    """Pesos de ajuste (trim) en 2 planos usando la matriz M ya calculada:
+    M·Wtrim = −[Af; Bf] (vibración final por sonda)."""
+    M = np.array([[result["H_AA"], result["H_AB"]],
+                  [result["H_BA"], result["H_BB"]]], dtype=complex)
+    if abs(np.linalg.det(M)) < 1e-12:
+        raise ValueError("Matriz singular: no se puede calcular trim.")
+    sol = np.linalg.solve(M, np.array([[-Af], [-Bf]], dtype=complex))
+    wa, wb = sol[0, 0], sol[1, 0]
+    return {"WA_trim": wa, "WB_trim": wb,
+            "WA_trim_mag": to_polar(wa)[0], "WA_trim_ang": to_polar(wa)[1],
+            "WB_trim_mag": to_polar(wb)[0], "WB_trim_ang": to_polar(wb)[1]}
+
+
+# =========================================================
+# Método de 4 corridas SIN FASE (amplitud solamente, sin keyphasor)
+# =========================================================
+def solve_1plane_nophase(V0_mag: float, trial_mass_g: float,
+                         trials: List[Tuple[float, float]]) -> Dict[str, Any]:
+    """Balanceo 1 plano con SOLO AMPLITUDES (sin keyphasor). `trials` = lista de
+    (ángulo del peso de prueba [°], amplitud medida). Se necesitan ≥3 corridas.
+
+    Con V0 sobre el eje real, |Vi|² = |V0|² + 2|V0|(p·cosβ − q·sinβ) + (p²+q²),
+    donde H·Wt = p+iq. Es LINEAL en (p, q, r=p²+q²) → mínimos cuadrados.
+    La corrección Wc = −V0/H queda en el ángulo FÍSICO del rotor (referencia =
+    los ángulos donde se puso el peso de prueba)."""
+    V0 = float(V0_mag)
+    Wt = float(trial_mass_g)
+    if len([t for t in trials if t is not None]) < 3:
+        raise ValueError("El método sin fase requiere al menos 3 corridas de prueba.")
+    if V0 <= 0 or Wt <= 0:
+        raise ValueError("V0 y el peso de prueba deben ser positivos.")
+    A, y = [], []
+    for ang, vm in trials:
+        b = np.radians(float(ang))
+        A.append([2.0 * V0 * np.cos(b), -2.0 * V0 * np.sin(b), 1.0])
+        y.append(float(vm) ** 2 - V0 ** 2)
+    sol, *_ = np.linalg.lstsq(np.array(A), np.array(y), rcond=None)
+    p, q, r = float(sol[0]), float(sol[1]), float(sol[2])
+    HWt = complex(p, q)
+    if abs(HWt) < 1e-12:
+        raise ValueError("Respuesta nula al peso de prueba (sin sensibilidad).")
+    H = HWt / Wt
+    Wcorr = -complex(V0, 0.0) / H
+    cm, ca = to_polar(Wcorr)
+    pred = abs(complex(V0, 0.0) + H * Wcorr)
+    consistency = abs(r - (p * p + q * q)) / max(1e-9, abs(r))
+    quality = "GOOD" if consistency < 0.15 else ("MED" if consistency < 0.4 else "POOR")
+    return {"H": H, "Wcorr": Wcorr, "corr_mass_g": cm, "corr_ang_deg": ca,
+            "pred_mag": float(pred), "consistency": float(consistency),
+            "quality": quality,
+            "note": ("4 corridas sin fase — ángulo de corrección en la referencia "
+                     "FÍSICA del rotor (donde se colocó el peso de prueba).")}
