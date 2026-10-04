@@ -87,10 +87,12 @@ def _hero() -> None:
         mode = "1 plane"
     else:
         mode = "—"
+    _cfg = st.session_state.get("bal_cfg") or {}
     bal_hero_card(
-        asset_name=st.session_state.get("rep_asset") or "(unspecified asset)",
-        client=st.session_state.get("rep_client", ""),
-        site=st.session_state.get("rep_location", ""),
+        asset_name=(_cfg.get("asset") or st.session_state.get("rep_asset")
+                    or "(sin activo)"),
+        client=_cfg.get("client") or st.session_state.get("rep_client", ""),
+        site=_cfg.get("location") or st.session_state.get("rep_location", ""),
         mode=mode,
     )
 
@@ -477,9 +479,9 @@ def _source_badge(src: str) -> None:
 # Paso 1 — Origen de los datos
 # ---------------------------------------------------------------------
 def _set_source(val: str) -> None:
-    if st.session_state.get("bal_source") != val:
-        st.session_state["bal_source"] = val
-        st.session_state["bal_cfg_ok"] = False       # re-configurar al cambiar
+    st.session_state["bal_source"] = val
+    st.session_state["bal_cfg_ok"] = False            # re-configurar al cambiar
+    st.session_state["_pending_nav"] = "Configuración"  # pasar directo a config
 
 
 def _render_origen() -> None:
