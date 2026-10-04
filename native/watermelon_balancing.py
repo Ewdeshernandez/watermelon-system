@@ -28,7 +28,60 @@ from core.balance.engine import (
     solve_1plane, solve_2plane, recommend_trial_weight_g,
     evaluate_iso_grades, to_complex, to_polar, calc_U_trial, calc_U_res_auto,
     diagnose_1plane, diagnose_2plane,
+    split_to_buckets, split_to_positions, combine_weights,
+    diagnose_static_couple, trim_1plane, trim_2plane, solve_1plane_nophase,
 )
+
+
+# Config de posiciones de corrección (álabes/buckets/huecos) a nivel app.
+_BAL_POS = {"mode": "Ángulo libre", "n": 24, "offset": 0.0, "step": 30.0, "cw": False}
+
+
+def _split_text(W_mag: float, W_ang: float) -> str:
+    """Reparto de la corrección a posiciones instalables → texto plano (reporte)."""
+    mode = _BAL_POS.get("mode", "Ángulo libre")
+    if mode == "Ángulo libre" or not W_mag or W_mag <= 0:
+        return ""
+    try:
+        if mode.startswith("Álabes"):
+            res = split_to_buckets(W_mag, W_ang, int(_BAL_POS["n"]),
+                                   float(_BAL_POS["offset"]), bool(_BAL_POS["cw"]))
+            return " · ".join(f"bucket #{o.get('bucket')}: {o['mass']:,.2f} g" for o in res)
+        step = float(_BAL_POS["step"]); off = float(_BAL_POS["offset"])
+        poss = [(off + i * step) % 360.0 for i in range(int(round(360.0 / step)))]
+        res = split_to_positions(W_mag, W_ang, poss)
+        return " · ".join(f"{o['angle']:.0f}°: {o['mass']:,.2f} g" for o in res)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _split_html(W_mag: float, W_ang: float, title: str = "") -> str:
+    """Reparto de la corrección a posiciones instalables (álabes/huecos) → HTML."""
+    mode = _BAL_POS.get("mode", "Ángulo libre")
+    if mode == "Ángulo libre" or not W_mag or W_mag <= 0:
+        return ""
+    try:
+        if mode.startswith("Álabes"):
+            res = split_to_buckets(W_mag, W_ang, int(_BAL_POS["n"]),
+                                   float(_BAL_POS["offset"]), bool(_BAL_POS["cw"]))
+            rows = "".join(f"<tr><td>#{o.get('bucket')}</td><td>{o['angle']:.1f}°</td>"
+                           f"<td><b>{o['mass']:,.2f} g</b></td></tr>" for o in res)
+            head = "<tr><th>Álabe</th><th>Ángulo</th><th>Peso</th></tr>"
+        else:
+            step = float(_BAL_POS["step"]); off = float(_BAL_POS["offset"])
+            poss = [(off + i * step) % 360.0 for i in range(int(round(360.0 / step)))]
+            res = split_to_positions(W_mag, W_ang, poss)
+            rows = "".join(f"<tr><td>{o['angle']:.1f}°</td>"
+                           f"<td><b>{o['mass']:,.2f} g</b></td></tr>" for o in res)
+            head = "<tr><th>Posición</th><th>Peso</th></tr>"
+        _rc = combine_weights([(o["mass"], o["angle"]) for o in res])
+        return (f"<div style='margin-top:8px;padding:6px 10px;background:#f1f5f9;"
+                f"border-radius:8px;'><b>Instalar ({title}):</b>"
+                f"<table style='font-size:12px;margin-top:4px'>{head}{rows}</table>"
+                f"<span style='color:#64748b;font-size:11px'>Σ = {_rc[0]:,.2f} g ∠ "
+                f"{_rc[1]:.1f}° (= corrección)</span></div>")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _warn_html(warns) -> str:
@@ -49,7 +102,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.5.7"
+__version__ = "0.5.8"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -275,6 +328,31 @@ def build_app(simulated: bool = True):
     fr.addRow(T("Balance radius", "Radio de balanceo"), tw_r)
     fr.addRow(T("Trial factor k", "Factor de prueba k"), tw_k)
     fr.addRow(T("ISO grade G", "Grado ISO G"), iso_g)
+    # Posiciones de corrección (dónde se pueden instalar los pesos)
+    cb_posmode = QtWidgets.QComboBox()
+    cb_posmode.addItems([T("Free angle", "Ángulo libre"),
+                         T("Blades / buckets (N)", "Álabes / buckets (N)"),
+                         T("Holes every X°", "Huecos cada X°")])
+    sb_nbk = QtWidgets.QSpinBox(); sb_nbk.setRange(2, 400); sb_nbk.setValue(24)
+    sb_posoff = _dsb(0, 360, 0.0, 0, " °")        # referencia del #1 / primer hueco
+    sb_posstep = _dsb(1, 180, 30.0, 0, " °")      # paso de huecos
+    fr.addRow(T("Correction positions", "Posiciones de corrección"), cb_posmode)
+    fr.addRow(T("N blades/buckets", "N álabes/buckets"), sb_nbk)
+    fr.addRow(T("Ref #1 / hole step", "Ref #1 / paso huecos"), sb_posoff)
+    fr.addRow(T("Hole step [°]", "Paso de huecos [°]"), sb_posstep)
+
+    def _sync_pos(_=0):
+        _m = [T("Free angle", "Ángulo libre"),
+              "Álabes / buckets (N)", "Huecos cada X°"][cb_posmode.currentIndex()]
+        _BAL_POS["mode"] = ("Ángulo libre" if cb_posmode.currentIndex() == 0
+                            else ("Álabes / buckets (N)" if cb_posmode.currentIndex() == 1
+                                  else "Huecos cada X°"))
+        _BAL_POS["n"] = sb_nbk.value(); _BAL_POS["offset"] = sb_posoff.value()
+        _BAL_POS["step"] = sb_posstep.value()
+    for _w in (cb_posmode, sb_nbk, sb_posoff, sb_posstep):
+        (_w.currentIndexChanged if hasattr(_w, "currentIndexChanged")
+         else _w.valueChanged).connect(_sync_pos)
+    _sync_pos()
     cl.addWidget(gb_rotor)
 
     def _autoload(_=0):
@@ -297,6 +375,8 @@ def build_app(simulated: bool = True):
         _CFG.setValue("sens", sb_sens.value())
         _CFG.setValue("mass", iso_w.value()); _CFG.setValue("load", tw_w.value())
         _CFG.setValue("radius", tw_r.value()); _CFG.setValue("k", tw_k.value()); _CFG.setValue("G", iso_g.currentIndex())
+        _CFG.setValue("posmode", cb_posmode.currentIndex()); _CFG.setValue("nbk", sb_nbk.value())
+        _CFG.setValue("posoff", sb_posoff.value()); _CFG.setValue("posstep", sb_posstep.value())
         _cfgmsg.setText(T("✅ Configuration saved.", "✅ Configuración guardada."))
 
     def _load_config():
@@ -312,6 +392,11 @@ def build_app(simulated: bool = True):
             iso_w.setValue(float(_CFG.value("mass", 500.0) or 500.0)); tw_w.setValue(float(_CFG.value("load", 250.0) or 250.0))
             tw_r.setValue(float(_CFG.value("radius", 150.0) or 150.0)); tw_k.setValue(float(_CFG.value("k", 1.25) or 1.25))
             iso_g.setCurrentIndex(int(_CFG.value("G", 2)))
+            cb_posmode.setCurrentIndex(int(_CFG.value("posmode", 0)))
+            sb_nbk.setValue(int(_CFG.value("nbk", 24)))
+            sb_posoff.setValue(float(_CFG.value("posoff", 0.0) or 0.0))
+            sb_posstep.setValue(float(_CFG.value("posstep", 30.0) or 30.0))
+            _sync_pos()
         except Exception:  # noqa: BLE001
             pass
     btn_savecfg.clicked.connect(_save_config)
@@ -502,13 +587,25 @@ def build_app(simulated: bool = True):
                                  Vf_mag=_vf[0], Vf_ang=_vf[1])
         st["r1p"]["warnings"] = _warns
         _wh = _warn_html(_warns)
+        _sp = _split_html(r['corr_mass_g'], r['corr_ang_deg'], T("correction", "corrección"))
+        _trimtxt = ""
+        if vfm.value() > 0:
+            try:
+                _tr = trim_1plane(r, vfm.value(), vfa.value())
+                _trimtxt = (f"<div style='margin-top:6px;color:#166534;font-size:12px'>"
+                            f"<b>{T('Trim weight', 'Peso de ajuste (trim)')}:</b> "
+                            f"{_tr['trim_mass_g']:,.2f} g ∠ {_tr['trim_ang_deg']:.1f}°"
+                            f"{_split_html(_tr['trim_mass_g'], _tr['trim_ang_deg'], 'trim')}</div>")
+            except Exception:  # noqa: BLE001
+                pass
+        _sp = _sp + _trimtxt
         out1.setText(T(
             f"<b>Correction weight:</b> {r['corr_mass_g']:,.2f} g ∠ {r['corr_ang_deg']:.1f}°<br>"
             f"Predicted residual: {r['pred_mag']:.3f} {u} · model {r['quality']}<br>"
-            f"<span style='color:#64748b'>{r['note']}</span>{_wh}",
+            f"<span style='color:#64748b'>{r['note']}</span>{_sp}{_wh}",
             f"<b>Peso de corrección:</b> {r['corr_mass_g']:,.2f} g ∠ {r['corr_ang_deg']:.1f}°<br>"
             f"Residual predicho: {r['pred_mag']:.3f} {u} · modelo {r['quality']}<br>"
-            f"<span style='color:#64748b'>{r['note']}</span>{_wh}"))
+            f"<span style='color:#64748b'>{r['note']}</span>{_sp}{_wh}"))
 
     def _demo1():
         v0m.setValue(8.60); v0a.setValue(63.0); twm.setValue(10.0); twa.setValue(0.0)
@@ -594,13 +691,25 @@ def build_app(simulated: bool = True):
             cx(wam.value(), waa.value()), cx(wbm.value(), wba.value()))
         st["r2p"]["warnings"] = _warns
         _wh = _warn_html(_warns)
+        _spA = _split_html(wca_m, wca_a, "A"); _spB = _split_html(wcb_m, wcb_a, "B")
+        # Estático / par
+        _S = (r["WA_corr"] + r["WB_corr"]) / 2.0; _C = (r["WA_corr"] - r["WB_corr"]) / 2.0
+        _sc = diagnose_static_couple(abs(_S), abs(_C), abs(_C))
+        _km = {"STATIC": T("Static (planes in phase)", "Estático (planos en fase)"),
+               "COUPLE": T("Couple/dynamic (opposite)", "De par/dinámico (opuestos)"),
+               "MIXED": T("Mixed", "Mixto")}
+        _sctxt = (f"<div style='margin-top:6px;color:#334155;font-size:12px'>"
+                  f"<b>{_km.get(_sc.get('kind'), _sc.get('kind'))}</b> · |S|={abs(_S):,.2f} g · "
+                  f"|C|={abs(_C):,.2f} g (C/S={_sc.get('ratio_C_over_S', 0):.2f})</div>")
         out2.setText(T(
-            f"<b>Plane A correction:</b> {wca_m:,.2f} g ∠ {wca_a:.1f}°<br>"
-            f"<b>Plane B correction:</b> {wcb_m:,.2f} g ∠ {wcb_a:.1f}°<br>"
-            f"Predicted residual: A {aa_m:.3f} · B {ba_m:.3f} {u} · model {r['quality']}{_wh}",
-            f"<b>Corrección plano A:</b> {wca_m:,.2f} g ∠ {wca_a:.1f}°<br>"
-            f"<b>Corrección plano B:</b> {wcb_m:,.2f} g ∠ {wcb_a:.1f}°<br>"
-            f"Residual predicho: A {aa_m:.3f} · B {ba_m:.3f} {u} · modelo {r['quality']}{_wh}"))
+            f"<b>Plane A correction:</b> {wca_m:,.2f} g ∠ {wca_a:.1f}°{_spA}<br>"
+            f"<b>Plane B correction:</b> {wcb_m:,.2f} g ∠ {wcb_a:.1f}°{_spB}<br>"
+            f"Predicted residual: A {aa_m:.3f} · B {ba_m:.3f} {u} · model {r['quality']}"
+            f"{_sctxt}{_wh}",
+            f"<b>Corrección plano A:</b> {wca_m:,.2f} g ∠ {wca_a:.1f}°{_spA}<br>"
+            f"<b>Corrección plano B:</b> {wcb_m:,.2f} g ∠ {wcb_a:.1f}°{_spB}<br>"
+            f"Residual predicho: A {aa_m:.3f} · B {ba_m:.3f} {u} · modelo {r['quality']}"
+            f"{_sctxt}{_wh}"))
     btn2.clicked.connect(_solve2)
 
     def _demo2():
@@ -692,6 +801,9 @@ def build_app(simulated: bool = True):
                                    [T("Predicted residual", "Residual predicho"), f"{r['pred_mag']:,.3f} {u}"]]}})
             findings.append(T(f"Single-plane: place {r['corr_mass_g']:,.2f} g at {r['corr_ang_deg']:.0f}°; predicted residual {r['pred_mag']:,.2f} {u}.",
                               f"Un plano: colocar {r['corr_mass_g']:,.2f} g a {r['corr_ang_deg']:.0f}°; residual predicho {r['pred_mag']:,.2f} {u}."))
+            _st1 = _split_text(r['corr_mass_g'], r['corr_ang_deg'])
+            if _st1:
+                findings.append(T(f"Install split: {_st1}.", f"Reparto a instalar: {_st1}."))
         if r2p:
             r = r2p["result"]; wa = to_polar(r["WA_corr"]); wb = to_polar(r["WB_corr"])
             aa = to_polar(r["A_after"]); ba = to_polar(r["B_after"])
@@ -719,6 +831,17 @@ def build_app(simulated: bool = True):
                                    [T("Predicted residual B", "Residual predicho B"), f"{ba[0]:,.3f} {u}"]]}})
             findings.append(T(f"Two-plane: A {wa[0]:,.2f} g ∠ {wa[1]:.0f}°, B {wb[0]:,.2f} g ∠ {wb[1]:.0f}°.",
                               f"Dos planos: A {wa[0]:,.2f} g ∠ {wa[1]:.0f}°, B {wb[0]:,.2f} g ∠ {wb[1]:.0f}°."))
+            _sa = _split_text(wa[0], wa[1]); _sb = _split_text(wb[0], wb[1])
+            if _sa:
+                findings.append(T(f"Plane A split: {_sa}.", f"Reparto plano A: {_sa}."))
+            if _sb:
+                findings.append(T(f"Plane B split: {_sb}.", f"Reparto plano B: {_sb}."))
+            # Estático / par
+            _S = (r["WA_corr"] + r["WB_corr"]) / 2.0; _C = (r["WA_corr"] - r["WB_corr"]) / 2.0
+            _sc = diagnose_static_couple(abs(_S), abs(_C), abs(_C))
+            findings.append(T(
+                f"Unbalance type: {_sc.get('kind')} (|S|={abs(_S):,.2f} g, |C|={abs(_C):,.2f} g).",
+                f"Tipo de desbalance: {_sc.get('kind')} (|S|={abs(_S):,.2f} g, |C|={abs(_C):,.2f} g)."))
         if iso:
             _bg = iso.get("best_grade")
             quality.append((T("ISO 21940 quality", "Calidad ISO 21940"),
