@@ -143,3 +143,15 @@ def load_run(run_id: str) -> Optional[Dict[str, Any]]:
     except Exception:  # noqa: BLE001
         return None
     return None
+
+
+def delete_run(run_id: str) -> Dict[str, Any]:
+    """Borra una corrida/borrador de `balance_runs` por su id. No se puede deshacer."""
+    c = _client()
+    if c is None:
+        return {"ok": False, "reason": "offline"}
+    try:
+        c.table(_RUNS_TABLE).delete().eq("id", run_id).execute()
+        return {"ok": True, "id": run_id}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}

@@ -189,8 +189,8 @@ def _restore_draft(payload: dict) -> None:
     _cfg = payload.get("bal_cfg") or {}
     if _cfg:
         _apply_cfg(_cfg)
-    st.session_state["bal_nav"] = ("Balanceo" if st.session_state["bal_cfg_ok"]
-                                   else "Origen")
+    st.session_state["_pending_nav"] = ("Balanceo" if st.session_state["bal_cfg_ok"]
+                                        else "Origen")
 
 
 def _reset_balance() -> None:
@@ -200,7 +200,7 @@ def _reset_balance() -> None:
                 k.startswith("_keep_") or k.startswith("b1_") or k.startswith("b2_")
                 or k.startswith("iso_") or k.startswith("rep_") or k.startswith("cfg_")
                 or k in _DRAFT_SCALARS or k in (
-                    "bal_cfg_ok", "bal_pdf", "bal_nav", "_draft_hash", "_draft_id")):
+                    "bal_cfg_ok", "bal_pdf", "_draft_hash", "_draft_id")):
             del st.session_state[k]
 
 
@@ -403,6 +403,14 @@ _flow_html = " ".join(
     for _lbl, _d in _steps_vis)
 st.markdown(f"<div style='margin:6px 0 8px'>{_flow_html}</div>", unsafe_allow_html=True)
 
+# Aplica un cambio de paso PENDIENTE (de validar config / cargar / reanudar)
+# ANTES de crear el widget — no se puede modificar bal_nav después de instanciarlo.
+_pn = st.session_state.pop("_pending_nav", None)
+if _pn and _pn in _NAV:
+    st.session_state["bal_nav"] = _pn
+elif st.session_state.get("bal_nav") not in _NAV:
+    st.session_state.pop("bal_nav", None)             # evita valor inválido en el widget
+
 if hasattr(st, "segmented_control"):
     _active = st.segmented_control(
         "Paso", _NAV, key="bal_nav", label_visibility="collapsed")
@@ -489,7 +497,7 @@ def _render_origen() -> None:
                                f"{(d.get('updated_at') or '')[:16]}" for d in _drafts}
             _pick = st.selectbox("Borradores", list(_do.keys()),
                                  format_func=lambda x: _do.get(x, x), key="resume_pick")
-            rc1, rc2 = st.columns([1, 3])
+            rc1, rc2, rc3 = st.columns([1, 1, 2])
             with rc1:
                 if st.button("Reanudar", type="primary", key="resume_btn"):
                     from core.balance import cloud
@@ -502,7 +510,20 @@ def _render_origen() -> None:
                     else:
                         st.error("No se pudo cargar el borrador.")
             with rc2:
-                st.caption("O empieza uno nuevo eligiendo un origen abajo.")
+                _del_ok = st.checkbox("Confirmar borrar", key="draft_del_ok")
+                if st.button("Borrar", key="draft_del_btn", disabled=not _del_ok):
+                    from core.balance import cloud
+                    _r = cloud.delete_run(_pick)
+                    if _r.get("ok"):
+                        if st.session_state.get("_draft_id") == _pick:
+                            st.session_state.pop("_draft_id", None)
+                        st.success("Borrador eliminado (no se puede deshacer).")
+                        st.rerun()
+                    else:
+                        st.error(f"No se pudo borrar: {_r.get('reason', '—')}")
+            with rc3:
+                st.caption("Borrar es permanente. O empieza uno nuevo eligiendo "
+                           "un origen abajo.")
 
     _opts = [
         ("Manual", "Datos manuales",
@@ -634,7 +655,22 @@ def _render_config() -> None:
                             f"{(r.get('updated_at') or '')[:16]}" for r in runs}
         _rid = st.selectbox("Corrida de campo", list(_ro.keys()),
                             format_func=lambda x: _ro.get(x, x), key="cfg_run")
-        if st.button("Cargar corrida", type="primary"):
+        _fc1, _fc2, _fc3 = st.columns([1, 1, 2])
+        with _fc1:
+            _load_click = st.button("Cargar corrida", type="primary")
+        with _fc2:
+            _fdel_ok = st.checkbox("Confirmar borrar", key="run_del_ok")
+            _del_click = st.button("Borrar", key="run_del_btn", disabled=not _fdel_ok)
+        with _fc3:
+            st.caption("Borrar una corrida de campo es permanente.")
+        if _del_click:
+            _r = cloud.delete_run(_rid)
+            if _r.get("ok"):
+                st.success("Corrida eliminada (no se puede deshacer).")
+                st.rerun()
+            else:
+                st.error(f"No se pudo borrar: {_r.get('reason', '—')}")
+        if _load_click:
             try:
                 payload = cloud.load_run(_rid)
                 if not payload:
@@ -642,7 +678,7 @@ def _render_config() -> None:
                     return
                 _load_field_payload(payload)
                 st.session_state["bal_cfg_ok"] = True
-                st.session_state["bal_nav"] = "Balanceo"
+                st.session_state["_pending_nav"] = "Balanceo"
                 st.success("Corrida cargada. Revisa el balanceo y el reporte.")
                 st.rerun()
             except Exception as e:  # noqa: BLE001
@@ -729,7 +765,7 @@ def _render_config() -> None:
             st.session_state["bal_cfg"] = _cfg
             st.session_state["bal_src"] = "Live" if src == "Live" else "Manual"
             st.session_state["bal_cfg_ok"] = True
-            st.session_state["bal_nav"] = "Balanceo"
+            st.session_state["_pending_nav"] = "Balanceo"
             _apply_cfg(_cfg)
             st.success("Configuración validada. Continúa en **Balanceo**.")
             st.rerun()
