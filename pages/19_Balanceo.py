@@ -181,20 +181,24 @@ def _trial_weight_suggester(prefix: str, mag_key: str,
     with st.expander(title, expanded=False):
         st.caption("W = weight supported by **this plane** (≈ ½ of the rotor "
                    "between 2 bearings). API 684 formula: W_trial = 6350·W·k / (N·radius).")
+        _cfg = st.session_state.get("bal_cfg") or {}
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            _num(f"{prefix}_sw", "Plane weight W [kg]", 3500.0,
+            _num(f"{prefix}_sw", "Plane weight W [kg]",
+                 float((_cfg.get("rotor_mass") or 0.0) / 2.0) or 3500.0,
                  min_value=0.0, step=10.0, format="%.1f")
         with c2:
             _num(f"{prefix}_sn", "Speed N [rpm]",
-                 float(st.session_state.get("iso_rpm")
+                 float(_cfg.get("rpm") or st.session_state.get("iso_rpm")
                        or st.session_state.get("tw_rpm") or 3600.0),
                  min_value=0.0, step=10.0, format="%.0f")
         with c3:
-            _num(f"{prefix}_sr", "Radius [mm]", 420.0,
+            _num(f"{prefix}_sr", "Radius [mm]",
+                 float(_cfg.get("radius") or 0.0) or 420.0,
                  min_value=0.0, step=1.0, format="%.1f")
         with c4:
-            _num(f"{prefix}_sk", "Factor k", 1.25,
+            _num(f"{prefix}_sk", "Factor k",
+                 float(_cfg.get("trial_k") or 1.25),
                  min_value=0.2, max_value=2.0, step=0.05, format="%.2f")
         Wt, _u = recommend_trial_weight_g(
             st.session_state[f"{prefix}_sw"], st.session_state[f"{prefix}_sn"],
@@ -226,30 +230,36 @@ def _plane_label(p) -> str:
 
 
 # =====================================================================
-# Navegación por pasos — BLOQUEO REAL del flujo (paridad con el campo)
+# Navegación por pasos — BLOQUEO REAL del flujo
 # =====================================================================
-# Streamlit no deshabilita st.tabs, así que se usa un control por pasos que SOLO
-# ofrece los pasos desbloqueados: ISO y Reporte no aparecen hasta completar un
-# balanceo (1 o 2 planos). No se puede saltar el flujo.
+# Primero se elige el ORIGEN de los datos; luego la CONFIGURACIÓN de la máquina
+# (obligatoria en Manual; ya viene con los datos en Campo/En línea). Hasta no
+# completar config no se habilita el balanceo; ISO y Reporte requieren resultado.
+_src = st.session_state.get("bal_source")                      # None hasta elegir
+_cfg_ok = bool(st.session_state.get("bal_cfg_ok"))
 _has_result = bool(st.session_state.get("bal_r1p") or st.session_state.get("bal_r2p"))
 _has_iso = bool(st.session_state.get("bal_iso")) and _has_result
 _has_pdf = bool(st.session_state.get("bal_pdf"))
 
-# Stepper de progreso (visual): muestra los 4 pasos; gris = bloqueado.
-_flow_steps = [("1 · Datos", True), ("2 · Cálculo", _has_result),
-               ("3 · Validación ISO", _has_iso), ("4 · Reporte", _has_pdf)]
+_NAV = ["Origen"]
+if _src:
+    _NAV.append("Configuración")
+if _cfg_ok:
+    _NAV += ["Peso prueba", "1 plano", "2 planos"]
+if _has_result:
+    _NAV += ["Validación ISO", "Reporte"]
+
+# Stepper visual (muestra las etapas; gris = bloqueada).
+_steps_vis = [("1 · Origen", True), ("2 · Configuración", bool(_src)),
+              ("3 · Balanceo", _cfg_ok), ("4 · Validación ISO", _has_iso),
+              ("5 · Reporte", _has_pdf)]
 _flow_html = " ".join(
-    f"<span style='color:{'#10b981' if _d else '#cbd5e1'};font-size:15px'>●</span>"
+    f"<span style='color:{'#10b981' if _d else '#cbd5e1'};font-size:14px'>●</span>"
     f"<span style='color:{'#0b1f3a' if _d else '#94a3b8'};"
-    f"font-weight:{700 if _d else 500};font-size:13px;margin:0 16px 0 5px'>{_lbl}</span>"
-    for _lbl, _d in _flow_steps)
+    f"font-weight:{700 if _d else 500};font-size:12px;margin:0 14px 0 5px'>{_lbl}</span>"
+    for _lbl, _d in _steps_vis)
 st.markdown(f"<div style='margin:6px 0 8px'>{_flow_html}</div>", unsafe_allow_html=True)
 
-_NAV = ["Trial weight", "1 plane", "2 planes"] + (
-    ["ISO validation", "Report"] if _has_result else [])
-if not _has_result:
-    st.caption("ISO y Reporte se habilitan al completar un balanceo "
-               "(1 plano o 2 planos).")
 if hasattr(st, "segmented_control"):
     _active = st.segmented_control(
         "Paso", _NAV, key="bal_nav", label_visibility="collapsed")
@@ -257,7 +267,7 @@ else:
     _active = st.radio("Paso", _NAV, key="bal_nav", horizontal=True,
                        label_visibility="collapsed")
 if _active not in _NAV:
-    _active = "Trial weight"
+    _active = _NAV[-1] if _NAV else "Origen"
 
 
 def _render_bal_warnings(warns):
@@ -273,6 +283,7 @@ def _render_bal_warnings(warns):
 def _source_label(src: str) -> str:
     """Etiqueta legible de la fuente de datos."""
     return {"Manual": "Datos manuales (escritos)",
+            "Live": "Monitoreo en línea (1X en vivo)",
             "Live Monitoring": "Monitoreo en línea (1X en vivo)",
             "Campo": "Enviado de campo"}.get(src, src or "—")
 
@@ -280,6 +291,7 @@ def _source_label(src: str) -> str:
 def _source_badge(src: str) -> None:
     """Chip visible con el ORIGEN de los datos (manual / en línea / campo)."""
     _c = {"Manual": ("#12305e", "#e8eefb", "#c7d7f0"),
+          "Live": ("#166534", "#e8f6ee", "#b7e4c7"),
           "Live Monitoring": ("#166534", "#e8f6ee", "#b7e4c7"),
           "Campo": ("#8a5a00", "#fdf2e0", "#f3d9ad")}
     fg, bg, bd = _c.get(src, ("#475569", "#f1f5f9", "#e2e8f2"))
@@ -291,9 +303,253 @@ def _source_badge(src: str) -> None:
 
 
 # ---------------------------------------------------------------------
-# 1) Peso de prueba (API 684)
+# Paso 1 — Origen de los datos
 # ---------------------------------------------------------------------
-if _active == "Trial weight":
+def _set_source(val: str) -> None:
+    if st.session_state.get("bal_source") != val:
+        st.session_state["bal_source"] = val
+        st.session_state["bal_cfg_ok"] = False       # re-configurar al cambiar
+
+
+def _render_origen() -> None:
+    bal_section_header("Origen de los datos",
+                       "Elige de dónde vienen los datos del balanceo.",
+                       "Paso 1", "●")
+    _opts = [
+        ("Manual", "Datos manuales",
+         "Tú escribes la configuración de la máquina y los vectores de vibración."),
+        ("Campo", "Enviado de campo",
+         "Carga una corrida subida desde el equipo de campo (trae todo listo)."),
+        ("Live", "Monitoreo en línea",
+         "Toma el vector 1X en vivo de una máquina monitoreada."),
+    ]
+    cols = st.columns(3)
+    for col, (val, title, desc) in zip(cols, _opts):
+        with col:
+            _sel = st.session_state.get("bal_source") == val
+            st.button(("● " if _sel else "") + title, key=f"src_{val}",
+                      use_container_width=True,
+                      type=("primary" if _sel else "secondary"),
+                      on_click=_set_source, args=(val,))
+            st.markdown(f"<div style='font-size:11px;color:#64748b;line-height:1.4;"
+                        f"margin-top:4px'>{desc}</div>", unsafe_allow_html=True)
+    if st.session_state.get("bal_source"):
+        st.markdown("")
+        st.caption("Continúa en **Configuración**.")
+
+
+# ---------------------------------------------------------------------
+# Paso 2 — Configuración de la máquina
+# ---------------------------------------------------------------------
+_ISO_GRADES_UI = ["0.4", "1.0", "2.5", "6.3", "16.0"]
+
+
+def _apply_cfg(cfg: dict) -> None:
+    """Propaga la config a las claves que usan los pasos de balanceo (ISO/trial/
+    unidad/giro), para no re-teclear nada."""
+    try:
+        st.session_state["iso_w"] = float(cfg.get("rotor_mass") or 0.0)
+        st.session_state["iso_rpm"] = float(cfg.get("rpm") or 0.0)
+    except Exception:  # noqa: BLE001
+        pass
+    _u = cfg.get("unit")
+    if _u in UNITS:                       # evita romper el selectbox con una unidad ajena
+        st.session_state["b1_unit"] = _u
+        st.session_state["b2_unit"] = _u
+    _rot = cfg.get("rotation") if cfg.get("rotation") in ("CCW", "CW") else "CCW"
+    st.session_state["b1_rot"] = _rot
+    st.session_state["b2_rot"] = _rot
+
+
+def _load_field_payload(payload: dict) -> dict:
+    """Carga una corrida de campo (o nube) a la sesión: config + vectores +
+    resultados + avisos. Devuelve el cfg derivado."""
+    _one = payload.get("one_plane") or {}
+    _two = payload.get("two_plane") or {}
+    _iso = payload.get("iso") or {}
+    _setup = payload.get("setup") or {}
+    _unit = payload.get("unit") or _one.get("unit") or _two.get("unit") or "mils pk-pk"
+
+    def _put(prefix, vec):
+        if vec and len(vec) == 2:
+            st.session_state[f"{prefix}_mag"] = float(vec[0])
+            st.session_state[f"{prefix}_ang"] = float(vec[1])
+
+    if _one.get("result"):
+        st.session_state["bal_r1p"] = _one["result"]
+        st.session_state["bal_r1p_warn"] = _one.get("warnings") or []
+        _put("b1_v0", _one.get("v0")); _put("b1_tw", _one.get("trial"))
+        _put("b1_vt", _one.get("vt")); _put("b1_vf", _one.get("vf"))
+    if _two.get("result"):
+        st.session_state["bal_r2p"] = _two["result"]
+        st.session_state["bal_r2p_warn"] = _two.get("warnings") or []
+        for _p, _k in (("b2_a0", "a0"), ("b2_b0", "b0"), ("b2_a1", "a1"),
+                       ("b2_b1", "b1"), ("b2_a2", "a2"), ("b2_b2", "b2"),
+                       ("b2_wa", "wa"), ("b2_wb", "wb"),
+                       ("b2_vfa", "vf_a"), ("b2_vfb", "vf_b")):
+            _put(_p, _two.get(_k))
+    if _iso:
+        st.session_state["bal_iso"] = _iso
+
+    cfg = {
+        "asset": _setup.get("machine") or _setup.get("tag") or "",
+        "client": _setup.get("client") or "",
+        "location": _setup.get("location") or "",
+        "specialist": _setup.get("operator") or "",
+        "rpm": float(_iso.get("N_rpm") or _setup.get("nameplate_rpm") or 0.0),
+        "rotor_mass": float(_iso.get("W_kg") or 0.0),
+        "radius": 0.0,
+        "trial_k": 1.25,
+        "iso_g": "2.5",
+        "planes": "2 planes" if _two.get("result") else "1 plane",
+        "rotation": "CCW",
+        "unit": _unit,
+    }
+    st.session_state["bal_cfg"] = cfg
+    st.session_state["bal_src"] = "Campo"
+    _apply_cfg(cfg)
+    return cfg
+
+
+def _render_config() -> None:
+    src = st.session_state.get("bal_source")
+    _source_badge(src)
+    cfg = st.session_state.get("bal_cfg") or {}
+
+    # ---- Campo: cargar una corrida subida desde el equipo ----
+    if src == "Campo":
+        bal_section_header("Configuración — Enviado de campo",
+                           "Carga una corrida de balanceo subida desde el equipo. "
+                           "Trae la configuración, los vectores y el resultado.",
+                           "Paso 2", "●")
+        try:
+            from core.balance import cloud
+            runs = cloud.list_runs() or []
+        except Exception as e:  # noqa: BLE001
+            st.error(f"No se pudo leer la nube: {e}")
+            return
+        if not runs:
+            st.info("No hay corridas de balanceo en la nube todavía. Sube una "
+                    "desde el módulo de campo (Watermelon Balancing).")
+            return
+        _ro = {r.get("id"): f"{r.get('tag') or r.get('id')}  ·  "
+                            f"{(r.get('updated_at') or '')[:16]}" for r in runs}
+        _rid = st.selectbox("Corrida de campo", list(_ro.keys()),
+                            format_func=lambda x: _ro.get(x, x), key="cfg_run")
+        if st.button("Cargar corrida", type="primary"):
+            try:
+                payload = cloud.load_run(_rid)
+                if not payload:
+                    st.error("No se pudo cargar la corrida.")
+                    return
+                _load_field_payload(payload)
+                st.session_state["bal_cfg_ok"] = True
+                st.success("Corrida cargada. Revisa el balanceo y el reporte.")
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Error al cargar: {e}")
+        if cfg:
+            st.caption(f"Cargado: **{cfg.get('asset','—')}** · {cfg.get('planes','—')} "
+                       f"· {cfg.get('rpm',0):.0f} rpm · {cfg.get('unit','')}")
+        return
+
+    # ---- Live: elegir la máquina monitoreada (el 1X se captura en el balanceo) ----
+    _live_iid = None
+    if src == "Live":
+        bal_section_header("Configuración — Monitoreo en línea",
+                           "Elige la máquina monitoreada. El vector 1X se captura "
+                           "en vivo en el paso de balanceo.", "Paso 2", "●")
+        _live_iid, _planes = _machine_and_planes("cfg_live")
+        if _live_iid:
+            st.session_state["bal_live_iid"] = _live_iid
+    else:
+        bal_section_header("Configuración de la máquina",
+                           "Completa los datos del rotor. Son obligatorios antes "
+                           "de balancear.", "Paso 2", "●")
+
+    # ---- Formulario físico (Manual y Live) ----
+    with st.form("bal_cfg_form"):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            _asset = st.text_input("Activo / Tag", value=cfg.get("asset", ""))
+            _client = st.text_input("Cliente", value=cfg.get("client", ""))
+            _specialist = st.text_input(
+                "Especialista", value=cfg.get("specialist", _user.get("full_name") or ""))
+        with c2:
+            _location = st.text_input("Sitio / ubicación", value=cfg.get("location", ""))
+            _rpm = st.number_input("RPM de operación",
+                                   value=float(cfg.get("rpm") or 3600.0),
+                                   min_value=0.0, step=10.0, format="%.0f")
+            _planes = st.radio("Planos de balanceo", ["1 plane", "2 planes"],
+                               index=(1 if cfg.get("planes") == "2 planes" else 0),
+                               horizontal=True)
+        with c3:
+            _mass = st.number_input("Masa del rotor [kg]",
+                                    value=float(cfg.get("rotor_mass") or 0.0),
+                                    min_value=0.0, step=10.0, format="%.1f")
+            _radius = st.number_input("Radio de balanceo [mm]",
+                                      value=float(cfg.get("radius") or 0.0),
+                                      min_value=0.0, step=1.0, format="%.1f")
+            _k = st.number_input("Factor de prueba k",
+                                 value=float(cfg.get("trial_k") or 1.25),
+                                 min_value=0.2, max_value=2.0, step=0.05, format="%.2f")
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            _iso_g = st.selectbox("Grado ISO objetivo", _ISO_GRADES_UI,
+                                  index=_ISO_GRADES_UI.index(cfg.get("iso_g", "2.5"))
+                                  if cfg.get("iso_g", "2.5") in _ISO_GRADES_UI else 2)
+        with c5:
+            _rot = st.selectbox("Sentido de giro", ["CCW", "CW"],
+                                index=(1 if cfg.get("rotation") == "CW" else 0))
+        with c6:
+            _unit = st.selectbox("Unidad de vibración", UNITS,
+                                 index=UNITS.index(cfg.get("unit"))
+                                 if cfg.get("unit") in UNITS else 0)
+        _ok = st.form_submit_button("Validar configuración y continuar",
+                                    type="primary", use_container_width=True)
+    if _ok:
+        _miss = []
+        if not _asset.strip():
+            _miss.append("Activo / Tag")
+        if _rpm <= 0:
+            _miss.append("RPM")
+        if _mass <= 0:
+            _miss.append("Masa del rotor")
+        if _radius <= 0:
+            _miss.append("Radio de balanceo")
+        if src == "Live" and not st.session_state.get("bal_live_iid"):
+            _miss.append("Máquina monitoreada")
+        if _miss:
+            st.error("Faltan datos obligatorios: " + ", ".join(_miss))
+        else:
+            _cfg = {"asset": _asset.strip(), "client": _client.strip(),
+                    "location": _location.strip(), "specialist": _specialist.strip(),
+                    "rpm": float(_rpm), "rotor_mass": float(_mass),
+                    "radius": float(_radius), "trial_k": float(_k),
+                    "iso_g": _iso_g, "planes": _planes, "rotation": _rot, "unit": _unit}
+            st.session_state["bal_cfg"] = _cfg
+            st.session_state["bal_src"] = "Live" if src == "Live" else "Manual"
+            st.session_state["bal_cfg_ok"] = True
+            _apply_cfg(_cfg)
+            st.success("Configuración validada. Continúa en **Peso prueba** / "
+                       "**1 plano** / **2 planos**.")
+            st.rerun()
+
+
+# ---------------------------------------------------------------------
+# Pasos 1 y 2 — Origen + Configuración
+# ---------------------------------------------------------------------
+if _active == "Origen":
+    _render_origen()
+
+if _active == "Configuración":
+    _render_config()
+
+
+# ---------------------------------------------------------------------
+# Peso de prueba (API 684)
+# ---------------------------------------------------------------------
+if _active == "Peso prueba":
     bal_section_header("Trial weight", "Starting mass to produce a measurable "
                        "vector change.", "API 684 · Umax = 6350·W/N", "⚙️")
     with st.container(border=True):
@@ -325,7 +581,7 @@ if _active == "Trial weight":
 # ---------------------------------------------------------------------
 # 2) Balanceo en 1 plano
 # ---------------------------------------------------------------------
-if _active == "1 plane":
+if _active == "1 plano":
     bal_section_header("Single-plane balancing",
                        "H = (Vt − V0) / Wt  ·  Wcorr = −V0 / H",
                        "ISO 21940-12 · influence coefficient", "🎯")
@@ -342,19 +598,17 @@ if _active == "1 plane":
                 unsafe_allow_html=True)
     st.markdown("<div style='font-size:13px;color:#64748b'><span style='color:#dc3545'>●</span> Measured vibration (V0) &nbsp;·&nbsp; <span style='color:#2563eb'>●</span> Correction weight to install (appears on calculation)</div>", unsafe_allow_html=True)
 
-    top = st.columns([1, 1, 1])
+    top = st.columns([1, 1])
     with top[0]:
         unit1 = st.selectbox("Vibration unit", UNITS, key="b1_unit")
     with top[1]:
         st.selectbox("Rotation direction", ["CCW", "CW"], key="b1_rot",
                      help="Orients the angular scale against rotation (balancing "
                           "convention). Does not affect the calculation.")
-    with top[2]:
-        source1 = st.radio("Data source", ["Manual", "Live Monitoring"],
-                           key="b1_source", horizontal=True)
-    _source_badge(source1)
+    _bsrc = st.session_state.get("bal_source")
+    _source_badge(_bsrc)
 
-    if source1 == "Live Monitoring":
+    if _bsrc == "Live":
         with st.container(border=True):
             iid, planes = _machine_and_planes("b1_live")
             if planes:
@@ -398,7 +652,7 @@ if _active == "1 plane":
         try:
             _res1 = solve_1plane(v0m, v0a, vtm, vta, twm, twa)
             st.session_state["bal_r1p"] = _res1
-            st.session_state["bal_src"] = st.session_state.get("b1_source", "Manual")
+            st.session_state["bal_src"] = st.session_state.get("bal_source", "Manual")
             _vfm = st.session_state.get("b1_vf_mag")
             st.session_state["bal_r1p_warn"] = diagnose_1plane(
                 _res1, v0m, v0a, vtm, vta, twm, twa,
@@ -440,7 +694,7 @@ if _active == "1 plane":
 # ---------------------------------------------------------------------
 # 3) Balanceo en 2 planos
 # ---------------------------------------------------------------------
-if _active == "2 planes":
+if _active == "2 planos":
     bal_section_header("Two-plane balancing",
                        "2×2 influence coefficient matrix · runs "
                        "0 (initial) · 1 (trial A) · 2 (trial B).",
@@ -464,19 +718,17 @@ if _active == "2 planes":
                 unsafe_allow_html=True)
     st.markdown("<div style='font-size:13px;color:#64748b'><span style='color:#dc3545'>●</span> Initial vibration (A0/B0) &nbsp;·&nbsp; <span style='color:#2563eb'>●</span> Correction weights (appear on calculation)</div>", unsafe_allow_html=True)
 
-    top = st.columns([1, 1, 1])
+    top = st.columns([1, 1])
     with top[0]:
         unit2 = st.selectbox("Vibration unit", UNITS, key="b2_unit")
     with top[1]:
         st.selectbox("Rotation direction", ["CCW", "CW"], key="b2_rot",
                      help="Orients the angular scale against rotation (balancing "
                           "convention). Does not affect the calculation.")
-    with top[2]:
-        source2 = st.radio("Data source", ["Manual", "Live Monitoring"],
-                           key="b2_source", horizontal=True)
-    _source_badge(source2)
+    _bsrc = st.session_state.get("bal_source")
+    _source_badge(_bsrc)
 
-    if source2 == "Live Monitoring":
+    if _bsrc == "Live":
         with st.container(border=True):
             iid, planes = _machine_and_planes("b2_live")
             if planes and len(planes) >= 2:
@@ -550,7 +802,7 @@ if _active == "2 planes":
             _cWA, _cWB = to_complex(wam, waa), to_complex(wbm, wba)
             _res2 = solve_2plane(_cA0, _cB0, _cA1, _cB1, _cA2, _cB2, _cWA, _cWB)
             st.session_state["bal_r2p"] = _res2
-            st.session_state["bal_src"] = st.session_state.get("b2_source", "Manual")
+            st.session_state["bal_src"] = st.session_state.get("bal_source", "Manual")
             _vfa = st.session_state.get("b2_vfa_mag")
             _vfb = st.session_state.get("b2_vfb_mag")
             st.session_state["bal_r2p_warn"] = diagnose_2plane(
@@ -610,7 +862,7 @@ if _active == "2 planes":
 # ---------------------------------------------------------------------
 # 4) Validación ISO 21940-11
 # ---------------------------------------------------------------------
-if _active == "ISO validation":
+if _active == "Validación ISO":
     bal_section_header("ISO validation",
                        "e_per = 9549·G/N  ·  U_per = e_per·W. The residual is "
                        "evaluated against ISO 21940 grades.",
@@ -682,7 +934,7 @@ if _active == "ISO validation":
 # ---------------------------------------------------------------------
 # 5) Reporte
 # ---------------------------------------------------------------------
-if _active == "Report":
+if _active == "Reporte":
     bal_section_header("Report", "Session summary and branded "
                        "Watermelon/SIGA PDF.", "ISO 21940 · API 684", "⎙")
 
