@@ -138,6 +138,45 @@ def _vec(v: Optional[Tuple[float, float]], unit: str) -> str:
 # =====================================================================
 # Constructor principal
 # =====================================================================
+def _split_flow(W_mag, W_ang, positions, styles):
+    """Devuelve flowables con el reparto de la corrección a posiciones instalables
+    (álabes/buckets o huecos), o [] si el modo es ángulo libre."""
+    mode = (positions or {}).get("pos_mode", "Ángulo libre")
+    if not mode or mode == "Ángulo libre" or not W_mag or W_mag <= 0:
+        return []
+    try:
+        from core.balance.engine import (split_to_buckets, split_to_positions,
+                                          combine_weights)
+    except Exception:  # noqa: BLE001
+        return []
+    if str(mode).startswith("Álabes"):
+        res = split_to_buckets(W_mag, W_ang, int(positions.get("n_buckets") or 24),
+                               float(positions.get("pos_offset") or 0.0),
+                               bool(positions.get("pos_cw", False)))
+        rows = [[f"#{o.get('bucket')}", f"{_fmt(o['angle'], 1)}°",
+                 f"{_fmt(o['mass'], 2)} g"] for o in res]
+        head = ["Álabe / Bucket", "Ángulo", "Peso a instalar"]
+    else:
+        step = float(positions.get("hole_step") or 30.0)
+        off = float(positions.get("pos_offset") or 0.0)
+        poss = [(off + i * step) % 360.0 for i in range(int(round(360.0 / step)))]
+        res = split_to_positions(W_mag, W_ang, poss)
+        rows = [[f"{_fmt(o['angle'], 1)}°", f"{_fmt(o['mass'], 2)} g"] for o in res]
+        head = ["Posición (hueco)", "Peso a instalar"]
+    if not res:
+        return []
+    _rc = combine_weights([(o["mass"], o["angle"]) for o in res])
+    out = [_p(f"<b>Reparto a posiciones instalables</b> (corrección "
+              f"{_fmt(W_mag, 2)} g ∠ {_fmt(W_ang, 1)}°):", styles, "WMBody"),
+           _grid_table(head, rows, styles,
+                       col_widths=([4.0 * cm] * len(head)) if len(head) == 3
+                       else [8.1 * cm, 8.1 * cm]),
+           _p(f"Verificación: suma vectorial = {_fmt(_rc[0], 2)} g ∠ "
+              f"{_fmt(_rc[1], 1)}° (igual a la corrección).", styles, "WMBody"),
+           Spacer(1, 0.3 * cm)]
+    return out
+
+
 def build_balance_pdf(
     *,
     meta: Dict[str, Any],
@@ -210,6 +249,9 @@ def build_balance_pdf(
                 _t1 += " — <b>EL PLANO EMPEORÓ</b>, no es una mejora."
             body.append(Spacer(1, 0.2 * cm))
             body.append(_p(_t1, styles, "WMBody"))
+        for _f in _split_flow(r.get("corr_mass_g"), r.get("corr_ang_deg"),
+                              meta.get("positions"), styles):
+            body.append(_f)
         if v0:
             after = one_plane.get("vf") or (r.get("pred_mag"), r.get("pred_ang"))
             png = polar_png("Vector 1 plano (antes / después)", v0, after, u)
@@ -267,6 +309,15 @@ def build_balance_pdf(
         body.append(Spacer(1, 0.2 * cm))
         body.append(_p(f"Calidad del modelo: <b>{r.get('quality', '—')}</b> · "
                        f"cond(M) = {_fmt(r.get('cond'), 1)}", styles, "WMBody"))
+        _wa_mag, _wa_ang = _to_mag(r.get("WA_corr"))
+        _wb_mag, _wb_ang = _to_mag(r.get("WB_corr"))
+        for _plabel, _wm, _wa in (("Plano A", _wa_mag, _wa_ang),
+                                  ("Plano B", _wb_mag, _wb_ang)):
+            _rows = _split_flow(_wm, _wa, meta.get("positions"), styles)
+            if _rows:
+                body.append(_p(f"<b>{_plabel}</b>", styles, "WMBody"))
+                for _f in _rows:
+                    body.append(_f)
         # Diagramas polares por sonda (vibración antes/después) — como en 1 plano.
         _imgs = []
         for _lbl, _v0key, _afterkey, _vfkey in (("A", "a0", "A_after", "vf_a"),

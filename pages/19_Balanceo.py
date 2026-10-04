@@ -1396,6 +1396,9 @@ if _active == "Reporte":
                     "rotation": (st.session_state.get("b1_rot")
                                  or st.session_state.get("b2_rot") or "CCW"),
                     "data_source": _source_label(st.session_state.get("bal_src", "Manual")),
+                    "positions": {k: (st.session_state.get("bal_cfg") or {}).get(k)
+                                  for k in ("pos_mode", "n_buckets", "hole_step",
+                                            "pos_offset", "pos_cw")},
                     "notes": rep_notes,
                 }
                 st.session_state["bal_pdf"] = build_balance_pdf(
