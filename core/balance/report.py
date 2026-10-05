@@ -38,6 +38,40 @@ _HEADER_BG = "#0f4c81"
 # =====================================================================
 # Polar plot (antes / después) — matplotlib, PNG bytes
 # =====================================================================
+def nomogram_png(W_kg: float, U_res_gmm: float, rpm: float) -> Optional[bytes]:
+    """Nomograma ISO 21940-11 (log-log): líneas de grado G (e_per = 9549·G/n) +
+    el punto de operación del rotor. PNG o None si no hay matplotlib."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from core.balance.engine import iso_nomogram_lines, iso_operating_point
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        nl = iso_nomogram_lines(rpm_min=100.0, rpm_max=60000.0)
+        op = iso_operating_point(W_kg, U_res_gmm, rpm)
+        fig, ax = plt.subplots(figsize=(6.6, 4.4), dpi=130)
+        for g, ys in nl["lines"].items():
+            ax.loglog(nl["rpm"], ys, lw=1.1, label=g)
+        ax.loglog([op["rpm"]], [max(op["e_um"], 1e-3)], marker="o", ms=9,
+                  color="#e8890c", mec="#7a4a00", mew=1.2, ls="", label="Rotor")
+        ax.annotate("rotor", (op["rpm"], max(op["e_um"], 1e-3)),
+                    textcoords="offset points", xytext=(6, 6), color="#7a4a00",
+                    fontsize=8, fontweight="bold")
+        ax.set_xlabel("Velocidad de servicio [rpm]", fontsize=9)
+        ax.set_ylabel("Excentricidad permisible e_per [µm]", fontsize=9)
+        ax.grid(True, which="both", color="#e2e8f2", lw=0.5)
+        ax.legend(fontsize=7, ncol=3, loc="upper right")
+        ax.set_title("Nomograma ISO 21940-11", fontsize=10, color="#12305e")
+        fig.tight_layout()
+        buf = io.BytesIO(); fig.savefig(buf, format="png", bbox_inches="tight")
+        plt.close(fig)
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def polar_png(title: str, before: Tuple[float, float],
               after: Tuple[float, float], unit: str) -> Optional[bytes]:
     """Diagrama polar con los vectores antes/después. 0° arriba, sentido
@@ -359,6 +393,11 @@ def build_balance_pdf(
             ["Grado", "e_per [µm]", "U_per [g·mm]", "U_res/U_per", "Estado"],
             rows, styles,
             col_widths=[2.6 * cm, 3.4 * cm, 3.8 * cm, 3.2 * cm, 3.2 * cm]))
+        _npng = nomogram_png(float(iso.get("W_kg") or 0), float(iso.get("U_res") or 0),
+                             float(iso.get("N_rpm") or meta.get("rpm") or 0))
+        if _npng:
+            body.append(Spacer(1, 0.3 * cm))
+            body.append(Image(io.BytesIO(_npng), width=13.0 * cm, height=8.7 * cm))
         body.append(Spacer(1, 0.5 * cm))
 
     # ---- Avisos de auditoría (guards) --------------------------------
@@ -415,4 +454,4 @@ def _to_mag(z: Any) -> Tuple[float, float]:
         return 0.0, 0.0
 
 
-__all__ = ["build_balance_pdf", "polar_png"]
+__all__ = ["build_balance_pdf", "polar_png", "nomogram_png"]

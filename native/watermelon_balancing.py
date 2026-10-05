@@ -102,7 +102,7 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.5.8"
+__version__ = "0.5.9"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -505,8 +505,31 @@ def build_app(simulated: bool = True):
     iso_ures = _dsb(0, 1e7, 0.0, 1, " g·mm")
     fiso.addRow(T("Residual U_res (measured)", "Residual U_res (medido)"), iso_ures)
     btn_iso = QtWidgets.QPushButton(T("Evaluate ISO", "Evaluar ISO")); fiso.addRow("", btn_iso)
+    btn_nomo = QtWidgets.QPushButton(T("View nomogram (ISO 21940-11)",
+                                       "Ver nomograma (ISO 21940-11)"))
+    fiso.addRow("", btn_nomo)
     iso_out = QtWidgets.QLabel("—"); iso_out.setWordWrap(True); iso_out.setStyleSheet("font-weight:700;"); fiso.addRow("", iso_out)
     twl.addWidget(gb_iso); twl.addStretch(1)
+
+    def _show_nomogram():
+        try:
+            from core.balance.report import nomogram_png
+            png = nomogram_png(iso_w.value(), iso_ures.value(), sb_rpm.value())
+            if not png:
+                iso_out.setText(T("Could not draw nomogram (matplotlib?).",
+                                  "No se pudo dibujar el nomograma (matplotlib?)."))
+                return
+            dlg = QtWidgets.QDialog(win)
+            dlg.setWindowTitle(T("ISO 21940-11 nomogram", "Nomograma ISO 21940-11"))
+            lay = QtWidgets.QVBoxLayout(dlg)
+            lbl = QtWidgets.QLabel()
+            pix = QtGui.QPixmap(); pix.loadFromData(png)
+            lbl.setPixmap(pix)
+            lay.addWidget(lbl)
+            dlg.exec()
+        except Exception as e:  # noqa: BLE001
+            iso_out.setText(f"{type(e).__name__}: {e}")
+    btn_nomo.clicked.connect(_show_nomogram)
 
     def _do_iso():
         res = evaluate_iso_grades(iso_w.value(), sb_rpm.value(), iso_ures.value())
@@ -571,6 +594,44 @@ def build_app(simulated: bool = True):
     out1 = QtWidgets.QLabel("—"); out1.setWordWrap(True)
     out1.setStyleSheet("background:white;border:1px solid #dbe4f0;border-radius:10px;padding:12px;font-size:14px;")
     l1.addWidget(out1); l1.addStretch(1)
+
+    # --- Método SIN FASE (4 corridas, solo amplitudes) ---
+    gb_np = QtWidgets.QGroupBox(T("No-phase method (4 runs · amplitude only)",
+                                  "Método sin fase (4 corridas · solo amplitud)"))
+    fnp = QtWidgets.QFormLayout(gb_np)
+    np_v0 = _dsb(0, 1e6, 0.0, 3)
+    np_wt = _dsb(0, 1e5, 0.0, 2, " g")
+    fnp.addRow(T("V0 amplitude", "Amplitud V0"), np_v0)
+    fnp.addRow(T("Trial weight", "Peso de prueba"), np_wt)
+    np_rows = []
+    for _i, _defa in enumerate((0, 120, 240, 60)):
+        _ra = _dsb(0, 360, float(_defa), 0, " °"); _rp = _dsb(0, 1e6, 0.0, 3)
+        _w = QtWidgets.QWidget(); _hl = QtWidgets.QHBoxLayout(_w)
+        _hl.setContentsMargins(0, 0, 0, 0); _hl.addWidget(_ra); _hl.addWidget(_rp)
+        fnp.addRow(T(f"Run {_i+1}: angle · amp", f"Corrida {_i+1}: ángulo · amp"), _w)
+        np_rows.append((_ra, _rp))
+    btn_np = QtWidgets.QPushButton(T("Solve (no-phase)", "Resolver (sin fase)"))
+    fnp.addRow("", btn_np)
+    l1.insertWidget(l1.count() - 1, gb_np)
+
+    def _solve_np():
+        trials = [(ra.value(), rp.value()) for ra, rp in np_rows if rp.value() > 0]
+        try:
+            r = solve_1plane_nophase(np_v0.value(), np_wt.value(), trials)
+        except ValueError as e:
+            out1.setText(f"⚠ {e}"); return
+        st["r1p"] = {"unit": st["unit"], "v0": (np_v0.value(), 0.0),
+                     "trial": (np_wt.value(), 0.0), "vt": None, "vf": None,
+                     "result": r, "warnings": []}
+        _sp = _split_html(r['corr_mass_g'], r['corr_ang_deg'], T("correction", "corrección"))
+        out1.setText(T(
+            f"<b>Correction (no-phase):</b> {r['corr_mass_g']:,.2f} g ∠ "
+            f"{r['corr_ang_deg']:.1f}° · model {r['quality']}<br>"
+            f"<span style='color:#64748b'>{r['note']}</span>{_sp}",
+            f"<b>Corrección (sin fase):</b> {r['corr_mass_g']:,.2f} g ∠ "
+            f"{r['corr_ang_deg']:.1f}° · modelo {r['quality']}<br>"
+            f"<span style='color:#64748b'>{r['note']}</span>{_sp}"))
+    btn_np.clicked.connect(_solve_np)
 
     def _solve1():
         try:
@@ -847,6 +908,16 @@ def build_app(simulated: bool = True):
             quality.append((T("ISO 21940 quality", "Calidad ISO 21940"),
                             "GO" if (_bg is not None and _bg <= 6.3) else "REVIEW", iso.get("summary_label", "—")))
             findings.append(T(f"ISO 21940: {iso.get('summary_label','—')}.", f"ISO 21940: {iso.get('summary_label','—')}."))
+            try:
+                from core.balance.report import nomogram_png
+                _np = nomogram_png(float(iso.get("W_kg") or 0), float(iso.get("U_res") or 0),
+                                   float(iso.get("N_rpm") or 0))
+                if _np:
+                    sections.append({"title": T("ISO 21940-11 nomogram",
+                                                "Nomograma ISO 21940-11"),
+                                     "figures": [(T("Nomogram", "Nomograma"), _np)]})
+            except Exception:  # noqa: BLE001
+                pass
         # Avisos de auditoría (guards): van al reporte como hallazgos + estado.
         _bw = list((r1p or {}).get("warnings") or []) + list((r2p or {}).get("warnings") or [])
         if _bw:
