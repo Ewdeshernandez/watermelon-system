@@ -323,6 +323,21 @@ def build_balance_pdf(
               f"{_fmt(abs(r.get('A_after', 0)), 3)} {u}",
               f"{_fmt(abs(r.get('B_after', 0)), 3)} {u}"]],
             styles, col_widths=[4.0 * cm, 6.1 * cm, 6.1 * cm]))
+        # Estático vs par (descomposición de las correcciones)
+        try:
+            from core.balance.engine import diagnose_static_couple
+            _Sv = (r.get("WA_corr", 0) + r.get("WB_corr", 0)) / 2.0
+            _Cv = (r.get("WA_corr", 0) - r.get("WB_corr", 0)) / 2.0
+            _scv = diagnose_static_couple(abs(_Sv), abs(_Cv), abs(_Cv))
+            _kmv = {"STATIC": "Estático (ambos planos en fase)",
+                    "COUPLE": "De par / dinámico (planos opuestos)", "MIXED": "Mixto"}
+            body.append(Spacer(1, 0.15 * cm))
+            body.append(_p(
+                f"<b>Tipo de desbalance:</b> {_kmv.get(_scv.get('kind'), _scv.get('kind'))} · "
+                f"estático |S| = {_fmt(abs(_Sv), 2)} g · par |C| = {_fmt(abs(_Cv), 2)} g "
+                f"(ratio C/S = {_fmt(_scv.get('ratio_C_over_S'), 2)}).", styles, "WMBody"))
+        except Exception:  # noqa: BLE001
+            pass
         # Vibración final medida (si existe): muestra el cambio honesto por plano.
         _vfa = two_plane.get("vf_a"); _vfb = two_plane.get("vf_b")
         _a0 = two_plane.get("a0"); _b0 = two_plane.get("b0")
