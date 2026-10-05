@@ -102,21 +102,21 @@ from core.balance.ni_balance import (
 )
 from core.torsional.ni_source import KeyphasorSensor, nidaqmx_available
 
-__version__ = "0.5.9"
+__version__ = "0.5.10"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
 
 # --- idioma (bilingüe, como los otros módulos) ---
-_LANG = "es"
+_LANG = "en"
 
 
 def _load_lang() -> str:
     try:
-        v = QtCore.QSettings("WatermelonSystem", "Balancing").value("lang", "es")
-        return "en" if str(v).lower() == "en" else "es"
+        v = QtCore.QSettings("WatermelonSystem", "Balancing").value("lang", "en")
+        return "es" if str(v).lower().startswith("es") else "en"
     except Exception:  # noqa: BLE001
-        return "es"
+        return "en"
 
 
 def _save_lang(v: str) -> None:
