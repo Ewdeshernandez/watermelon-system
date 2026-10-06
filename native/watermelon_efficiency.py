@@ -39,7 +39,7 @@ from core.torsional.ni_source import (
     KeyphasorSensor, NITorsionalConfig, NITorsionalSource, rpm_from_keyphasor,
 )
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -181,6 +181,17 @@ def build_app(simulated: bool = True):
                    (T("Operator", "Operador"), ed_operator), (T("Approved by", "Aprobado por"), ed_approved)]:
         f.addRow(lbl, w)
     sl.addWidget(gb)
+    _type_hint = QtWidgets.QLabel(T(
+        "ℹ Choose what DRIVES the load (fan / pump / compressor / turbine), NOT the motor. "
+        "The driven type computes the motor efficiency AND the process (aerodynamic/hydraulic) "
+        "efficiency; picking 'motor' only gives motor + operational. E.g. Paz del Río B120 → Fan.",
+        "ℹ Elige lo que MUEVE la carga (ventilador / bomba / compresor / turbina), NO el motor. "
+        "El tipo accionado calcula la eficiencia del motor Y la de proceso (aerodinámica/hidráulica); "
+        "si eliges 'motor' solo da motor + operativa. Ej.: Ventilador B120 de Paz del Río → Ventilador."))
+    _type_hint.setWordWrap(True)
+    _type_hint.setStyleSheet(f"color:{NAVY};background:#eef6fd;border:1px solid #cfe3f5;"
+                             "border-radius:8px;padding:8px 10px;font-size:12px;")
+    sl.addWidget(_type_hint)
     btn_saveset = QtWidgets.QPushButton(T("💾 Save setup", "💾 Guardar setup"))
     btn_saveset.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     _setmsg = QtWidgets.QLabel(""); _setmsg.setStyleSheet("color:#16a34a;font-weight:700;")
