@@ -126,6 +126,16 @@ NAV_GROUPS = [
         ],
     },
     {
+        "section": "Efficiency",
+        "items": [
+            # Módulo Efficiency (eficiencia de máquinas rotatorias) bajo IEC 60034-2
+            # / ISO 5801 / ISO 9906 / ASME PTC 10 / IEC 60041. Motor puro en
+            # core.efficiency. Web = SOLO análisis/reporte de las corridas de campo
+            # (par+rpm+eléctrico → η). Solo admin/specialist — bloqueado para cliente.
+            {"label": "⚡  Efficiency", "page": "pages/23_Efficiency.py"},
+        ],
+    },
+    {
         "section": "Calibración",
         "items": [
             # Módulo Calibración (curvas de linealidad de sensores) bajo API 670
@@ -224,6 +234,9 @@ CLIENT_BLOCKED_PAGES = {
     "pages/_admin_users.py",
     # Calibración: herramienta del analista (curvas de linealidad API 670).
     "pages/21_Calibracion.py",
+    # Efficiency: herramienta del analista (η de máquinas rotatorias). El cliente
+    # recibe el reporte final, no el módulo de cálculo.
+    "pages/23_Efficiency.py",
 }
 
 

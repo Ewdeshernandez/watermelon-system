@@ -28,8 +28,9 @@ Deno.serve(async (req) => {
     const _ml = moduleName.toLowerCase();
     const isTors = _ml.startsWith("tors");
     const isBal = _ml.startsWith("bal");
-    const kind = isTors ? "torsional" : isBal ? "de balanceo" : "OMA";
-    const webMod = isTors ? "Torsional" : isBal ? "Balancing" : "Modal";
+    const isEff = _ml.startsWith("eff");
+    const kind = isTors ? "torsional" : isBal ? "de balanceo" : isEff ? "de eficiencia" : "OMA";
+    const webMod = isTors ? "Torsional" : isBal ? "Balancing" : isEff ? "Efficiency" : "Modal";
     const rowIp = ip ? `<tr><td style="padding:4px 10px;color:#64748b">IP de conexión</td><td style="padding:4px 10px">${ip}</td></tr>` : "";
     const rowGeo = geo ? `<tr><td style="padding:4px 10px;color:#64748b">Ubicación aprox.</td><td style="padding:4px 10px">${geo}</td></tr>` : "";
     const html = `
