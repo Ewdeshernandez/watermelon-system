@@ -69,7 +69,14 @@ _MODULE_RELEASE: Dict[str, Dict[str, Any]] = {
                   "exe": "WatermelonTorsional-Setup.exe", "feat": {"torsional"}},
     "Balanceo": {"tag": "balance-v", "app": "Watermelon Balancing",
                  "exe": "WatermelonBalancing-Setup.exe", "feat": {"balance"}},
+    # Módulo NUEVO: sin "feat" → el aviso aplica a TODAS las licencias activas
+    # (modelo paquete; Efficiency va incluido para todos, igual que el gate
+    # fail-open). No entra a _MODULE_ORDER para no romper "Paquete completo".
+    "Efficiency": {"tag": "efficiency-v", "app": "Watermelon Efficiency",
+                   "exe": "WatermelonEfficiency-Setup.exe"},
 }
+# Módulos que se pueden anunciar por correo (incluye el nuevo Efficiency).
+_ANNOUNCE_MODULES = _MODULE_ORDER + ["Efficiency"]
 _RELEASE_REPO = "Ewdeshernandez/watermelon-system"
 
 # Resumen CLIENTE (bien redactado, sin jerga interna) de lo que trae la versión
@@ -90,6 +97,13 @@ _UPDATE_HIGHLIGHTS: Dict[str, str] = {
     "Balanceo": (
         "• Mejoras de estabilidad y rendimiento.\n"
         "• Validación de licencia más robusta."),
+    "Efficiency": (
+        "• NUEVO módulo de Eficiencia de máquinas rotatorias, ya incluido en tu paquete.\n"
+        "• Potencia mecánica real en el eje (torque + RPM) vs. potencia eléctrica y de diseño.\n"
+        "• Eficiencia del motor y operativa con semáforo por norma (IEC 60034-2 / ISO 20816).\n"
+        "• Eficiencia de proceso por tipo: ventiladores (ISO 5801), bombas (ISO 9906), "
+        "compresores (ASME PTC 10) y turbinas hidráulicas (IEC 60041).\n"
+        "• Reporte técnico completo y análisis en la web."),
     "Todos": (
         "• Nueva versión disponible con mejoras de estabilidad y seguridad de "
         "licencia en tus módulos de Watermelon System."),
@@ -661,7 +675,7 @@ def render() -> None:
     with st.expander("Anunciar nueva versión a clientes"):
         _u1, _u2 = st.columns([1.2, 1])
         with _u1:
-            _mod = st.selectbox("Módulo", ["Todos"] + _MODULE_ORDER, key="upd_mod")
+            _mod = st.selectbox("Módulo", ["Todos"] + _ANNOUNCE_MODULES, key="upd_mod")
         # Auto: última versión + fecha + url (en vivo). "Qué trae" = resumen
         # redactado por módulo (preciso y profesional). En monorepo el compare
         # entre tags mezcla commits de TODOS los módulos, así que solo se usa
