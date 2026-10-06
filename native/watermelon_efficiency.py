@@ -39,7 +39,7 @@ from core.torsional.ni_source import (
     KeyphasorSensor, NITorsionalConfig, NITorsionalSource, rpm_from_keyphasor,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -113,8 +113,11 @@ def build_app(simulated: bool = True):
           "acq": {"mode": "sim", "kph": KeyphasorSensor.phototach_reflective(),
                   "kph_device": "cDAQ1Mod1", "torque_device": "cDAQ1Mod1",
                   "tq_fullscale": 1000.0, "fs": 2560.0},
-          # Simulador: un motor-ventilador con ~1.5% de sobre-diseño.
-          "sim": {"torque": 11626.0, "rpm": 1785.0, "v": 4160.0, "i": 438.0, "pf": 0.92}}
+          # Simulador = caso real Paz del Río · Ventilador B120 (motor ABB AMI 500L4A
+          # 2700 kW). Punto de operación medido cerca del diseño (2140 kW), con
+          # margen de reserva. type=fan + caudal/presión del sistema de succión.
+          "sim": {"type": "fan", "torque": 11164.0, "rpm": 1792.0, "v": 4155.0,
+                  "i": 354.0, "pf": 0.87, "design": 2140.0, "flow": 246.0, "dp": 6800.0}}
 
     # ---- Toolbar: marca + versión + idioma ----
     tb = win.addToolBar("main"); tb.setMovable(False)
@@ -425,8 +428,15 @@ def build_app(simulated: bool = True):
 
     def _demo():
         s = st["sim"]
+        # tipo + diseño + proceso (caso Paz del Río B120 = ventilador)
+        _ti = cb_type.findData(s.get("type", "fan"))
+        if _ti >= 0:
+            cb_type.setCurrentIndex(_ti)
+        sb_design.setValue(s.get("design", 2140.0))
+        sb_flow.setValue(s.get("flow", 0.0)); sb_dp.setValue(s.get("dp", 0.0))
         sb_torque.setValue(s["torque"]); sb_rpm.setValue(s["rpm"])
         sb_v.setValue(s["v"]); sb_i.setValue(s["i"]); sb_pf.setValue(s["pf"])
+        _proc_visible()
         tabs.setCurrentIndex(IDX_EFF); _compute()
     btn_demo.clicked.connect(_demo)
 
