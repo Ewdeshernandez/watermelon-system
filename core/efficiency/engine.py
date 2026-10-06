@@ -37,6 +37,20 @@ MACHINE_TYPES = [
 ]
 
 
+# Demo de referencia — caso real Paz del Río · Ventilador B120 (motor ABB AMI
+# 500L4A 2700 kW). Fuente ÚNICA para el "Ejemplo simulado" del campo y de la web
+# → ambos muestran EXACTAMENTE el mismo ejercicio. Punto de operación medido
+# cerca del diseño (2140 kW) con margen de reserva. Caudal/presión del sistema
+# de succión (medición de campo; ajústalos con la curva real del ventilador).
+DEMO_B120 = {
+    "machine": "Ventilador B120", "client": "Acerías Paz del Río",
+    "location": "Planta de Sinterización",
+    "machine_type": "fan", "torque_nm": 11164.0, "rpm": 1792.0,
+    "voltage_v": 4155.0, "current_a": 354.0, "power_factor": 0.87, "phases": 3,
+    "design_power_kw": 2140.0, "flow_m3s": 246.0, "dp_pa": 6800.0,
+}
+
+
 # =====================================================================
 # Potencias base
 # =====================================================================

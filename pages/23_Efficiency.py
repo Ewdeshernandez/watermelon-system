@@ -26,7 +26,7 @@ from core.auth import (
 )
 from core.ui_theme import apply_watermelon_page_style
 from core.ui_industrial import inject_industrial_css, industrial_band, dot, html_table
-from core.efficiency.engine import MACHINE_TYPES, EfficiencyInputs, compute
+from core.efficiency.engine import MACHINE_TYPES, EfficiencyInputs, compute, DEMO_B120
 
 st.set_page_config(page_title="Watermelon System | Efficiency", page_icon="⚡", layout="wide")
 
@@ -104,7 +104,26 @@ def _load_from_cloud():
         st.rerun()
 
 
+def _load_demo_b120():
+    """Carga el ejemplo de referencia Paz del Río · B120 (misma fuente que el campo)."""
+    d = DEMO_B120
+    for k, v in {"eff_type": d["machine_type"], "eff_phases": str(d["phases"]),
+                 "eff_torque": d["torque_nm"], "eff_rpm": d["rpm"], "eff_design": d["design_power_kw"],
+                 "eff_v": d["voltage_v"], "eff_i": d["current_a"], "eff_pf": d["power_factor"],
+                 "eff_flow": d["flow_m3s"], "eff_dp": d["dp_pa"], "eff_rho": 1000.0,
+                 "eff_machine": d["machine"], "eff_client": d["client"],
+                 "eff_location": d["location"]}.items():
+        st.session_state[k] = v
+
+
 with tab_an:
+    _cl, _cr = st.columns([3, 1])
+    with _cl:
+        st.caption("Ingresa el punto de operación, carga una corrida de campo, o prueba el ejemplo B120.")
+    with _cr:
+        if st.button("⚡ Ejemplo B120", use_container_width=True, help="Caso real Paz del Río"):
+            _load_demo_b120()
+            st.rerun()
     with st.expander("☁ Cargar corrida de campo desde la nube", expanded=False):
         _load_from_cloud()
 

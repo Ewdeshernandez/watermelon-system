@@ -33,13 +33,13 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from core.efficiency.engine import (
     MACHINE_TYPES, EfficiencyInputs, compute, diagnose_operational,
-    mechanical_power_kw, electrical_power_kw,
+    mechanical_power_kw, electrical_power_kw, DEMO_B120,
 )
 from core.torsional.ni_source import (
     KeyphasorSensor, NITorsionalConfig, NITorsionalSource, rpm_from_keyphasor,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 # Marca
 NAVY = "#0f2a4a"; ACC = "#1AAEE5"; GREEN = "#16a34a"; AMBER = "#f59e0b"; RED = "#dc2626"
@@ -113,11 +113,12 @@ def build_app(simulated: bool = True):
           "acq": {"mode": "sim", "kph": KeyphasorSensor.phototach_reflective(),
                   "kph_device": "cDAQ1Mod1", "torque_device": "cDAQ1Mod1",
                   "tq_fullscale": 1000.0, "fs": 2560.0},
-          # Simulador = caso real Paz del Río · Ventilador B120 (motor ABB AMI 500L4A
-          # 2700 kW). Punto de operación medido cerca del diseño (2140 kW), con
-          # margen de reserva. type=fan + caudal/presión del sistema de succión.
-          "sim": {"type": "fan", "torque": 11164.0, "rpm": 1792.0, "v": 4155.0,
-                  "i": 354.0, "pf": 0.87, "design": 2140.0, "flow": 246.0, "dp": 6800.0}}
+          # Simulador = caso real Paz del Río · Ventilador B120 (fuente única
+          # DEMO_B120 en core.efficiency.engine; campo y web muestran lo MISMO).
+          "sim": {"type": DEMO_B120["machine_type"], "torque": DEMO_B120["torque_nm"],
+                  "rpm": DEMO_B120["rpm"], "v": DEMO_B120["voltage_v"], "i": DEMO_B120["current_a"],
+                  "pf": DEMO_B120["power_factor"], "design": DEMO_B120["design_power_kw"],
+                  "flow": DEMO_B120["flow_m3s"], "dp": DEMO_B120["dp_pa"]}}
 
     # ---- Toolbar: marca + versión + idioma ----
     tb = win.addToolBar("main"); tb.setMovable(False)
