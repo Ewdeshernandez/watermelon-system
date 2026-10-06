@@ -92,8 +92,13 @@ def build_efficiency_pdf(*, meta: Dict[str, Any], result: Dict[str, Any]) -> byt
     _diag_es = r.get("diag_es", "—")
     _diag_hex = _SEMA_HEX.get(r.get("diag_color", ""), "#64748b")
 
-    # ---- 1. Datos generales -------------------------------------------
-    body.append(_section("1. Datos del servicio", styles))
+    # Orden canónico SIGA (igual que torsional/modal):
+    #   1 Introducción y alcance · 2 Hallazgos · 3 Recomendaciones ·
+    #   4 Desarrollo del servicio · 5 Marco normativo.
+    # Resumen ejecutivo (hallazgos + recomendaciones) ANTES del detalle técnico.
+
+    # ---- 1. Introducción y alcance ------------------------------------
+    body.append(_section("1. Introducción y alcance", styles))
     body.append(_kv_table([
         ("Activo", meta.get("asset", "—")),
         ("Cliente", meta.get("client", "—")),
@@ -105,13 +110,44 @@ def build_efficiency_pdf(*, meta: Dict[str, Any], result: Dict[str, Any]) -> byt
         ("Fuente de datos", meta.get("data_source", "Medición de campo")),
         ("Norma", meta.get("norm", "IEC 60034-2 · ISO 20816")),
     ], styles))
+    body.append(Spacer(1, 0.3 * cm))
+    body.append(_p("Determinación de la potencia mecánica real absorbida y la eficiencia "
+                   "operativa del equipo a partir de mediciones directas de campo bajo "
+                   "condiciones reales de operación, con comparación frente a los parámetros "
+                   "de diseño para establecer la capacidad disponible y el margen de reserva.",
+                   styles, "WMBody"))
     if meta.get("notes"):
-        body.append(Spacer(1, 0.3 * cm))
+        body.append(Spacer(1, 0.2 * cm))
         body.append(_p(meta["notes"], styles, "WMBody"))
     body.append(Spacer(1, 0.5 * cm))
 
-    # ---- 2. Potencias y eficiencia ------------------------------------
-    body.append(_section("2. Potencia y eficiencia", styles))
+    # ---- 2. Hallazgos -------------------------------------------------
+    body.append(_section("2. Hallazgos", styles))
+    findings = meta.get("findings") or []
+    for fnd in findings:
+        body.append(_p(f"• {fnd}", styles, "WMBody"))
+    if (r.get("eta_op") or 0) > 0:
+        _reserve = (r.get("design") or 0) - (r.get("p_mec") or 0)
+        _resv_pct = 100.0 - (r.get("eta_op") or 0)
+        body.append(Spacer(1, 0.2 * cm))
+        srows = [["Eficiencia operativa", f"{_fmt(r.get('eta_op'), 1)} %"],
+                 ["Diagnóstico (semáforo)", _diag_es],
+                 ["Margen de reserva", f"{_fmt(_reserve, 0)} kW ({_fmt(_resv_pct, 1)} %)"]]
+        body.append(_grid_table(["Evaluación operativa", "Valor"], srows, styles,
+                                col_widths=[7.5 * cm, 8.7 * cm], row_colors={2: _diag_hex}))
+        body.append(_p("Bandas: &gt;105% sobrecarga · 95–105% normal · 85–95% degradación · "
+                       "&lt;85% falla inminente.", styles, "WMBody"))
+    body.append(Spacer(1, 0.5 * cm))
+
+    # ---- 3. Recomendaciones (al final del resumen ejecutivo) ----------
+    body.append(_section("3. Recomendaciones", styles))
+    recs = meta.get("recommendations") or []
+    for rc in recs:
+        body.append(_p(f"• {rc}", styles, "WMBody"))
+    body.append(Spacer(1, 0.5 * cm))
+
+    # ---- 4. Desarrollo del servicio (detalle técnico) -----------------
+    body.append(_section("4. Desarrollo del servicio", styles))
     body.append(_p("Potencia mecánica en el eje P_mec = T·ω/1000 (par por telemetría "
                    "rotativa + velocidad por tacómetro). Potencia eléctrica "
                    "P_elec = √3·V·I·cosφ/1000 (analizador de red). "
@@ -125,26 +161,12 @@ def build_efficiency_pdf(*, meta: Dict[str, Any], result: Dict[str, Any]) -> byt
                    f"{_fmt(r.get('volt'), 0)} V · {_fmt(r.get('curr'), 0)} A · {_fmt(r.get('pf'), 2)}"],
                   ["Potencia eléctrica P_elec", f"{_fmt(r.get('p_elec'), 1)} kW"],
                   ["Eficiencia del motor η_motor", f"{_fmt(r.get('eta_motor'), 1)} %"]]
-    prows += [["Potencia de diseño", f"{_fmt(r.get('design'), 1)} kW"]]
+    prows += [["Potencia de diseño", f"{_fmt(r.get('design'), 1)} kW"],
+              ["Eficiencia operativa η_operativa", f"{_fmt(r.get('eta_op'), 1)} %"]]
     body.append(_grid_table(["Magnitud", "Valor"], prows, styles,
                             col_widths=[7.5 * cm, 8.7 * cm]))
-    body.append(Spacer(1, 0.3 * cm))
 
-    # Semáforo de la eficiencia operativa (fila resaltada por color).
-    if (r.get("eta_op") or 0) > 0:
-        _reserve = (r.get("design") or 0) - (r.get("p_mec") or 0)
-        _resv_pct = 100.0 - (r.get("eta_op") or 0)
-        srows = [["Eficiencia operativa", f"{_fmt(r.get('eta_op'), 1)} %"],
-                 ["Diagnóstico (semáforo)", _diag_es],
-                 ["Margen de reserva", f"{_fmt(_reserve, 0)} kW ({_fmt(_resv_pct, 1)} %)"]]
-        body.append(_grid_table(["Evaluación operativa", "Valor"], srows, styles,
-                                col_widths=[7.5 * cm, 8.7 * cm], row_colors={1: _diag_hex}))
-        body.append(_p("Bandas: &gt;105% sobrecarga · 95–105% normal · 85–95% degradación · "
-                       "&lt;85% falla inminente. El margen de reserva positivo indica "
-                       "capacidad disponible respecto al diseño.", styles, "WMBody"))
-    body.append(Spacer(1, 0.4 * cm))
-
-    # ---- 3. Eficiencia de proceso (según tipo) ------------------------
+    # Eficiencia de proceso (según tipo), como subsección del desarrollo.
     if r.get("proc_label"):
         _pl = {"pump": ("Eficiencia hidráulica de la bomba",
                         "P_hidráulica = ρ·g·Q·H/1000 · η_bomba = P_hidráulica/P_mec (ISO 9906)."),
@@ -155,9 +177,9 @@ def build_efficiency_pdf(*, meta: Dict[str, Any], result: Dict[str, Any]) -> byt
                "compressor": ("Eficiencia isentrópica del compresor",
                               "W_isen = ṁ·Cp·T1·(π^((k−1)/k)−1) · η = W_isen/P_mec (ASME PTC 10).")
                }.get(r["proc_label"], ("Eficiencia de proceso", ""))
-        body.append(_section("3. Eficiencia de proceso", styles))
+        body.append(Spacer(1, 0.35 * cm))
         if _pl[1]:
-            body.append(_p(_pl[1], styles, "WMBody"))
+            body.append(_p(f"<b>{_pl[0]}.</b> {_pl[1]}", styles, "WMBody"))
         crows = []
         if r["proc_label"] in ("pump", "hydro"):
             crows += [["Caudal Q", f"{_fmt(r.get('flow'), 3)} m³/s"],
@@ -170,25 +192,20 @@ def build_efficiency_pdf(*, meta: Dict[str, Any], result: Dict[str, Any]) -> byt
         crows += [[_pl[0], f"{_fmt(r.get('eta_proc'), 1)} %"]]
         body.append(_grid_table(["Magnitud", "Valor"], crows, styles,
                                 col_widths=[7.5 * cm, 8.7 * cm]))
-        body.append(Spacer(1, 0.4 * cm))
-
-    # ---- 4. Hallazgos y recomendaciones -------------------------------
-    body.append(_section("4. Hallazgos y recomendaciones", styles))
-    findings = meta.get("findings") or []
-    if findings:
-        for fnd in findings:
-            body.append(_p(f"• {fnd}", styles, "WMBody"))
-    recs = meta.get("recommendations") or []
-    if recs:
-        body.append(Spacer(1, 0.2 * cm))
-        body.append(_p("<b>Recomendaciones:</b>", styles, "WMBody"))
-        for rc in recs:
-            body.append(_p(f"• {rc}", styles, "WMBody"))
-    body.append(Spacer(1, 0.4 * cm))
+    body.append(Spacer(1, 0.35 * cm))
     body.append(_p("Metodología: mediciones directas en campo bajo condiciones reales de "
                    "operación. Par por telemetría rotativa (transmisor + antena), velocidad "
                    "por tacómetro, variables eléctricas por analizador de red y variables de "
                    "proceso (caudal, presión, temperatura) por instrumentación directa.",
+                   styles, "WMBody"))
+    body.append(Spacer(1, 0.5 * cm))
+
+    # ---- 5. Marco normativo -------------------------------------------
+    body.append(_section("5. Marco normativo", styles))
+    body.append(_p(f"El análisis se rige por: {meta.get('norm', 'IEC 60034-2')} "
+                   "(eficiencia de motores de inducción), ISO 5801 (ventiladores), "
+                   "ISO 9906 (bombas), ASME PTC 10 (compresores), IEC 60041 (turbinas "
+                   "hidráulicas) e ISO 20816 (evaluación de la condición mecánica).",
                    styles, "WMBody"))
 
     report_meta = {
