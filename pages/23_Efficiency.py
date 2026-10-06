@@ -185,7 +185,8 @@ with tab_an:
             "p_mec": res.p_mec_kw, "p_elec": res.p_elec_kw, "eta_motor": res.eta_motor_pct,
             "eta_op": res.eta_operational_pct, "diag_code": res.diagnosis.code,
             "diag_es": res.diagnosis.label_es, "diag_color": res.diagnosis.color,
-            "proc_label": res.process_label, "eta_proc": res.eta_process_pct, "p_proc": res.process_power_kw}
+            "proc_label": res.process_label, "eta_proc": res.eta_process_pct, "p_proc": res.process_power_kw,
+            "flow": flow, "head": head, "dp": dp}
 
         st.markdown("###  Resultado")
         kc = st.columns(4)
@@ -232,55 +233,33 @@ with tab_rp:
         st.caption(f"{_TYPE_LABEL.get(r['mtype'], r['mtype'])} · η operativa "
                    f"{r['eta_op']:,.1f}% ({r['diag_es']})" if r["eta_op"] > 0
                    else _TYPE_LABEL.get(r["mtype"], r["mtype"]))
+        rep_notes = st.text_area("Notas / observaciones (opcional)", key="eff_rep_notes")
         if st.button("📄 Generar reporte (PDF)", type="primary"):
             from datetime import date as _date
             _norm = next((norm for c, en, es, norm in MACHINE_TYPES if c == r["mtype"]), "")
-            meta = {"title": "Reporte de Eficiencia", "asset": r["machine"] or "—",
-                    "client": r["client"] or "—", "machine_type": _TYPE_LABEL.get(r["mtype"], r["mtype"]),
-                    "location": r["location"] or "—", "test_type": "Eficiencia de máquina rotatoria",
-                    "rpm": f"{r['rpm']:,.0f}", "technician": _user.get("name", "—"),
-                    "reviewer": "—", "date": _date.today().isoformat(), "equipment": "Watermelon Efficiency"}
-            _go = "GO" if r["diag_code"] == "normal" else "REVIEW"
-            quality = [("Eficiencia operativa", _go,
-                        f"{r['eta_op']:,.1f}% — {r['diag_es']}" if r["eta_op"] > 0 else "Sin potencia de diseño")]
-            if r["eta_motor"] > 0:
-                quality.append(("Eficiencia del motor", "GO" if r["eta_motor"] >= 90 else "REVIEW",
-                                f"{r['eta_motor']:,.1f}%"))
-            if r["proc_label"]:
-                quality.append(("Eficiencia de proceso", "GO" if r["eta_proc"] >= 60 else "REVIEW",
-                                f"{r['eta_proc']:,.1f}%"))
-            rows = [["Tipo de máquina", _TYPE_LABEL.get(r["mtype"], r["mtype"])],
-                    ["Par", f"{r['torque']:,.2f} N·m"], ["RPM", f"{r['rpm']:,.1f}"],
-                    ["Potencia mecánica P_mec", f"{r['p_mec']:,.2f} kW"]]
-            if r["p_elec"] > 0:
-                rows += [["V · I · cosφ", f"{r['volt']:,.0f} V · {r['curr']:,.0f} A · {r['pf']:.3f}"],
-                         ["Potencia eléctrica P_elec", f"{r['p_elec']:,.2f} kW"],
-                         ["η motor", f"{r['eta_motor']:,.1f} %"]]
-            rows += [["Potencia de diseño", f"{r['design']:,.1f} kW"],
-                     ["η operativa", f"{r['eta_op']:,.1f} % ({r['diag_es']})" if r["eta_op"] > 0 else "—"]]
-            if r["proc_label"]:
-                rows += [["η proceso", f"{r['eta_proc']:,.1f} %"]]
-                if r["p_proc"] > 0:
-                    rows += [["Potencia de proceso", f"{r['p_proc']:,.2f} kW"]]
-            sections = [{"title": "Resultado de eficiencia",
-                         "table": {"headers": ["Ítem", "Valor"], "rows": rows}}]
             findings = []
             if r["eta_op"] > 0:
-                findings.append(f"Eficiencia operativa {r['eta_op']:,.1f}% → {r['diag_es']}.")
+                _reserve = r["design"] - r["p_mec"]
+                findings.append(f"Eficiencia operativa {r['eta_op']:,.1f}% → {r['diag_es']}; "
+                                f"margen de reserva {_reserve:,.0f} kW ({100 - r['eta_op']:,.1f}%).")
             if r["eta_motor"] > 0:
                 findings.append(f"Eficiencia del motor {r['eta_motor']:,.1f}% "
-                                f"(P_mec {r['p_mec']:,.1f} kW / P_elec {r['p_elec']:,.1f} kW).")
+                                f"(P_mec {r['p_mec']:,.0f} kW / P_elec {r['p_elec']:,.0f} kW).")
             if r["proc_label"]:
-                findings.append(f"Eficiencia de proceso ({r['proc_label']}) {r['eta_proc']:,.1f}%.")
-            analysis = ["P_mec = T·ω/1000 · P_elec = √3·V·I·cosφ/1000 · "
-                        "η_motor = P_mec/P_elec · η_op = P_mec/P_diseño. Norma: " + _norm + "."]
-            recs = ["Comparar contra la eficiencia de placa y la curva de diseño del punto de operación.",
-                    "Si está bajo la banda, revisar carga, alineación, ensuciamiento y punto de operación."]
+                findings.append(f"Eficiencia de proceso ({r['proc_label']}) {r['eta_proc']:,.1f}% "
+                                f"(P_proceso {r['p_proc']:,.0f} kW).")
+            recs = ["Comparar la eficiencia obtenida contra la curva de diseño del punto de operación.",
+                    "Si está bajo la banda operativa, revisar carga, alineación, ensuciamiento y "
+                    "condiciones del sistema (succión/descarga)."]
+            meta = {"report_title": "Reporte de Eficiencia", "asset": r["machine"] or "—",
+                    "client": r["client"] or "—", "location": r["location"] or "—",
+                    "machine_type_label": _TYPE_LABEL.get(r["mtype"], r["mtype"]),
+                    "norm": _norm, "specialist": _user.get("name", "—"),
+                    "report_date": _date.today().strftime("%d/%m/%Y"),
+                    "notes": rep_notes, "findings": findings, "recommendations": recs}
             try:
-                from core.modal.preliminary_report import build_preliminary_pdf
-                pdf = build_preliminary_pdf(meta=meta, quality=quality, sections=sections,
-                                            analysis=analysis, findings=findings, recommendations=recs,
-                                            run_id=f"EFF-{meta['asset']}", lang="es")
+                from core.efficiency.report import build_efficiency_pdf
+                pdf = build_efficiency_pdf(meta=meta, result=r)
                 st.download_button("⬇ Descargar PDF", data=pdf,
                                    file_name=f"Eficiencia_{r['machine'] or 'equipo'}.pdf",
                                    mime="application/pdf")
