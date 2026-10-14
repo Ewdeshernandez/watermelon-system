@@ -1,0 +1,52 @@
+# =====================================================================
+# Watermelon System1 Agent · config PARA SGT300A (Parex turbina A)
+# Copia este archivo como  config.toml  EN EL HOST/VM de SGT300A y llena
+# el service_key (o mejor: variables de entorno SUPABASE_URL/SERVICE_KEY).
+# NO subir config.toml a git (lleva credenciales).
+# =====================================================================
+
+# Activo (instance_id EXACTO en Watermelon Live). Para SGT300A es:
+asset = "siemens_sgt300_gearbox_brush_turbogen"   # tag en la web: "SGT300A"
+
+# ---------------------------------------------------------------------
+# Red del host SGT300A (referencia — ya debe estar conectado):
+#   Host turbina A : 192.168.192.223  (usuario backup1)
+#   Gateway        : 192.168.1.163
+#   Rack TDI (3500): 192.168.1.17     (System1 toma la onda de acá)
+#   La onda vive dentro de la VM (System1) que corre sobre este host.
+#   Requisito: la VM alcanza *.supabase.co (internet) para subir.
+# ---------------------------------------------------------------------
+
+[supabase]
+url = "https://yxeqwkhybueelmkrdkgq.supabase.co"
+service_key = "PONER_SERVICE_ROLE_KEY_AQUI"   # o env SUPABASE_SERVICE_KEY
+
+# Onda cruda desde los CSV que exporta System1 (igual que SGT300B).
+[system1_csv]
+folder = "C:\\Users\\backup1\\Desktop\\CSV"    # ajustar al usuario real del host
+
+# RPA — automatiza el 'Export to CSV' por punto. MISMOS 8 puntos que SGT300B
+# (4 cojinetes X/Y → órbita). ⚠️ Confirmar el texto EXACTO de cada `tag` contra
+# el árbol de System1 de SGT300A con:  python s1_rpa_export.py --inspect
+[rpa]
+out_folder = "C:\\Users\\backup1\\Desktop\\CSV"
+plot_xy = [640, 360]                           # re-afinar con --inspect
+points = [
+  { tag = "1XD TURBINA DE",  name = "1xd" },
+  { tag = "1YD TURBINA DE",  name = "1yd" },
+  { tag = "2XD TURBINA",     name = "2xd" },
+  { tag = "2YD TURBINA",     name = "2yd" },
+  { tag = "5XD GENERADOR",   name = "5xd" },
+  { tag = "5YD GENERADOR",   name = "5yd" },
+  { tag = "6XD GENERADOR",   name = "6xd" },
+  { tag = "6YD GENERADOR",   name = "6yd" },
+]
+
+# System1 backend (igual que Parex B): SQL Server BNC_Databases, Windows Auth.
+# Solo se usa si algún día se lee config de la DB; la onda sale por CSV.
+[system1]
+server = "localhost"
+database = "BNC_Databases"
+trusted = true
+driver = "ODBC Driver 17 for SQL Server"
+points = ["CDE", "CNDE", "TDE", "TNDE", "GDE", "GNDE"]
