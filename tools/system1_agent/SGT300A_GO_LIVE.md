@@ -1,44 +1,56 @@
-# SGT300A → Live Monitoring (replicar lo de SGT300B)
+# SGT300A → Live Monitoring (clonar el setup de SGT300B)
 
-Igual que SGT300B, el robot corre **en la VM de System1 de la turbina A** y sube
-la onda cruda cada hora al Watermelon Cloud. SGT300A **ya existe** como activo:
-`siemens_sgt300_gearbox_brush_turbogen` (tag web "SGT300A") → no hay que crearlo.
+Replica EXACTA de B. Arquitectura REAL de producción (la VM no tiene internet,
+el host sí) → **2 tareas** que comparten `C:\WM_wave\csv`:
 
-## Red (ya conectado)
-- Host turbina A: **192.168.192.223** (usuario `backup1`) — la contraseña NO va aquí.
-- Gateway: **192.168.1.163** · Rack TDI 3500: **192.168.1.17** (de ahí toma System1).
-- La **VM** con System1 corre dentro de ese host. El agente va **dentro de la VM**.
-- La VM necesita salida a internet para `*.supabase.co`.
+```
+VM (System1)   WM_export  →  C:\WM_wave\export.bat
+                            = python s1_rpa_export.py --expall C:\WM_wave\csv
+                            (activa la hoja "Export csv1" 4×2 y exporta las 8 ondas)
+                            C:\WM_wave\csv  = carpeta COMPARTIDA (share)
+HOST (internet) WM_upload  →  C:\Watermelon\upload.bat
+                            = python s1_agent.py --csv --once
+                            (lee el share de la VM y sube a Supabase)
+```
 
-## Pasos en la VM de SGT300A (≈20 min) — sigue INSTALL_NUEVA_VM.md con estos cambios
-1. Copiar `system1_agent\` a `C:\Watermelon\system1_agent\`.
+## Estado
+- **Nube: LISTA** — activo `siemens_sgt300_gearbox_brush_turbogen` (tag "SGT300A"),
+  in_service, Parex, bucket `dynamic_raw`. No hay nada que crear.
+- **Host A: VACÍO** (instalación de cero). La VM ya tiene System1 tomando datos.
+- Solo cambian vs B: el **asset** (arriba) y los **IP** (ZeroTier host A
+  192.168.192.223 / gateway 192.168.1.163 / rack TDI 192.168.1.17).
+
+## A) En la VM de SGT300A (donde está System1)
+1. Copiar `system1_agent\` a la VM (ej. `C:\WM_wave\system1_agent\`).
 2. Python 3.11+ (Add to PATH) → `pip install -r requirements.txt`.
-3. Config: copiar **`config.sgt300a.example.toml` → `config.toml`** (ya trae
-   `asset = siemens_sgt300_gearbox_brush_turbogen` y los 8 puntos).
-   - Poner `[supabase] service_key` (o env `SUPABASE_SERVICE_KEY`).
-   - Ajustar `folder`/`out_folder` al usuario real del host (ej. `backup1`).
-4. **Confirmar los tags** del árbol de System1 de A (pueden diferir en texto):
-   ```
-   python s1_rpa_export.py --inspect
-   ```
-   - Ajustar en `config.toml → [rpa]`: `plot_xy` (centro de la gráfica) y el
-     `tag` EXACTO de cada punto (1xd,1yd,2xd,2yd,5xd,5yd,6xd,6yd).
-5. Probar el ciclo:
-   ```
-   python s1_rpa_export.py --run
-   python s1_agent.py --csv --once
-   ```
-   Abrir Watermelon Live → **SGT300A** → *Dynamic analysis* → onda/espectro/órbita.
-6. Agendar cada hora: Task Scheduler → Import `WatermelonS1Agent.xml`
-   (editar ruta si no es `C:\Watermelon\system1_agent\`).
+3. En System1: crear/abrir la hoja **"Export csv1"** = parrilla **4×2** con las 8
+   ondas (1xd,1yd,2xd,2yd,5xd,5yd,6xd,6yd) — IGUAL que B. Confirmar tags:
+   `python s1_rpa_export.py --inspect`.
+4. Crear carpeta `C:\WM_wave\csv` y **compartirla** (lectura para el host).
+5. `C:\WM_wave\export.bat` = `python <ruta>\s1_rpa_export.py --expall C:\WM_wave\csv`.
+6. Task Scheduler (en la VM) → tarea **WM_export** cada hora → corre `export.bat`
+   (en sesión interactiva; trae System1 al frente aunque haya otra ventana).
+7. Probar: `python s1_rpa_export.py --expall C:\WM_wave\csv` → deben salir 8 CSV.
 
-## Lo único que puede diferir de B
-- El **texto de los tags** en el árbol de System1 de A (paso 4). La estructura de
-  sensores de A es la MISMA que B (4 cojinetes X/Y), así que son los mismos 8
-  puntos; solo hay que confirmar cómo están rotulados en A.
-- La **carpeta/usuario** del host (B usaba `Administrator`; A es `backup1`).
+## B) En el HOST de SGT300A (internet)
+1. Copiar `system1_agent\` a `C:\Watermelon\system1_agent\`.
+2. Python 3.11+ → `pip install -r requirements.txt`.
+3. `config.toml` (desde `config.sgt300a.example.toml`):
+   - `asset = siemens_sgt300_gearbox_brush_turbogen`.
+   - `[supabase] service_key` (o env `SUPABASE_SERVICE_KEY`).
+   - `[system1_csv] folder` = la ruta del **share de la VM** (ej. `\\VM\WM_wave\csv`
+     o la letra mapeada).
+4. `C:\Watermelon\upload.bat` = `python C:\Watermelon\system1_agent\s1_agent.py --csv --once`.
+5. Task Scheduler (en el host) → tarea **WM_upload** cada hora → corre `upload.bat`.
+6. Probar: `python s1_agent.py --csv --once` → sube los CSV del share.
+7. Abrir Watermelon Live → **SGT300A** → *Dynamic analysis* → onda/espectro/órbita.
+
+## Lo irreducible (manual on-site, igual que B)
+- Iniciar sesión en la VM (contraseña) y dejar la hoja "Export csv1" armada.
+- Compartir `C:\WM_wave\csv` entre VM↔host y mapearla.
+- Confirmar los tags con `--inspect` (deben ser iguales a B).
 
 ## Verificación final
-- En Supabase Storage, bucket `dynamic_raw`, deben aparecer archivos bajo el
-  asset `siemens_sgt300_gearbox_brush_turbogen`.
-- En Live Monitoring, SGT300A deja de estar "fuera de línea" cuando llegan datos.
+- Supabase Storage → bucket `dynamic_raw` → archivos bajo
+  `siemens_sgt300_gearbox_brush_turbogen`.
+- Live Monitoring: SGT300A deja de estar "fuera de línea".
