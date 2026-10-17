@@ -2473,6 +2473,20 @@ def render_asset_header(
     direct_rows = [r for r in (latest or []) if r.get("metric") == "Direct"]
     _sp_txt, _sp_all, _sp_val = _pick_speeds(latest or [])   # turbina (mayor), no generador
     speed_txt = f"{_sp_val:.0f}" if _sp_val is not None else "—"
+    # MÁQUINA DETENIDA — data fresca pero RPM≈0 (colector en línea, máquina
+    # parada): NO mostrar "NORMAL OPERATION" verde → estado gris "DETENIDA".
+    # Umbral WM_STOPPED_RPM_MIN (default 100). Solo si hay data y NO está stale.
+    _hdr_stopped = False
+    if latest and not _is_stale:
+        try:
+            from core.live_report_builder import is_machine_stopped as _is_stopped
+            if _is_stopped(_sp_val):
+                _hdr_stopped = True
+                status_label = "MÁQUINA DETENIDA"
+                status_fg = "#475569"; status_bg = "#f1f5f9"
+                status_border = "#cbd5e1"; status_icon = "⏸"
+        except Exception:  # noqa: BLE001
+            pass
     # 2 ejes (turbo-generador): sub con el generador
     _speed_extra = ""
     if _sp_all and "·" in _sp_all:
@@ -2527,6 +2541,9 @@ def render_asset_header(
     # System1 para lectura gerencial inmediata. Se intercala antes del
     # status pill en la barra oscura.
     _score, _zone, _zcolor = compute_health_score(severity_summary, latest)
+    if _hdr_stopped:
+        # Máquina parada → salud N/A (no verde) + zona gris "Máquina detenida".
+        _score = None; _zone = "Máquina detenida"; _zcolor = "#475569"
     if (not latest) or _is_stale:
         # Data vieja/ausente → NO mostrar salud/zona como si fuera en vivo (honestidad)
         health_block = (
