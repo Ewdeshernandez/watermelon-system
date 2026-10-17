@@ -1168,6 +1168,50 @@ def _setup_logging():
                   logging.FileHandler(LOG_DIR / "s1_rpa.log", encoding="utf-8")])
 
 
+def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 900.0) -> int:
+    """Tras reiniciar: espera el diálogo 'Welcome to System 1' y abre la base
+    `db_name` (que System1 deja PRESELECCIONADA arriba) → clic en Open. Así la
+    base + las hojas quedan cargadas sin intervención. Sondea hasta `timeout` s
+    (System1 puede tardar varios minutos en abrir tras el boot)."""
+    from pywinauto import Desktop
+    log.info("open_welcome: esperando 'Welcome to System 1' (hasta %ds)...",
+             int(timeout))
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            dlg = Desktop(backend="uia").window(
+                title_re=".*Welcome to System ?1.*")
+            if dlg.exists(timeout=1):
+                # Seleccionar la base por nombre (por si no quedó preseleccionada).
+                for ct in ("DataItem", "ListItem", "Text", "TreeItem"):
+                    try:
+                        row = dlg.child_window(title_re=f".*{db_name}.*",
+                                               control_type=ct)
+                        if row.exists(timeout=0.6):
+                            row.click_input()
+                            time.sleep(0.4)
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+                # Clic en Open.
+                for t in ("Open", "&Open", "Abrir", "&Abrir"):
+                    try:
+                        b = dlg.child_window(title=t, control_type="Button")
+                        if b.exists(timeout=1):
+                            b.click_input()
+                            log.info("open_welcome: Open clicado (base %s)", db_name)
+                            print("OPENWELCOME: Open clicado (%s)" % db_name)
+                            return 0
+                    except Exception:  # noqa: BLE001
+                        continue
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(5)
+    log.warning("open_welcome: no apareció el diálogo en %ds", int(timeout))
+    print("OPENWELCOME: timeout (no apareció el diálogo)")
+    return 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Watermelon System1 RPA Exporter")
     ap.add_argument("--config")
@@ -1214,9 +1258,15 @@ def main(argv=None) -> int:
     ap.add_argument("--names", metavar="a,b,c,...",
                     help="8 nombres de archivo separados por coma que reemplazan "
                          "los de la parrilla (para la hoja GearBox)")
+    ap.add_argument("--openwelcome", nargs="?", const="PAREX A", metavar="DBNAME",
+                    help="espera el diálogo Welcome de System1 y abre la base "
+                         "(preseleccionada) → clic Open. Def 'PAREX A'. Para el "
+                         "arranque de la VM (deja la base cargada sin intervención)")
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
+    if args.openwelcome is not None:
+        return open_welcome(cfg, db_name=args.openwelcome)
     if args.shot:
         return shot(cfg, args.shot)
     if args.treetop:
