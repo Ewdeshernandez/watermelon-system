@@ -621,6 +621,26 @@ def _find_file_dialog(app):
     return None
 
 
+def _set_clipboard(text: str) -> bool:
+    """Pone `text` en el portapapeles (para pegar con Ctrl+V). INMUNE al layout
+    del teclado: en RDP/VM anidado el layout Latin American remapea '\\'→'}' y
+    ':'→'ñ', así que teclear la ruta del Save As la corrompe y el robot se
+    congela. Pegar por portapapeles escribe el texto verbatim."""
+    try:
+        import win32clipboard  # pywin32
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+        win32clipboard.CloseClipboard()
+        return True
+    except Exception:  # noqa: BLE001
+        try:
+            win32clipboard.CloseClipboard()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+
 def _save_as_win32(full_path: str, timeout: float = 25.0) -> bool:
     """Maneja el diálogo Save As con backend WIN32 (el diálogo de archivo es un
     #32770 clásico Win32; el backend uia lo ve mal). Fija el nombre en la caja
@@ -647,22 +667,46 @@ def _save_as_win32(full_path: str, timeout: float = 25.0) -> bool:
     except Exception:  # noqa: BLE001
         pass
     time.sleep(0.3)
-    # 1) caja de nombre: Edit clásico
+    # Caja de nombre: localizar el Edit (clásico o dentro del ComboBox).
     filled = False
+    _edit = None
     for finder in (
         lambda: dlg.child_window(class_name="Edit"),
         lambda: dlg.child_window(class_name="ComboBox").child_window(
             class_name="Edit"),
     ):
         try:
-            e = finder()
-            if e.exists():
-                e.set_edit_text(full_path)
-                filled = True
+            _e = finder()
+            if _e.exists():
+                _edit = _e
                 break
         except Exception:  # noqa: BLE001
             continue
-    # 2) fallback: teclear en el campo enfocado (el diálogo abre con foco ahí)
+    # 1) PRIMARIO: pegar por portapapeles (Ctrl+A + Ctrl+V). INMUNE al layout
+    #    del teclado (el RDP/VM anidado en Latin American remapea '\' ':' al
+    #    teclear → nombre corrupto → freeze). Ctrl+A/Ctrl+V no dependen del layout.
+    if _set_clipboard(full_path):
+        try:
+            if _edit is not None:
+                _edit.set_focus()
+            send_keys("^a^v")
+            time.sleep(0.25)
+            try:
+                _cur = _edit.window_text() if _edit is not None else ""
+            except Exception:  # noqa: BLE001
+                _cur = ""
+            if (_cur or "").strip():
+                filled = True
+        except Exception:  # noqa: BLE001
+            pass
+    # 2) set_edit_text (WM_SETTEXT, no teclea → tampoco depende del layout)
+    if not filled and _edit is not None:
+        try:
+            _edit.set_edit_text(full_path)
+            filled = True
+        except Exception:  # noqa: BLE001
+            pass
+    # 3) último recurso: teclear (depende del layout; puede fallar en LAA)
     if not filled:
         try:
             send_keys("^a{DELETE}")
