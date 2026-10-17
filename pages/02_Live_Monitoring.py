@@ -2215,7 +2215,7 @@ def _build_live_report_pdf(
 
     # Health + KPIs
     score, zone, zcolor = compute_health_score(severity_summary, latest)
-    speed_txt, _speeds_all, _ = _pick_speeds(latest)    # eje principal (turbina, no generador)
+    speed_txt, _speeds_all, _speed_val = _pick_speeds(latest)    # eje principal (turbina, no generador)
     n_danger = severity_summary.get("Danger", 0)
     n_alarm = severity_summary.get("Alarma", 0)
     status = "Critical" if n_danger else ("Attention" if n_alarm else "Normal operation")
@@ -2259,6 +2259,20 @@ def _build_live_report_pdf(
                          "offline_since": _since_txt, "offline_age": _age_txt,
                          "last": _age_txt})
             meta.update({"status": "Fuera de línea", "offline": True})
+        else:
+            # MÁQUINA DETENIDA — dato FRESCO pero RPM≈0 (colector en línea, máquina
+            # parada). Muestra los datos actuales pero salud N/A + rótulo gris; NO
+            # "operación normal". Umbral WM_STOPPED_RPM_MIN (default 100).
+            try:
+                from core.live_report_builder import is_machine_stopped as _is_stopped
+                if _is_stopped(_speed_val):
+                    health = {"score": None, "zone": "Máquina detenida", "color": "#475569"}
+                    kpis.update({"status": "Máquina detenida", "stopped": True,
+                                 "stopped_rpm": _speed_val})
+                    meta.update({"status": "Máquina detenida", "stopped": True,
+                                 "score": None})
+            except Exception:  # noqa: BLE001
+                pass
 
     # Canales con 1X/2X
     vec: Dict[str, Dict[str, Any]] = {}

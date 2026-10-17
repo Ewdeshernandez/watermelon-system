@@ -191,6 +191,19 @@ def generate_briefing_pdf(
             "Este informe presenta el ÚLTIMO estado conocido y las últimas "
             "recomendaciones emitidas — la condición vigente NO puede confirmarse "
             "hasta restablecer el monitoreo.")
+    elif bool(kpis.get("stopped")):
+        try:
+            _rpm_txt = f"{float(kpis.get('stopped_rpm')):.0f} rpm"
+        except Exception:
+            _rpm_txt = "≈0 rpm"
+        _intro = (
+            f"El activo {tag}"
+            + (f" ({paragraph_safe(train)})" if train else "")
+            + f" está DETENIDA (velocidad {_rpm_txt}) al momento del dato. El colector "
+            "está en línea y reporta, pero la máquina no está en operación. Los valores "
+            "y la tabular mostrados son los ACTUALES con la máquina parada; NO "
+            "representan su condición en operación y la salud no aplica a 0 rpm. Al "
+            "arrancar, se confirmará la vibración en régimen antes de diagnosticar.")
     else:
         _intro = (
             f"Se presenta el seguimiento de condición del tren {tag}"

@@ -9,21 +9,26 @@
 asset = "siemens_sgt300_gearbox_brush_turbogen"   # tag en la web: "SGT300A"
 
 # ---------------------------------------------------------------------
-# Red del host SGT300A (referencia — ya debe estar conectado):
-#   Host turbina A : 192.168.192.223  (usuario backup1)
+# Red (referencia — ya debe estar conectado):
+#   Host turbina A : 192.168.192.223  (usuario backup1)  <- corre upload.bat
+#   VM de A (System1): 192.168.192.172 (ZeroTier)  <- corre el RPA export
+#       (en B la VM es 192.168.192.130)
 #   Gateway        : 192.168.1.163
 #   Rack TDI (3500): 192.168.1.17     (System1 toma la onda de acá)
-#   La onda vive dentro de la VM (System1) que corre sobre este host.
-#   Requisito: la VM alcanza *.supabase.co (internet) para subir.
+#   Reparto: la VM exporta los CSV a su C:\WM_wave\csv (y csv_gb). El HOST
+#   (que SÍ tiene internet) lee ese share por UNC y sube a Supabase. La VM
+#   NO necesita internet. IDÉNTICO a SGT300B.
 # ---------------------------------------------------------------------
 
 [supabase]
 url = "https://yxeqwkhybueelmkrdkgq.supabase.co"
 service_key = "PONER_SERVICE_ROLE_KEY_AQUI"   # o env SUPABASE_SERVICE_KEY
 
-# Onda cruda desde los CSV que exporta System1 (igual que SGT300B).
+# Onda cruda desde los CSV que exporta System1 en la VM (igual que SGT300B).
+# El host lee el share C$ de la VM por UNC (VM de A = 192.168.192.172).
 [system1_csv]
-folder = "C:\\Users\\backup1\\Desktop\\CSV"    # ajustar al usuario real del host
+folder = '\\192.168.192.172\C$\WM_wave\csv'
+gearbox_folder = '\\192.168.192.172\C$\WM_wave\csv_gb'
 
 # RPA — automatiza el 'Export to CSV' por punto. MISMOS 8 puntos que SGT300B
 # (4 cojinetes X/Y → órbita). ⚠️ Confirmar el texto EXACTO de cada `tag` contra

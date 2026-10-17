@@ -204,6 +204,27 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         status = "Fuera de línea"; zone = "Fuera de línea"; zcolor = "#475569"
         score = None       # sin datos actuales → salud no aplica (no "100")
 
+    # MÁQUINA DETENIDA — data FRESCA pero velocidad live < umbral (RPM≈0). El
+    # colector sigue reportando con la máquina parada → NO es "Operación normal".
+    # Muestra los datos ACTUALES (no oculta tendencias como offline), pero salud
+    # N/A y rótulo gris "Máquina detenida". Usa la velocidad LIVE (speed_row),
+    # no base_rpm (que cae al nominal). Solo si NO está fuera de línea.
+    _stopped = False
+    _stopped_rpm = None
+    if not _offline:
+        try:
+            from core.live_report_builder import is_machine_stopped as _is_stopped
+            _live_rpm = (float(speed_row["value"])
+                         if (speed_row and speed_row.get("value") is not None) else None)
+            if _is_stopped(_live_rpm):
+                _stopped = True
+                _stopped_rpm = _live_rpm
+        except Exception:  # noqa: BLE001
+            pass
+    if _stopped:
+        status = "Máquina detenida"; zone = "Máquina detenida"; zcolor = "#475569"
+        score = None
+
     # Continuidad para el reporte fuera de línea: últimas recomendaciones (del
     # informe previo) + últimas alarmas registradas CON FECHA.
     _last_recs = list(getattr(instance_obj, "last_recommendations", []) or [])
@@ -225,12 +246,14 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
     return {
         "health": {"score": score, "zone": zone, "color": zcolor},
         "kpis": {"status": status, "speed": speed_txt, "alarms": n_danger + n_alarm,
-                 "offline": _offline, "offline_since": _off_since, "offline_age": _off_age},
+                 "offline": _offline, "offline_since": _off_since, "offline_age": _off_age,
+                 "stopped": _stopped, "stopped_rpm": _stopped_rpm},
         "channels": channels,
         "severity_summary": severity_summary,
         "n_alarm": n_alarm, "n_danger": n_danger,
         "tabular_asof": tabular_asof,
         "offline": _offline, "offline_since": _off_since, "offline_age": _off_age,
+        "stopped": _stopped, "stopped_rpm": _stopped_rpm,
         "last_recommendations": _last_recs, "last_recommendations_date": _last_recs_date,
         "last_alarms": _last_alarms,
     }
@@ -279,6 +302,31 @@ def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict
                 "mostrados corresponden al ÚLTIMO estado conocido, no a la condición "
                 "actual."),
             "diagnosis": _diag,
+            "recommendations": _rec_out,
+        }
+
+    # MÁQUINA DETENIDA — colector en línea pero RPM≈0. Datos ACTUALES (se
+    # muestran), pero honesto: a 0 rpm no hay condición operativa que evaluar.
+    if data.get("stopped"):
+        try:
+            _rpm_txt = f"{float(data.get('stopped_rpm')):.0f} rpm"
+        except Exception:  # noqa: BLE001
+            _rpm_txt = "≈0 rpm"
+        _recs = data.get("last_recommendations") or []
+        _recs_date = data.get("last_recommendations_date") or ""
+        _rec_out = [(f"[Informe {_recs_date}] " if _recs_date else "") + r for r in _recs[:5]]
+        _rec_out.append("Cuando la máquina arranque, confirmar la vibración en régimen "
+                        "de operación antes de emitir diagnóstico de condición.")
+        return {
+            "summary": (
+                f"{tag} está DETENIDA (velocidad {_rpm_txt}) al momento del dato. El "
+                "colector sí reporta en línea; los valores y la tabular mostrados son "
+                "los ACTUALES con la máquina parada, por lo que NO representan su "
+                "condición en operación y la salud no aplica a 0 rpm."),
+            "diagnosis": (
+                f"Máquina detenida ({_rpm_txt}). A 0 rpm la vibración no refleja el estado "
+                "mecánico en marcha, por lo que no se emite diagnóstico de condición. Los "
+                "datos se presentan como referencia del estado actual (parada)."),
             "recommendations": _rec_out,
         }
 
@@ -986,7 +1034,7 @@ def build_asset_briefing(
     sections = _deterministic_sections(tag, period_label, data)
     # FUERA DE LÍNEA: NO pasar por la IA — se conserva el texto honesto (sin datos
     # en el periodo, último estado conocido). La IA lo reescribiría como si operara.
-    if use_ai and not data.get("offline"):
+    if use_ai and not data.get("offline") and not data.get("stopped"):
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
         # Comentario de figura nivel Cat. IV (IA + RAG): sobrescribe el análisis
@@ -1194,7 +1242,7 @@ def build_asset_draft(
         figures = {}
 
     sections = _deterministic_sections(tag, period_label, data)
-    if use_ai and not data.get("offline"):       # offline → texto honesto, sin IA
+    if use_ai and not data.get("offline") and not data.get("stopped"):  # offline/detenida → texto honesto, sin IA
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
 

@@ -242,6 +242,20 @@ def generate_live_report_pdf(
                  "medidos; NO representan la condición actual del equipo. "
                  "Acción: verificar operación del equipo, el colector y el "
                  "enlace del sitio.")
+    elif bool(kpis.get("stopped")):
+        # MÁQUINA DETENIDA — telemetría en línea pero RPM≈0. Datos ACTUALES,
+        # con la máquina parada: no es "operación normal" ni condición evaluable.
+        _fg, _bg = "#475569", "#f1f5f9"
+        try:
+            _rpm_txt = f"{float(kpis.get('stopped_rpm')):.0f} rpm"
+        except Exception:
+            _rpm_txt = "≈0 rpm"
+        _band = "MÁQUINA DETENIDA — FUERA DE OPERACIÓN"
+        _diag = (f"El colector está en línea, pero la máquina está detenida "
+                 f"(velocidad {_rpm_txt}). Los valores mostrados son los actuales "
+                 "con la máquina parada; NO representan su condición en operación "
+                 "y la salud no aplica a 0 rpm. Al arrancar, confirmar la vibración "
+                 "en régimen antes de emitir diagnóstico.")
     elif "crít" in _sl or "crit" in _sl:
         _band = "CONDICIÓN CRÍTICA — ACCIÓN INMEDIATA"
         _diag = (f"{_alarms} punto(s) en nivel de PELIGRO. Requiere atención inmediata: "

@@ -78,6 +78,33 @@ def pick_speeds(latest: List[Dict[str, Any]]):
 
 
 # =============================================================
+# Máquina DETENIDA (parada) — telemetría en línea pero RPM ≈ 0
+# =============================================================
+
+def stopped_rpm_threshold() -> float:
+    """RPM bajo el cual se considera la máquina DETENIDA (no en marcha).
+    Env WM_STOPPED_RPM_MIN (default 100). El SGT300 opera en miles de rpm, así
+    que <100 = parada (no giro / virador lento), nunca condición operativa."""
+    import os
+    try:
+        return float(os.environ.get("WM_STOPPED_RPM_MIN", "100"))
+    except Exception:
+        return 100.0
+
+
+def is_machine_stopped(live_rpm) -> bool:
+    """True si HAY lectura de velocidad y es < umbral de marcha. Si no hay
+    lectura (None) devuelve False: sin velocidad no se afirma que está parada
+    (podría ser falta de keyphasor, no máquina detenida)."""
+    if live_rpm is None:
+        return False
+    try:
+        return float(live_rpm) < stopped_rpm_threshold()
+    except Exception:
+        return False
+
+
+# =============================================================
 # Helpers de tiempo (puros) — portados de la página
 # =============================================================
 
@@ -363,6 +390,19 @@ def build_report_for_instance(
                      "offline_since": since_txt, "offline_age": age_txt,
                      "last": age_txt})
         meta.update({"status": "Fuera de línea", "offline": True, "score": None})
+
+    # MÁQUINA DETENIDA — telemetría FRESCA pero velocidad < umbral (RPM≈0).
+    # A diferencia de "Fuera de línea" (sin enlace), acá los datos SÍ son
+    # actuales → se MUESTRAN completos (tendencias/figuras); pero la salud NO
+    # aplica (no hay condición operativa a 0 rpm) y el rótulo es "Máquina
+    # detenida", nunca "Operación normal". Solo si NO está fuera de línea.
+    _stopped = False
+    if offline_age_min is None and is_machine_stopped(_speed_val):
+        _stopped = True
+        health = {"score": None, "zone": "Máquina detenida", "color": "#475569"}
+        kpis.update({"status": "Máquina detenida", "stopped": True,
+                     "stopped_rpm": _speed_val})
+        meta.update({"status": "Máquina detenida", "stopped": True, "score": None})
 
     # Canales con 1X/2X
     vec: Dict[str, Dict[str, Any]] = {}
