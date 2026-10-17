@@ -1169,37 +1169,37 @@ def _setup_logging():
 
 
 def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 900.0) -> int:
-    """Tras reiniciar: espera el diálogo 'Welcome to System 1' y abre la base
-    `db_name` (que System1 deja PRESELECCIONADA arriba) → clic en Open. Así la
-    base + las hojas quedan cargadas sin intervención. Sondea hasta `timeout` s
-    (System1 puede tardar varios minutos en abrir tras el boot)."""
-    from pywinauto import Desktop
-    log.info("open_welcome: esperando 'Welcome to System 1' (hasta %ds)...",
+    """Tras reiniciar: abre la base de System1 sin intervención. El diálogo de
+    bienvenida es un HIJO de la ventana 'System 1' (un Dialog titulado
+    'Open Enterprise' con la base PRESELECCIONADA y un botón 'Open'), NO una
+    ventana top-level. Conecta a 'System 1', busca ese diálogo + su botón Open
+    y lo clica. Sondea hasta `timeout` s (System1 tarda varios min en abrir)."""
+    from pywinauto import Application
+    log.info("open_welcome: esperando el diálogo 'Open Enterprise' (hasta %ds)...",
              int(timeout))
     end = time.time() + timeout
     while time.time() < end:
         try:
-            dlg = Desktop(backend="uia").window(
-                title_re=".*Welcome to System ?1.*")
+            app = Application(backend="uia").connect(
+                title_re=".*System ?1.*", timeout=2)
+            win = app.window(title_re=".*System ?1.*")
+            dlg = win.child_window(title="Open Enterprise")
             if dlg.exists(timeout=1):
-                # Seleccionar la base por nombre (por si no quedó preseleccionada).
-                for ct in ("DataItem", "ListItem", "Text", "TreeItem"):
-                    try:
-                        row = dlg.child_window(title_re=f".*{db_name}.*",
-                                               control_type=ct)
-                        if row.exists(timeout=0.6):
-                            row.click_input()
-                            time.sleep(0.4)
-                            break
-                    except Exception:  # noqa: BLE001
-                        continue
-                # Clic en Open.
+                # La base (PAREX A) ya está preseleccionada → basta clicar Open.
+                # Intentar primero seleccionar la fila por nombre (best-effort).
+                try:
+                    row = dlg.child_window(title_re=f".*{db_name}.*")
+                    if row.exists(timeout=0.6):
+                        row.click_input()
+                        time.sleep(0.4)
+                except Exception:  # noqa: BLE001
+                    pass
                 for t in ("Open", "&Open", "Abrir", "&Abrir"):
                     try:
                         b = dlg.child_window(title=t, control_type="Button")
                         if b.exists(timeout=1):
                             b.click_input()
-                            log.info("open_welcome: Open clicado (base %s)", db_name)
+                            log.info("open_welcome: Open clicado (Open Enterprise)")
                             print("OPENWELCOME: Open clicado (%s)" % db_name)
                             return 0
                     except Exception:  # noqa: BLE001
@@ -1207,7 +1207,7 @@ def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 900.0) -> int:
         except Exception:  # noqa: BLE001
             pass
         time.sleep(5)
-    log.warning("open_welcome: no apareció el diálogo en %ds", int(timeout))
+    log.warning("open_welcome: no apareció 'Open Enterprise' en %ds", int(timeout))
     print("OPENWELCOME: timeout (no apareció el diálogo)")
     return 1
 
