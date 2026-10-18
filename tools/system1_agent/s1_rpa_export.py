@@ -568,6 +568,17 @@ def _dismiss_dialogs(app=None):
             time.sleep(0.5)
         except Exception:  # noqa: BLE001
             break
+    # Cerrar cualquier menú contextual owner-drawn colgado: ESC a la ventana de
+    # System1. Si un right-click→Export quedó a medias, su menú tapa el siguiente
+    # canal y el robot reporta "no hallé 'Export to CSV'". ESC lo descarta.
+    try:
+        if app is not None:
+            w = app.top_window()
+            w.set_focus()
+            send_keys("{ESC}{ESC}")
+            time.sleep(0.2)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _find_save_button(w):
@@ -1065,15 +1076,38 @@ def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
             _activate_sheet(win, sheet, cfg)
     except Exception as exc:  # noqa: BLE001
         log.warning("preparación de hoja falló: %s", exc)
-    ok = 0
-    results = []
-    for t in tiles:
-        rc = export_one(cfg, int(t["x"]), int(t["y"]), t["name"], out_dir)
-        good = (rc == 0)
-        results.append("%s=%s" % (t["name"], "OK" if good else "FAIL"))
-        if good:
-            ok += 1
-        time.sleep(0.5)
+    # Reintenta los canales FALLIDOS hasta 3 pasadas. Tras un reinicio System1
+    # está FRÍO → el 1er Save As tarda más del timeout → ese canal falla y a
+    # veces deja un diálogo trabado → cascada. Entre pasadas: cierra colgados,
+    # reactiva la hoja y espera (calienta). Una pasada caliente recupera, igual
+    # que correr a mano minutos después. Solo reexporta lo pendiente.
+    status = {t["name"]: "FAIL" for t in tiles}
+    pending = list(tiles)
+    for attempt in range(3):
+        if not pending:
+            break
+        if attempt > 0:
+            try:
+                app, win = _connect()
+                _dismiss_dialogs(app)             # cierra Save As/menú colgado
+                if sheet:
+                    _activate_sheet(win, sheet, cfg)
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(8.0)                       # deja calentar System1
+            log.info("EXPORTALL: pasada %d, reintentando %d pendientes",
+                     attempt + 1, len(pending))
+        still = []
+        for t in pending:
+            rc = export_one(cfg, int(t["x"]), int(t["y"]), t["name"], out_dir)
+            if rc == 0:
+                status[t["name"]] = "OK"
+            else:
+                still.append(t)
+            time.sleep(0.5)
+        pending = still
+    ok = sum(1 for v in status.values() if v == "OK")
+    results = ["%s=%s" % (t["name"], status[t["name"]]) for t in tiles]
     print("EXPORTALL: %d/%d  [%s]" % (ok, len(tiles), " ".join(results)))
     return 0 if ok == len(tiles) else 1
 
