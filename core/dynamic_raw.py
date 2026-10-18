@@ -469,13 +469,25 @@ def list_captures(asset: str, limit: int = 200, client=None) -> List[Dict[str, s
     try:
         st_api = client.storage.from_(BUCKET)
         # estructura: {asset}/{YYYYMMDD}/{HHMMSS}__{point}.csv
-        days = st_api.list(asset) or []
+        # OJO: Supabase .list() devuelve SOLO 100 por defecto, en orden
+        # ascendente → al pasar de 100 archivos/día se caían las capturas
+        # NUEVAS (bug: "esta mañana sí, en la tarde no"). Pedimos límite alto y
+        # orden descendente (más recientes primero) por carpeta.
+        _opts = {"limit": 2000, "sortBy": {"column": "name", "order": "desc"}}
+
+        def _ls(path):
+            try:
+                return st_api.list(path, _opts) or []
+            except Exception:  # noqa: BLE001  (clientes viejos: sin options)
+                return st_api.list(path) or []
+
+        days = _ls(asset)
         day_names = sorted((x.get("name", "") for x in days if x.get("name")),
                            reverse=True)
         for d in day_names:
             if d.endswith(".csv"):
                 continue  # (defensivo) archivo suelto en la raíz del activo
-            files = st_api.list(f"{asset}/{d}") or []
+            files = _ls(f"{asset}/{d}")
             # más reciente primero dentro del día
             for f in sorted(files, key=lambda z: z.get("name", ""), reverse=True):
                 nm = f.get("name", "")
