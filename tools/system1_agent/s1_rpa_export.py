@@ -568,6 +568,47 @@ def _dismiss_dialogs(app=None):
             time.sleep(0.5)
         except Exception:  # noqa: BLE001
             break
+    # Cerrar el "Shutdown Event Tracker" de Windows Server: tras un apagado o
+    # reinicio inesperado sale ese modal ("Why did the computer shut down
+    # unexpectedly?"), ROBA EL FOCO y el nombre que el robot teclea para el Save
+    # As se va a SU caja → Save As vacío → export falla SOLO tras reiniciar.
+    # El registro (ShutdownReasonOn=0) lo desactiva, pero esto es el cinturón:
+    # si aparece, lo cancelamos. Buscar por título en el escritorio y dar Cancel.
+    try:
+        from pywinauto import Desktop
+        for _ in range(3):
+            found = False
+            for be in ("win32", "uia"):
+                try:
+                    w = Desktop(backend=be).window(title="Shutdown Event Tracker")
+                    if w.exists(timeout=0.4):
+                        found = True
+                        try:
+                            w.set_focus()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        clicked = False
+                        for tt in ("Cancel", "&Cancel", "Cancelar", "&Cancelar"):
+                            try:
+                                b = w.child_window(title=tt, class_name="Button")
+                                if b.exists(timeout=0.3):
+                                    b.click_input()
+                                    clicked = True
+                                    break
+                            except Exception:  # noqa: BLE001
+                                continue
+                        if not clicked:
+                            try:
+                                send_keys("{ESC}")
+                            except Exception:  # noqa: BLE001
+                                pass
+                        time.sleep(0.4)
+                except Exception:  # noqa: BLE001
+                    continue
+            if not found:
+                break
+    except Exception:  # noqa: BLE001
+        pass
     # Cerrar cualquier menú contextual owner-drawn colgado: ESC a la ventana de
     # System1. Si un right-click→Export quedó a medias, su menú tapa el siguiente
     # canal y el robot reporta "no hallé 'Export to CSV'". ESC lo descarta.
