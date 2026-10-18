@@ -1168,15 +1168,16 @@ def _setup_logging():
                   logging.FileHandler(LOG_DIR / "s1_rpa.log", encoding="utf-8")])
 
 
-def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 900.0) -> int:
+def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 1800.0) -> int:
     """Tras reiniciar: abre la base de System1 sin intervención. El diálogo de
-    bienvenida es un HIJO de la ventana 'System 1' (un Dialog titulado
-    'Open Enterprise' con la base PRESELECCIONADA y un botón 'Open'), NO una
-    ventana top-level. Conecta a 'System 1', busca ese diálogo + su botón Open
-    y lo clica. Sondea hasta `timeout` s (System1 tarda varios min en abrir)."""
+    bienvenida es un HIJO de 'System 1' (Dialog 'Open Enterprise', base
+    PRESELECCIONADA + botón 'Open'). Clica Open y REINTENTA: si el server aún
+    inicializa, System1 muestra 'Error: Could not open selected enterprise' → se
+    clica OK, se espera 30 s y se vuelve a Open, hasta que la base abre (o
+    `timeout`). System1 + su server tardan varios minutos tras el boot."""
     from pywinauto import Application
-    log.info("open_welcome: esperando el diálogo 'Open Enterprise' (hasta %ds)...",
-             int(timeout))
+    log.info("open_welcome: abriendo base (hasta %ds, reintenta si el server no "
+             "está listo)...", int(timeout))
     end = time.time() + timeout
     while time.time() < end:
         try:
@@ -1184,31 +1185,58 @@ def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 900.0) -> int:
                 title_re=".*System ?1.*", timeout=2)
             win = app.window(title_re=".*System ?1.*")
             dlg = win.child_window(title="Open Enterprise")
-            if dlg.exists(timeout=1):
-                # La base (PAREX A) ya está preseleccionada → basta clicar Open.
-                # Intentar primero seleccionar la fila por nombre (best-effort).
+            if not dlg.exists(timeout=1):
+                time.sleep(5)
+                continue
+            # Seleccionar la fila (best-effort; ya suele venir preseleccionada).
+            try:
+                row = dlg.child_window(title_re=f".*{db_name}.*")
+                if row.exists(timeout=0.6):
+                    row.click_input()
+                    time.sleep(0.4)
+            except Exception:  # noqa: BLE001
+                pass
+            # Clic en Open.
+            clicked = False
+            for t in ("Open", "&Open", "Abrir", "&Abrir"):
                 try:
-                    row = dlg.child_window(title_re=f".*{db_name}.*")
-                    if row.exists(timeout=0.6):
-                        row.click_input()
-                        time.sleep(0.4)
+                    b = dlg.child_window(title=t, control_type="Button")
+                    if b.exists(timeout=1):
+                        b.click_input()
+                        clicked = True
+                        break
                 except Exception:  # noqa: BLE001
-                    pass
-                for t in ("Open", "&Open", "Abrir", "&Abrir"):
+                    continue
+            if not clicked:
+                time.sleep(5)
+                continue
+            time.sleep(4)
+            # ¿Apareció 'Error: Could not open selected enterprise'? (server aún
+            # inicializando) → OK + esperar + reintentar.
+            err = win.child_window(title="Error")
+            if err.exists(timeout=1):
+                for t in ("OK", "&OK", "Aceptar", "&Aceptar"):
                     try:
-                        b = dlg.child_window(title=t, control_type="Button")
-                        if b.exists(timeout=1):
-                            b.click_input()
-                            log.info("open_welcome: Open clicado (Open Enterprise)")
-                            print("OPENWELCOME: Open clicado (%s)" % db_name)
-                            return 0
+                        ob = err.child_window(title=t, control_type="Button")
+                        if ob.exists(timeout=0.6):
+                            ob.click_input()
+                            break
                     except Exception:  # noqa: BLE001
                         continue
+                log.info("open_welcome: server aún inicializando → reintento en 30s")
+                time.sleep(30)
+                continue
+            # Sin error + el diálogo 'Open Enterprise' se cerró = base abierta.
+            time.sleep(2)
+            if not dlg.exists(timeout=1):
+                log.info("open_welcome: base '%s' abierta OK", db_name)
+                print("OPENWELCOME: base abierta (%s)" % db_name)
+                return 0
         except Exception:  # noqa: BLE001
             pass
         time.sleep(5)
-    log.warning("open_welcome: no apareció 'Open Enterprise' en %ds", int(timeout))
-    print("OPENWELCOME: timeout (no apareció el diálogo)")
+    log.warning("open_welcome: no se pudo abrir la base en %ds", int(timeout))
+    print("OPENWELCOME: timeout (base no abrió)")
     return 1
 
 
