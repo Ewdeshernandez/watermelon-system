@@ -935,8 +935,19 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
         pass
     ok = False
     clicked_any = False
-    for intento in range(2):
-        mouse.right_click(coords=(x, y))
+    # Si el right-click cae justo al borde del plot, el menú no sale. Reintenta
+    # con pequeños desplazamientos hacia adentro (sirve para tiles al borde como
+    # 6xd). ESC antes de cada intento cierra cualquier menú colgado.
+    from pywinauto.keyboard import send_keys as _sk
+    offsets = [(0, 0), (-12, -12), (12, 12), (0, -18), (-18, 0)]
+    for intento, (dx, dy) in enumerate(offsets):
+        if intento > 0:
+            try:
+                _sk("{ESC}")
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.2)
+        mouse.right_click(coords=(x + dx, y + dy))
         time.sleep(0.7)
         clicked = _click_menuitem(EXPORT_MENU_TEXT, app=app)
         clicked_any = clicked_any or clicked
