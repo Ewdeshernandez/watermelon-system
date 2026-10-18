@@ -1244,6 +1244,25 @@ def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 1800.0) -> int:
                     opened = True
                     break
             if opened:
+                # Dejar System1 LISTO para el robot: navegar por COORDENADA
+                # (los tabs/árbol son owner-drawn, no exponen UIA) →
+                # clic SGT300A (árbol izq) → Plots (tab) → Export CSV1 (sub-tab).
+                # Coords del guest 1718×839 (configurables en cfg[rpa]).
+                try:
+                    from pywinauto import mouse
+                    rpa = (cfg or {}).get("rpa", {})
+                    nav_tree  = tuple(rpa.get("nav_tree",  [130, 128]))
+                    nav_plots = tuple(rpa.get("nav_plots", [555, 78]))
+                    nav_sheet = tuple(rpa.get("nav_sheet", [357, 116]))
+                    time.sleep(4)                       # la máquina tarda en cargar
+                    mouse.click(coords=nav_tree);  time.sleep(1.5)
+                    mouse.click(coords=nav_plots); time.sleep(1.5)
+                    mouse.click(coords=nav_sheet); time.sleep(1.0)
+                    log.info("open_welcome: navegado SGT300A->Plots->Export CSV1 "
+                             "%s %s %s", nav_tree, nav_plots, nav_sheet)
+                    print("OPENWELCOME: navegado a Export CSV1")
+                except Exception:  # noqa: BLE001
+                    pass
                 log.info("open_welcome: base '%s' abierta OK", db_name)
                 print("OPENWELCOME: base abierta (%s)" % db_name)
                 return 0
