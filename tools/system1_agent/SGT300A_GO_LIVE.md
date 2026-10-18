@@ -110,6 +110,28 @@ pywinauto/opencv/pywin32. Calibrado a **1718×839**:
 - `C:\WM_wave\export.bat` (CSV1 + gearbox) + tarea **WM_export** horaria (interactiva, Administrator).
 - Verificado E2E: export 8 bearings + 7 gearbox → host WM_upload sube BRG1/2/5/6 + GB (6) → Supabase HTTP200.
 
+## REINICIO AUTO — piezas finas (2026-10-18)
+Tras pelear con reinicios reales, lo que hace A 100% auto:
+- **VM auto-arranca:** host auto-login (Autologon backup1/WatermelonModal) +
+  `C:\watermelon\run_vm.bat` (`vmrun start <vmx> gui`) en Startup del host +
+  tarea **WM_vm_watchdog** (cada 15 min, `vmrun start` idempotente, relanza si cae).
+  vmx real: `C:\Users\backup1\Desktop\SIGA Paquete Watermelon System (1)\...\mv\WinServ22 Clasicand22.1.vmx`.
+- **VM auto-login** Administrator (registro AutoAdminLogon, DisableCAD=1).
+- **Teclado en-US PERSISTENTE:** el guest revierte a Latin American en cada
+  reinicio → `ForceENUS.lnk` en Startup corre `Set-WinUserLanguageList en-US -Force`
+  cada login (si no, el Save As del robot se congela). Ver [[system1-rpa-saveas-underscore]].
+- **System1 abre solo:** `System1.lnk` en Startup.
+- **⭐ CAUSA RAÍZ del "Could not open selected enterprise":** el servicio
+  **"System 1 Data Server"** estaba en **Manual** → Stopped tras boot → el Open
+  fallaba. FIX: `Set-Service "System 1 Data Server" -StartupType Automatic`.
+  (Data Acquisition / Enterprise Data Server fallan al arrancar a mano = on-demand,
+  los dispara el Open; solo Data Server debía quedar Automatic.)
+- **Carga la base sola:** `OpenWelcome.lnk` en Startup corre
+  `s1_rpa_export.py --openwelcome "PAREX A"` → sondea el diálogo hijo
+  'Open Enterprise', clica Open, cierra con Enter cualquier 'Error' y reintenta
+  cada 30s hasta abrir (commit 32212f5).
+- **Robot Save As:** patch de portapapeles (commit 8035cd2) + en-US (lo confiable).
+
 ## SUPERVIVENCIA A REINICIO (2026-10-16)
 - **Live Monitoring (colector + upload): 100% AUTO.** Colector = servicio nssm AUTO_START (host).
   WM_upload = tarea "Interactive/Background" con clave (host). Vuelven solos tras reinicio.
