@@ -1084,6 +1084,38 @@ def _activate_sheet(win, sheet_name: str, cfg: dict | None = None) -> bool:
         return False
 
 
+def nav_to_export(cfg: dict) -> int:
+    """Clic por coordenada SGT300A(árbol) → Plots → Export CSV1. Deja System1
+    parado en la hoja de export tras un arranque EN FRÍO: la base abre en la
+    vista de inicio y la pestaña 'Export CSV1' no existe hasta seleccionar
+    máquina + Plots, así que el --expall por sí solo no la encuentra. Coords en
+    cfg[rpa] (nav_tree/nav_plots/nav_sheet), defaults del guest 1718×839."""
+    from pywinauto import mouse
+    rpa = (cfg or {}).get("rpa", {})
+    nav_tree  = tuple(rpa.get("nav_tree",  [130, 128]))
+    nav_plots = tuple(rpa.get("nav_plots", [555, 78]))
+    nav_sheet = tuple(rpa.get("nav_sheet", [357, 116]))
+    try:
+        app, win = _connect()
+        _dismiss_dialogs(app)        # cierra Shutdown Event Tracker / colgados
+        win.set_focus()
+    except Exception:  # noqa: BLE001
+        pass
+    time.sleep(1.0)
+    try:
+        mouse.click(coords=nav_tree);  time.sleep(1.5)
+        mouse.click(coords=nav_plots); time.sleep(1.5)
+        mouse.click(coords=nav_sheet); time.sleep(1.0)
+        log.info("nav: SGT300A->Plots->Export CSV1 %s %s %s",
+                 nav_tree, nav_plots, nav_sheet)
+        print("NAV: SGT300A->Plots->Export CSV1 OK")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        log.warning("nav falló: %s", exc)
+        print("NAV: falló (%s)" % exc)
+        return 1
+
+
 def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
                names: list | None = None, sheet_xy=None) -> int:
     """Exporta las 8 gráficas de la hoja (clic-derecho→Export→Save As) por
@@ -1398,6 +1430,10 @@ def main(argv=None) -> int:
     ap.add_argument("--names", metavar="a,b,c,...",
                     help="8 nombres de archivo separados por coma que reemplazan "
                          "los de la parrilla (para la hoja GearBox)")
+    ap.add_argument("--nav", action="store_true",
+                    help="navega SGT300A(árbol)->Plots->Export CSV1 por coord "
+                         "(cfg[rpa] nav_tree/nav_plots/nav_sheet). Deja System1 "
+                         "listo para exportar tras un arranque en frío.")
     ap.add_argument("--openwelcome", nargs="?", const="PAREX A", metavar="DBNAME",
                     help="espera el diálogo Welcome de System1 y abre la base "
                          "(preseleccionada) → clic Open. Def 'PAREX A'. Para el "
@@ -1405,6 +1441,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     _setup_logging()
     cfg = _load_cfg(args.config)
+    if args.nav:
+        return nav_to_export(cfg)
     if args.openwelcome is not None:
         return open_welcome(cfg, db_name=args.openwelcome)
     if args.shot:
