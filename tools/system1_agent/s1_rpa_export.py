@@ -667,6 +667,19 @@ def _save_as_win32(full_path: str, timeout: float = 25.0) -> bool:
     except Exception:  # noqa: BLE001
         pass
     time.sleep(0.3)
+    # FORZAR en-US en la VENTANA del Save As (inmune a que el guest revierta a
+    # Latin American en cada reinicio — eso rompía el tecleo de la ruta: \->}, :->ñ).
+    # Carga el layout 00000409 y pide el cambio a la ventana vía
+    # WM_INPUTLANGCHANGEREQUEST → el tecleo posterior sale correcto sin depender
+    # del layout de la sesión. Es por-ventana, no se revierte.
+    try:
+        import ctypes as _ct
+        _hkl = _ct.windll.user32.LoadKeyboardLayoutW("00000409", 0x00000001)  # KLF_ACTIVATE
+        _ct.windll.user32.PostMessageW(int(dlg.handle), 0x0050, 0, _hkl)      # WM_INPUTLANGCHANGEREQUEST
+        _ct.windll.user32.ActivateKeyboardLayout(_hkl, 0)
+        time.sleep(0.25)
+    except Exception:  # noqa: BLE001
+        pass
     # Caja de nombre: localizar el Edit (clásico o dentro del ComboBox).
     filled = False
     _edit = None
