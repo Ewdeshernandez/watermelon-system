@@ -1210,28 +1210,33 @@ def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 1800.0) -> int:
             if not clicked:
                 time.sleep(5)
                 continue
-            time.sleep(4)
-            # ¿Apareció 'Error: Could not open selected enterprise'? (server aún
-            # inicializando) → OK + esperar + reintentar.
-            err = win.child_window(title="Error")
-            if err.exists(timeout=1):
-                for t in ("OK", "&OK", "Aceptar", "&Aceptar"):
-                    try:
-                        ob = err.child_window(title=t, control_type="Button")
-                        if ob.exists(timeout=0.6):
-                            ob.click_input()
-                            break
-                    except Exception:  # noqa: BLE001
-                        continue
-                log.info("open_welcome: server aún inicializando → reintento en 30s")
-                time.sleep(30)
-                continue
-            # Sin error + el diálogo 'Open Enterprise' se cerró = base abierta.
-            time.sleep(2)
-            if not dlg.exists(timeout=1):
+            # Tras Open: si el server aún inicializa sale 'Error: Could not open
+            # selected enterprise' (modal, su OK es el botón POR DEFECTO). En vez
+            # de cazar ese diálogo (se anida/parpadea), mandamos Enter cada ~1s
+            # por 10s para cerrarlo apenas aparezca, y chequeamos si la base
+            # abrió = el diálogo 'Open Enterprise' se cerró.
+            from pywinauto.keyboard import send_keys as _sk
+            opened = False
+            for _ in range(10):
+                time.sleep(1)
+                try:
+                    _sk("{ENTER}")
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    if not dlg.exists(timeout=0.5):
+                        opened = True
+                        break
+                except Exception:  # noqa: BLE001
+                    opened = True
+                    break
+            if opened:
                 log.info("open_welcome: base '%s' abierta OK", db_name)
                 print("OPENWELCOME: base abierta (%s)" % db_name)
                 return 0
+            log.info("open_welcome: server aún inicializando → reintento en 30s")
+            time.sleep(30)
+            continue
         except Exception:  # noqa: BLE001
             pass
         time.sleep(5)
