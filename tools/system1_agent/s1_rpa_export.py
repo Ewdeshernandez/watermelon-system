@@ -1208,8 +1208,21 @@ def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
     # reactiva la hoja y espera (calienta). Una pasada caliente recupera, igual
     # que correr a mano minutos después. Solo reexporta lo pendiente.
     status = {t["name"]: "FAIL" for t in tiles}
-    pending = list(tiles)
+
+    def _alt_tab(xy):
+        """La OTRA sub-pestaña (CSV1<->CSV2). Los tabs viven en x≈357 y x≈470/472,
+        misma y. Sirve para AUTO-CORREGIR si las pestañas quedaron invertidas."""
+        x, y = int(xy[0]), int(xy[1])
+        return (472 if x < 415 else 357, y)
+
+    def _set_sheet_xy(xy):
+        nonlocal cfg
+        rr = dict(cfg.get("rpa", {})); rr["sheet_xy"] = list(xy)
+        cfg = dict(cfg); cfg["rpa"] = rr
+
+    flips = 0
     for attempt in range(3):
+        pending = [t for t in tiles if status[t["name"]] != "OK"]
         if not pending:
             break
         if attempt > 0:
@@ -1223,27 +1236,38 @@ def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
             time.sleep(8.0)                       # deja calentar System1
             log.info("EXPORTALL: pasada %d, reintentando %d pendientes",
                      attempt + 1, len(pending))
-        still = []
-        crossed_abort = False
-        for t in pending:
+        i = 0
+        while i < len(pending):
+            t = pending[i]
             rc = export_one(cfg, int(t["x"]), int(t["y"]), t["name"], out_dir)
             if rc == 0:
                 status[t["name"]] = "OK"
+                i += 1
             elif rc == 2:
-                # CRUCE: la hoja activa no es la esperada (pestañas en mal orden).
-                # Reintentar no sirve (seguiría cruzado) → ABORTAR la hoja YA.
-                status[t["name"]] = "CRUZADO"
-                crossed_abort = True
-                break
+                # CRUCE: la hoja activa no es la esperada (pestañas invertidas por
+                # un arrastre). AUTO-CORREGIR: activar la OTRA posición de tab y
+                # reintentar ESTE MISMO tile. Máx 2 inversiones → si persiste,
+                # abortar (sin subir nada cruzado, el blindaje ya borró el CSV).
+                if flips >= 2:
+                    print("EXPORTALL: *** CRUCE PERSISTENTE tras invertir 2x *** "
+                          "aborto hoja '%s' (sin datos cruzados)." % sheet)
+                    return 2
+                flips += 1
+                cur = (cfg.get("rpa", {}) or {}).get("sheet_xy") or DEFAULT_SHEET_XY
+                alt = _alt_tab(cur)
+                _set_sheet_xy(alt)
+                print("EXPORTALL: CRUCE en '%s' → invierto pestaña a %s y reintento."
+                      % (t["name"], alt))
+                try:
+                    _dismiss_dialogs(app)
+                    _activate_sheet(win, sheet, cfg)
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(1.0)
+                # NO avanzar i: reintenta el mismo tile con la hoja ya corregida.
             else:
-                still.append(t)
+                i += 1          # fallo normal → lo recoge la siguiente pasada
             time.sleep(0.5)
-        if crossed_abort:
-            print("EXPORTALL: *** ABORTADO POR CRUCE DE PESTAÑAS *** La hoja activa "
-                  "NO es '%s'. Revisa el orden Export CSV1 | Export CSV2 en System1. "
-                  "NO se exportó NADA de esta hoja (sin datos cruzados)." % sheet)
-            return 2
-        pending = still
     ok = sum(1 for v in status.values() if v == "OK")
     results = ["%s=%s" % (t["name"], status[t["name"]]) for t in tiles]
     print("EXPORTALL: %d/%d  [%s]" % (ok, len(tiles), " ".join(results)))
