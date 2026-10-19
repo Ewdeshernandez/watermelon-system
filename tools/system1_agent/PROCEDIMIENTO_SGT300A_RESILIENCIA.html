@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Procedimiento SGT300A — Resiliencia a reinicio</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 18mm 14mm; }
+  :root{
+    --ink:#0f172a; --muted:#475569; --line:#d9e1ec; --accent:#1d4ed8;
+    --accent2:#0f7a3d; --warn:#b45309; --bg-code:#0f172a; --bg-soft:#f1f5f9;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    font-family:"Segoe UI",-apple-system,Helvetica,Arial,sans-serif;
+    color:var(--ink); font-size:10.6px; line-height:1.5; margin:0;
+  }
+  h1{ font-size:21px; margin:0 0 2px; letter-spacing:-.01em; }
+  h2{ font-size:14px; margin:20px 0 7px; padding-bottom:4px;
+      border-bottom:2px solid var(--accent); color:var(--accent);
+      page-break-after:avoid; }
+  h3{ font-size:11.6px; margin:13px 0 5px; color:var(--ink);
+      page-break-after:avoid; }
+  p{ margin:5px 0; }
+  code{ font-family:"SF Mono",Consolas,"Roboto Mono",monospace;
+        background:var(--bg-soft); padding:1px 4px; border-radius:3px;
+        font-size:9.6px; color:#0b3a8a; }
+  pre{ background:var(--bg-code); color:#e8eefc; border-radius:7px;
+       padding:9px 11px; overflow:auto; font-size:9.1px; line-height:1.45;
+       font-family:"SF Mono",Consolas,"Roboto Mono",monospace;
+       page-break-inside:avoid; margin:6px 0; }
+  pre .c{ color:#8aa2c9; }    /* comentario */
+  .lead{ color:var(--muted); font-size:11px; margin:3px 0 0; }
+  .meta{ color:var(--muted); font-size:9px; margin-top:4px; }
+  .tag{ display:inline-block; background:var(--ink); color:#f1f5f9;
+        border-radius:6px; padding:3px 9px; font-weight:700; font-size:9px;
+        letter-spacing:.04em; }
+  .pill{ display:inline-block; border-radius:5px; padding:2px 8px;
+         font-weight:700; font-size:8.6px; margin-right:4px; }
+  .pill.vm{ background:#1d4ed8; color:#fff; }
+  .pill.host{ background:#0f7a3d; color:#fff; }
+  .pill.ok{ background:#e6f7ec; color:#0f7a3d; }
+  table{ border-collapse:collapse; width:100%; margin:6px 0; font-size:9.4px; }
+  th,td{ border:1px solid var(--line); padding:4px 7px; text-align:left;
+         vertical-align:top; }
+  th{ background:var(--bg-soft); font-weight:700; }
+  .box{ border:1px solid var(--line); border-left:4px solid var(--accent);
+        background:#f8fafc; border-radius:6px; padding:8px 11px; margin:8px 0;
+        page-break-inside:avoid; }
+  .box.warn{ border-left-color:var(--warn); background:#fff8f0; }
+  .box.ok{ border-left-color:var(--accent2); background:#f3fcf6; }
+  .box .t{ font-weight:800; font-size:10px; margin-bottom:2px; }
+  .step{ counter-increment:step; }
+  .step h3::before{ content:"Paso " counter(step) " · "; color:var(--accent); }
+  .arch{ display:flex; gap:10px; margin:8px 0; }
+  .arch .node{ flex:1; border:1px solid var(--line); border-radius:7px;
+               padding:8px 10px; background:#fff; }
+  .arch .node .h{ font-weight:800; font-size:10.5px; margin-bottom:3px; }
+  figure{ margin:8px 0; page-break-inside:avoid; }
+  figure img{ width:100%; border:1px solid var(--line); border-radius:6px; }
+  figcaption{ font-size:8.8px; color:var(--muted); margin-top:3px; }
+  ul,ol{ margin:5px 0 5px 16px; padding:0; }
+  li{ margin:2px 0; }
+  .foot{ margin-top:14px; border-top:1px solid var(--line); padding-top:6px;
+         color:var(--muted); font-size:8.4px; }
+  .kbd{ background:#fff; border:1px solid #cbd5e1; border-bottom-width:2px;
+        border-radius:4px; padding:0 5px; font-size:9px; font-weight:700; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="tag">WATERMELON SYSTEM · RUNBOOK OPERATIVO</span>
+  <h1>Resiliencia a reinicio — SGT300A (System1 → Watermelon Live)</h1>
+  <p class="lead">Cómo la turbina SGT300A exporta onda cruda de System1 y la sube
+  a la nube <b>100&nbsp;% automático, sobreviviendo a cualquier reinicio</b>, sin
+  intervención humana.</p>
+  <p class="meta">Activo: <code>siemens_sgt300_gearbox_brush_turbogen</code> (tag
+  SGT300A) · Parex / SIGA Group SAS · Validado 2026-10-19 (reinicio real → auto-run
+  07:56 → Supabase). VM resolución 1718×839.</p>
+</header>
+
+<h2>1. Arquitectura — 2 máquinas, 2 tareas</h2>
+<p>La <b>VM</b> (VMware, Windows Server 2022) corre System1 y <b>exporta</b> los CSV
+por automatización de pantalla (RPA). El <b>HOST</b> (Windows 11, única con internet)
+<b>lee</b> el recurso compartido de la VM por UNC y <b>sube</b> a Supabase.</p>
+<div class="arch">
+  <div class="node">
+    <div class="h"><span class="pill vm">VM</span> S1BNTEST · 192.168.192.172</div>
+    System1 + robot RPA (<code>s1_rpa_export.py</code>).<br>
+    Tarea <b>WM_export</b> (cada hora :56) → <code>export.bat</code>:<br>
+    nav → 8 bearings → 7 gearbox → <code>C:\WM_wave\csv</code> y <code>\csvgb</code>.<br>
+    <span class="meta">Sin internet. Comparte C$ (admin share).</span>
+  </div>
+  <div class="node">
+    <div class="h"><span class="pill host">HOST</span> WatermelonModal · backup1</div>
+    Internet (IPv4). Tarea <b>WM_upload</b> (cada hora) → <code>upload.bat</code>:<br>
+    <code>s1_agent.py --csv --once</code> + <code>--gearbox --once</code><br>
+    lee <code>\\192.168.192.172\C$\WM_wave\csv</code> → Supabase bucket
+    <code>dynamic_raw</code>.<br>
+    <span class="meta">+ Colector Modbus (overalls/RPM) = servicio nssm.</span>
+  </div>
+</div>
+
+<h2>2. ⚠️ Causa raíz del “tras reiniciar no exporta” — NO era el teclado</h2>
+<div class="box warn">
+  <div class="t">El culpable: “Shutdown Event Tracker” de Windows Server</div>
+  Tras un apagado/reinicio <b>inesperado</b> (incl. <code>Restart-Computer -Force</code>),
+  Server 2022 saca el modal <b>“Why did the computer shut down unexpectedly?”</b>. Ese
+  cuadro <b>roba el foco</b> → cuando el robot teclea el nombre del “Save As”, el texto
+  cae en SU caja (se veía <code>Problem Id: C:\WM_wave\csv\1yd.csv</code>) → el “Save As”
+  queda vacío → <code>#32770 no apareció</code> → el 1.er canal falla → cascada
+  <code>no hallé 'Export to CSV'</code> → <b>0/8</b>. Solo ocurría <b>tras reiniciar</b>;
+  a mano después (ya sin el cuadro) daba 8/8. Por eso parecía “problema de teclado”.
+</div>
+<figure>
+  <img src="__IMG__" alt="Shutdown Event Tracker robando foco">
+  <figcaption>Evidencia en el guest: el “Shutdown Event Tracker” encima del “Save As”
+  (vacío); la ruta del archivo quedó tecleada en <i>Problem Id</i> del cuadro, no en el
+  nombre del archivo.</figcaption>
+</figure>
+
+<h2>3. Procedimiento en la VM (System1) — exporta</h2>
+
+<div class="step">
+<h3>Desactivar el Shutdown Event Tracker (fix permanente de la causa raíz)</h3>
+<p>En PowerShell <b>como Administrator</b>:</p>
+<pre>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" /v ShutdownReasonOn /t REG_DWORD /d 0 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" /v ShutdownReasonUI /t REG_DWORD /d 0 /f</pre>
+</div>
+
+<div class="step">
+<h3>Descargar / actualizar el robot (la VM no tiene git)</h3>
+<p>El repo es público; se baja el archivo del raw de GitHub:</p>
+<pre>Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Ewdeshernandez/watermelon-system/main/tools/system1_agent/s1_rpa_export.py" -OutFile "C:\Watermelon\agent\s1_rpa_export.py"</pre>
+<p>El robot ya trae: <code>--nav</code>, reintento de canales (3 pasadas), reintento de
+right-click con offsets (tiles al borde como 6xd), cierre del Shutdown Event Tracker en
+<code>_dismiss_dialogs</code>, y forzado de teclado en-US por-ventana en el Save As.</p>
+</div>
+
+<div class="step">
+<h3>Escribir <code>C:\WM_wave\export.bat</code> (nav + bearings + gearbox)</h3>
+<p>El <b>nav va PRIMERO</b>: tras reiniciar, System1 abre la base en la vista de inicio
+y la pestaña “Export CSV1” no existe hasta seleccionar máquina+Plots. En PowerShell:</p>
+<pre>@'
+cd /d C:\Watermelon\agent
+powershell -NoProfile -WindowStyle Hidden -Command "Set-WinUserLanguageList en-US -Force"
+python s1_rpa_export.py --config config.toml --nav &gt; C:\WM_wave\export.log 2&gt;&amp;1
+python s1_rpa_export.py --config config.toml --expall C:\WM_wave\csv --sheet "Export csv1" &gt;&gt; C:\WM_wave\export.log 2&gt;&amp;1
+python s1_rpa_export.py --config config_gb.toml --expall C:\WM_wave\csvgb --sheet "Export csv2" &gt;&gt; C:\WM_wave\export.log 2&gt;&amp;1
+'@ | Set-Content -Path C:\WM_wave\export.bat -Encoding ASCII</pre>
+<div class="box">
+  <div class="t">Coordenadas del guest 1718×839 (recalibrar si cambia la resolución)</div>
+  <table>
+    <tr><th>Elemento</th><th>Coord (x,y)</th><th>Dónde se usa</th></tr>
+    <tr><td>SGT300A (árbol izq)</td><td>130, 128</td><td><code>--nav</code> paso 1</td></tr>
+    <tr><td>Pestaña Plots</td><td>555, 78</td><td><code>--nav</code> paso 2</td></tr>
+    <tr><td>Sub-pestaña Export CSV1</td><td>357, 116</td><td>bearings (config.toml)</td></tr>
+    <tr><td>Sub-pestaña Export CSV2</td><td>470, 116</td><td>gearbox (config_gb.toml)</td></tr>
+    <tr><td>Parrilla 4×2 (centros)</td><td>x 343/733/1113/1493 · y 295/595</td><td>8 gráficas</td></tr>
+  </table>
+  <span class="meta">⚠️ Gearbox va a <code>csvgb</code> (SIN “_”: el underscore congela el Save As).</span>
+</div>
+</div>
+
+<div class="step">
+<h3>Tarea programada WM_export (cada hora, interactiva)</h3>
+<table>
+  <tr><th>Campo</th><th>Valor</th></tr>
+  <tr><td>Task To Run</td><td><code>cmd /c C:\WM_wave\export.bat</code></td></tr>
+  <tr><td>Schedule</td><td>Hourly, Start 12:56 → repite cada 1 h (corre a los <b>:56</b>)</td></tr>
+  <tr><td>Run As</td><td>Administrator · <b>Logon Mode: Interactive only</b></td></tr>
+</table>
+<p>“Interactive only” exige una sesión iniciada → se garantiza con el <b>autologin</b> de
+Administrator (Sysinternals Autologon cifrado; <code>DisableCAD=1</code>).</p>
+</div>
+
+<div class="step">
+<h3>Arranque automático de la VM (Startup del host + login del guest)</h3>
+<ul>
+  <li><b>System1.lnk</b> en Startup → abre System1 solo.</li>
+  <li><b>OpenWelcome.lnk</b> → <code>s1_rpa_export.py --openwelcome "PAREX A"</code>
+      (abre la base; cierra con <span class="kbd">Enter</span> el “Could not open…”).</li>
+  <li><b>ForceENUS.lnk</b> → <code>Set-WinUserLanguageList en-US -Force</code> (respaldo).</li>
+  <li>Servicio <b>“System 1 Data Server” = Automatic</b> (si queda Manual, el Open falla):
+      <code>Set-Service "System 1 Data Server" -StartupType Automatic</code>.</li>
+</ul>
+</div>
+
+<h2>4. Procedimiento en el HOST — sube a la nube</h2>
+
+<div class="step">
+<h3>Internet IPv4 (Starlink da solo IPv6; Supabase es IPv4)</h3>
+<pre>route -p add 0.0.0.0 mask 0.0.0.0 192.168.1.1 metric 1</pre>
+</div>
+
+<div class="step">
+<h3><code>C:\watermelon\upload.bat</code> + tarea WM_upload (cada hora)</h3>
+<pre>cd /d C:\watermelon\wm\tools\system1_agent
+python s1_agent.py --csv --once     &gt;&gt; C:\watermelon\upload.log 2&gt;&amp;1
+python s1_agent.py --gearbox --once &gt;&gt; C:\watermelon\upload.log 2&gt;&amp;1</pre>
+<p>Autenticación al UNC de la VM:
+<code>cmdkey /add:192.168.192.172 /user:192.168.192.172\Administrator</code>
+(clave de la VM). <code>config.toml</code>: <code>folder</code> y <code>gearbox_folder</code>
+apuntan a <code>\\192.168.192.172\C$\WM_wave\csv</code> y <code>\csvgb</code>;
+<code>service_key</code> por env <code>SUPABASE_SERVICE_KEY</code>.</p>
+</div>
+
+<div class="step">
+<h3>Colector Modbus (overalls/RPM → Live Monitoring) — servicio nssm</h3>
+<p>En <code>C:\watermelon\collector\</code>: <code>wm_collector.py</code> +
+<code>modbus_maps\sgt300a.json</code> (gateway 192.168.1.163:502). Servicio
+<b>WatermelonCollectorSGT300A</b> (AUTO_START + auto-restart). Es el feed PRINCIPAL del
+panel (online/alarmas); la onda cruda alimenta <i>Dynamic analysis</i>.</p>
+</div>
+
+<div class="step">
+<h3>VM auto-encendido desde el host (sobrevive al reinicio del host)</h3>
+<ul>
+  <li>Autologin del host (backup1) + <code>C:\watermelon\run_vm.bat</code>
+      (<code>vmrun start &lt;vmx&gt; gui</code>) en Startup.</li>
+  <li>Tarea <b>WM_vm_watchdog</b> (cada 15 min, <code>vmrun start</code> idempotente).</li>
+</ul>
+</div>
+
+<h2>5. Verificación end-to-end</h2>
+<ol>
+  <li>VM: <code>C:\WM_wave\export.bat</code> → <code>Get-Content C:\WM_wave\export.log -Tail 6</code>
+      → debe decir <code>EXPORTALL: 8/8</code> y <code>7/7</code>.</li>
+  <li>HOST: <code>C:\watermelon\upload.bat</code> → <code>upload.log</code> con HTTP 200.</li>
+  <li>Supabase → bucket <code>dynamic_raw</code> → <code>siemens_sgt300_gearbox_brush_turbogen/AAAAMMDD/</code>
+      → archivos <code>HHMMSS__BRG1..6 / GB*</code> frescos.</li>
+  <li>Watermelon Live → SGT300A → <b>Advanced Analysis</b>: onda / espectro / órbita.</li>
+</ol>
+<div class="box ok">
+  <div class="t"><span class="pill ok">VALIDADO 2026-10-19 07:56</span></div>
+  Reinicio real del host → VM levantó sola → System1 abrió la base → WM_export (:56)
+  hizo <b>nav + 8 bearings + 7 gearbox</b> → host subió → Supabase con archivos 07:56+.
+  <b>Cero intervención.</b>
+</div>
+
+<h2>6. Troubleshooting / notas finas</h2>
+<table>
+  <tr><th>Síntoma</th><th>Causa / arreglo</th></tr>
+  <tr><td>Tras reiniciar no exporta (Save As vacío)</td>
+      <td><b>Shutdown Event Tracker</b> roba foco → desactivar por registro (§3.1). El robot también lo cierra solo.</td></tr>
+  <tr><td>Save As teclea mal (<code>\</code>→<code>}</code>, <code>:</code>→<code>ñ</code>)</td>
+      <td>Guest revierte a Latin American. El robot fuerza en-US <b>por-ventana</b> (WM_INPUTLANGCHANGEREQUEST) antes de teclear.</td></tr>
+  <tr><td>“Save As” se congela con <code>_</code> en la ruta</td>
+      <td>El underscore es inteclable en el RDP anidado → usar <code>csvgb</code>, NO <code>csv_gb</code>.</td></tr>
+  <tr><td>Un tile da <code>no hallé 'Export to CSV'</code> (p.ej. 6xd)</td>
+      <td>Right-click cae al borde del plot → el robot reintenta con offsets (±12/−18).</td></tr>
+  <tr><td>Web no muestra capturas nuevas (de tarde)</td>
+      <td>Supabase <code>.list()</code> devuelve solo 100 ascendente → <code>list_captures</code> pide <code>limit</code> alto + <code>sortBy desc</code>.</td></tr>
+  <tr><td>Máquina en línea pero 0 rpm</td>
+      <td>Estado “Máquina detenida” (RPM&lt;100). El reporte muestra datos actuales; IA+RAG se apagan (texto honesto).</td></tr>
+</table>
+
+<h3>Commits de referencia</h3>
+<p><code>f063420</code> teclado por-ventana · <code>98dcca9</code> nav en openwelcome ·
+<code>62b557e</code> retry de canales · <code>95fda29</code> offsets right-click ·
+<code>1aa49a4</code> cierre Shutdown Event Tracker · <code>97918f1</code> flag <code>--nav</code> ·
+<code>3e075fe</code> fix <code>list_captures</code> (.list cap 100).</p>
+
+<div class="foot">
+  Watermelon System — documento interno de operación. No contiene credenciales.
+  El <code>service_key</code> y las claves viven en variables de entorno / secretos de la
+  máquina, nunca en este documento. Para clonar a otra turbina, repetir §3 y §4 con las
+  IPs, el asset y las coordenadas de ESA VM.
+</div>
+
+</body>
+</html>
