@@ -918,6 +918,30 @@ def _save_as(app, full_path: str, timeout: float = 25.0) -> bool:
             return False
 
 
+def _csv_point_name(path: str) -> str:
+    """Lee el 'Point Name' del header de un CSV de System1 (sin numpy)."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            head = fh.read(4000)
+        for line in head.splitlines():
+            if line.lower().replace(" ", "").startswith("pointname,"):
+                return line.split(",", 1)[1].strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def _channel_matches(expected: str, point_name: str) -> bool:
+    """¿El 'Point Name' del CSV corresponde al canal esperado (nombre del tile)?
+    expected ej '1yd'/'4xa'; point_name ej '1YD', '4YD GEARBOX', '2YD TURBINA'.
+    Compara al inicio, ignorando mayúsculas/espacios. Sin dato → no bloquea."""
+    w = (expected or "").upper().replace(" ", "")
+    p = (point_name or "").upper().replace(" ", "")
+    if not w or not p:
+        return True
+    return p.startswith(w)
+
+
 def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
     """Exporta UNA gráfica: clic-derecho (x,y) → Export to CSV → Save As nombre."""
     from pywinauto import mouse
@@ -961,9 +985,27 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
         print("EXPORT %s: no hallé 'Export to CSV' en el menú" % name)
     time.sleep(1.2)
     exists = Path(full).exists()
-    print("EXPORT %s: menu=%s saveas=%s archivo=%s (%s)" % (
-        name, clicked_any, ok, exists, full))
+    # BLINDAJE ANTI-CRUCE: si las pestañas (Export CSV1/CSV2) quedaron en otro
+    # orden, (x,y) cae en la hoja equivocada y el archivo tendría OTRO canal.
+    # Leemos 'Point Name' del CSV y, si NO coincide con el nombre esperado,
+    # BORRAMOS el archivo y marcamos FAIL → jamás se suben datos cruzados.
+    crossed = False
+    if exists:
+        chan = _csv_point_name(full)
+        if chan and not _channel_matches(name, chan):
+            crossed = True
+            try:
+                Path(full).unlink()
+            except Exception:  # noqa: BLE001
+                pass
+            exists = False
+            print("EXPORT %s: *** CRUZADO *** el CSV era de '%s' (hoja/pestañas "
+                  "en mal orden). Borrado, NO se sube." % (name, chan))
+    print("EXPORT %s: menu=%s saveas=%s archivo=%s%s (%s)" % (
+        name, clicked_any, ok, exists, " CRUZADO" if crossed else "", full))
     _grab_screen(r"C:\WM_wave\s1.png")
+    if crossed:
+        return 2          # señal de CRUCE → export_all aborta la hoja
     return 0 if exists else 1
 
 
@@ -1182,13 +1224,25 @@ def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
             log.info("EXPORTALL: pasada %d, reintentando %d pendientes",
                      attempt + 1, len(pending))
         still = []
+        crossed_abort = False
         for t in pending:
             rc = export_one(cfg, int(t["x"]), int(t["y"]), t["name"], out_dir)
             if rc == 0:
                 status[t["name"]] = "OK"
+            elif rc == 2:
+                # CRUCE: la hoja activa no es la esperada (pestañas en mal orden).
+                # Reintentar no sirve (seguiría cruzado) → ABORTAR la hoja YA.
+                status[t["name"]] = "CRUZADO"
+                crossed_abort = True
+                break
             else:
                 still.append(t)
             time.sleep(0.5)
+        if crossed_abort:
+            print("EXPORTALL: *** ABORTADO POR CRUCE DE PESTAÑAS *** La hoja activa "
+                  "NO es '%s'. Revisa el orden Export CSV1 | Export CSV2 en System1. "
+                  "NO se exportó NADA de esta hoja (sin datos cruzados)." % sheet)
+            return 2
         pending = still
     ok = sum(1 for v in status.values() if v == "OK")
     results = ["%s=%s" % (t["name"], status[t["name"]]) for t in tiles]
