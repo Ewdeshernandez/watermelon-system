@@ -219,13 +219,26 @@ def request_code(email: str) -> Dict[str, Any]:
             f"Vence en {OTP_TTL_SECONDS // 60} minutos. "
             f"Si no solicitaste este acceso, ignorá este correo."
         )
+        mins = OTP_TTL_SECONDS // 60
         body_html = (
-            f"<div style='font-family:sans-serif'>"
-            f"<p>Tu código de acceso a <b>Watermelon System</b> es:</p>"
-            f"<p style='font-size:30px;font-weight:800;letter-spacing:6px;"
-            f"color:#0f172a'>{code}</p>"
-            f"<p style='color:#64748b'>Vence en {OTP_TTL_SECONDS // 60} minutos. "
-            f"Si no solicitaste este acceso, ignorá este correo.</p></div>"
+            "<div style=\"font-family:-apple-system,Segoe UI,Arial,Helvetica,sans-serif;background:#eef2f6;padding:28px 16px\">"
+            "<div style=\"max-width:540px;margin:0 auto;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,.08)\">"
+            "<div style=\"background:#1f7a43;padding:24px 28px\">"
+            "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr>"
+            "<td style=\"vertical-align:middle\"><div style=\"width:48px;height:48px;border-radius:50%;background:#ffffff;text-align:center;line-height:48px;font-size:27px\">&#127817;</div></td>"
+            "<td style=\"vertical-align:middle;padding-left:14px\"><div style=\"font-size:13px;letter-spacing:.16em;color:#ffffff;font-weight:700\">WATERMELON&nbsp;SYSTEM</div><div style=\"font-size:12px;color:#cdeed6\">Live Monitoring</div></td>"
+            "</tr></table></div>"
+            "<div style=\"height:6px;background:#2fa65a\"></div><div style=\"height:4px;background:#ffffff\"></div><div style=\"height:5px;background:#e23b55\"></div>"
+            "<div style=\"padding:24px 30px 6px\"><div style=\"display:inline-block;background:#0090c4;color:#fff;font-size:11px;font-weight:700;letter-spacing:.06em;padding:4px 12px;border-radius:999px;text-transform:uppercase\">C&oacute;digo de acceso</div></div>"
+            "<div style=\"padding:8px 30px 4px;color:#243041;font-size:15px;line-height:1.65\">"
+            "<p style=\"margin:0 0 16px\">Hola, usa este c&oacute;digo para entrar a <b>Watermelon System</b>:</p>"
+            "<div style=\"text-align:center;margin:0 0 20px\">"
+            f"<div style=\"display:inline-block;background:#f3faf5;border:1px solid #d3eddb;border-radius:14px;padding:16px 26px;font-size:34px;letter-spacing:10px;font-weight:700;color:#1f7a43\">{code}</div>"
+            "</div>"
+            f"<p style=\"margin:0;font-size:13px;color:#64748b\">El c&oacute;digo vence en {mins} minutos. Si no solicitaste este acceso, ignora este correo.</p>"
+            "</div>"
+            "<div style=\"padding:22px 30px 26px\"><div style=\"border-top:1px solid #eef2f6;padding-top:14px;font-size:12px;color:#9aa7b5\">Watermelon System &middot; SIGA Group SAS &middot; <span style=\"color:#1f7a43\">monitoreo que protege tus activos</span></div></div>"
+            "</div></div>"
         )
         res = send_email(e, subject, body_text, body_html)
         if not res.get("ok"):
