@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Procedimiento Maestro System1 → Watermelon Live</title>
+<style>
+  @page { size: A4; margin: 15mm 13mm 16mm 13mm; }
+  @page { @bottom-right { content: "Watermelon System · pág " counter(page); font-size:8px; color:#94a3b8; } }
+  :root{
+    --ink:#0f172a; --muted:#475569; --line:#d9e1ec; --accent:#1d4ed8;
+    --accent2:#0f7a3d; --warn:#b45309; --danger:#b91c1c; --bg-code:#0f172a; --bg-soft:#f1f5f9;
+  }
+  *{ box-sizing:border-box; }
+  body{ font-family:"Segoe UI",-apple-system,Helvetica,Arial,sans-serif;
+        color:var(--ink); font-size:10.3px; line-height:1.5; margin:0; }
+  h1{ font-size:22px; margin:0 0 3px; letter-spacing:-.01em; }
+  h2{ font-size:15px; margin:22px 0 8px; padding:6px 0 5px; color:#fff;
+      background:var(--accent); padding-left:9px; border-radius:5px;
+      page-break-after:avoid; }
+  h3{ font-size:12px; margin:14px 0 5px; color:var(--accent);
+      border-bottom:1px solid var(--line); padding-bottom:3px; page-break-after:avoid; }
+  h4{ font-size:10.8px; margin:10px 0 3px; color:var(--ink); page-break-after:avoid; }
+  p{ margin:5px 0; }
+  code{ font-family:"SF Mono",Consolas,monospace; background:var(--bg-soft);
+        padding:1px 4px; border-radius:3px; font-size:9.3px; color:#0b3a8a; }
+  pre{ background:var(--bg-code); color:#e8eefc; border-radius:7px; padding:9px 11px;
+       overflow:auto; font-size:8.9px; line-height:1.45;
+       font-family:"SF Mono",Consolas,monospace; page-break-inside:avoid; margin:6px 0; }
+  .lead{ color:var(--muted); font-size:11px; }
+  .meta{ color:var(--muted); font-size:8.8px; }
+  .tag{ display:inline-block; background:var(--ink); color:#f1f5f9; border-radius:6px;
+        padding:3px 9px; font-weight:700; font-size:8.8px; letter-spacing:.04em; }
+  .pill{ display:inline-block; border-radius:5px; padding:2px 7px; font-weight:700;
+         font-size:8.4px; margin-right:3px; color:#fff; }
+  .vm{ background:#1d4ed8; } .host{ background:#0f7a3d; } .both{ background:#6d28d9; }
+  .ok{ background:#e6f7ec!important; color:#0f7a3d!important; }
+  table{ border-collapse:collapse; width:100%; margin:6px 0; font-size:9px; }
+  th,td{ border:1px solid var(--line); padding:4px 6px; text-align:left; vertical-align:top; }
+  th{ background:var(--bg-soft); font-weight:700; }
+  .box{ border:1px solid var(--line); border-left:4px solid var(--accent);
+        background:#f8fafc; border-radius:6px; padding:8px 11px; margin:8px 0; page-break-inside:avoid; }
+  .box.warn{ border-left-color:var(--warn); background:#fff8f0; }
+  .box.ok{ border-left-color:var(--accent2); background:#f3fcf6; }
+  .box.danger{ border-left-color:var(--danger); background:#fef2f2; }
+  .box .t{ font-weight:800; font-size:10px; margin-bottom:2px; }
+  .prob{ border:1px solid var(--line); border-radius:7px; margin:9px 0; page-break-inside:avoid; overflow:hidden; }
+  .prob .hd{ background:#fef2f2; color:var(--danger); font-weight:800; padding:5px 9px; font-size:10.3px; border-bottom:1px solid var(--line); }
+  .prob .bd{ padding:7px 10px; }
+  .prob .fix{ background:#f3fcf6; border-top:1px solid var(--line); padding:6px 10px; }
+  .prob .fix b{ color:var(--accent2); }
+  figure{ margin:8px 0; page-break-inside:avoid; }
+  figure img{ width:100%; border:1px solid var(--line); border-radius:6px; }
+  figcaption{ font-size:8.6px; color:var(--muted); margin-top:3px; }
+  ul,ol{ margin:4px 0 4px 16px; padding:0; } li{ margin:2px 0; }
+  .arch{ display:flex; gap:9px; margin:8px 0; }
+  .arch .node{ flex:1; border:1px solid var(--line); border-radius:7px; padding:8px 10px; background:#fff; }
+  .arch .node .h{ font-weight:800; font-size:10px; margin-bottom:3px; }
+  .toc{ columns:2; column-gap:18px; font-size:9.5px; }
+  .toc a{ color:var(--ink); text-decoration:none; }
+  .foot{ margin-top:14px; border-top:1px solid var(--line); padding-top:6px; color:var(--muted); font-size:8.2px; }
+  .step{ counter-increment:step; } .step h4::before{ content:counter(step) ". "; color:var(--accent); font-weight:800; }
+  .kbd{ background:#fff; border:1px solid #cbd5e1; border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:8.6px; font-weight:700; }
+  .reset{ counter-reset: step; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="tag">WATERMELON SYSTEM · PROCEDIMIENTO MAESTRO</span>
+  <h1>System1 → Watermelon Live — Pipeline de Onda Cruda (SGT300A &amp; SGT300B)</h1>
+  <p class="lead">Exportación automática de formas de onda de Bently System1 a la nube,
+  <b>100 % hands-off y a prueba de reinicios</b>, con blindaje anti-cruce de datos.
+  Todos los problemas encontrados y sus soluciones.</p>
+  <p class="meta">Parex / SIGA Group SAS · Activos <code>siemens_sgt300_gearbox_brush_turbogen</code> (SGT300A)
+  y <code>turbina_sgt300_b</code> (SGT300B) · Actualizado 2026-10-20 · Repo
+  github.com/Ewdeshernandez/watermelon-system</p>
+</header>
+
+<h2>Contenido</h2>
+<div class="toc">
+1. Resumen ejecutivo<br>
+2. Arquitectura (VM + Host)<br>
+3. Flujo de datos extremo a extremo<br>
+4. PROBLEMAS Y SOLUCIONES (catálogo completo)<br>
+5. Procedimiento en la VM (System1)<br>
+6. Procedimiento en el HOST (upload + colector)<br>
+7. Resiliencia a reinicio<br>
+8. Blindaje anti-cruce de datos<br>
+9. Verificación end-to-end<br>
+10. Detección y limpieza de datos cruzados<br>
+11. Diferencias SGT300A vs SGT300B<br>
+12. Comandos de referencia · Commits · Clonar a turbina nueva<br>
+</div>
+
+<h2>1. Resumen ejecutivo</h2>
+<p>Bently System1 <b>no expone la onda cruda por SQL</b> — solo por "Export to CSV" en su
+GUI. Un robot RPA (<code>s1_rpa_export.py</code>, pywinauto) automatiza ese export por
+coordenadas de pantalla, corriendo DENTRO de la VM de cada turbina. El HOST (único con
+internet) lee los CSV por recurso compartido UNC y los sube a Supabase. La web
+(Watermelon Live → Live Monitoring → Advanced Analysis) los muestra como onda / espectro
+/ órbita. Todo corre solo cada hora y se recupera solo tras cualquier reinicio.</p>
+<div class="box ok"><div class="t">Estado 2026-10-20</div>
+SGT300A: 100 % hands-off VALIDADO (reinicio real → auto-run → nube). SGT300B: replicado
+igual, falta solo el reinicio final de prueba. Blindaje anti-cruce activo en ambas.</div>
+
+<h2>2. Arquitectura (VM + Host)</h2>
+<div class="arch">
+  <div class="node">
+    <div class="h"><span class="pill vm">VM</span> System1 (exporta)</div>
+    VMware · Windows Server 2022. Corre System1 + robot RPA en <code>C:\Watermelon\agent</code>.
+    <b>Sin internet.</b> Comparte <code>C$</code> (admin share).<br>
+    Tarea <b>WM_export</b> (cada hora) → <code>C:\WM_wave\export.bat</code>.<br>
+    <span class="meta">A: VM 192.168.192.172, guest 1718×839, enterprise "PAREX A", :56.<br>
+    B: VM 192.168.192.130, guest 1718×920, enterprise "Parex", :00.</span>
+  </div>
+  <div class="node">
+    <div class="h"><span class="pill host">HOST</span> Internet (sube)</div>
+    Windows 11. Lee el share de la VM por UNC y sube a Supabase.<br>
+    Tarea <b>WM_upload</b> (cada hora) → <code>C:\watermelon\upload.bat</code>.<br>
+    Colector Modbus (overalls/RPM) = servicio <b>nssm</b>.<br>
+    + arranca la VM (vmrun) y la vigila (watchdog).<br>
+    <span class="meta">A: host WatermelonModal, user backup1. B: host PAREX_HOST, user Parex.</span>
+  </div>
+</div>
+
+<h2>3. Flujo de datos extremo a extremo</h2>
+<ol>
+  <li><b>VM — WM_export (cada hora):</b> <code>export.bat</code> → <code>--nav</code>
+    (selecciona máquina en el árbol → Plots → Export CSV1) → exporta 8 bearings
+    (clic-derecho en cada gráfica → Export to CSV → Save As) a <code>C:\WM_wave\csv</code>,
+    luego cambia a Export CSV2 → 7-8 gearbox a <code>C:\WM_wave\csvgb</code>.</li>
+  <li><b>HOST — WM_upload (cada hora):</b> lee <code>\\&lt;IP-VM&gt;\C$\WM_wave\csv</code> y
+    <code>\csvgb</code>, empareja X/Y por cojinete, sube a Supabase bucket
+    <code>dynamic_raw/&lt;asset&gt;/&lt;AAAAMMDD&gt;/&lt;HHMMSS&gt;__&lt;punto&gt;.csv</code>.</li>
+  <li><b>Nube → Web:</b> <code>core.dynamic_raw.list_captures</code> lista el bucket;
+    Advanced Analysis dibuja onda/espectro/órbita.</li>
+  <li><b>Colector Modbus (paralelo):</b> overalls + RPM → API → Live Monitoring (online/alarmas).</li>
+</ol>
+
+<h2>4. PROBLEMAS Y SOLUCIONES (catálogo completo)</h2>
+
+<div class="prob">
+  <div class="hd">P1 · Tras reiniciar no exporta (Save As queda vacío / 0&#47;8)</div>
+  <div class="bd">Windows Server, tras un apagado/reinicio inesperado, saca el modal
+  <b>"Shutdown Event Tracker"</b> ("Why did the computer shut down unexpectedly?"). Ese
+  cuadro <b>roba el foco</b> y el nombre que el robot teclea para el Save As cae en SU
+  caja (quedaba <code>Problem Id: C:\WM_wave\csv\1yd.csv</code>) → Save As vacío →
+  <code>#32770 no apareció</code> → 1er canal falla → cascada "no hallé Export to CSV".
+  <b>Solo pasa tras reiniciar</b>; a mano después ya no está el cuadro. NO es el teclado.</div>
+  <div class="fix"><b>Fix:</b> desactivar el tracker por registro (VM) + el robot lo
+  cierra solo en <code>_dismiss_dialogs</code>.
+  <pre>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" /v ShutdownReasonOn /t REG_DWORD /d 0 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" /v ShutdownReasonUI /t REG_DWORD /d 0 /f</pre></div>
+</div>
+<figure><img src="__IMG1__" alt="Shutdown Event Tracker robando foco">
+<figcaption>P1 — El "Shutdown Event Tracker" encima del "Save As" (vacío); la ruta del
+archivo quedó tecleada en <i>Problem Id</i> del cuadro, no en el nombre del archivo.</figcaption></figure>
+
+<div class="prob">
+  <div class="hd">P2 · Datos CRUZADOS — bearings ↔ gearbox invertidos (GRAVE)</div>
+  <div class="bd">El clic del robot sobre la sub-pestaña a veces la <b>arrastra y reordena</b>
+  (Export CSV1 ↔ Export CSV2). Si quedan invertidas, la coordenada fija cae en la hoja
+  equivocada → <code>BRG1</code> termina con data de <code>4XD GEARBOX</code> y
+  <code>GB4</code> con <code>1XD TURBINA</code>. Intermitente (A alternó cruzado/correcto
+  todo un día: 54 cruzados / 50 OK). Peligroso: diagnóstico equivocado.</div>
+  <div class="fix"><b>Fix (doble, commits 6bfae4c + 34d4466):</b>
+  <b>(1) Blindaje:</b> el robot lee <code>Point Name</code> del CSV recién exportado y
+  verifica que el canal real corresponde al tile esperado; si no → borra el archivo y
+  marca cruce (jamás sube cruzado). <b>(2) Auto-corrección:</b> al detectar cruce, activa
+  la OTRA posición de pestaña (357↔472) y reintenta el mismo tile → sale 8/8 sea cual sea
+  el orden. Verificación: <code># point</code> vs <code># point_name</code> del CSV subido.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P3 · Save As teclea mal (\→} , :→ñ) — teclado Latin American</div>
+  <div class="bd">El guest revierte a Latin American en cada reinicio; el RDP/VMware anidado
+  remapea y corrompe la ruta del Save As.</div>
+  <div class="fix"><b>Fix (commit f063420):</b> el robot fuerza <b>en-US POR VENTANA</b>
+  justo antes de teclear, vía Win32 <code>LoadKeyboardLayoutW("00000409")</code> +
+  <code>PostMessage(WM_INPUTLANGCHANGEREQUEST)</code>. Inmune al layout de la sesión.
+  Respaldo: <code>Set-WinUserLanguageList en-US -Force</code> en export.bat.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P4 · Save As se congela con "_" en la ruta</div>
+  <div class="bd">El underscore es inteclable en el RDP anidado → nombre corrupto → freeze.</div>
+  <div class="fix"><b>Fix:</b> gearbox a <code>C:\WM_wave\csvgb</code> (SIN underscore),
+  NUNCA <code>csv_gb</code>. Bearings a <code>csv</code>. Debe coincidir VM ↔ config del host.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P5 · Tras reiniciar, System1 no selecciona la máquina (base en vista inicio)</div>
+  <div class="bd">System1 abre la base pero queda en la vista de inicio; la pestaña Export
+  CSV1 no existe hasta seleccionar máquina + Plots → <code>--expall</code> solo no la halla.</div>
+  <div class="fix"><b>Fix (commit 97918f1):</b> flag <code>--nav</code> que clica por coord
+  Máquina(árbol) → Plots → Export CSV1, ANTEPUESTO en export.bat (se garantiza en cada
+  corrida, no depende del arranque).</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P6 · "Could not open selected enterprise" al abrir la base tras reiniciar</div>
+  <div class="bd">El servicio <b>"System 1 Data Server"</b> estaba en Manual → Stopped tras
+  boot → el Open fallaba.</div>
+  <div class="fix"><b>Fix:</b> <code>Set-Service "System 1 Data Server" -StartupType Automatic</code>
+  (+ <code>Start-Service</code>). Las otras (Data Acquisition / Enterprise) quedan on-demand.
+  Auto-abrir la base: <code>--openwelcome "&lt;enterprise&gt;"</code> en Startup.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P7 · Un tile falla "no hallé Export to CSV" (p.ej. 6xd, esquina)</div>
+  <div class="bd">El right-click cae justo al borde del plot → no abre el menú.</div>
+  <div class="fix"><b>Fix (commit 95fda29):</b> <code>export_one</code> reintenta el
+  right-click con offsets hacia adentro (0,0 / ±12 / 0,−18 / −18,0) + ESC entre intentos.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P8 · System1 frío tras reinicio → 1er Save As tarde → cascada</div>
+  <div class="bd">Recién arrancado, el 1er Save As tarda más del timeout → ese canal falla
+  y puede dejar un diálogo trabado.</div>
+  <div class="fix"><b>Fix (commit 62b557e):</b> <code>export_all</code> reintenta los
+  canales FALLIDOS hasta 3 pasadas, calentando entre pasadas (cierra colgados + reactiva
+  hoja + espera 8s). Una pasada caliente recupera.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P9 · Web no muestra capturas nuevas (de la tarde)</div>
+  <div class="bd">Supabase <code>storage.list()</code> devuelve solo <b>100 objetos por
+  defecto, en orden ascendente</b>. Al pasar de 100 archivos/día, <code>list_captures</code>
+  perdía las capturas nuevas → "en la mañana sí, en la tarde no".</div>
+  <div class="fix"><b>Fix (commit 3e075fe):</b> <code>.list(path, {"limit":2000,
+  "sortBy":{"column":"name","order":"desc"}})</code> con fallback para clientes viejos.
+  REGLA: todo <code>.list()</code> de storage necesita limit + sortBy explícitos.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P10 · Reportes programados no llegan al cliente</div>
+  <div class="bd">Los briefing Semanal/Mensual crean BORRADORES que requieren aprobación
+  en Report Center; si nadie aprueba (y el cron no lleva <code>--auto-send</code>), se
+  acumulan y no salen. Los RÁPIDO/diario sí salen directos. Además, con la máquina parada
+  (0 rpm), el reporte sale "Máquina detenida" y la IA+RAG se apagan (texto honesto).</div>
+  <div class="fix"><b>Fix:</b> aprobar en Report Center, o poner <code>--auto-send</code>
+  en el cron de Render. La config por máquina (slots/destinatarios) estaba correcta.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P11 · Internet IPv4 muerto en el host (Starlink IPv6 + ZeroTier)</div>
+  <div class="bd">Starlink daba solo IPv6; ZeroTier full-tunnel se tragaba el IPv4;
+  Supabase es IPv4.</div>
+  <div class="fix"><b>Fix:</b> <code>route -p add 0.0.0.0 mask 0.0.0.0 192.168.1.1 metric 1</code>.</div>
+</div>
+
+<div class="prob">
+  <div class="hd">P12 · VMware abre la VM en ventana pequeña tras reiniciar</div>
+  <div class="bd">Es solo la vista del host. Lo que importa es la resolución INTERNA del
+  guest (el robot clica coords del guest). Verificar que el guest siga en su resolución
+  (A 1718×839, B 1718×920); si VMware "autoajustó" el guest, recalibrar o desactivar autofit.</div>
+  <div class="fix"><b>Comprobar:</b> en la VM <code>Add-Type -AssemblyName System.Windows.Forms;
+  [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize</code>.</div>
+</div>
+<figure><img src="__IMG3__" alt="VMware ventana pequeña + Welcome System1">
+<figcaption>P12/P5 — Tras reiniciar: ventana de VMware pequeña (solo vista del host) y
+System1 en la pantalla "Welcome to System 1" (base sin abrir → la abre OpenWelcome).</figcaption></figure>
+
+<h2>5. Procedimiento en la VM (System1)</h2>
+<figure><img src="__IMG2__" alt="System1 en B: Plots, Export CSV1/CSV2, árbol SGT300B">
+<figcaption>Vista de referencia (SGT300B): árbol de máquinas (izq), pestañas Status/Events/
+<b>Plots</b>/Case History, sub-pestañas <b>Export CSV1 | Export CSV2</b>, parrilla 4×2 de ondas.</figcaption></figure>
+<div class="box"><div class="t">Coordenadas (guest). A: 1718×839 · B: 1718×920 — iguales en X</div>
+<table>
+  <tr><th>Elemento</th><th>Coord (x,y)</th><th>Uso</th></tr>
+  <tr><td>Máquina en árbol (SGT300A / SGT300B)</td><td>130, 128</td><td>--nav paso 1</td></tr>
+  <tr><td>Pestaña Plots</td><td>555, 78</td><td>--nav paso 2</td></tr>
+  <tr><td>Sub-pestaña Export CSV1 (bearings)</td><td>357, 116</td><td>hoja bearings</td></tr>
+  <tr><td>Sub-pestaña Export CSV2 (gearbox)</td><td>A 470 / B 472, 116</td><td>hoja gearbox</td></tr>
+  <tr><td>Parrilla 4×2 (tiles)</td><td>x 384/742/1100/1458 · y 405/680</td><td>8 gráficas (DEFAULT_TILES)</td></tr>
+</table></div>
+<div class="step reset">
+<h4>Desactivar Shutdown Event Tracker (P1)</h4>
+<pre>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" /v ShutdownReasonOn /t REG_DWORD /d 0 /f
+reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Reliability" /v ShutdownReasonUI /t REG_DWORD /d 0 /f</pre>
+<h4>Descargar el robot (la VM no tiene git → raw público)</h4>
+<pre>Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Ewdeshernandez/watermelon-system/main/tools/system1_agent/s1_rpa_export.py" -OutFile "C:\Watermelon\agent\s1_rpa_export.py"</pre>
+<h4>Data Server en Automatic (P6)</h4>
+<pre>Set-Service "System 1 Data Server" -StartupType Automatic
+Start-Service "System 1 Data Server"</pre>
+<h4>Escribir export.bat — SGT300A (usa config.toml / config_gb.toml)</h4>
+<pre>@'
+cd /d C:\Watermelon\agent
+powershell -NoProfile -WindowStyle Hidden -Command "Set-WinUserLanguageList en-US -Force"
+python s1_rpa_export.py --config config.toml --nav &gt; C:\WM_wave\export.log 2&gt;&amp;1
+python s1_rpa_export.py --config config.toml --expall C:\WM_wave\csv --sheet "Export csv1" &gt;&gt; C:\WM_wave\export.log 2&gt;&amp;1
+python s1_rpa_export.py --config config_gb.toml --expall C:\WM_wave\csvgb --sheet "Export csv2" &gt;&gt; C:\WM_wave\export.log 2&gt;&amp;1
+'@ | Set-Content -Path C:\WM_wave\export.bat -Encoding ASCII</pre>
+<h4>Escribir export.bat — SGT300B (inline, coords 357/472 + nombres gearbox de B)</h4>
+<pre>@'
+cd /d C:\Watermelon\agent
+powershell -NoProfile -WindowStyle Hidden -Command "Set-WinUserLanguageList en-US -Force"
+python s1_rpa_export.py --nav &gt; C:\WM_wave\export.log 2&gt;&amp;1
+python s1_rpa_export.py --expall C:\WM_wave\csv --sheet "Export csv1" --sheet-xy 357 116 &gt;&gt; C:\WM_wave\export.log 2&gt;&amp;1
+python s1_rpa_export.py --expall C:\WM_wave\csvgb --sheet "Export csv2" --sheet-xy 472 116 --names 4yd,4xd,4xa,4ya,4xv,4yv,3ya,3yv &gt;&gt; C:\WM_wave\export.log 2&gt;&amp;1
+'@ | Set-Content -Path C:\WM_wave\export.bat -Encoding ASCII</pre>
+<h4>Tarea WM_export (cada hora, interactiva) + Startup</h4>
+<p>Tarea: <code>cmd /c C:\WM_wave\export.bat</code>, Hourly, Run As Administrator,
+<b>Logon Mode Interactive only</b> (necesita autologin del guest). Startup del guest:
+<code>System1.lnk</code> + <code>OpenWelcome.lnk</code> (python <code>--openwelcome "&lt;enterprise&gt;"</code>, WorkingDir C:\Watermelon\agent).</p>
+<pre>$s=(New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\OpenWelcome.lnk")
+$s.TargetPath="C:\Program Files\Python312\python.exe"
+$s.Arguments='s1_rpa_export.py --openwelcome "Parex"'   # A: "PAREX A"
+$s.WorkingDirectory="C:\Watermelon\agent"; $s.Save()</pre>
+</div>
+
+<h2>6. Procedimiento en el HOST (upload + colector)</h2>
+<div class="step reset">
+<h4>Internet IPv4 (P11)</h4>
+<pre>route -p add 0.0.0.0 mask 0.0.0.0 192.168.1.1 metric 1</pre>
+<h4>config.toml del upload — folders de la VM (gearbox SIN underscore)</h4>
+<pre>folder         = '\\&lt;IP-VM&gt;\C$\WM_wave\csv'
+gearbox_folder = '\\&lt;IP-VM&gt;\C$\WM_wave\csvgb'</pre>
+<p>Corregir si trae <code>csv_gb</code>:
+<code>$p='C:\watermelon\wm\tools\system1_agent\config.toml'; $c=(Get-Content $p -Raw) -replace 'WM_wave\\csv_gb','WM_wave\csvgb'; [System.IO.File]::WriteAllText($p,$c)</code></p>
+<h4>upload.bat + tarea WM_upload (cada hora)</h4>
+<pre>cd /d C:\watermelon\wm\tools\system1_agent
+python s1_agent.py --csv --once     &gt;&gt; C:\watermelon\upload.log 2&gt;&amp;1
+python s1_agent.py --gearbox --once &gt;&gt; C:\watermelon\upload.log 2&gt;&amp;1</pre>
+<p>Autenticar UNC: <code>cmdkey /add:&lt;IP-VM&gt; /user:&lt;IP-VM&gt;\Administrator</code> (clave de la VM).
+<code>service_key</code> por env <code>SUPABASE_SERVICE_KEY</code>.</p>
+<h4>Colector Modbus (overalls/RPM) = servicio nssm</h4>
+<p><code>C:\watermelon\collector\</code> (wm_collector.py + modbus_maps) · servicio nssm
+AUTO_START + auto-restart · gateway Modbus :502.</p>
+</div>
+
+<h2>7. Resiliencia a reinicio</h2>
+<div class="box"><div class="t">Para que todo arranque solo tras reiniciar el HOST</div>
+<table>
+<tr><th>Pieza</th><th>Dónde</th><th>Qué hace</th></tr>
+<tr><td>Autologin</td><td>Host + VM</td><td>sesión interactiva al arrancar (tareas "Interactive only" la necesitan). Preferir <b>Sysinternals Autologon</b> (cifra) sobre el registro (texto plano).</td></tr>
+<tr><td>run_vm.bat + Startup lnk</td><td>Host</td><td><code>vmrun start "&lt;vmx&gt;" gui</code> → prende la VM al iniciar sesión.</td></tr>
+<tr><td>WM_vm_watchdog (15 min)</td><td>Host</td><td>relanza la VM si se cae (vmrun start idempotente).</td></tr>
+<tr><td>Data Server Automatic</td><td>VM</td><td>que la base abra sin "Could not open".</td></tr>
+<tr><td>System1.lnk + OpenWelcome.lnk</td><td>VM Startup</td><td>abre System1 y la base (enterprise).</td></tr>
+<tr><td>WM_export / WM_upload</td><td>VM / Host</td><td>horarias; usan el export.bat / upload.bat ya corregidos.</td></tr>
+</table></div>
+<pre># HOST — run_vm.bat
+"C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe" start "&lt;ruta .vmx&gt;" gui
+# HOST — shortcut en Startup
+$s=(New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\run_vm.lnk"); $s.TargetPath="C:\watermelon\run_vm.bat"; $s.Save()
+# HOST — watchdog
+schtasks /create /tn WM_vm_watchdog /tr "C:\watermelon\run_vm.bat" /sc minute /mo 15 /rl highest /f</pre>
+
+<h2>8. Blindaje anti-cruce de datos (detalle)</h2>
+<p>El robot <b>nunca</b> sube bearings↔gearbox cruzados. Tras exportar cada CSV lee su
+<code>Point Name</code> y lo compara con el canal esperado (nombre del tile):</p>
+<pre>def _channel_matches(expected, point_name):   # '1yd' vs '1YD' / '4XA GEARBOX'
+    w=(expected or '').upper().replace(' ',''); p=(point_name or '').upper().replace(' ','')
+    return True if (not w or not p) else p.startswith(w)
+# si NO coincide: borra el CSV, rc=2 → export_all invierte la pestaña (357<->472) y reintenta.</pre>
+<div class="box ok"><div class="t">Resultado</div>
+Sale 8/8 sea cual sea el orden de las pestañas, y es imposible subir un canal en el
+lugar de otro. Si el cruce persiste tras 2 inversiones, aborta la hoja sin subir nada.</div>
+
+<h2>9. Verificación end-to-end</h2>
+<ol>
+<li>VM: <code>C:\WM_wave\export.bat</code> → <code>Get-Content C:\WM_wave\export.log -Tail 10</code>
+  → <code>NAV ... OK</code> + <code>EXPORTALL: 8/8</code> (bearings) + <code>8/8</code> (gearbox), sin "CRUZADO".</li>
+<li>HOST: <code>C:\watermelon\upload.bat</code> → <code>upload.log</code> con HTTP 200.</li>
+<li>Supabase → <code>dynamic_raw/&lt;asset&gt;/&lt;AAAAMMDD&gt;/</code> con archivos frescos.</li>
+<li>Watermelon Live → máquina → Advanced Analysis: onda/espectro/órbita.</li>
+</ol>
+
+<h2>10. Detección y limpieza de datos cruzados (Supabase)</h2>
+<p>El CSV que sube el host conserva <code># point</code> (etiqueta) y <code># point_name</code>
+(canal real). Un archivo está cruzado si <code>point=BRG*</code> contiene "GEARBOX", o
+<code>point=GB*</code> no contiene "GEARBOX". Para auditar/limpiar: listar el día, pedir
+<code>Range: bytes=0-500</code> de cada CSV, parsear ambas líneas, y borrar los cruzados
+con <code>DELETE /storage/v1/object/dynamic_raw</code> body <code>{"prefixes":[...]}</code>.
+<span class="meta">(2026-10-19 se borraron 54 cruzados de SGT300A; quedaron 50 OK.)</span></p>
+
+<h2>11. Diferencias SGT300A vs SGT300B</h2>
+<table>
+<tr><th>Cosa</th><th>SGT300A</th><th>SGT300B</th></tr>
+<tr><td>asset</td><td>siemens_sgt300_gearbox_brush_turbogen</td><td>turbina_sgt300_b</td></tr>
+<tr><td>VM IP · guest</td><td>192.168.192.172 · 1718×839</td><td>192.168.192.130 · 1718×920</td></tr>
+<tr><td>Enterprise System1</td><td>PAREX A</td><td>Parex</td></tr>
+<tr><td>Host · user</td><td>WatermelonModal · backup1</td><td>PAREX_HOST · Parex</td></tr>
+<tr><td>Export CSV2 x</td><td>470</td><td>472</td></tr>
+<tr><td>export.bat</td><td>--config config.toml / config_gb.toml</td><td>inline --sheet-xy + --names</td></tr>
+<tr><td>Gearbox</td><td>7 canales</td><td>8 (4yd,4xd,4xa,4ya,4xv,4yv,3ya,3yv)</td></tr>
+<tr><td>WM_export</td><td>:56</td><td>:00</td></tr>
+</table>
+
+<h2>12. Referencia</h2>
+<h3>Comandos útiles</h3>
+<pre># Resolución del guest
+Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize
+# Captura del guest (para calibrar coords)
+python s1_rpa_export.py --grab        # guarda C:\WM_wave\s1.png
+# Navegar manual (máquina->Plots->Export CSV1)
+python s1_rpa_export.py --nav
+# Estado de una tarea
+schtasks /query /tn WM_export /v /fo LIST</pre>
+<h3>Commits de referencia</h3>
+<p><code>f063420</code> teclado por-ventana · <code>32212f5</code> openwelcome ·
+<code>97918f1</code> --nav · <code>62b557e</code> retry canales · <code>95fda29</code>
+offsets right-click · <code>1aa49a4</code> cierre Shutdown Event Tracker ·
+<code>6bfae4c</code> blindaje anti-cruce · <code>34d4466</code> auto-corrección pestañas ·
+<code>3e075fe</code> list_captures (.list cap 100).</p>
+<h3>Clonar a una turbina NUEVA (checklist)</h3>
+<ol>
+<li>Crear activo en Supabase (asset + in_service) y en Live Monitoring.</li>
+<li>VM: Python + robot (<code>Invoke-WebRequest</code>), armar hoja Export CSV1/CSV2 (4×2),
+  confirmar coords con <code>--grab</code>, desactivar Shutdown Event Tracker, Data Server
+  Automatic, System1.lnk + OpenWelcome.lnk, autologin, export.bat (coords de ESA VM),
+  tarea WM_export.</li>
+<li>Host: Python + agente, config.toml (asset, folders UNC con csvgb, service_key), ruta
+  IPv4, cmdkey, upload.bat + WM_upload, colector nssm, run_vm + watchdog + autologin.</li>
+<li>Probar export.bat (8/8+8/8 sin CRUZADO) → upload.bat (HTTP 200) → reinicio real hands-off.</li>
+</ol>
+
+<div class="foot">
+Watermelon System — documento interno de operación. <b>No contiene credenciales</b>: el
+<code>service_key</code> y las contraseñas viven en variables de entorno / secretos de cada
+máquina, nunca aquí. El PDF se regenera del HTML con Chrome headless (<code>--print-to-pdf</code>).
+Fuente: <code>tools/system1_agent/PROCEDIMIENTO_MAESTRO_SYSTEM1.html</code>.
+</div>
+
+</body>
+</html>
