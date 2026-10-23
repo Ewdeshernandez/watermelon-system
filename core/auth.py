@@ -60,41 +60,27 @@ NAV_GROUPS = [
             # v3.31.494 — Remote Monitoring: adquisición dinámica en vivo
             # (maleta NI 9178 + 9234 / simulado) → rotordinámica completa.
             # Herramienta de analista (admin/specialist), bloqueada a cliente.
-            {"label": "📡  Remote Monitoring", "page": "pages/02_Remote_Monitoring.py"},
+            {"label": "⇄  Remote Monitoring", "page": "pages/02_Remote_Monitoring.py"},
             # Ciclo 15.1 — Machine Map (heatmap de severidad por sensor)
             {"label": "⌖  Machine Map", "page": "pages/01b_Machine_Map.py"},
         ],
     },
     {
-        "section": "Time Domain",
+        # Fase 1 declutter (2026-10-23): antes eran 4 secciones de 1 ítem c/u
+        # (Time Domain / Frequency Domain / Rotordynamics / Trends & AI) → ruido.
+        # Ahora UNA sola sección con todas las vistas de diagnóstico (clase
+        # ADRE/System1: las gráficas son VISTAS, no destinos). Fase 2 pendiente:
+        # fusionar en un workspace único con segmented control.
+        "section": "Análisis Rotodinámico",
         "items": [
             {"label": "∿  Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
-        ],
-    },
-    {
-        "section": "Frequency Domain",
-        "items": [
             {"label": "▥  Spectrum", "page": "pages/03_Spectrum.py"},
-        ],
-    },
-    {
-        "section": "Rotordynamics",
-        "items": [
             {"label": "⊕  Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
             {"label": "◔  Polar Plot", "page": "pages/06_Polar_Plot.py"},
             {"label": "⌭  Bode Plot", "page": "pages/07_Bode_Plot.py"},
             {"label": "─  Shaft Centerline", "page": "pages/09_Shaft_Centerline.py"},
-        ],
-    },
-    {
-        "section": "Trends & AI",
-        "items": [
-            {"label": "📈  Trends", "page": "pages/04_Trends.py"},
-            # Ciclo 17.27 — AI Assistant Q&A sobre archivo histórico
+            {"label": "↗  Trends", "page": "pages/04_Trends.py"},
             {"label": "✧  AI Assistant", "page": "pages/_ai_assistant.py"},
-            # "Briefing por activo" (pages/_asset_briefing.py) se movió a la
-            # sección Reports como "Report Center". La página vieja sigue en el
-            # repo por compat de cron/imports, pero ya no se expone en el menú.
         ],
     },
     {
@@ -103,7 +89,7 @@ NAV_GROUPS = [
             # Ciclo 23.147 — Módulo Modal (EMA + OMA + FEA) bajo ISO 7626 / ISO 20816
             # / API 684. Solo admin/specialist — bloqueado para cliente en
             # CLIENT_BLOCKED_PAGES. Stack modal in-house de Watermelon.
-            {"label": "🌐  Modal Analysis", "page": "pages/18_Modal_Analysis.py"},
+            {"label": "◈  Modal Analysis", "page": "pages/18_Modal_Analysis.py"},
         ],
     },
     {
@@ -113,7 +99,7 @@ NAV_GROUPS = [
             # TorqueTrak 10K leída con NI 9229 (voltaje DC). Web = SOLO análisis
             # (order tracking, Campbell de torque, fatiga rainflow ASTM E1049).
             # Solo admin/specialist — bloqueado para cliente. Motor en core.torsional.
-            {"label": "🌀  Torsional", "page": "pages/22_Torsional.py"},
+            {"label": "⟳  Torsional", "page": "pages/22_Torsional.py"},
         ],
     },
     {
@@ -122,7 +108,7 @@ NAV_GROUPS = [
             # Módulo Balanceo (coef. de influencia 1/2 planos) bajo ISO 21940-11/12
             # + API 684. Motor puro en core.balance (extraído de ROTORIX, validado
             # en campo). Solo admin/specialist — bloqueado para cliente.
-            {"label": "⚖️  Balanceo", "page": "pages/19_Balanceo.py"},
+            {"label": "⇌  Balanceo", "page": "pages/19_Balanceo.py"},
         ],
     },
     {
@@ -132,7 +118,7 @@ NAV_GROUPS = [
             # / ISO 5801 / ISO 9906 / ASME PTC 10 / IEC 60041. Motor puro en
             # core.efficiency. Web = SOLO análisis/reporte de las corridas de campo
             # (par+rpm+eléctrico → η). Solo admin/specialist — bloqueado para cliente.
-            {"label": "⚡  Efficiency", "page": "pages/23_Efficiency.py"},
+            {"label": "η  Efficiency", "page": "pages/23_Efficiency.py"},
         ],
     },
     {
@@ -142,7 +128,7 @@ NAV_GROUPS = [
             # 5.ª ed. + manual del fabricante. Motor puro en core.calibration.
             # Proximidad / acelerómetro / velomitor. Solo admin/specialist —
             # bloqueado para cliente. Sección propia, al mismo nivel que Balanceo.
-            {"label": "📐  Calibración", "page": "pages/21_Calibracion.py"},
+            {"label": "∡  Calibración", "page": "pages/21_Calibracion.py"},
         ],
     },
     {
