@@ -261,6 +261,47 @@ archivo quedó tecleada en <i>Problem Id</i> del cuadro, no en el nombre del arc
 <figcaption>P12/P5 — Tras reiniciar: ventana de VMware pequeña (solo vista del host) y
 System1 en la pantalla "Welcome to System 1" (base sin abrir → la abre OpenWelcome).</figcaption></figure>
 
+<div class="prob">
+  <div class="hd">P13 · Live Monitoring "en línea" pero SIN datos nuevos — DNS del host (caso 2026-10-23)</div>
+  <div class="bd"><b>Importante:</b> Live Monitoring (overalls/RPM) lo alimenta el
+  <b>colector Modbus</b> (servicio nssm <code>WatermelonCollectorSGT300A</code> en el HOST),
+  NO las ondas crudas. Si no refresca valores aunque diga "en línea", casi siempre es que
+  el host <b>no puede resolver el nombre de la API</b> (DNS), aunque tenga internet IPv4.
+  <h4>Diagnóstico (en orden)</h4>
+  <ol>
+    <li><b>Supabase</b> <code>live_readings</code>: ¿última lectura vieja? → feed caído.</li>
+    <li><b>Log del colector:</b> <code>Get-Content C:\watermelon\collector\logs_sgt300a\svc_out.log -Tail 40</code>.
+      Si se ve <code>Cycle read 72/72 good</code> (Modbus OK) + <code>POST failed ... getaddrinfo failed</code>
+      + <code>Buffered batch (pending count=...)</code> creciendo → es <b>DNS</b>. (Si dijera
+      <code>read failed/timeout</code> sería pérdida del rack Modbus, no DNS.)</li>
+    <li><b>Confirmar que SOLO es DNS:</b> <code>Resolve-DnsName &lt;api&gt;</code> falla, pero
+      <code>Test-NetConnection 1.1.1.1 -Port 443</code> = True (hay internet, falla el nombre).</li>
+  </ol>
+  <h4>Ejemplo real del log (lo que se vio)</h4>
+  <pre>[INFO]    Cycle read: 72/72 good
+[WARNING] POST failed: ... Failed to resolve 'watermelon-api-bpv4.onrender.com'
+          [Errno 11001] getaddrinfo failed
+[WARNING] Buffered batch (pending count=3189)      &lt;- creciendo, nada sube</pre>
+  Causa: los 3 adaptadores del host quedaron con <b>DNS IPv6 basura</b>
+  (<code>fec0::*</code>, <code>fdd6::*</code> de ZeroTier/Starlink).</div>
+  <div class="fix"><b>Fix (persistente):</b> poner DNS IPv4 reales en el adaptador de
+  internet y en ZeroTier (índices con <code>Get-NetIPConfiguration | ? {$_.IPv4DefaultGateway}</code>):
+  <pre>Set-DnsClientServerAddress -InterfaceIndex 5 -ServerAddresses ("8.8.8.8","1.1.1.1")   # Ethernet (internet)
+Set-DnsClientServerAddress -InterfaceIndex 3 -ServerAddresses ("8.8.8.8","1.1.1.1")   # ZeroTier
+Clear-DnsClientCache
+Resolve-DnsName watermelon-api-bpv4.onrender.com   # debe devolver una IP</pre>
+  <b>Resultado (log tras el fix):</b>
+  <pre>[INFO] POST OK: ingested=72 received=72
+[INFO] Flushing 20 buffered batches
+[INFO] POST OK: ingested=72 received=72 ...   &lt;- vacía el buffer y revive Live Monitoring</pre></div>
+</div>
+
+<div class="box"><div class="t">Catálogo vivo — cómo alimentarlo</div>
+Cada problema NUEVO que aparezca se agrega aquí como <code>P&lt;n+1&gt;</code> con el mismo
+molde: <b>Síntoma → Diagnóstico (en orden) → Ejemplo real → Fix (código)</b>, se regenera
+el PDF (del HTML, Chrome <code>--print-to-pdf</code>) y se guarda en la memoria del proyecto.
+Así este documento crece con la operación y nunca se pierde el "cómo se arregló".</div>
+
 <h2>5. Procedimiento en la VM (System1)</h2>
 <figure><img src="__IMG2__" alt="System1 en B: Plots, Export CSV1/CSV2, árbol SGT300B">
 <figcaption>Vista de referencia (SGT300B): árbol de máquinas (izq), pestañas Status/Events/
