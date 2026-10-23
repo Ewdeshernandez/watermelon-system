@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -931,15 +932,28 @@ def _csv_point_name(path: str) -> str:
     return ""
 
 
+def _split_chan(s: str):
+    """'1YD'/'1yd'/'2XD TURBINA'/'6XA GEARBOX' → (cojinete, eje, letra). None si no."""
+    m = re.match(r"(\d+)\s*([XYZ])\s*([A-Z]?)", (s or "").upper().replace(" ", ""))
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
 def _channel_matches(expected: str, point_name: str) -> bool:
     """¿El 'Point Name' del CSV corresponde al canal esperado (nombre del tile)?
-    expected ej '1yd'/'4xa'; point_name ej '1YD', '4YD GEARBOX', '2YD TURBINA'.
-    Compara al inicio, ignorando mayúsculas/espacios. Sin dato → no bloquea."""
-    w = (expected or "").upper().replace(" ", "")
-    p = (point_name or "").upper().replace(" ", "")
-    if not w or not p:
-        return True
-    return p.startswith(w)
+    ESTRICTO: mismo nº de cojinete Y mismo eje (X/Y/Z). Antes era startswith y
+    dejaba colar un canal distinto que empezara igual (p.ej. otro '1Y…'). Si la
+    letra de medición está en ambos, también debe coincidir. Sin dato → no bloquea
+    (el header raro no debe tumbar un export válido)."""
+    e, p = _split_chan(expected), _split_chan(point_name)
+    if not (point_name or "").strip():
+        return True                      # sin Point Name legible → no bloquea
+    if e is None or p is None:
+        return False                     # hay texto pero no parsea → sospechoso
+    if e[0] != p[0] or e[1] != p[1]:     # cojinete y eje DEBEN coincidir
+        return False
+    if e[2] and p[2] and e[2] != p[2]:   # letra de medición (D/A) si ambas existen
+        return False
+    return True
 
 
 def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
@@ -1209,11 +1223,15 @@ def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
     # que correr a mano minutos después. Solo reexporta lo pendiente.
     status = {t["name"]: "FAIL" for t in tiles}
 
-    def _alt_tab(xy):
-        """La OTRA sub-pestaña (CSV1<->CSV2). Los tabs viven en x≈357 y x≈470/472,
-        misma y. Sirve para AUTO-CORREGIR si las pestañas quedaron invertidas."""
-        x, y = int(xy[0]), int(xy[1])
-        return (472 if x < 415 else 357, y)
+    # Posiciones X candidatas de la sub-pestaña de export. Si alguien arrastró la
+    # pestaña (Export CSV1 ↔ CSV2 ↔ GearBox…), el robot cicla por TODAS hasta que
+    # el canal probado coincida. Configurable: cfg[rpa].sheet_xy_candidates.
+    _cand_x = list(rpa.get("sheet_xy_candidates", [357, 472, 272, 445]))
+    _cur0 = (cfg.get("rpa", {}) or {}).get("sheet_xy") or DEFAULT_SHEET_XY
+    _tab_y = int(_cur0[1])
+    # arranca por la coord actual; luego las candidatas que no sean esa
+    _cx0 = int(_cur0[0])
+    _candidates = [_cx0] + [cx for cx in _cand_x if abs(cx - _cx0) > 8]
 
     def _set_sheet_xy(xy):
         nonlocal cfg
@@ -1221,6 +1239,7 @@ def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
         cfg = dict(cfg); cfg["rpa"] = rr
 
     flips = 0
+    _cand_i = 0
     for attempt in range(3):
         pending = [t for t in tiles if status[t["name"]] != "OK"]
         if not pending:
@@ -1244,20 +1263,23 @@ def export_all(cfg: dict, out_dir: str, sheet: str | None = None,
                 status[t["name"]] = "OK"
                 i += 1
             elif rc == 2:
-                # CRUCE: la hoja activa no es la esperada (pestañas invertidas por
-                # un arrastre). AUTO-CORREGIR: activar la OTRA posición de tab y
-                # reintentar ESTE MISMO tile. Máx 2 inversiones → si persiste,
-                # abortar (sin subir nada cruzado, el blindaje ya borró el CSV).
-                if flips >= 2:
-                    print("EXPORTALL: *** CRUCE PERSISTENTE tras invertir 2x *** "
-                          "aborto hoja '%s' (sin datos cruzados)." % sheet)
+                # CRUCE: la hoja activa no es la esperada (pestañas arrastradas).
+                # AUTO-CORREGIR: probar la SIGUIENTE posición candidata de tab y
+                # reintentar ESTE MISMO tile. Se ciclan TODAS las candidatas; si
+                # ninguna coincide, abortar (sin subir nada cruzado — el blindaje
+                # ya borró el CSV).
+                _cand_i += 1
+                if _cand_i >= len(_candidates):
+                    print("EXPORTALL: *** CRUCE PERSISTENTE tras probar %d posiciones "
+                          "de pestaña %s *** aborto hoja '%s' (sin datos cruzados). "
+                          "Revisa el orden de las pestañas en System1." % (
+                              len(_candidates), _candidates, sheet))
                     return 2
                 flips += 1
-                cur = (cfg.get("rpa", {}) or {}).get("sheet_xy") or DEFAULT_SHEET_XY
-                alt = _alt_tab(cur)
+                alt = (_candidates[_cand_i], _tab_y)
                 _set_sheet_xy(alt)
-                print("EXPORTALL: CRUCE en '%s' → invierto pestaña a %s y reintento."
-                      % (t["name"], alt))
+                print("EXPORTALL: CRUCE en '%s' → pruebo pestaña en %s (candidata %d/%d) "
+                      "y reintento." % (t["name"], alt, _cand_i + 1, len(_candidates)))
                 try:
                     _dismiss_dialogs(app)
                     _activate_sheet(win, sheet, cfg)
