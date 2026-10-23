@@ -3995,8 +3995,8 @@ def main() -> None:
         /* Fondo con atmósfera + retícula tenue (profundidad, no plano) */
         [data-testid="stAppViewContainer"] > .main {
             background:
-              radial-gradient(1100px 460px at 82% -8%, rgba(37,99,235,.07), transparent 60%),
-              radial-gradient(900px 380px at 0% 8%, rgba(13,148,136,.05), transparent 55%),
+              radial-gradient(1100px 460px at 82% -8%, rgba(18,48,94,.07), transparent 60%),
+              radial-gradient(900px 380px at 0% 8%, rgba(232,137,12,.045), transparent 55%),
               linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
         }
         .main .block-container { max-width: 1180px; }
@@ -4014,13 +4014,18 @@ def main() -> None:
         }
         div[data-testid="stButton"] > button:hover,
         div[data-testid="stDownloadButton"] > button:hover {
-            border-color: #93c5fd !important;
-            box-shadow: 0 10px 24px rgba(37,99,235,.16);
+            border-color: #274b7d !important;
+            background: #12305e !important;
+            color: #ffffff !important;
+            box-shadow: 0 12px 24px rgba(12,32,78,.18);
             transform: translateY(-1px);
         }
         div[data-testid="stDownloadButton"] > button {
-            background: linear-gradient(135deg,#0f2a4a,#1e3a5f) !important;
+            background: linear-gradient(135deg,#0e2547,#274b7d) !important;
             color: #eaf2ff !important; border-color: transparent !important;
+        }
+        div[data-testid="stDownloadButton"] > button:hover {
+            background: linear-gradient(135deg,#0b1f3a,#12305e) !important;
         }
 
         /* Expanders = tarjetas premium con hairline y elevación al hover */
@@ -4044,8 +4049,8 @@ def main() -> None:
         /* Picker header — badge de señal (dot vivo, sin emoji) */
         .wm-picker-header-icon {
             width: 42px !important; height: 42px !important; border-radius: 13px !important;
-            background: linear-gradient(135deg,#0f2a4a,#20406b) !important;
-            box-shadow: 0 8px 18px rgba(15,42,74,.24);
+            background: linear-gradient(135deg,#0e2547,#274b7d) !important;
+            box-shadow: 0 8px 18px rgba(12,32,78,.24);
             display: flex !important; align-items: center; justify-content: center;
             font-size: 0 !important; position: relative;
         }

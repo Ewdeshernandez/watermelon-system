@@ -332,19 +332,16 @@ st.markdown(
         box-shadow: 0 1px 6px rgba(15,23,42,0.06);
     }
     .wmh-kpi-label {
-        font-size: 9px;
-        font-weight: 800;
-        letter-spacing: 0.11em;
+        font: 600 9px/1.2 'IBM Plex Mono', monospace;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: #64748b;
-        margin-bottom: 2px;
+        color: #8090a6;
+        margin-bottom: 3px;
     }
     .wmh-kpi-value {
-        font-size: 19px;
-        font-weight: 800;
-        line-height: 1;
-        letter-spacing: -0.02em;
-        color: #0f172a;
+        font: 700 20px/1 'IBM Plex Sans', sans-serif;
+        letter-spacing: -0.3px;
+        color: #0b1f3a;
         font-variant-numeric: tabular-nums;
     }
     .wmh-kpi-sub {
@@ -359,14 +356,14 @@ st.markdown(
     }
     /* La card va envuelta en <a>; quitamos subrayado/color de link */
     a.wmh-kpi-link, a.wmh-kpi-link:hover { text-decoration: none; color: inherit; }
-    .wmh-kpi.danger  .wmh-kpi-value { color: #dc2626; }
-    .wmh-kpi.warning .wmh-kpi-value { color: #d97706; }
-    .wmh-kpi.healthy .wmh-kpi-value { color: #059669; }
-    /* Border-top accent fino (2px) — discreto pero leible */
-    .wmh-kpi.danger  { border-top: 2px solid #ef4444; }
-    .wmh-kpi.warning { border-top: 2px solid #f59e0b; }
-    .wmh-kpi.healthy { border-top: 2px solid #10b981; }
-    .wmh-kpi.total   { border-top: 2px solid #0ea5e9; }
+    .wmh-kpi.danger  .wmh-kpi-value { color: #dc3545; }
+    .wmh-kpi.warning .wmh-kpi-value { color: #e8890c; }
+    .wmh-kpi.healthy .wmh-kpi-value { color: #1f9d55; }
+    /* Border-top accent (2px) — tokens industriales; 'total' = acero (no cyan) */
+    .wmh-kpi.danger  { border-top: 2px solid #dc3545; }
+    .wmh-kpi.warning { border-top: 2px solid #e8890c; }
+    .wmh-kpi.healthy { border-top: 2px solid #1f9d55; }
+    .wmh-kpi.total   { border-top: 2px solid #274b7d; }
 
     /* Ciclo 17.24 — Botón "Ver →" debajo de cada card KPI.
        Estilo "link sutil": sin fondo ni borde, texto pequeño con
