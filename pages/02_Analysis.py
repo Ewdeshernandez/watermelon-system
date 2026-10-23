@@ -275,34 +275,76 @@ def _trend_block():
 
 # ====================== DISPATCH DE VISTAS (una sola cadena) ======================
 if view == "Tabular":
-    from core.ui_industrial import html_table
+    from core.ui_industrial import dot, html_table
+    grp = st.selectbox("Grupo ISO 20816-2", ["group2", "group1"], index=0, key="tab_grp",
+                       help="group2 = eje montado (turbogeneradores, caso típico). "
+                            "Define los límites de zona A/B/C/D.")
+
+    def _meas(ch):
+        """(tipo_es, measurement_type_iso|None, unidad, convención_amp)."""
+        u = (ch.unit or "").lower()
+        if "mm/s" in u or "mm / s" in u:
+            return "Velocidad", "casing_velocity", ch.unit or "mm/s rms", "rms"
+        if u.strip() in ("g", "g pk", "g rms") or "m/s2" in u or "m/s²" in u:
+            return "Aceleración", None, ch.unit or "g", "rms"
+        return "Desplazamiento", "shaft_displacement", ch.unit or "µm pp", "pp"
+
+    def _conv(vv, mode):
+        return float(np.ptp(vv)) if mode == "pp" else float(np.std(vv))
+
     rows = []
+    n_alarm = n_dang = 0
     for c in rec.channels:
         vv = c.v[np.isfinite(c.v)]
         if not vv.size:
             continue
-        opp, rms = float(np.ptp(vv)), float(np.std(vv))
-        a1 = a2 = ph1 = 0.0
+        tipo, mtype, unit, mode = _meas(c)
+        overall = _conv(vv, mode)
+        # 1X / 2X por FFT (misma convención que la directa: pp = 2×pico, rms = pico/√2)
+        a1 = a2 = ph1 = ph2 = None
         if c.fs_hz and c.rpm:
             w = vv - np.mean(vv)
-            spc = np.fft.rfft(w * np.hanning(w.size))
-            am = np.abs(spc) * 2.0 / w.size
+            win = np.hanning(w.size)
+            spc = np.fft.rfft(w * win)
+            am = np.abs(spc) * 2.0 / np.sum(win)   # ganancia coherente del Hanning
             frq = np.fft.rfftfreq(w.size, 1.0 / c.fs_hz)
             f1 = c.rpm / 60.0
+            # am = cero-a-pico → pp = ×2 (desplazamiento) · rms = ÷√2 (vel/acel)
+            kfac = 2.0 if mode == "pp" else (1.0 / np.sqrt(2.0))
 
             def _pk(fh):
                 k = int(np.argmin(np.abs(frq - fh)))
                 lo, hi = max(0, k - 2), min(am.size, k + 3)
                 kk = lo + int(np.argmax(am[lo:hi])) if hi > lo else k
-                return float(am[kk]), float((np.degrees(np.angle(spc[kk])) + 360) % 360)
+                return float(am[kk]) * kfac, float((np.degrees(np.angle(spc[kk])) + 360) % 360)
             a1, ph1 = _pk(f1)
-            a2, _ = _pk(2 * f1)
-        rows.append([c.label, f"{opp:.1f}", f"{a1:.1f}", f"{ph1:.0f}°",
-                     f"{a2:.1f}", f"{rms:.1f}"])
+            a2, ph2 = _pk(2 * f1)
+        # Alarma / Danger por norma ISO 20816-2 (zona B/C y C/D)
+        alarm = danger = None
+        sev = "info"
+        if mtype and c.rpm:
+            try:
+                from core.rotordynamics import iso_20816_2_zone
+                z = iso_20816_2_zone(overall, measurement_type=mtype, machine_group=grp,
+                                     operating_speed_rpm=c.rpm)
+                alarm, danger = z.boundary_BC, z.boundary_CD
+                sev = {"A": "ok", "B": "ok", "C": "warn", "D": "dang"}.get(z.zone, "info")
+                n_alarm += sev == "warn"
+                n_dang += sev == "dang"
+            except Exception:  # noqa: BLE001
+                pass
+        _f = lambda x: "—" if x is None else f"{x:.1f}"  # noqa: E731
+        _p = lambda x: "—" if x is None else f"{x:.0f}°"  # noqa: E731
+        rows.append([dot(sev), c.label, tipo, unit, _f(alarm), _f(danger),
+                     _f(overall), _f(a1), _p(ph1), _f(a2), _p(ph2)])
     if rows:
-        html_table(["Canal", "Overall pp", "1X amp", "1X fase", "2X amp", "RMS"], rows)
-        st.caption(f"Unidades {rec.channels[0].unit or '—'} · {rec.rpm or 0:.0f} rpm · "
-                   f"{len(rows)} canal(es).")
+        html_table(["", "Sensor", "Tipo", "Unidades", "Alarma", "Danger", "Directa",
+                    "1X", "1X ∠", "2X", "2X ∠"], rows, raw_cols=[0])
+        st.caption(f"{len(rows)} sensor(es) · {rec.rpm or 0:.0f} rpm · ISO 20816-2 {grp}. "
+                   f"Alarma = límite zona B/C · Danger = C/D · punto verde A/B, "
+                   f"ámbar C (alarma), rojo D (danger). "
+                   + (f"{n_alarm} en alarma · {n_dang} en danger."
+                      if (n_alarm or n_dang) else "Todos en zona A/B (normal)."))
     else:
         st.info("Sin canales para tabular.")
 

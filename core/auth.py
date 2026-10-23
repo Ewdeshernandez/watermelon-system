@@ -37,7 +37,9 @@ NAV_GROUPS = [
             {"label": "▣  Machinery Library", "page": "pages/00_Machinery_Library.py"},
             # Crear activo (wizard): crea máquinas nuevas (no es ingesta de datos).
             {"label": "✦  Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
-            {"label": "▤  Tabular List", "page": "pages/01__Tabular_List.py"},
+            # 2026-10-23: Tabular List retirado del nav — la vista Tabular vive
+            # en Rotodinámica. La página 01__Tabular_List.py sigue en el repo
+            # (la usan reportes + snapshots cliente por URL/programático).
         ],
     },
     # 2026-10-23: sección "Ingest" retirada. La ingesta de onda cruda ya es
