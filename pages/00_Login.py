@@ -628,7 +628,7 @@ with left_col:
         unsafe_allow_html=True,
     )
 
-    logo_col, text_col = st.columns([0.12, 0.88], gap="small")
+    logo_col, text_col = st.columns([0.16, 0.84], gap="small", vertical_alignment="center")
 
     with logo_col:
         # Marker invisible que sirve para que el CSS detecte ESTA
@@ -640,7 +640,7 @@ with left_col:
         if asset_exists(LOGO_PATH):
             st.markdown(
                 f'<img src="{_logo_data_uri(str(LOGO_PATH))}" alt="Watermelon System" '
-                f'style="width:100%;max-width:118px;display:block;height:auto;" />',
+                f'style="width:100%;max-width:150px;display:block;height:auto;" />',
                 unsafe_allow_html=True,
             )
         else:
