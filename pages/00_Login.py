@@ -30,6 +30,23 @@ def asset_exists(path: Path) -> bool:
         return False
 
 
+@st.cache_data(show_spinner=False)
+def _logo_data_uri(path_str: str, max_w: int = 280) -> str:
+    """Logo como data URI (base64) redimensionado. Robusto en Streamlit Cloud:
+    NO depende del endpoint de media de st.image (que a veces rompía el <img> →
+    icono de imagen rota en el login). Se cachea por ruta."""
+    import base64
+    import io
+
+    from PIL import Image
+    im = Image.open(path_str).convert("RGBA")
+    if im.width > max_w:
+        im = im.resize((max_w, round(im.height * max_w / im.width)), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
 # =========================================================
 # AUTH
 # =========================================================
@@ -621,9 +638,19 @@ with left_col:
         # como bloque aparte, dejando una caja blanca fantasma.
         st.markdown('<span class="wm-logo-marker"></span>', unsafe_allow_html=True)
         if asset_exists(LOGO_PATH):
-            st.image(str(LOGO_PATH), use_container_width=True)
+            st.markdown(
+                f'<img src="{_logo_data_uri(str(LOGO_PATH))}" alt="Watermelon System" '
+                f'style="width:100%;max-width:118px;display:block;height:auto;" />',
+                unsafe_allow_html=True,
+            )
         else:
-            st.markdown("<div style='font-size:1.5rem;'>🍉</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div style='width:46px;height:46px;border-radius:11px;"
+                "background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;"
+                "font:700 16px/46px \"IBM Plex Mono\",monospace;text-align:center;"
+                "letter-spacing:.02em;'>WS</div>",
+                unsafe_allow_html=True,
+            )
 
     with text_col:
         st.markdown(
