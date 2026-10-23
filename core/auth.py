@@ -71,18 +71,14 @@ NAV_GROUPS = [
         # Ahora UNA sola sección con todas las vistas de diagnóstico (clase
         # ADRE/System1: las gráficas son VISTAS, no destinos). Fase 2 pendiente:
         # fusionar en un workspace único con segmented control.
-        "section": "Análisis Rotodinámico",
+        # Fase 2 — workspace ÚNICO reemplaza las 7 páginas clásicas (Waveform,
+        # Spectrum, Orbit, Polar, Bode, Shaft Centerline, Trends). Mismas reglas
+        # por norma (ISO 20816 / API 670/684) reutilizando los motores core.*.
+        # Las páginas viejas siguen en el repo y abren por URL (fallback), pero
+        # YA NO se listan en el menú. Para restaurarlas, re-agregar aquí.
+        "section": "Análisis",
         "items": [
-            # Fase 2 — workspace ÚNICO (1 registro + segmented control de vistas).
-            # Convive con las clásicas durante la migración incremental.
-            {"label": "⊡  Análisis (workspace)", "page": "pages/02_Analysis.py"},
-            {"label": "∿  Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
-            {"label": "▥  Spectrum", "page": "pages/03_Spectrum.py"},
-            {"label": "⊕  Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
-            {"label": "◔  Polar Plot", "page": "pages/06_Polar_Plot.py"},
-            {"label": "⌭  Bode Plot", "page": "pages/07_Bode_Plot.py"},
-            {"label": "─  Shaft Centerline", "page": "pages/09_Shaft_Centerline.py"},
-            {"label": "↗  Trends", "page": "pages/04_Trends.py"},
+            {"label": "⊡  Análisis", "page": "pages/02_Analysis.py"},
             {"label": "✧  AI Assistant", "page": "pages/_ai_assistant.py"},
         ],
     },
