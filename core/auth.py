@@ -73,6 +73,9 @@ NAV_GROUPS = [
         # fusionar en un workspace único con segmented control.
         "section": "Análisis Rotodinámico",
         "items": [
+            # Fase 2 — workspace ÚNICO (1 registro + segmented control de vistas).
+            # Convive con las clásicas durante la migración incremental.
+            {"label": "⊡  Análisis (workspace)", "page": "pages/02_Analysis.py"},
             {"label": "∿  Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
             {"label": "▥  Spectrum", "page": "pages/03_Spectrum.py"},
             {"label": "⊕  Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
