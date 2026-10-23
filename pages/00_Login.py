@@ -21,6 +21,7 @@ st.set_page_config(
 ROOT_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = ROOT_DIR / "assets"
 LOGO_PATH = ASSETS_DIR / "watermelon_logo.png"
+ICON_PATH = ASSETS_DIR / "watermelon_icon_1024.png"   # icono solo (sin wordmark)
 
 
 def asset_exists(path: Path) -> bool:
@@ -164,7 +165,7 @@ st.markdown(
         margin: 0;
     }
     .wm-hero .accent {
-        background: linear-gradient(90deg, #21478c 0%, #2a6dd1 100%);
+        background: linear-gradient(90deg, #12305e 0%, #274b7d 100%);
         -webkit-background-clip: text;
         background-clip: text;
         color: transparent;
@@ -392,15 +393,15 @@ st.markdown(
         font-weight: 700 !important;
         letter-spacing: 0.02em !important;
         color: #ffffff !important;
-        background: linear-gradient(135deg, #21478c 0%, #2a6dd1 100%) !important;
-        box-shadow: 0 10px 26px rgba(33,71,140,0.28) !important;
+        background: linear-gradient(135deg, #12305e 0%, #274b7d 100%) !important;
+        box-shadow: 0 10px 26px rgba(12,32,78,0.26) !important;
         transition: all 0.2s ease !important;
     }
 
     div[data-testid="stFormSubmitButton"] > button:hover {
         transform: translateY(-1px);
-        box-shadow: 0 14px 32px rgba(33,71,140,0.36) !important;
-        background: linear-gradient(135deg, #1d3f7c 0%, #2562bf 100%) !important;
+        box-shadow: 0 14px 32px rgba(12,32,78,0.34) !important;
+        background: linear-gradient(135deg, #0e2547 0%, #274b7d 100%) !important;
     }
 
     /* Footer (Ciclo 23.37 — a11y bumps).
@@ -495,7 +496,7 @@ st.markdown(
         font-variant-numeric: tabular-nums;
     }
     .wm-metric-value .accent {
-        color: #21478c;
+        color: #e8890c;
     }
     .wm-metric-label {
         font-size: 0.72rem;
@@ -637,10 +638,12 @@ with left_col:
         # Streamlit renderizaba el div VACÍO porque la imagen va
         # como bloque aparte, dejando una caja blanca fantasma.
         st.markdown('<span class="wm-logo-marker"></span>', unsafe_allow_html=True)
-        if asset_exists(LOGO_PATH):
+        _mark = ICON_PATH if asset_exists(ICON_PATH) else LOGO_PATH
+        if asset_exists(_mark):
             st.markdown(
-                f'<img src="{_logo_data_uri(str(LOGO_PATH))}" alt="Watermelon System" '
-                f'style="width:100%;max-width:150px;display:block;height:auto;" />',
+                f'<img src="{_logo_data_uri(str(_mark))}" alt="Watermelon System" '
+                f'style="width:100%;max-width:62px;display:block;height:auto;'
+                f'filter:drop-shadow(0 4px 10px rgba(12,32,78,.18));" />',
                 unsafe_allow_html=True,
             )
         else:
