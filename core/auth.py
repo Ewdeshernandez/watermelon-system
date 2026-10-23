@@ -76,9 +76,9 @@ NAV_GROUPS = [
         # por norma (ISO 20816 / API 670/684) reutilizando los motores core.*.
         # Las páginas viejas siguen en el repo y abren por URL (fallback), pero
         # YA NO se listan en el menú. Para restaurarlas, re-agregar aquí.
-        "section": "Análisis",
+        "section": "Rotodinámica",
         "items": [
-            {"label": "⊡  Análisis", "page": "pages/02_Analysis.py"},
+            {"label": "⊡  Rotodinámica", "page": "pages/02_Analysis.py"},
             {"label": "✧  AI Assistant", "page": "pages/_ai_assistant.py"},
         ],
     },

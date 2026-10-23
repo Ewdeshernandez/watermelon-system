@@ -359,3 +359,33 @@ def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40):
         vals.append(val)
         unit = unit or cap.unit_of(CH_X)
     return ts, vals, unit
+
+
+def spectra_series(caps_meta, point: str = "", limit: int = 24):
+    """Espectros (FFT) del canal X de un PUNTO a lo largo del histórico, para la
+    vista Waterfall. Baja cada sesión y calcula amplitud vs frecuencia. Devuelve
+    [(stamp 'YYYY-MM-DD HH:MM', freqs_hz, amp), ...] ordenado por tiempo."""
+    from core.dynamic_raw import CH_X, download_capture  # noqa: PLC0415
+    pt = point or (caps_meta[0].get("point", "") if caps_meta else "")
+    rows = sorted((c.get("day", ""), c.get("time", ""), c.get("key", ""))
+                  for c in (caps_meta or [])
+                  if (not point or c.get("point") == pt) and c.get("day") and c.get("time"))
+    rows = rows[-limit:]
+    out = []
+    for d, t, key in rows:
+        cap = download_capture(key)
+        if cap is None:
+            continue
+        v = cap.get(CH_X)
+        if v is None or not getattr(v, "size", 0):
+            continue
+        vf = v[np.isfinite(v)]
+        fs = cap.fs_hz or 0.0
+        if vf.size < 16 or not fs:
+            continue
+        w = vf - np.mean(vf)
+        amp = np.abs(np.fft.rfft(w * np.hanning(w.size))) * (2.0 / w.size)
+        fr = np.fft.rfftfreq(w.size, d=1.0 / fs)
+        stamp = f"{d[:4]}-{d[4:6]}-{d[6:]} {t[:2]}:{t[2:4]}"
+        out.append((stamp, fr, amp))
+    return out

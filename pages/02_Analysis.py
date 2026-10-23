@@ -19,7 +19,7 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 
-st.set_page_config(page_title="Watermelon System | Análisis", layout="wide",
+st.set_page_config(page_title="Watermelon System | Rotodinámica", layout="wide",
                    initial_sidebar_state="collapsed")
 require_login()
 render_user_menu()
@@ -30,11 +30,12 @@ from core.ui_theme import apply_watermelon_page_style, page_header
 
 apply_watermelon_page_style()
 inject_industrial_css()
-page_header("Análisis", "Ingesta manual de CSV · todas las vistas en un solo lugar")
+page_header("Rotodinámica", "Análisis de vibración · todas las vistas en un solo lugar")
 
 SS = st.session_state
 _NAVY = "#12305e"
 _AMBER = "#e8890c"
+_STEEL = "#274b7d"
 
 
 @st.cache_data(show_spinner=False)
@@ -82,6 +83,14 @@ def _trend(caps_tuple, point, metric):
     caps = [{"point": p, "day": d, "time": t, "key": k}
             for p, d, t, k in caps_tuple]
     return trend_series(caps, point, metric)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _spectra(caps_tuple, limit=24):
+    from core.analysis.model import spectra_series
+    caps = [{"point": p, "day": d, "time": t, "key": k}
+            for p, d, t, k in caps_tuple]
+    return spectra_series(caps, limit=limit)
 
 
 # Reutiliza los MOTORES de norma ya validados (core.diagnostics / core.rotordynamics):
@@ -183,9 +192,10 @@ st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
 # =========================================================
 # 2) VISTAS (segmented control) — dato compartido
 # =========================================================
-VIEWS = ["Waveform", "Espectro", "Órbita", "Shaft Centerline", "Polar", "Bode", "Trends"]
-view = st.segmented_control("Vista", VIEWS, default="Waveform",
-                            selection_mode="single") or "Waveform"
+VIEWS = ["Tabular", "Tendencias", "Forma de Onda", "Espectro", "Full Spectrum",
+         "Órbita", "Shaft Centerline", "Bode", "Polar", "Waterfall", "Cascada"]
+view = st.segmented_control("Vista", VIEWS, default="Tabular",
+                            selection_mode="single") or "Tabular"
 
 
 def _layout(fig, title, h=440):
@@ -211,8 +221,95 @@ def _pick_bearing(key):
     return brgs[names.index(sel)]
 
 
-# ---- Vistas de UNA captura ----
-if view == "Waveform":
+def _pick_sweep(key):
+    if not rec.sweeps:
+        return None
+    names = [s.label for s in rec.sweeps]
+    sel = st.selectbox("Barrido (Bode/Polar de System1)", names, key=key)
+    return rec.sweeps[names.index(sel)]
+
+
+def _sweep_controls(sw, key):
+    cA, cB, cC = st.columns(3)
+    op = cA.number_input("RPM operación", value=float(round(float(np.nanmax(sw.rpm)))),
+                         step=100.0, key=f"{key}_op")
+    grp = cB.selectbox("Grupo ISO 20816-2", ["group1", "group2"], index=1, key=f"{key}_g")
+    mt = cC.selectbox("Medición", ["Desplazamiento eje (prox)", "Velocidad carcasa (acel/vel)"],
+                      key=f"{key}_m")
+    mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
+    unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
+    diag = _sweep_diag(tuple(sw.rpm.tolist()), tuple(sw.amp.tolist()),
+                       tuple(sw.phase.tolist()), op, grp, mtype, unit,
+                       "Bode" if key == "bode" else "polar")
+    s = diag.get("structured", {})
+    return op, unit, diag, s, s.get("iso_zone", "—")
+
+
+def _trend_block():
+    if not hist_caps:
+        st.info("**Tendencias** — overall vs tiempo. Requiere varias capturas en el "
+                "tiempo (modo **Histórico del activo**).")
+        return
+    points = sorted({c.get("point", "") for c in hist_caps if c.get("point")})
+    cc1, cc2 = st.columns([2, 1])
+    with cc1:
+        pt = st.selectbox("Punto", points, key="tr_pt")
+    with cc2:
+        met = st.selectbox("Métrica", ["Overall pp", "RMS", "1X amp"], key="tr_met")
+    mk = {"Overall pp": "pp", "RMS": "rms", "1X amp": "1x"}[met]
+    _ct = tuple((c["point"], c["day"], c["time"], c["key"]) for c in hist_caps
+                if c.get("point") and c.get("day") and c.get("time") and c.get("key"))
+    with st.spinner("Calculando tendencia…"):
+        ts, vals, unit = _trend(_ct, pt, mk)
+    if not ts:
+        st.warning(f"Sin datos para {pt}.")
+        return
+    fig = go.Figure(go.Scatter(x=ts, y=vals, mode="lines+markers",
+                               line=dict(color=_NAVY, width=1.6),
+                               marker=dict(size=5, color=_NAVY)))
+    fig.update_xaxes(title="Tiempo")
+    fig.update_yaxes(title=f"{met} ({unit or 'a.u.'})")
+    st.plotly_chart(_layout(fig, f"Tendencia · {pt} · {met}", h=440), use_container_width=True)
+    st.caption(f"{len(ts)} capturas · {pt}.")
+
+
+# ====================== DISPATCH DE VISTAS (una sola cadena) ======================
+if view == "Tabular":
+    from core.ui_industrial import html_table
+    rows = []
+    for c in rec.channels:
+        vv = c.v[np.isfinite(c.v)]
+        if not vv.size:
+            continue
+        opp, rms = float(np.ptp(vv)), float(np.std(vv))
+        a1 = a2 = ph1 = 0.0
+        if c.fs_hz and c.rpm:
+            w = vv - np.mean(vv)
+            spc = np.fft.rfft(w * np.hanning(w.size))
+            am = np.abs(spc) * 2.0 / w.size
+            frq = np.fft.rfftfreq(w.size, 1.0 / c.fs_hz)
+            f1 = c.rpm / 60.0
+
+            def _pk(fh):
+                k = int(np.argmin(np.abs(frq - fh)))
+                lo, hi = max(0, k - 2), min(am.size, k + 3)
+                kk = lo + int(np.argmax(am[lo:hi])) if hi > lo else k
+                return float(am[kk]), float((np.degrees(np.angle(spc[kk])) + 360) % 360)
+            a1, ph1 = _pk(f1)
+            a2, _ = _pk(2 * f1)
+        rows.append([c.label, f"{opp:.1f}", f"{a1:.1f}", f"{ph1:.0f}°",
+                     f"{a2:.1f}", f"{rms:.1f}"])
+    if rows:
+        html_table(["Canal", "Overall pp", "1X amp", "1X fase", "2X amp", "RMS"], rows)
+        st.caption(f"Unidades {rec.channels[0].unit or '—'} · {rec.rpm or 0:.0f} rpm · "
+                   f"{len(rows)} canal(es).")
+    else:
+        st.info("Sin canales para tabular.")
+
+elif view == "Tendencias":
+    _trend_block()
+
+elif view == "Forma de Onda":
     ch = _pick_channel("wf_ch")
     fig = go.Figure(go.Scatter(x=ch.t, y=ch.v, mode="lines",
                                line=dict(color=_NAVY, width=1.3)))
@@ -301,6 +398,58 @@ elif view == "Espectro":
                 f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{diagS.get('narrative','')}</div>"
                 f"</div>", unsafe_allow_html=True)
 
+elif view == "Full Spectrum":
+    b = _pick_bearing("fs_b")
+    if b is None:
+        st.warning("Full Spectrum: necesita el **par X/Y** de un cojinete (espectro "
+                   "direccional · precesión forward/backward · supera a System1).")
+    else:
+        n = min(b.x.v.size, b.y.v.size)
+        xv = b.x.v[:n] - np.nanmean(b.x.v[:n])
+        yv = b.y.v[:n] - np.nanmean(b.y.v[:n])
+        fs = b.x.fs_hz or b.y.fs_hz
+        if n < 16 or not fs:
+            st.warning("Full Spectrum: faltan muestras o frecuencia de muestreo.")
+        else:
+            # z = X + iY → FFT complejo → +f = precesión forward, −f = backward
+            win = np.hanning(n)
+            z = (xv * win) + 1j * (yv * win)
+            sp = np.fft.fftshift(np.fft.fft(z)) * (2.0 / n)
+            fr = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / fs))
+            amp = np.abs(sp)
+            fwd = fr >= 0
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=fr[fwd], y=amp[fwd], mode="lines",
+                          line=dict(color=_NAVY, width=1.2), name="Forward (+)"))
+            fig.add_trace(go.Scatter(x=fr[~fwd], y=amp[~fwd], mode="lines",
+                          line=dict(color=_AMBER, width=1.2), name="Backward (−)"))
+            if b.x.rpm:
+                f1 = b.x.rpm / 60.0
+                for k, lab in [(1, "+1X"), (2, "+2X"), (-1, "−1X")]:
+                    if abs(k) * f1 < fr[-1]:
+                        fig.add_vline(x=k * f1, line=dict(color="#8090a6", width=1, dash="dot"),
+                                      annotation_text=lab, annotation_position="top")
+            fig.update_xaxes(title="Frecuencia direccional (Hz) · + forward / − backward")
+            fig.update_yaxes(title=f"Amplitud ({b.x.unit or 'µm'})")
+            st.plotly_chart(_layout(fig, f"Full Spectrum · {b.name}", h=500),
+                            use_container_width=True)
+            # dominancia forward vs backward
+            ef = float(np.sum(amp[fwd] ** 2))
+            eb = float(np.sum(amp[~fwd] ** 2))
+            tot = ef + eb or 1.0
+            dom = "FORWARD" if ef >= eb else "BACKWARD"
+            dc = "#1f9d55" if dom == "FORWARD" else "#e8890c"
+            st.markdown(
+                f"<div style='border-left:4px solid {dc};background:#f8fafc;border:1px solid "
+                f"#e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
+                f"<span style='background:{dc};color:#fff;border-radius:6px;padding:2px 9px;"
+                f"font:700 11px IBM Plex Mono'>{dom}</span>  "
+                f"<b>Precesión {ef/tot*100:.0f}% fwd / {eb/tot*100:.0f}% bwd.</b>"
+                f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>Backward fuerte "
+                f"(&gt;30%) sugiere roce (rub), anisotropía de soporte o inestabilidad. "
+                f"El espectro direccional separa fuerzas co- y contra-rotatorias (no lo da "
+                f"System1 estándar).</div></div>", unsafe_allow_html=True)
+
 elif view == "Órbita":
     b = _pick_bearing("orb_b")
     if b is None:
@@ -388,32 +537,7 @@ elif view == "Shaft Centerline":
             f"Anillos: verde 60% · ámbar 85% · rojo = borde del claro (API 670).</div>",
             unsafe_allow_html=True)
 
-# ---- Vistas de BARRIDO (Bode/Polar) desde CSV de System1 ----
-def _pick_sweep(key):
-    if not rec.sweeps:
-        return None
-    names = [s.label for s in rec.sweeps]
-    sel = st.selectbox("Barrido (Bode/Polar de System1)", names, key=key)
-    return rec.sweeps[names.index(sel)]
-
-
-def _sweep_controls(sw, key):
-    cA, cB, cC = st.columns(3)
-    op = cA.number_input("RPM operación", value=float(round(float(np.nanmax(sw.rpm)))),
-                         step=100.0, key=f"{key}_op")
-    grp = cB.selectbox("Grupo ISO 20816-2", ["group1", "group2"], index=1, key=f"{key}_g")
-    mt = cC.selectbox("Medición", ["Desplazamiento eje (prox)", "Velocidad carcasa (acel/vel)"],
-                      key=f"{key}_m")
-    mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
-    unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
-    diag = _sweep_diag(tuple(sw.rpm.tolist()), tuple(sw.amp.tolist()),
-                       tuple(sw.phase.tolist()), op, grp, mtype, unit,
-                       "Bode" if key == "bode" else "polar")
-    s = diag.get("structured", {})
-    return op, unit, diag, s, s.get("iso_zone", "—")
-
-
-if view == "Bode":
+elif view == "Bode":
     sw = _pick_sweep("bode_sw")
     if sw is None:
         st.warning("Bode: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
@@ -490,33 +614,47 @@ elif view == "Polar":
                    "anillos punteados = límites ISO 20816-2 (A/B/C).")
         _diag_panel(diag, zone, zc)
 
-else:  # Trends
+elif view == "Waterfall":
+    # Espectros apilados en el TIEMPO (una traza por sesión del histórico).
     if not hist_caps:
-        st.info("**Trends** — overall vs tiempo. Requiere varias capturas en el tiempo "
-                "(modo **Histórico del activo**). En CSV manual de una captura no aplica.")
+        st.info("**Waterfall** — espectros apilados en el tiempo. Requiere varias "
+                "capturas (modo **Histórico del activo**). Separa picos síncronos de "
+                "los que cambian con la condición.")
     else:
         points = sorted({c.get("point", "") for c in hist_caps if c.get("point")})
-        cc1, cc2 = st.columns([2, 1])
-        with cc1:
-            pt = st.selectbox("Punto", points, key="tr_pt")
-        with cc2:
-            met = st.selectbox("Métrica", ["Overall pp", "RMS", "1X amp"], key="tr_met")
-        mk = {"Overall pp": "pp", "RMS": "rms", "1X amp": "1x"}[met]
+        pt = st.selectbox("Punto", points, key="wf_pt")
         _ct = tuple((c["point"], c["day"], c["time"], c["key"]) for c in hist_caps
-                    if c.get("point") and c.get("day") and c.get("time") and c.get("key"))
-        with st.spinner("Calculando tendencia del histórico…"):
-            ts, vals, unit = _trend(_ct, pt, mk)
-        if not ts:
-            st.warning(f"Sin datos para la tendencia de {pt}.")
+                    if c.get("point") == pt and c.get("day") and c.get("time") and c.get("key"))
+        with st.spinner("Calculando espectros por sesión…"):
+            spectra = _spectra(_ct, limit=24)
+        if not spectra:
+            st.warning(f"Sin espectros para {pt}.")
         else:
-            fig = go.Figure(go.Scatter(x=ts, y=vals, mode="lines+markers",
-                                       line=dict(color=_NAVY, width=1.6),
-                                       marker=dict(size=5, color=_NAVY)))
-            fig.update_xaxes(title="Tiempo")
-            fig.update_yaxes(title=f"{met} ({unit or 'a.u.'})")
-            st.plotly_chart(_layout(fig, f"Tendencia · {pt} · {met}", h=440),
+            fig = go.Figure()
+            step = (max(float(np.max(a)) for _, _, a in spectra) or 1.0) * 0.6
+            for i, (stamp, fr, amp) in enumerate(spectra):
+                fig.add_trace(go.Scatter(
+                    x=fr, y=amp + i * step, mode="lines",
+                    line=dict(color=_NAVY if i % 2 == 0 else _STEEL, width=0.9),
+                    name=stamp, hovertemplate=f"{stamp}<br>%{{x:.1f}} Hz<br>%{{y:.1f}}"))
+            fig.update_xaxes(title="Frecuencia (Hz)")
+            fig.update_yaxes(title="Amplitud apilada (offset por sesión)", showticklabels=False)
+            st.plotly_chart(_layout(fig, f"Waterfall · {pt} · {len(spectra)} sesiones", h=560),
                             use_container_width=True)
-            st.caption(f"{len(ts)} capturas · {pt} · métrica sobre el canal X.")
+            st.caption("Cada traza = una sesión (offset vertical). Picos que crecen con el "
+                       "tiempo = degradación; líneas rectas = síncronos estables.")
 
-st.caption("Workspace unificado (Fase 2) · ingesta + vistas de una captura. "
-           "Barrido/histórico (Polar·Bode·Trends) en integración.")
+elif view == "Cascada":
+    # Espectros vs RPM (run-up / coast-down). Fuente: NI/ADRE run-up o barrido System1.
+    if rec.sweeps:
+        st.info("Barrido de System1 cargado — la **Cascada** vive mejor en **Bode/Polar** "
+                "(amplitud y fase 1X vs rpm). La cascada por espectros completos vs rpm "
+                "llega con el run-up de NI 9229/9234.")
+    else:
+        st.info("**Cascada** — espectros vs **RPM** en arranque/parada (run-up/coast-down). "
+                "Separa resonancias (fijas en Hz) de órdenes (siguen la rpm) y revela las "
+                "velocidades críticas. Requiere captura transitoria continua — llega con la "
+                "adquisición directa **NI 9229/9234** o un run-up de ADRE 408.")
+
+st.caption("Rotodinámica · ingesta + 11 vistas sobre la misma captura o histórico. "
+           "Fuentes: histórico Supabase automático · CSV System1/ADRE · (NI en camino).")
