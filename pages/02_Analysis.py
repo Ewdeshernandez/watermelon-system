@@ -219,6 +219,39 @@ if view == "Waveform":
     fig.update_xaxes(title="Tiempo (s)")
     fig.update_yaxes(title=f"{ch.label} ({ch.unit or 'a.u.'})")
     st.plotly_chart(_layout(fig, f"Forma de onda · {ch.label}"), use_container_width=True)
+    # Métricas + diagnóstico (reutiliza core.waveform_metrics / waveform_diagnostics)
+    from core.waveform_metrics import compute_waveform_metrics
+    mx = compute_waveform_metrics(ch.v)
+    if mx:
+        u = ch.unit or ""
+        cells = [("RMS", f"{mx.get('rms',0):.2f} {u}"), ("Pico", f"{mx.get('peak',0):.2f} {u}"),
+                 ("Pico-pico", f"{mx.get('peak_to_peak',0):.2f} {u}"),
+                 ("Crest", f"{mx.get('crest_factor',0):.2f}"),
+                 ("Kurtosis", f"{mx.get('kurtosis',0):.2f}")]
+        cols = st.columns(len(cells))
+        for col, (lbl, val) in zip(cols, cells):
+            col.markdown(f"<div style='background:#f7f9fc;border:1px solid #e2e8f2;border-radius:8px;"
+                         f"padding:8px 10px'><div style='font:600 10px IBM Plex Mono;color:#8090a6;"
+                         f"text-transform:uppercase;letter-spacing:.08em'>{lbl}</div>"
+                         f"<div style='font:700 17px IBM Plex Sans;color:#0b1f3a'>{val}</div></div>",
+                         unsafe_allow_html=True)
+        try:
+            from core.waveform_diagnostics import build_waveform_diagnostics_rotordyn
+            dW = build_waveform_diagnostics_rotordyn(
+                time_s=ch.t, amplitude=ch.v, metrics=mx, machine_label=rec.name,
+                point_label=ch.label, amplitude_unit=u)
+            _sev = str(dW.get("severity_global", "")).upper()
+            _c = {"DANGER": "#dc3545", "CRITICAL": "#dc3545", "WARNING": "#e8890c",
+                  "CAUTION": "#84cc16"}.get(_sev, "#1f9d55")
+            st.markdown(
+                f"<div style='border-left:4px solid {_c};background:#f8fafc;border:1px solid #e2e8f2;"
+                f"border-radius:8px;padding:11px 15px;margin-top:10px'>"
+                f"<b style='font-size:13px'>{dW.get('headline','')}</b>"
+                f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{dW.get('detail','')}</div>"
+                f"<div style='color:#0b1f3a;font-size:12.5px;margin-top:4px'><b>Acción:</b> "
+                f"{dW.get('action','')}</div></div>", unsafe_allow_html=True)
+        except Exception:  # noqa: BLE001
+            pass
 
 elif view == "Espectro":
     ch = _pick_channel("sp_ch")
@@ -241,6 +274,32 @@ elif view == "Espectro":
         fig.update_xaxes(title="Frecuencia (Hz)")
         fig.update_yaxes(title=f"Amplitud ({ch.unit or 'a.u.'})")
         st.plotly_chart(_layout(fig, f"Espectro (FFT) · {ch.label}"), use_container_width=True)
+        # Diagnóstico por norma (reutiliza core.spectrum_diagnostics)
+        if ch.rpm:
+            from core.spectrum_diagnostics import evaluate_spectrum_diagnostic
+            f1 = ch.rpm / 60.0
+
+            def _amp_at(fhz):
+                k = int(np.argmin(np.abs(fr - fhz)))
+                lo, hi = max(0, k - 2), min(amp.size, k + 3)
+                return float(np.max(amp[lo:hi])) if hi > lo else 0.0
+            harms = [{"order": k, "amp_peak": _amp_at(k * f1),
+                      "freq_cpm": k * f1 * 60.0} for k in range(1, 7)]
+            dk = int(np.argmax(amp))
+            diagS = evaluate_spectrum_diagnostic(
+                one_x_amp=harms[0]["amp_peak"], harmonics=harms,
+                overall_spec_rms=float(np.sqrt(np.mean(w ** 2))),
+                dominant_peak_freq_cpm=float(fr[dk] * 60.0),
+                dominant_peak_amp=float(amp[dk]), rpm=ch.rpm)
+            _col = diagS.get("color", "#8090a6")
+            st.markdown(
+                f"<div style='border-left:4px solid {_col};background:#f8fafc;border:1px solid "
+                f"#e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
+                f"<span style='background:{_col};color:#fff;border-radius:6px;padding:2px 9px;"
+                f"font:700 11px IBM Plex Mono'>{diagS.get('status','')}</span>  "
+                f"<b style='font-size:13px'>{diagS.get('headline','')}</b>"
+                f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{diagS.get('narrative','')}</div>"
+                f"</div>", unsafe_allow_html=True)
 
 elif view == "Órbita":
     b = _pick_bearing("orb_b")
