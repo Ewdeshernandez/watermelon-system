@@ -10,6 +10,12 @@ def apply_watermelon_page_style() -> None:
     st.markdown(
         """
         <style>
+        /* ===== TIPOGRAFÍA + TOKENS INDUSTRIALES (unificado con ui_industrial) ===== */
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        :root{ --wi-ink:#0b1f3a; --wi-ink2:#3a4c66; --wi-steel:#274b7d; --wi-mut:#8090a6;
+               --wi-navy:#12305e; --wi-amber:#e8890c; --wi-line:#e2e8f2; }
+        html, body, .stApp, .block-container, [data-testid="stMarkdownContainer"]{
+            font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif; }
         /* ===== CHROME STREAMLIT OCULTO + LOADER SANDÍA =====
            Ciclo 23.161 — feedback cliente (Juan Mora). Mismo tratamiento
            que core/ui/theme.py para que aplique en TODOS los módulos
@@ -42,43 +48,47 @@ def apply_watermelon_page_style() -> None:
         }
 
         .wm-page-title {
-            font-size: 2.15rem;
-            font-weight: 800;
-            color: #0f172a;
+            font-family:'IBM Plex Sans',sans-serif;
+            font-size: 2.05rem;
+            font-weight: 700;
+            color: var(--wi-ink);
             margin-bottom: 0.15rem;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.4px;
         }
 
         .wm-page-subtitle {
-            color: #64748b;
-            font-size: 0.98rem;
+            color: var(--wi-mut);
+            font-size: 0.96rem;
             margin-bottom: 1.15rem;
         }
 
         .wm-card {
-            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.88));
-            border: 1px solid #dbe3ee;
-            border-radius: 18px;
-            padding: 14px 16px 14px 16px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            background: #ffffff;
+            border: 1px solid var(--wi-line);
+            border-radius: 14px;
+            padding: 15px 17px;
+            box-shadow: 0 1px 2px rgba(11,31,58,.05), 0 6px 20px rgba(11,31,58,.05);
             margin-bottom: 12px;
+            border-top: 3px solid var(--wi-navy);
         }
 
         .wm-card-title {
+            font-family:'IBM Plex Sans',sans-serif;
             font-size: 1.02rem;
-            font-weight: 800;
-            color: #0f172a;
+            font-weight: 700;
+            color: var(--wi-ink);
             margin-bottom: 0.18rem;
+            letter-spacing: -0.2px;
         }
 
         .wm-card-subtitle {
-            color: #64748b;
-            font-size: 0.90rem;
+            color: var(--wi-mut);
+            font-size: 0.88rem;
             margin-bottom: 0.35rem;
         }
 
         .wm-meta {
-            color: #334155;
+            color: var(--wi-ink2);
             font-size: 0.92rem;
             line-height: 1.6;
         }
@@ -91,13 +101,14 @@ def apply_watermelon_page_style() -> None:
         }
 
         .wm-chip {
-            border:1px solid #dbe3ee;
-            background:#f8fafc;
-            border-radius:999px;
-            padding:5px 10px;
-            color:#334155;
-            font-size:0.82rem;
-            font-weight:600;
+            border:1px solid var(--wi-line);
+            background:#f7f9fc;
+            border-radius:7px;
+            padding:5px 11px;
+            color:var(--wi-steel);
+            font:600 11px/1.3 'IBM Plex Mono',monospace;
+            letter-spacing:.03em;
+            text-transform:uppercase;
         }
 
         /* Ciclo 23.50 (bugfix) — los selectores de abajo antes usaban
@@ -109,22 +120,31 @@ def apply_watermelon_page_style() -> None:
            SOLO afecta botones del contenido principal, nunca del sidebar. */
         section.main div[data-testid="stButton"]:not([data-testid="stSidebar"] *) > button,
         section.main div[data-testid="stDownloadButton"]:not([data-testid="stSidebar"] *) > button {
-            min-height: 52px;
-            border-radius: 16px;
-            font-weight: 700;
-            border: 1px solid #bfd8ff !important;
-            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
-            color: #2563eb !important;
-            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
-            transition: all 0.18s ease;
+            min-height: 48px;
+            border-radius: 11px;
+            font-family:'IBM Plex Sans',sans-serif;
+            font-weight: 600;
+            border: 1px solid #c7d4e8 !important;
+            background: #ffffff !important;
+            color: var(--wi-navy) !important;
+            box-shadow: 0 1px 2px rgba(11,31,58,.05), 0 6px 18px rgba(11,31,58,.06);
+            transition: all 0.16s ease;
         }
 
         section.main div[data-testid="stButton"]:not([data-testid="stSidebar"] *) > button:hover,
         section.main div[data-testid="stDownloadButton"]:not([data-testid="stSidebar"] *) > button:hover {
-            border-color: #93c5fd !important;
-            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
-            color: #1d4ed8 !important;
-            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+            border-color: var(--wi-steel) !important;
+            background: var(--wi-navy) !important;
+            color: #ffffff !important;
+            box-shadow: 0 12px 24px rgba(12,32,78,.18);
+        }
+        /* Botón primario (type="primary") = navy sólido con acento */
+        section.main div[data-testid="stButton"]:not([data-testid="stSidebar"] *) > button[kind="primary"]{
+            background: var(--wi-navy) !important; color:#fff !important;
+            border-color: var(--wi-navy) !important; box-shadow:0 8px 22px rgba(12,32,78,.22);
+        }
+        section.main div[data-testid="stButton"]:not([data-testid="stSidebar"] *) > button[kind="primary"]:hover{
+            background: var(--wi-steel) !important; border-color: var(--wi-steel) !important;
         }
 
         /* Garantía adicional: aunque algún CSS leakeara al sidebar,
@@ -187,48 +207,47 @@ def page_header(title: str, subtitle: str) -> None:
         st.markdown(f'<div class="wm-page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
         return
 
+    # Look INDUSTRIAL unificado (mismo lenguaje que core.ui_industrial):
+    # banda navy con textura + strip ámbar (rojo en turno noche), IBM Plex,
+    # sin emojis (puntos/labels mono). El saludo + reloj + turno se conservan.
     _night = _g.get("shift") == "Turno noche"
-    _accent = "#ef4444" if _night else "#10b981"
-    _bg = ("linear-gradient(135deg, #1a0a14 0%, #2a0e1f 100%)" if _night
-           else "linear-gradient(135deg, #0b1426 0%, #0f1d36 100%)")
+    _accent = "#dc3545" if _night else "#e8890c"   # ámbar día · rojo noche
     st.markdown(
         f"""
         <style>
         .wmh-hero {{
-            border-radius: 12px; padding: 12px 20px; margin: 2px 0 16px 0;
-            border: 1px solid rgba(148,163,184,0.12);
-            box-shadow: 0 2px 10px rgba(15,23,42,0.08);
-            color: #f8fafc; display: flex; align-items: center;
-            justify-content: space-between; gap: 28px; flex-wrap: wrap;
+            position:relative; border-radius:16px; padding:18px 24px; margin:2px 0 18px 0;
+            background:linear-gradient(120deg,#0e2547 0%,#12305e 46%,#274b7d 100%);
+            color:#eaf1fb; overflow:hidden; box-shadow:0 10px 30px rgba(12,32,78,.22);
+            display:flex; align-items:center; justify-content:space-between; gap:28px; flex-wrap:wrap;
         }}
-        .wmh-hero-left {{ flex: 1 1 60%; min-width: 320px; }}
-        .wmh-hero-right {{ flex: 0 0 auto; text-align: right; min-width: 200px; }}
-        .wmh-pill {{
-            display:inline-block; padding:3px 10px; border-radius:999px;
-            background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14);
-            color:rgba(248,250,252,0.85); font-size:9px; font-weight:700;
-            letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px;
-        }}
-        .wmh-greeting {{ font-size:18px; font-weight:700; color:#f1f5f9;
-            margin:3px 0 2px 0; letter-spacing:-0.01em; }}
-        .wmh-status-line {{ font-size:13px; color:rgba(226,232,240,0.78); font-weight:500; }}
-        .wmh-status-line .dot {{ display:inline-block; width:8px; height:8px;
-            border-radius:50%; margin:0 6px 0 2px; vertical-align:middle; }}
-        .wmh-clock {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size:26px; font-weight:700; color:#f8fafc; line-height:1; letter-spacing:-0.02em; }}
-        .wmh-shift {{ font-size:11px; color:rgba(226,232,240,0.78); font-weight:600;
-            letter-spacing:0.12em; text-transform:uppercase; margin-top:6px; }}
-        .wmh-date {{ font-size:12px; color:rgba(226,232,240,0.55); margin-top:2px; }}
+        .wmh-hero::after {{ content:""; position:absolute; inset:0; pointer-events:none;
+            background:repeating-linear-gradient(135deg,rgba(255,255,255,.045) 0 2px,transparent 2px 9px); }}
+        .wmh-hero .wmh-strip {{ position:absolute; top:0; right:0; height:100%; width:6px;
+            background:linear-gradient(180deg,{_accent},#c56f05); }}
+        .wmh-hero-left {{ flex:1 1 60%; min-width:300px; position:relative; z-index:1; }}
+        .wmh-hero-right {{ flex:0 0 auto; text-align:right; min-width:190px; position:relative; z-index:1; }}
+        .wmh-kick {{ font:600 10.5px/1 'IBM Plex Mono',monospace; letter-spacing:.26em;
+            text-transform:uppercase; color:#8fb4e6; }}
+        .wmh-greeting {{ font:700 20px/1.15 'IBM Plex Sans',sans-serif; color:#f1f5f9;
+            margin:5px 0 3px 0; letter-spacing:-0.3px; }}
+        .wmh-status-line {{ font:500 13px/1.4 'IBM Plex Sans',sans-serif; color:#b9cbe6; }}
+        .wmh-status-line .dot {{ display:inline-block; width:8px; height:8px; border-radius:50%;
+            margin:0 7px 0 2px; vertical-align:middle; box-shadow:0 0 0 3px rgba(255,255,255,.06); }}
+        .wmh-clock {{ font:700 26px/1 'IBM Plex Mono',monospace; color:#f8fafc; letter-spacing:-0.01em; }}
+        .wmh-shift {{ font:600 10px/1 'IBM Plex Mono',monospace; color:#a9c1e2;
+            letter-spacing:.14em; text-transform:uppercase; margin-top:7px; }}
+        .wmh-date {{ font:500 12px/1 'IBM Plex Sans',sans-serif; color:rgba(185,203,230,.65); margin-top:4px; }}
         </style>
-        <div class="wmh-hero" style="background:{_bg}; border-left:3px solid {_accent};">
+        <div class="wmh-hero"><span class="wmh-strip"></span>
           <div class="wmh-hero-left">
-            <span class="wmh-pill">🍉 Watermelon · {title}</span>
+            <span class="wmh-kick">Watermelon · {title}</span>
             <div class="wmh-greeting">{_g['greeting']}</div>
             <div class="wmh-status-line"><span class="dot" style="background:{_accent};"></span>{subtitle}</div>
           </div>
           <div class="wmh-hero-right">
             <div class="wmh-clock">{_g['time_hhmm']}</div>
-            <div class="wmh-shift">{_g['shift_emoji']} {_g['shift']}</div>
+            <div class="wmh-shift">{_g['shift']}</div>
             <div class="wmh-date">{_g['date_long']}</div>
           </div>
         </div>

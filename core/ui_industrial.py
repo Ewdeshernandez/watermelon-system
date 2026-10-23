@@ -40,7 +40,8 @@ def inject_industrial_css() -> None:
           background:linear-gradient(180deg,var(--wi-amber),#c56f05);}
         .wi-band .kick{font:600 10.5px/1 'IBM Plex Mono',monospace;letter-spacing:.28em;
           text-transform:uppercase;color:#8fb4e6;}
-        .wi-band h2{margin:6px 0 2px;font:700 23px/1.15 'IBM Plex Sans',sans-serif;letter-spacing:-.4px;}
+        .wi-band h2{margin:6px 0 2px;font:700 23px/1.15 'IBM Plex Sans',sans-serif;letter-spacing:-.4px;
+          color:#eaf1fb !important;}
         .wi-band p{margin:0;color:#b9cbe6;font:500 13px/1.4 'IBM Plex Sans',sans-serif;}
         .wi-kpis{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;}
         .wi-kpi{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.14);
