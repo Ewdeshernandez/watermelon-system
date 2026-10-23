@@ -766,10 +766,10 @@ with left_col:
         </div>
 
         <div class="wm-trust-row">
-            <span class="wm-trust-chip">🔒 SSO-ready</span>
-            <span class="wm-trust-chip">📊 API 670 / 684</span>
-            <span class="wm-trust-chip">🌐 ISO 20816</span>
-            <span class="wm-trust-chip">⚙️ Multi-instance</span>
+            <span class="wm-trust-chip">SSO-ready</span>
+            <span class="wm-trust-chip">API 670 / 684</span>
+            <span class="wm-trust-chip">ISO 20816</span>
+            <span class="wm-trust-chip">Multi-instance</span>
         </div>
 
         <!-- Certifications — sealed badges con shield icon -->
@@ -792,11 +792,11 @@ with right_col:
 
     st.markdown(
         """
-        <div class="wm-login-top">🔐 Secure access</div>
+        <div class="wm-login-top">Secure access</div>
         <div class="wm-login-title">Sign in</div>
         <div class="wm-login-copy">Passwordless access: we send a one-time code to your registered email. Sessions are audited for traceability.</div>
         <div class="wm-login-trust">
-            <span class="icon">🛡</span>
+            <span class="icon" aria-hidden="true"></span>
             <span>One-time code · 1 h idle / 6 h max session · audit log</span>
         </div>
         """,
@@ -907,14 +907,14 @@ with right_col:
                 {('· ' + _build_line) if _build_line else ''}
             </div>
             <div class="wm-footer-certs">
-                <span class="wm-footer-cert">🛡 ISO 27001</span>
-                <span class="wm-footer-cert">🔐 SOC 2</span>
-                <span class="wm-footer-cert">🌎 GDPR</span>
-                <span class="wm-footer-cert">📋 API 670</span>
-                <span class="wm-footer-cert">♿ WCAG 2.1 AA</span>
+                <span class="wm-footer-cert">ISO 27001</span>
+                <span class="wm-footer-cert">SOC 2</span>
+                <span class="wm-footer-cert">GDPR</span>
+                <span class="wm-footer-cert">API 670</span>
+                <span class="wm-footer-cert">WCAG 2.1 AA</span>
             </div>
             <div class="wm-footer-region">
-                🌎 LATAM region · 🇨🇴 COL data residency · 🇺🇸 EN / 🇪🇸 ES
+                LATAM region · 🇨🇴 COL data residency · 🇺🇸 EN / 🇪🇸 ES
             </div>
             <div class="wm-footer-build" style="font-size:0.7rem;opacity:0.7;margin-top:0.55rem;">
                 © 2026 SIGASAS · All rights reserved

@@ -700,7 +700,7 @@ try:
                 f'<div class="wmh-last-report" '
                 f'data-archived-at="{_archived_at_iso}" '
                 f'data-asset="{_last_asset}">'
-                f'<span class="wmh-lr-icon">📄</span> '
+                f'<span class="wmh-lr-icon" style="color:#8fb4e6;">●</span> '
                 f'<span class="wmh-lr-text">last report: {_last_asset} · {_rel}</span>'
                 f'</div>'
             )

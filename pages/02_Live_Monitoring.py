@@ -4489,7 +4489,7 @@ def main() -> None:
             st.rerun()
     with c2:
         st.caption(
-            f"📅 Local sync: {datetime.now().strftime('%H:%M:%S')} · "
+            f"Local sync: {datetime.now().strftime('%H:%M:%S')} · "
             "Engine: Watermelon System · ISO 20816-3 / API 670"
         )
 
