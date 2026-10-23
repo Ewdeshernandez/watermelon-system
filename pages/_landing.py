@@ -192,6 +192,7 @@ _HERO_BG = _HERO_BG_NIGHT if _is_night else _HERO_BG_DAY
 st.markdown(
     """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
     .block-container {
         max-width: 1600px !important;
         padding-top: 1.0rem !important;
@@ -199,57 +200,48 @@ st.markdown(
     }
 
     /* ───── HERO (v3.31.265 — minimalista enterprise) ───── */
+    /* Hero unificado con el lenguaje industrial (core.ui_industrial /
+       ui_theme.page_header): banda navy con textura + strip ámbar, IBM Plex,
+       sin emojis (kick mono). */
     .wmh-hero {
-        border-radius: 12px;
-        padding: 12px 20px;
-        margin-bottom: 14px;
-        background: linear-gradient(135deg, #0b1426 0%, #0f1d36 100%);
-        border: 1px solid rgba(148,163,184,0.12);
-        border-left: 3px solid #10b981; /* acento color de estado */
-        box-shadow: 0 2px 10px rgba(15,23,42,0.08);
-        color: #f8fafc;
+        position: relative;
+        border-radius: 16px;
+        padding: 18px 24px;
+        margin-bottom: 16px;
+        background: linear-gradient(120deg,#0e2547 0%,#12305e 46%,#274b7d 100%);
+        overflow: hidden;
+        box-shadow: 0 10px 30px rgba(12,32,78,.22);
+        color: #eaf1fb;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 28px;
         flex-wrap: wrap;
-        position: relative;
     }
-    /* ::before / ::after removidos en v3.31.265 — el scan animado y
-       los radial-gradients sobrecargados se quitan para un look mas
-       sobrio tipo System1/AMS. El border-left coloreado ya da el
-       acento de estado sin necesidad de capas extra. */
-    .wmh-hero-left { flex: 1 1 60%; min-width: 320px; }
-    .wmh-hero-right { flex: 0 0 auto; text-align: right; min-width: 240px; }
+    .wmh-hero::after { content:""; position:absolute; inset:0; pointer-events:none;
+        background:repeating-linear-gradient(135deg,rgba(255,255,255,.045) 0 2px,transparent 2px 9px); }
+    .wmh-hero .wmh-strip { position:absolute; top:0; right:0; height:100%; width:6px;
+        background:linear-gradient(180deg,#e8890c,#c56f05); }
+    .wmh-hero-left { flex: 1 1 60%; min-width: 320px; position:relative; z-index:1; }
+    .wmh-hero-right { flex: 0 0 auto; text-align: right; min-width: 240px; position:relative; z-index:1; }
 
     .wmh-pill {
         display: inline-block;
-        padding: 3px 10px;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.07);
-        border: 1px solid rgba(255,255,255,0.14);
-        color: rgba(248,250,252,0.85);
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.16em;
+        font: 600 10.5px/1 'IBM Plex Mono', monospace;
+        letter-spacing: 0.26em;
         text-transform: uppercase;
-        margin-bottom: 6px;
+        color: #8fb4e6;
+        margin-bottom: 4px;
     }
     .wmh-title {
-        font-size: 24px;
-        font-weight: 800;
-        line-height: 1.05;
-        letter-spacing: -0.02em;
-        margin: 0 0 3px 0;
-        background: linear-gradient(90deg, #f8fafc 0%, #cbd5e1 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        font: 700 24px/1.1 'IBM Plex Sans', sans-serif;
+        letter-spacing: -0.3px;
+        margin: 2px 0 3px 0;
+        color: #f1f5f9;
     }
     .wmh-greeting {
-        font-size: 14px;
-        font-weight: 600;
-        color: #e2e8f0;
+        font: 600 14px/1.3 'IBM Plex Sans', sans-serif;
+        color: #cfe0f5;
         margin: 2px 0 1px 0;
     }
     .wmh-status-line {
@@ -301,20 +293,16 @@ st.markdown(
     }
 
     .wmh-clock {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 26px;
-        font-weight: 700;
+        font: 700 26px/1 'IBM Plex Mono', ui-monospace, monospace;
         color: #f8fafc;
-        line-height: 1;
-        letter-spacing: -0.02em;
+        letter-spacing: -0.01em;
     }
     .wmh-shift {
-        font-size: 12px;
-        color: rgba(226,232,240,0.78);
-        font-weight: 600;
-        letter-spacing: 0.12em;
+        font: 600 10px/1 'IBM Plex Mono', monospace;
+        color: #a9c1e2;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
-        margin-top: 6px;
+        margin-top: 7px;
     }
     .wmh-date {
         font-size: 12px;
@@ -722,7 +710,7 @@ except Exception:
 
 st.markdown(
     f"""
-    <div class="wmh-hero"><div class="wmh-hero-left"><span class="wmh-pill">🍉 Watermelon · Industrial Vibration Intelligence</span><div class="wmh-greeting">{_greet['greeting']}</div><div class="wmh-status-line"><span class="dot" style="background:{_status_color};"></span>{_status_text}</div>{_last_report_line}</div><div class="wmh-hero-right"><div class="wmh-clock" id="wm-clock-live">{_greet['time_hhmm']}</div><div class="wmh-shift" id="wm-shift-live">{_greet['shift_emoji']} {_greet['shift']}</div><div class="wmh-date" id="wm-date-live">{_greet['date_long']}</div><div class="wmh-next-shift" id="wm-next-shift">&nbsp;</div></div></div>
+    <div class="wmh-hero"><span class="wmh-strip"></span><div class="wmh-hero-left"><span class="wmh-pill">Watermelon · Industrial Vibration Intelligence</span><div class="wmh-greeting">{_greet['greeting']}</div><div class="wmh-status-line"><span class="dot" style="background:{_status_color};"></span>{_status_text}</div>{_last_report_line}</div><div class="wmh-hero-right"><div class="wmh-clock" id="wm-clock-live">{_greet['time_hhmm']}</div><div class="wmh-shift" id="wm-shift-live">{_greet['shift']}</div><div class="wmh-date" id="wm-date-live">{_greet['date_long']}</div><div class="wmh-next-shift" id="wm-next-shift">&nbsp;</div></div></div>
     """,
     unsafe_allow_html=True,
 )
