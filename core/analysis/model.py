@@ -232,3 +232,76 @@ def build_record(files) -> AnalysisRecord:
         name = f"{len(files)} archivos"
     return AnalysisRecord(name=name, channels=chans,
                           bearings=list(by_brg.values()), sweeps=sweeps)
+
+
+# -------------------------------------------------------------------------
+# FUENTE B — histórico del activo (Supabase dynamic_raw, automático)
+# -------------------------------------------------------------------------
+def _bnum(point: str) -> str:
+    m = re.search(r"(\d+)", point or "")
+    return m.group(1) if m else ""
+
+
+def session_stamps(caps_meta, gap_s: int = 600):
+    """Agrupa las capturas en SESIONES por proximidad de tiempo (una corrida de
+    export dura ~minutos → archivos con HHMMSS distintos). Devuelve
+    [(label, [keys...]), …] más reciente primero."""
+    rows = []
+    for c in caps_meta or []:
+        d, t = c.get("day", ""), c.get("time", "")
+        if len(d) == 8 and len(t) == 6:
+            try:
+                secs = int(t[:2]) * 3600 + int(t[2:4]) * 60 + int(t[4:])
+                rows.append((d, secs, t, c.get("key", "")))
+            except ValueError:
+                pass
+    rows.sort()  # por día, luego segundos
+    sessions = []
+    cur = []
+    for r in rows:
+        if cur and (r[0] != cur[-1][0] or r[1] - cur[-1][1] > gap_s):
+            sessions.append(cur); cur = []
+        cur.append(r)
+    if cur:
+        sessions.append(cur)
+    out = []
+    for sess in sessions:
+        d, t0 = sess[0][0], sess[0][2]
+        label = (f"{d[:4]}-{d[4:6]}-{d[6:]}  {t0[:2]}:{t0[2:4]}:{t0[4:]}"
+                 if len(d) == 8 and len(t0) == 6 else f"{d} {t0}")
+        out.append((label, [r[3] for r in sess]))
+    out.reverse()  # más reciente primero
+    return out
+
+
+def record_from_history(label: str, keys) -> AnalysisRecord:
+    """Carga una SESIÓN de capturas (lista de keys del bucket dynamic_raw) al
+    MISMO modelo. El robot System1 ya subió la onda cruda con X/Y/KPH por cojinete
+    (BRG1=cojinete emparejado → órbita lista). Automático: sin subir CSV."""
+    from core.dynamic_raw import CH_X, CH_Y, download_capture  # noqa: PLC0415
+    chans: List[Channel] = []
+    bearings: List[Bearing] = []
+    for key in keys or []:
+        cap = download_capture(key)
+        if cap is None:
+            continue
+        point = str(cap.meta.get("point", "") or "")
+        rpm = cap.rpm
+        spr = cap.samples_per_rev
+        if cap.has(CH_X) and cap.has(CH_Y):          # par X/Y → cojinete + órbita
+            n = _bnum(point)
+            cx = Channel(label=f"{point} · X", bearing=n, axis="X", t=cap.t,
+                         v=cap.get(CH_X), rpm=rpm, spr=spr,
+                         unit=cap.unit_of(CH_X), source=point)
+            cy = Channel(label=f"{point} · Y", bearing=n, axis="Y", t=cap.t,
+                         v=cap.get(CH_Y), rpm=rpm, spr=spr,
+                         unit=cap.unit_of(CH_Y), source=point)
+            chans += [cx, cy]
+            bearings.append(Bearing(name=point, x=cx, y=cy))
+        else:                                        # canal único (acel/vel GB)
+            v = cap.get(CH_X)
+            if v is not None and v.size:
+                chans.append(Channel(label=point, bearing=_bnum(point), t=cap.t,
+                                     v=v, rpm=rpm, spr=spr,
+                                     unit=cap.unit_of(CH_X), source=point))
+    return AnalysisRecord(name=label, channels=chans, bearings=bearings)

@@ -46,26 +46,83 @@ def _record_from(payload) -> AnalysisRecord:
     return build_record([_F(n, b) for n, b in payload])
 
 
-# =========================================================
-# 1) INGESTA — subir uno o varios CSV
-# =========================================================
-ups = st.file_uploader(
-    "Registro CSV importado (uno o varios canales)", type=["csv"],
-    accept_multiple_files=True,
-    help="Export de System1 (1yd.csv, 1xd.csv…) o CSV con tiempo+amplitud. "
-         "Sube el par X/Y de un cojinete para ver la órbita.")
-if ups:
-    SS["an_payload"] = [(f.name, f.getvalue()) for f in ups]
+@st.cache_data(ttl=120, show_spinner=False)
+def _list_assets():
+    from core.instance_state import get_instance, list_reportable_instances
+    out = []
+    for r in (list_reportable_instances() or []):
+        iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
+        if not iid:
+            continue
+        tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or ""
+        if not tag:
+            try:
+                tag = getattr(get_instance(iid), "tag", "") or iid
+            except Exception:  # noqa: BLE001
+                tag = iid
+        out.append((iid, tag))
+    return out
 
-payload = SS.get("an_payload")
-if not payload:
-    st.info("Sube uno o varios CSV para empezar. Con el **par X/Y** de un cojinete "
-            "se habilita la órbita y el shaft centerline.")
-    st.stop()
 
-rec = _record_from(payload)
-if not rec.channels:
-    st.warning("No se pudo leer ningún canal de los archivos. ¿Formato correcto?")
+@st.cache_data(ttl=90, show_spinner=False)
+def _list_caps(iid):
+    from core.dynamic_raw import list_captures
+    return list_captures(iid) or []
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _rec_history(label, keys):
+    from core.analysis.model import record_from_history
+    return record_from_history(label, list(keys))
+
+
+# =========================================================
+# 1) FUENTE — histórico automático (Supabase) o CSV manual
+# =========================================================
+src = st.radio("Fuente", ["Histórico del activo (automático)", "CSV manual (System1 / ADRE)"],
+               horizontal=True, key="an_src")
+rec: AnalysisRecord | None = None
+
+if src.startswith("Histórico"):
+    assets = _list_assets()
+    if not assets:
+        st.info("No hay activos disponibles.")
+        st.stop()
+    tags = [t for _i, t in assets]
+    c0, c1 = st.columns([1, 2])
+    with c0:
+        tsel = st.selectbox("Activo", tags, key="an_asset")
+        iid = assets[tags.index(tsel)][0]
+    caps = _list_caps(iid)
+    if not caps:
+        st.info(f"**{tsel}** aún no tiene onda cruda en el histórico. El robot System1 "
+                "la sube automáticamente; en cuanto llegue, aparece aquí.")
+        st.stop()
+    from core.analysis.model import session_stamps
+    sessions = session_stamps(caps)        # [(label, [keys]), …] reciente primero
+    labels = [s[0] for s in sessions]
+    with c1:
+        lsel = st.selectbox("Captura (sesión de export)", labels, key="an_stamp")
+    _, keys = sessions[labels.index(lsel)]
+    with st.spinner("Cargando captura del histórico…"):
+        rec = _rec_history(lsel, tuple(keys))
+else:
+    ups = st.file_uploader(
+        "Registro CSV importado (uno o varios canales)", type=["csv"],
+        accept_multiple_files=True,
+        help="Export de System1 (1yd.csv, 1xd.csv…), Bode/Polar de System1, o ADRE. "
+             "Sube el par X/Y de un cojinete para ver la órbita.")
+    if ups:
+        SS["an_payload"] = [(f.name, f.getvalue()) for f in ups]
+    payload = SS.get("an_payload")
+    if not payload:
+        st.info("Sube uno o varios CSV para empezar. Con el **par X/Y** de un cojinete "
+                "se habilita la órbita y el shaft centerline.")
+        st.stop()
+    rec = _record_from(payload)
+
+if rec is None or not rec.channels:
+    st.warning("No se pudo cargar ningún canal. ¿Formato / captura correctos?")
     st.stop()
 
 _rpm = rec.rpm
