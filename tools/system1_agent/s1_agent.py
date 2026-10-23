@@ -316,7 +316,20 @@ class System1CsvFolderReader:
             groups.setdefault(bearing, {})[axis] = {"file": f, "p": parsed}
 
         out: List[RawCapture] = []
+        require_pair = bool(getattr(self, "require_pair", True))
         for bearing, ax in sorted(groups.items()):
+            # ANTI-CARRERA: no subir un cojinete A MEDIAS. Si el uploader corre
+            # mientras el robot aún escribe los CSV (tenía 1xd pero aún no 1yd),
+            # saldría un BRG con un solo eje → bloquea sync_state con captured_at
+            # y el par completo nunca se sube (dedup). Si falta X o Y, se OMITE y
+            # se recoge en el próximo ciclo ya con el par. (Los cojinetes de esta
+            # planta son todos par X/Y; si algún día hay un solo probe, poner
+            # require_pair=False en el reader.)
+            if require_pair and ("x" not in ax or "y" not in ax):
+                log.warning("BRG%s incompleto (solo %s) — se omite hasta tener "
+                            "el par X/Y (anti-carrera)", bearing,
+                            ",".join(sorted(ax.keys())))
+                continue
             base = ax.get("x") or ax.get("y")
             p = base["p"]
             t = p["t_s"]
