@@ -34,22 +34,17 @@ NAV_GROUPS = [
         "section": "Overview",
         "items": [
             {"label": "◉  Home", "page": "pages/_landing.py"},
-            # Machinery Library segundo: flujo correcto es seleccionar
-            # primero la máquina y después cargar CSVs en Load Data.
             {"label": "▣  Machinery Library", "page": "pages/00_Machinery_Library.py"},
+            # Crear activo (wizard): crea máquinas nuevas (no es ingesta de datos).
+            {"label": "✦  Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
             {"label": "▤  Tabular List", "page": "pages/01__Tabular_List.py"},
         ],
     },
-    {
-        "section": "Ingest",
-        "items": [
-            {"label": "⤓  Load Data", "page": "pages/01_Load_Data.py"},
-            # Ciclo 18.2 — Importers & Plantillas LATAM hub
-            {"label": "⇪  Importers & Plantillas", "page": "pages/17_Importers.py"},
-            # Ciclo 21 — Wizard guiado para crear activos
-            {"label": "✦  Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
-        ],
-    },
+    # 2026-10-23: sección "Ingest" retirada. La ingesta de onda cruda ya es
+    # automática (robot System1 → Supabase); la ingesta MANUAL de CSV
+    # (System1 / ADRE 408) vive en Rotodinámica. Load Data (pre-robot) e
+    # Importers/Plantillas CSI quedaban sin uso → duplicado. Las páginas
+    # 01_Load_Data.py y 17_Importers.py siguen en el repo (abren por URL).
     {
         "section": "Live Operations",
         "items": [
