@@ -93,6 +93,23 @@ def _spectra(caps_tuple, limit=24):
     return spectra_series(caps, limit=limit)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _inst_cfg(iid):
+    """Config de setpoints de la máquina: (sensors_map, alert_level, danger_level,
+    setpoint_unit). Para dar PRIORIDAD a lo configurado sobre la norma ISO."""
+    if not iid:
+        return [], 0.0, 0.0, ""
+    try:
+        from core.instance_state import get_instance
+        inst = get_instance(iid)
+        return (list(getattr(inst, "sensors", []) or []),
+                float(getattr(inst, "alert_level", 0.0) or 0.0),
+                float(getattr(inst, "danger_level", 0.0) or 0.0),
+                (getattr(inst, "setpoint_unit", "") or "").strip())
+    except Exception:  # noqa: BLE001
+        return [], 0.0, 0.0, ""
+
+
 # Reutiliza los MOTORES de norma ya validados (core.diagnostics / core.rotordynamics):
 # ISO 20816-2 zona A/B/C/D, críticas con Q, margen API 684.
 _ISO = {"A": "#1f9d55", "B": "#84cc16", "C": "#e8890c", "D": "#dc3545", "—": "#8090a6"}
@@ -139,6 +156,7 @@ src = st.radio("Fuente", ["Histórico del activo (automático)", "CSV manual (Sy
                horizontal=True, key="an_src")
 rec: AnalysisRecord | None = None
 hist_caps = None          # capturas del histórico (para Trends, solo en modo histórico)
+cur_iid = None            # instance_id activo (modo histórico) → setpoints configurados
 
 if src.startswith("Histórico"):
     assets = _list_assets()
@@ -150,6 +168,7 @@ if src.startswith("Histórico"):
     with c0:
         tsel = st.selectbox("Activo", tags, key="an_asset")
         iid = assets[tags.index(tsel)][0]
+        cur_iid = iid
     caps = _list_caps(iid)
     if not caps:
         st.info(f"**{tsel}** aún no tiene onda cruda en el histórico. El robot System1 "
@@ -292,6 +311,44 @@ if view == "Tabular":
     def _conv(vv, mode):
         return float(np.ptp(vv)) if mode == "pp" else float(np.std(vv))
 
+    def _ukind(u):
+        """Familia+unidad base para comparar/convertir setpoints con seguridad."""
+        u = (u or "").lower()
+        if "mil" in u:
+            return "disp", "mil"
+        if "µm" in u or "um" in u or "μm" in u:
+            return "disp", "um"
+        if "mm/s" in u or "mm / s" in u:
+            return "vel", "mm/s"
+        if "in/s" in u or "ips" in u:
+            return "vel", "in/s"
+        if u.strip() in ("g", "g pk", "g rms") or "m/s2" in u or "m/s²" in u:
+            return "accel", "g"
+        return "", ""
+
+    _DISP = {"um": 1.0, "mil": 25.4}       # a µm
+    _VEL = {"mm/s": 1.0, "in/s": 25.4}     # a mm/s
+
+    def _to(value, from_u, to_u):
+        """Convierte value de from_u a to_u si misma familia; None si incompatible."""
+        fk, fb = _ukind(from_u)
+        tk, tb = _ukind(to_u)
+        if not fk or not tk or fk != tk:
+            return None
+        if fk == "disp":
+            return value * _DISP.get(fb, 1.0) / _DISP.get(tb, 1.0)
+        if fk == "vel":
+            return value * _VEL.get(fb, 1.0) / _VEL.get(tb, 1.0)
+        return value if fb == tb else None
+
+    # Setpoints configurados en la máquina (PRIORIDAD sobre la norma ISO).
+    sensors_map, m_alert, m_danger, m_unit = _inst_cfg(cur_iid)
+    try:
+        from core.sensor_map import resolve_sensor_for_point
+    except Exception:  # noqa: BLE001
+        resolve_sensor_for_point = None
+    _cfg_used = False
+
     rows = []
     n_alarm = n_dang = 0
     for c in rec.channels:
@@ -319,20 +376,47 @@ if view == "Tabular":
                 return float(am[kk]) * kfac, float((np.degrees(np.angle(spc[kk])) + 360) % 360)
             a1, ph1 = _pk(f1)
             a2, ph2 = _pk(2 * f1)
-        # Alarma / Danger por norma ISO 20816-2 (zona B/C y C/D)
+        # ---- Alarma / Danger: PRIORIDAD a lo configurado en la máquina ----
+        # Todo se compara en la unidad del canal (`unit`); los setpoints/ISO se
+        # convierten a esa unidad. Si son incompatibles (ej. vel vs despl) se omiten.
         alarm = danger = None
-        sev = "info"
-        if mtype and c.rpm:
+        src = ""                         # "sensor" | "máquina" | "ISO"
+        # 1) Setpoint por-sensor (sensor map de la instancia)
+        if resolve_sensor_for_point and sensors_map:
+            sm = resolve_sensor_for_point(sensors_map, csv_point=c.label,
+                                          csv_variable="", csv_unit=c.unit or "")
+            if sm is not None:
+                sa = float(sm.get("alarm", 0.0) or 0.0)
+                sd = float(sm.get("danger", 0.0) or 0.0)
+                su = str(sm.get("unit_native", "") or "")
+                ac, dc = _to(sa, su, unit), _to(sd, su, unit)
+                if sa > 0 and sd > 0 and ac is not None and dc is not None:
+                    alarm, danger, src = ac, dc, "sensor"
+        # 2) Setpoint a nivel máquina
+        if alarm is None and m_alert > 0 and m_danger > 0:
+            ac, dc = _to(m_alert, m_unit, unit), _to(m_danger, m_unit, unit)
+            if ac is not None and dc is not None:
+                alarm, danger, src = ac, dc, "máquina"
+        # 3) Norma ISO 20816-2 (fallback) — tabla en µm pp (despl) / mm/s (casing)
+        if alarm is None and mtype and c.rpm:
             try:
                 from core.rotordynamics import iso_20816_2_zone
                 z = iso_20816_2_zone(overall, measurement_type=mtype, machine_group=grp,
                                      operating_speed_rpm=c.rpm)
-                alarm, danger = z.boundary_BC, z.boundary_CD
-                sev = {"A": "ok", "B": "ok", "C": "warn", "D": "dang"}.get(z.zone, "info")
-                n_alarm += sev == "warn"
-                n_dang += sev == "dang"
+                _bu = "µm" if mtype == "shaft_displacement" else "mm/s"
+                ac, dc = _to(z.boundary_BC, _bu, unit), _to(z.boundary_CD, _bu, unit)
+                if ac is None:                       # unidad del canal no estándar → usa cruda
+                    ac, dc = z.boundary_BC, z.boundary_CD
+                alarm, danger, src = ac, dc, "ISO"
             except Exception:  # noqa: BLE001
                 pass
+        # Estado por umbrales (misma lógica sea config o norma)
+        sev = "info"
+        if alarm is not None and danger is not None:
+            _cfg_used = _cfg_used or src in ("sensor", "máquina")
+            sev = "dang" if overall >= danger else ("warn" if overall >= alarm else "ok")
+            n_alarm += sev == "warn"
+            n_dang += sev == "dang"
         _f = lambda x: "—" if x is None else f"{x:.1f}"  # noqa: E731
         _p = lambda x: "—" if x is None else f"{x:.0f}°"  # noqa: E731
         rows.append([dot(sev), c.label, tipo, unit, _f(alarm), _f(danger),
@@ -340,11 +424,13 @@ if view == "Tabular":
     if rows:
         html_table(["", "Sensor", "Tipo", "Unidades", "Alarma", "Danger", "Directa",
                     "1X", "1X ∠", "2X", "2X ∠"], rows, raw_cols=[0])
-        st.caption(f"{len(rows)} sensor(es) · {rec.rpm or 0:.0f} rpm · ISO 20816-2 {grp}. "
-                   f"Alarma = límite zona B/C · Danger = C/D · punto verde A/B, "
-                   f"ámbar C (alarma), rojo D (danger). "
+        _origen = ("setpoints configurados en la máquina" if _cfg_used
+                   else f"norma ISO 20816-2 {grp} (sin setpoints configurados)")
+        st.caption(f"{len(rows)} sensor(es) · {rec.rpm or 0:.0f} rpm · límites de **{_origen}** "
+                   f"(prioridad: sensor → máquina → norma). Punto verde = normal, "
+                   f"ámbar = alarma, rojo = danger. "
                    + (f"{n_alarm} en alarma · {n_dang} en danger."
-                      if (n_alarm or n_dang) else "Todos en zona A/B (normal)."))
+                      if (n_alarm or n_dang) else "Todos normales."))
     else:
         st.info("Sin canales para tabular.")
 
