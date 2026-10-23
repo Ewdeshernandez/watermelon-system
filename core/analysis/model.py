@@ -54,10 +54,23 @@ class Bearing:
 
 
 @dataclass
+class Sweep:
+    """Dataset de barrido (run-up/coast-down) exportado por System1: amplitud y
+    fase 1X vs rpm. Alimenta Bode y Polar."""
+    label: str = ""
+    rpm: np.ndarray = field(default_factory=lambda: np.array([]))
+    amp: np.ndarray = field(default_factory=lambda: np.array([]))
+    phase: np.ndarray = field(default_factory=lambda: np.array([]))  # grados
+    unit: str = ""
+    source: str = ""
+
+
+@dataclass
 class AnalysisRecord:
     name: str = ""
     channels: List[Channel] = field(default_factory=list)
     bearings: List[Bearing] = field(default_factory=list)
+    sweeps: List[Sweep] = field(default_factory=list)
 
     @property
     def rpm(self) -> Optional[float]:
@@ -143,10 +156,64 @@ def parse_csv(name: str, data: bytes) -> Optional[Channel]:
                    unit=str(meta.get("Y-Axis Unit", "")).strip(), source=name)
 
 
+def _find_col(cols, aliases) -> Optional[str]:
+    low = {str(c).lower().replace(" ", ""): c for c in cols}
+    for a in aliases:
+        for k, orig in low.items():
+            if a in k:
+                return orig
+    return None
+
+
+def parse_sweep(name: str, data: bytes) -> Optional[Sweep]:
+    """Detecta y parsea un CSV de Bode/Polar de System1 (tabla con columnas
+    speed/rpm + amplitude + phase). None si no tiene esas 3 columnas."""
+    try:
+        text = data.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return None
+    lines = text.splitlines()
+    start = 0
+    for i, ln in enumerate(lines):
+        parts = ln.split(",")
+        if len(parts) >= 3:
+            head = parts[:3]
+            if not any(re.search(r"\d", p.split(".")[0] or "") and
+                       p.strip().replace(".", "").replace("-", "").isdigit()
+                       for p in head):
+                start = i
+                break
+    try:
+        df = pd.read_csv(io.StringIO("\n".join(lines[start:])), sep=None,
+                         engine="python")
+    except Exception:  # noqa: BLE001
+        return None
+    rc = _find_col(df.columns, ["speed", "rpm", "shaftspeed"])
+    ac = _find_col(df.columns, ["amplitude", "magnitude", "direct", "1x", "amp"])
+    pc = _find_col(df.columns, ["phase", "angle", "lag"])
+    if not (rc and ac and pc):
+        return None
+    rpm = pd.to_numeric(df[rc], errors="coerce").to_numpy(float)
+    amp = pd.to_numeric(df[ac], errors="coerce").to_numpy(float)
+    ph = pd.to_numeric(df[pc], errors="coerce").to_numpy(float)
+    m = np.isfinite(rpm) & np.isfinite(amp) & np.isfinite(ph)
+    if int(m.sum()) < 2:
+        return None
+    order = np.argsort(rpm[m])
+    return Sweep(label=name.rsplit(".", 1)[0], rpm=rpm[m][order],
+                 amp=amp[m][order], phase=ph[m][order], source=name)
+
+
 def build_record(files) -> AnalysisRecord:
-    """files = lista de UploadedFile (st.file_uploader). Parsea + empareja X/Y."""
+    """files = lista de UploadedFile (st.file_uploader). Cada archivo puede ser
+    una onda (1 canal) o un barrido Bode/Polar. Empareja X/Y por cojinete."""
     chans: List[Channel] = []
+    sweeps: List[Sweep] = []
     for f in files or []:
+        sw = parse_sweep(f.name, f.getvalue())
+        if sw is not None:
+            sweeps.append(sw)
+            continue
         c = parse_csv(f.name, f.getvalue())
         if c is not None and c.v.size:
             chans.append(c)
@@ -164,4 +231,4 @@ def build_record(files) -> AnalysisRecord:
     if files and len(files) > 1:
         name = f"{len(files)} archivos"
     return AnalysisRecord(name=name, channels=chans,
-                          bearings=list(by_brg.values()))
+                          bearings=list(by_brg.values()), sweeps=sweeps)

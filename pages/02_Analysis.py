@@ -176,16 +176,58 @@ elif view == "Shaft Centerline":
         st.caption(f"Posición DC del eje: X={gx:.1f}, Y={gy:.1f}. El claro real "
                    "depende del montaje — referencia relativa.")
 
-# ---- Vistas de BARRIDO / HISTÓRICO ----
-else:
-    _need = {
-        "Polar": "amplitud/fase 1X a lo largo de un **barrido de rpm** (run-up / coast-down).",
-        "Bode": "amplitud + fase 1X vs **rpm** de un barrido (run-up / coast-down).",
-        "Trends": "varias capturas en el **tiempo** (histórico del activo).",
-    }
-    st.info(f"**{view}** — requiere {_need.get(view, '')} Una sola captura CSV no basta. "
-            "Fuente: corrida de arranque/parada o el histórico (Live Monitoring). "
-            "Integración al workspace: en el roadmap de Fase 2.")
+# ---- Vistas de BARRIDO (Bode/Polar) desde CSV de System1 ----
+def _pick_sweep(key):
+    if not rec.sweeps:
+        return None
+    names = [s.label for s in rec.sweeps]
+    sel = st.selectbox("Barrido (Bode/Polar de System1)", names, key=key)
+    return rec.sweeps[names.index(sel)]
+
+
+if view == "Bode":
+    sw = _pick_sweep("bode_sw")
+    if sw is None:
+        st.warning("Bode: sube el **CSV de Bode/Polar de System1** (tabla con "
+                   "columnas speed/rpm + amplitude + phase).")
+    else:
+        from plotly.subplots import make_subplots
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                            row_heights=[0.55, 0.45])
+        fig.add_trace(go.Scatter(x=sw.rpm, y=sw.amp, mode="lines+markers",
+                                 line=dict(color=_NAVY, width=1.6),
+                                 marker=dict(size=4)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=sw.rpm, y=sw.phase, mode="lines+markers",
+                                 line=dict(color=_AMBER, width=1.6),
+                                 marker=dict(size=4)), row=2, col=1)
+        fig.update_yaxes(title="Amplitud", row=1, col=1)
+        fig.update_yaxes(title="Fase (°)", row=2, col=1)
+        fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
+        st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=520), use_container_width=True)
+
+elif view == "Polar":
+    sw = _pick_sweep("polar_sw")
+    if sw is None:
+        st.warning("Polar: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
+                   "amplitude + phase).")
+    else:
+        fig = go.Figure(go.Scatterpolar(
+            r=sw.amp, theta=sw.phase, mode="lines+markers",
+            line=dict(color=_NAVY, width=1.6), marker=dict(size=5,
+            color=sw.rpm, colorscale="Blues", showscale=True,
+            colorbar=dict(title="rpm", thickness=12))))
+        fig.update_layout(template="plotly_white", height=520,
+                          title=dict(text=f"Polar · {sw.label}", font=dict(size=15)),
+                          font=dict(family="IBM Plex Sans"),
+                          polar=dict(angularaxis=dict(direction="clockwise", rotation=90)),
+                          margin=dict(l=40, r=40, t=56, b=40))
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("Radio = amplitud · ángulo = fase · color = rpm.")
+
+else:  # Trends
+    st.info("**Trends** — overall de vibración vs **tiempo** (histórico del activo). "
+            "Fuente: varias capturas en el tiempo (Live Monitoring / histórico), "
+            "no una sola captura manual. Integración al workspace: en el roadmap.")
 
 st.caption("Workspace unificado (Fase 2) · ingesta + vistas de una captura. "
            "Barrido/histórico (Polar·Bode·Trends) en integración.")
