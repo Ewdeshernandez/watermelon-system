@@ -986,7 +986,13 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
     _dismiss_dialogs(app)                    # cierra Save As colgado previo
     win.set_focus()
     time.sleep(0.3)
+    # Ruta ABSOLUTA siempre: si out_dir es relativa (ej. 'csv') se ancla a la base
+    # (cfg[rpa].base_dir, def C:\WM_wave). Si no, el Save As la interpreta relativa a
+    # la carpeta que recuerde (p.ej. csvgb de un export previo) → 'Path does not exist'.
     outp = Path(out_dir)
+    if not outp.is_absolute():
+        base = (cfg.get("rpa", {}) or {}).get("base_dir") or r"C:\WM_wave"
+        outp = Path(base) / out_dir
     outp.mkdir(parents=True, exist_ok=True)
     full = str(outp / f"{name}.csv")
     try:
