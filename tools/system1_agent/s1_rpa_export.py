@@ -932,6 +932,29 @@ def _csv_point_name(path: str) -> str:
     return ""
 
 
+def _csv_is_valid(path: str) -> bool:
+    """Export válido: archivo con tamaño real + al menos 2 filas de datos
+    numéricos (x,y). Un Save As que falló o cayó en hoja sin datos deja un CSV
+    vacío/parcial → NO debe tratarse como OK ni subirse."""
+    try:
+        if Path(path).stat().st_size < 64:
+            return False
+        rows = 0
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                p = line.split(",")
+                if len(p) >= 2:
+                    try:
+                        float(p[0]); float(p[1]); rows += 1
+                    except ValueError:
+                        continue
+                if rows >= 2:
+                    return True
+        return False
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _split_chan(s: str):
     """'1YD'/'1yd'/'2XD TURBINA'/'6XA GEARBOX' → (cojinete, eje, letra). None si no."""
     m = re.match(r"(\d+)\s*([XYZ])\s*([A-Z]?)", (s or "").upper().replace(" ", ""))
@@ -999,6 +1022,15 @@ def export_one(cfg: dict, x: int, y: int, name: str, out_dir: str) -> int:
         print("EXPORT %s: no hallé 'Export to CSV' en el menú" % name)
     time.sleep(1.2)
     exists = Path(full).exists()
+    # SANIDAD: un Save As fallido o en hoja sin datos deja un CSV vacío/parcial.
+    # Sin filas numéricas no es un export válido → borrar y marcar FAIL (reintento).
+    if exists and not _csv_is_valid(full):
+        try:
+            Path(full).unlink()
+        except Exception:  # noqa: BLE001
+            pass
+        exists = False
+        print("EXPORT %s: archivo vacío/sin datos → FAIL (se reintenta), %s" % (name, full))
     # BLINDAJE ANTI-CRUCE: si las pestañas (Export CSV1/CSV2) quedaron en otro
     # orden, (x,y) cae en la hoja equivocada y el archivo tendría OTRO canal.
     # Leemos 'Point Name' del CSV y, si NO coincide con el nombre esperado,
