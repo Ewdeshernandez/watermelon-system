@@ -76,12 +76,21 @@ def _rec_history(label, keys):
     return record_from_history(label, list(keys))
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _trend(caps_tuple, point, metric):
+    from core.analysis.model import trend_series
+    caps = [{"point": p, "day": d, "time": t, "key": k}
+            for p, d, t, k in caps_tuple]
+    return trend_series(caps, point, metric)
+
+
 # =========================================================
 # 1) FUENTE — histórico automático (Supabase) o CSV manual
 # =========================================================
 src = st.radio("Fuente", ["Histórico del activo (automático)", "CSV manual (System1 / ADRE)"],
                horizontal=True, key="an_src")
 rec: AnalysisRecord | None = None
+hist_caps = None          # capturas del histórico (para Trends, solo en modo histórico)
 
 if src.startswith("Histórico"):
     assets = _list_assets()
@@ -98,6 +107,7 @@ if src.startswith("Histórico"):
         st.info(f"**{tsel}** aún no tiene onda cruda en el histórico. El robot System1 "
                 "la sube automáticamente; en cuanto llegue, aparece aquí.")
         st.stop()
+    hist_caps = caps                       # para la vista Trends
     from core.analysis.model import session_stamps
     sessions = session_stamps(caps)        # [(label, [keys]), …] reciente primero
     labels = [s[0] for s in sessions]
@@ -282,9 +292,32 @@ elif view == "Polar":
         st.caption("Radio = amplitud · ángulo = fase · color = rpm.")
 
 else:  # Trends
-    st.info("**Trends** — overall de vibración vs **tiempo** (histórico del activo). "
-            "Fuente: varias capturas en el tiempo (Live Monitoring / histórico), "
-            "no una sola captura manual. Integración al workspace: en el roadmap.")
+    if not hist_caps:
+        st.info("**Trends** — overall vs tiempo. Requiere varias capturas en el tiempo "
+                "(modo **Histórico del activo**). En CSV manual de una captura no aplica.")
+    else:
+        points = sorted({c.get("point", "") for c in hist_caps if c.get("point")})
+        cc1, cc2 = st.columns([2, 1])
+        with cc1:
+            pt = st.selectbox("Punto", points, key="tr_pt")
+        with cc2:
+            met = st.selectbox("Métrica", ["Overall pp", "RMS", "1X amp"], key="tr_met")
+        mk = {"Overall pp": "pp", "RMS": "rms", "1X amp": "1x"}[met]
+        _ct = tuple((c["point"], c["day"], c["time"], c["key"]) for c in hist_caps
+                    if c.get("point") and c.get("day") and c.get("time") and c.get("key"))
+        with st.spinner("Calculando tendencia del histórico…"):
+            ts, vals, unit = _trend(_ct, pt, mk)
+        if not ts:
+            st.warning(f"Sin datos para la tendencia de {pt}.")
+        else:
+            fig = go.Figure(go.Scatter(x=ts, y=vals, mode="lines+markers",
+                                       line=dict(color=_NAVY, width=1.6),
+                                       marker=dict(size=5, color=_NAVY)))
+            fig.update_xaxes(title="Tiempo")
+            fig.update_yaxes(title=f"{met} ({unit or 'a.u.'})")
+            st.plotly_chart(_layout(fig, f"Tendencia · {pt} · {met}", h=440),
+                            use_container_width=True)
+            st.caption(f"{len(ts)} capturas · {pt} · métrica sobre el canal X.")
 
 st.caption("Workspace unificado (Fase 2) · ingesta + vistas de una captura. "
            "Barrido/histórico (Polar·Bode·Trends) en integración.")

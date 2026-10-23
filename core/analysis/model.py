@@ -305,3 +305,57 @@ def record_from_history(label: str, keys) -> AnalysisRecord:
                                      v=v, rpm=rpm, spr=spr,
                                      unit=cap.unit_of(CH_X), source=point))
     return AnalysisRecord(name=label, channels=chans, bearings=bearings)
+
+
+def _amp_1x(v: np.ndarray, rpm: float, fs: float) -> float:
+    """Amplitud 1X (pico) por FFT en la banda rpm/60."""
+    w = v[np.isfinite(v)]
+    if w.size < 16 or not rpm or not fs:
+        return float("nan")
+    w = w - np.mean(w)
+    sp = np.abs(np.fft.rfft(w * np.hanning(w.size))) * (2.0 / w.size)
+    fr = np.fft.rfftfreq(w.size, d=1.0 / fs)
+    f1 = rpm / 60.0
+    k = int(np.argmin(np.abs(fr - f1)))
+    lo, hi = max(0, k - 2), min(sp.size, k + 3)
+    return float(np.max(sp[lo:hi])) if hi > lo else float("nan")
+
+
+def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40):
+    """Serie temporal de una métrica para un PUNTO a lo largo del histórico. Baja
+    la captura de ese punto en cada sesión y calcula pp / rms / 1X. Devuelve
+    ([datetime], [valor], unidad)."""
+    import datetime as _dt
+
+    from core.dynamic_raw import CH_X, download_capture  # noqa: PLC0415
+    rows = sorted((c.get("day", ""), c.get("time", ""), c.get("key", ""))
+                  for c in (caps_meta or [])
+                  if c.get("point") == point and c.get("day") and c.get("time"))
+    rows = rows[-limit:]
+    ts, vals, unit = [], [], ""
+    for d, t, key in rows:
+        cap = download_capture(key)
+        if cap is None:
+            continue
+        v = cap.get(CH_X)
+        if v is None or not getattr(v, "size", 0):
+            continue
+        vf = v[np.isfinite(v)]
+        if not vf.size:
+            continue
+        if metric == "rms":
+            val = float(np.std(vf))
+        elif metric == "1x":
+            val = _amp_1x(vf, cap.rpm or 0.0, cap.fs_hz or 0.0)
+        else:
+            val = float(np.ptp(vf))
+        if not np.isfinite(val):
+            continue
+        try:
+            ts.append(_dt.datetime(int(d[:4]), int(d[4:6]), int(d[6:]),
+                                   int(t[:2]), int(t[2:4]), int(t[4:])))
+        except Exception:  # noqa: BLE001
+            continue
+        vals.append(val)
+        unit = unit or cap.unit_of(CH_X)
+    return ts, vals, unit
