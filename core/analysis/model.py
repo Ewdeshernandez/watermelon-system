@@ -242,9 +242,11 @@ def _bnum(point: str) -> str:
     return m.group(1) if m else ""
 
 
-def session_stamps(caps_meta, gap_s: int = 600):
+def session_stamps(caps_meta, gap_s: int = 1800):
     """Agrupa las capturas en SESIONES por proximidad de tiempo (una corrida de
-    export dura ~minutos → archivos con HHMMSS distintos). Devuelve
+    export dura ~minutos → archivos con HHMMSS distintos). gap_s=1800 (30 min)
+    agrupa bearings + gearbox de la MISMA corrida aunque vayan con unos minutos
+    de diferencia, sin mezclar corridas horarias (separadas ~60 min). Devuelve
     [(label, [keys...]), …] más reciente primero."""
     rows = []
     for c in caps_meta or []:

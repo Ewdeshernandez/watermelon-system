@@ -343,11 +343,41 @@ if view == "Tabular":
 
     # Setpoints configurados en la máquina (PRIORIDAD sobre la norma ISO).
     sensors_map, m_alert, m_danger, m_unit = _inst_cfg(cur_iid)
-    try:
-        from core.sensor_map import resolve_sensor_for_point
-    except Exception:  # noqa: BLE001
-        resolve_sensor_for_point = None
+    import re as _re
     _cfg_used = False
+
+    def _tok(s):
+        """Token cojinete+eje(+letra) de un texto: '1XD DE turbina'→('1','X','D'),
+        'GB_4XA'→('4','X','A'), 'BRG1 · X'→None (no tiene eje pegado al nº)."""
+        m = _re.search(r"(\d+)\s*([XYZ])\s*([A-Z]?)",
+                       (s or "").upper().replace(" ", "").replace("_", ""))
+        return (m.group(1), m.group(2), m.group(3)) if m else None
+
+    # LUT de setpoints por-sensor, por token (cojinete, eje, letra) → (alarma, danger, unidad).
+    _sp_lut = {}
+    for _s in (sensors_map or []):
+        _t = _tok(_s.get("csv_match_pattern", ""))
+        _a = float(_s.get("alarm", 0.0) or 0.0)
+        _d = float(_s.get("danger", 0.0) or 0.0)
+        if _t and _a > 0 and _d > 0:
+            _sp_lut[_t] = (_a, _d, str(_s.get("unit_native", "") or ""))
+
+    def _sensor_sp(c):
+        """Setpoint configurado del canal: match por (cojinete, eje[, letra])."""
+        if c.axis in ("X", "Y", "Z"):                 # cojinete (despl): letra = D
+            for _l in ("D", "A", "V", ""):
+                if (c.bearing, c.axis, _l) in _sp_lut:
+                    return _sp_lut[(c.bearing, c.axis, _l)]
+            return None
+        k = _tok(c.source or c.label or "")           # gearbox canal único
+        if k is None:
+            return None
+        if k in _sp_lut:
+            return _sp_lut[k]
+        for _l in ("D", "A", "V", ""):                # sin letra exacta, cualquiera
+            if (k[0], k[1], _l) in _sp_lut:
+                return _sp_lut[(k[0], k[1], _l)]
+        return None
 
     rows = []
     n_alarm = n_dang = 0
@@ -381,17 +411,13 @@ if view == "Tabular":
         # convierten a esa unidad. Si son incompatibles (ej. vel vs despl) se omiten.
         alarm = danger = None
         src = ""                         # "sensor" | "máquina" | "ISO"
-        # 1) Setpoint por-sensor (sensor map de la instancia)
-        if resolve_sensor_for_point and sensors_map:
-            sm = resolve_sensor_for_point(sensors_map, csv_point=c.label,
-                                          csv_variable="", csv_unit=c.unit or "")
-            if sm is not None:
-                sa = float(sm.get("alarm", 0.0) or 0.0)
-                sd = float(sm.get("danger", 0.0) or 0.0)
-                su = str(sm.get("unit_native", "") or "")
-                ac, dc = _to(sa, su, unit), _to(sd, su, unit)
-                if sa > 0 and sd > 0 and ac is not None and dc is not None:
-                    alarm, danger, src = ac, dc, "sensor"
+        # 1) Setpoint por-sensor (sensor map de la instancia, match por token)
+        sp = _sensor_sp(c)
+        if sp is not None:
+            sa, sd, su = sp
+            ac, dc = _to(sa, su, unit), _to(sd, su, unit)
+            if ac is not None and dc is not None:
+                alarm, danger, src = ac, dc, "sensor"
         # 2) Setpoint a nivel máquina
         if alarm is None and m_alert > 0 and m_danger > 0:
             ac, dc = _to(m_alert, m_unit, unit), _to(m_danger, m_unit, unit)
