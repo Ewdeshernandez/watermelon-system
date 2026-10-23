@@ -84,6 +84,45 @@ def _trend(caps_tuple, point, metric):
     return trend_series(caps, point, metric)
 
 
+# Reutiliza los MOTORES de norma ya validados (core.diagnostics / core.rotordynamics):
+# ISO 20816-2 zona A/B/C/D, críticas con Q, margen API 684.
+_ISO = {"A": "#1f9d55", "B": "#84cc16", "C": "#e8890c", "D": "#dc3545", "—": "#8090a6"}
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _sweep_diag(rpm_t, amp_t, phase_t, op_rpm, group, mtype, unit, label):
+    from core.diagnostics import build_polar_diagnostics_rotordyn
+    return build_polar_diagnostics_rotordyn(
+        rpm=np.array(rpm_t, float), amp=np.array(amp_t, float),
+        phase=np.array(phase_t, float), operating_rpm=float(op_rpm),
+        machine_group=group, amp_unit=unit, measurement_type=mtype,
+        analysis_label=label)
+
+
+def _diag_panel(diag, zone, zc):
+    s = diag.get("structured", {})
+    crits = s.get("criticals", [])
+    crit_html = ""
+    if crits:
+        rows = "".join(
+            f"<tr><td>{c['rpm']:.0f}</td><td>{c.get('q_factor',0):.1f}</td>"
+            f"<td>{c.get('api684_actual_margin_pct',0):.0f}%</td>"
+            f"<td style='color:{'#1f9d55' if c.get('api684_compliant') else '#dc3545'}'>"
+            f"{c.get('api684_zone','—')}</td></tr>" for c in crits)
+        crit_html = ("<table style='width:100%;font:12px IBM Plex Mono;margin-top:6px;border-collapse:collapse'>"
+                     "<tr style='color:#8090a6'><td>Crítica rpm</td><td>Q</td>"
+                     "<td>Margen API684</td><td>Zona</td></tr>" + rows + "</table>")
+    st.markdown(
+        f"<div style='border-left:4px solid {zc};background:#f8fafc;border:1px solid #e2e8f2;"
+        f"border-radius:8px;padding:11px 15px;margin-top:10px'>"
+        f"<span style='background:{zc};color:#fff;border-radius:6px;padding:2px 9px;"
+        f"font:700 11px IBM Plex Mono;'>ISO 20816-2 · Zona {zone}</span>  "
+        f"<b style='font-size:13px'>{diag.get('headline','')}</b>"
+        f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{diag.get('detail','')}</div>"
+        f"<div style='color:#0b1f3a;font-size:12.5px;margin-top:4px'><b>Acción:</b> {diag.get('action','')}</div>"
+        f"{crit_html}</div>", unsafe_allow_html=True)
+
+
 # =========================================================
 # 1) FUENTE — histórico automático (Supabase) o CSV manual
 # =========================================================
@@ -252,25 +291,62 @@ def _pick_sweep(key):
     return rec.sweeps[names.index(sel)]
 
 
+def _sweep_controls(sw, key):
+    cA, cB, cC = st.columns(3)
+    op = cA.number_input("RPM operación", value=float(round(float(np.nanmax(sw.rpm)))),
+                         step=100.0, key=f"{key}_op")
+    grp = cB.selectbox("Grupo ISO 20816-2", ["group1", "group2"], index=1, key=f"{key}_g")
+    mt = cC.selectbox("Medición", ["Desplazamiento eje (prox)", "Velocidad carcasa (acel/vel)"],
+                      key=f"{key}_m")
+    mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
+    unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
+    diag = _sweep_diag(tuple(sw.rpm.tolist()), tuple(sw.amp.tolist()),
+                       tuple(sw.phase.tolist()), op, grp, mtype, unit,
+                       "Bode" if key == "bode" else "polar")
+    s = diag.get("structured", {})
+    return op, unit, diag, s, s.get("iso_zone", "—")
+
+
 if view == "Bode":
     sw = _pick_sweep("bode_sw")
     if sw is None:
-        st.warning("Bode: sube el **CSV de Bode/Polar de System1** (tabla con "
-                   "columnas speed/rpm + amplitude + phase).")
+        st.warning("Bode: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
+                   "amplitude + phase).")
     else:
+        op, unit, diag, s, zone = _sweep_controls(sw, "bode")
+        zc = _ISO.get(zone, "#8090a6")
+        ab, bc, cd = (s.get("iso_boundary_AB"), s.get("iso_boundary_BC"),
+                      s.get("iso_boundary_CD"))
         from plotly.subplots import make_subplots
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                            row_heights=[0.55, 0.45])
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.07,
+                            row_heights=[0.56, 0.44])
+        amax = max(float(np.nanmax(sw.amp)), cd or 0) * 1.12
+        for lo, hi, z in [(0.0, ab, "A"), (ab, bc, "B"), (bc, cd, "C"), (cd, amax, "D")]:
+            if lo is None or hi is None:
+                continue
+            fig.add_hrect(y0=lo, y1=hi, line_width=0, fillcolor=_ISO[z],
+                          opacity=0.08, row=1, col=1)
         fig.add_trace(go.Scatter(x=sw.rpm, y=sw.amp, mode="lines+markers",
-                                 line=dict(color=_NAVY, width=1.6),
+                                 line=dict(color=_NAVY, width=1.9),
                                  marker=dict(size=4)), row=1, col=1)
         fig.add_trace(go.Scatter(x=sw.rpm, y=sw.phase, mode="lines+markers",
-                                 line=dict(color=_AMBER, width=1.6),
+                                 line=dict(color=_AMBER, width=1.9),
                                  marker=dict(size=4)), row=2, col=1)
-        fig.update_yaxes(title="Amplitud", row=1, col=1)
+        for c in s.get("criticals", []):
+            col = "#dc3545" if c.get("kind") == "confirmed" else "#8090a6"
+            fig.add_vline(x=c["rpm"], line=dict(color=col, width=1.2, dash="dash"),
+                          annotation_text=f"fc {c['rpm']:.0f} · Q={c.get('q_factor',0):.1f}",
+                          annotation_position="top", annotation_font_size=10,
+                          row=1, col=1)
+            fig.add_vline(x=c["rpm"], line=dict(color=col, width=1, dash="dash"),
+                          row=2, col=1)
+        fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"),
+                      annotation_text="op", annotation_position="bottom", row=1, col=1)
+        fig.update_yaxes(title=f"Amplitud ({unit})", row=1, col=1)
         fig.update_yaxes(title="Fase (°)", row=2, col=1)
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
-        st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=520), use_container_width=True)
+        st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=560), use_container_width=True)
+        _diag_panel(diag, zone, zc)
 
 elif view == "Polar":
     sw = _pick_sweep("polar_sw")
@@ -278,18 +354,35 @@ elif view == "Polar":
         st.warning("Polar: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
                    "amplitude + phase).")
     else:
-        fig = go.Figure(go.Scatterpolar(
+        op, unit, diag, s, zone = _sweep_controls(sw, "polar")
+        zc = _ISO.get(zone, "#8090a6")
+        fig = go.Figure()
+        th = list(range(0, 365, 5))
+        for z, b in [("A", s.get("iso_boundary_AB")), ("B", s.get("iso_boundary_BC")),
+                     ("C", s.get("iso_boundary_CD"))]:
+            if b:
+                fig.add_trace(go.Scatterpolar(r=[b] * len(th), theta=th, mode="lines",
+                              line=dict(color=_ISO[z], width=1, dash="dot"),
+                              hoverinfo="skip", showlegend=False))
+        fig.add_trace(go.Scatterpolar(
             r=sw.amp, theta=sw.phase, mode="lines+markers",
-            line=dict(color=_NAVY, width=1.6), marker=dict(size=5,
-            color=sw.rpm, colorscale="Blues", showscale=True,
-            colorbar=dict(title="rpm", thickness=12))))
-        fig.update_layout(template="plotly_white", height=520,
+            line=dict(color=_NAVY, width=1.8),
+            marker=dict(size=5, color=sw.rpm, colorscale="Blues", showscale=True,
+                        colorbar=dict(title="rpm", thickness=12)),
+            customdata=sw.rpm, hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
+        for c in s.get("criticals", []):
+            fig.add_trace(go.Scatterpolar(r=[c["amp_peak"]], theta=[c.get("phase_change_deg", 0)],
+                          mode="markers", marker=dict(color="#dc3545", size=10, symbol="x"),
+                          hoverinfo="skip", showlegend=False))
+        fig.update_layout(template="plotly_white", height=560,
                           title=dict(text=f"Polar · {sw.label}", font=dict(size=15)),
                           font=dict(family="IBM Plex Sans"),
                           polar=dict(angularaxis=dict(direction="clockwise", rotation=90)),
                           margin=dict(l=40, r=40, t=56, b=40))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("Radio = amplitud · ángulo = fase · color = rpm.")
+        st.caption(f"Radio = amplitud ({unit}) · ángulo = fase · color = rpm · "
+                   "anillos punteados = límites ISO 20816-2 (A/B/C).")
+        _diag_panel(diag, zone, zc)
 
 else:  # Trends
     if not hist_caps:
