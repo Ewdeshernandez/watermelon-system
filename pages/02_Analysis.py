@@ -307,18 +307,45 @@ elif view == "Órbita":
         st.warning("Órbita: necesita el **par X/Y** de un cojinete. Sube ambos CSV "
                    "(ej. 1xd.csv + 1yd.csv).")
     else:
-        n = min(b.x.v.size, b.y.v.size)
-        xv, yv = b.x.v[:n], b.y.v[:n]
+        fmode = st.selectbox("Filtro", ["Direct", "1X", "2X"], index=0, key="orb_f")
+        xv, yv, prec, trav, sub = b.x.v, b.y.v, "", "", ""
+
+        class _Sig:
+            def __init__(self, t, x): self.time = t; self.x = x; self.metadata = {}
+        try:
+            from core.orbit import compute_orbit
+            res = compute_orbit(_Sig(b.x.t, b.x.v), _Sig(b.y.t, b.y.v),
+                                filter_mode=fmode, samples_per_rev=b.x.spr or None,
+                                rpm_override=b.x.rpm)
+            xv = np.asarray(res.plot_x, float); yv = np.asarray(res.plot_y, float)
+            prec = str(getattr(res, "precession", "") or "")
+            trav = str(getattr(res, "traversal", "") or "")
+            sp = getattr(res, "start_point", None)
+        except Exception:  # noqa: BLE001
+            n = min(b.x.v.size, b.y.v.size); xv, yv = b.x.v[:n], b.y.v[:n]; sp = None
         fig = go.Figure(go.Scatter(x=xv, y=yv, mode="lines",
-                                   line=dict(color=_NAVY, width=1.2)))
-        fig.add_trace(go.Scatter(x=[xv[0]], y=[yv[0]], mode="markers",
-                                 marker=dict(color=_AMBER, size=9)))
+                                   line=dict(color=_NAVY, width=1.4)))
+        _sx = sp[0] if (sp is not None and len(sp) == 2) else (xv[0] if xv.size else 0)
+        _sy = sp[1] if (sp is not None and len(sp) == 2) else (yv[0] if yv.size else 0)
+        fig.add_trace(go.Scatter(x=[_sx], y=[_sy], mode="markers",
+                      marker=dict(color="#1f9d55", size=10),
+                      name="keyphasor"))
         fig.update_xaxes(title=f"{b.x.label} ({b.x.unit or 'µm'})",
                          scaleanchor="y", scaleratio=1, zeroline=True)
         fig.update_yaxes(title=f"{b.y.label} ({b.y.unit or 'µm'})", zeroline=True)
-        st.plotly_chart(_layout(fig, f"Órbita · {b.name}", h=480), use_container_width=True)
-        st.caption("Órbita cruda (sin filtrar). El punto ámbar = inicio. Filtrado 1X con "
-                   "keyphasor: en el roadmap.")
+        _ttl = f"Órbita · {b.name} · {fmode}"
+        if prec:
+            _ttl += f"  ·  precesión {prec}"
+        st.plotly_chart(_layout(fig, _ttl, h=500), use_container_width=True)
+        _bits = []
+        if prec:
+            _bits.append(f"Precesión: **{prec}**")
+        if trav:
+            _bits.append(f"sentido: {trav}")
+        if b.x.rpm:
+            _bits.append(f"{b.x.rpm:.0f} rpm")
+        st.caption(" · ".join(_bits) + ("  ·  punto verde = marca keyphasor." if _bits
+                   else "Punto verde = keyphasor."))
 
 elif view == "Shaft Centerline":
     b = _pick_bearing("sc_b")
@@ -326,20 +353,40 @@ elif view == "Shaft Centerline":
         st.warning("Shaft Centerline: necesita el **par X/Y** (gap DC de los proximitores).")
     else:
         gx, gy = float(np.nanmean(b.x.v)), float(np.nanmean(b.y.v))
+        gmag = float(np.hypot(gx, gy))
+        clr = st.number_input("Claro radial del cojinete (µm)",
+                              value=float(round(max(gmag * 2.0, 50.0))), step=10.0,
+                              help="Del montaje / API 670. Define la zona de operación segura.")
+        from core.diagnostics import (boundary_utilization_pct,  # noqa: PLC0415
+                                      get_semaforo_status, remaining_margin_pct)
+        util = boundary_utilization_pct(gx, gy, 0.0, 0.0, clr, clr)
+        status, color = get_semaforo_status(util)
         fig = go.Figure()
-        th = np.linspace(0, 2 * np.pi, 120)
-        r = max(abs(gx), abs(gy), 1.0) * 1.6
-        fig.add_trace(go.Scatter(x=r * np.cos(th), y=r * np.sin(th), mode="lines",
-                                 line=dict(color="#cbd5e1", width=1)))
+        th = np.linspace(0, 2 * np.pi, 160)
+        # zonas semáforo (60% verde / 85% ámbar / resto rojo) como anillos
+        for frac, c in [(1.0, "#dc3545"), (0.85, "#e8890c"), (0.60, "#1f9d55")]:
+            fig.add_trace(go.Scatter(x=clr * frac * np.cos(th), y=clr * frac * np.sin(th),
+                          mode="lines", line=dict(color=c, width=1, dash="dot"),
+                          hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=b.x.v, y=b.y.v, mode="lines",
+                      line=dict(color="#cbd5e1", width=0.8), hoverinfo="skip"))
         fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text",
-                                 marker=dict(color=_NAVY, size=13),
-                                 text=["eje"], textposition="top center"))
-        fig.update_xaxes(title=f"{b.x.label}", scaleanchor="y", scaleratio=1, zeroline=True)
-        fig.update_yaxes(title=f"{b.y.label}", zeroline=True)
-        st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=460),
+                      marker=dict(color=color, size=14, line=dict(color="#fff", width=1.5)),
+                      text=["eje"], textposition="top center"))
+        fig.update_xaxes(title=f"{b.x.label} (µm)", scaleanchor="y", scaleratio=1, zeroline=True,
+                         range=[-clr * 1.1, clr * 1.1])
+        fig.update_yaxes(title=f"{b.y.label} (µm)", zeroline=True, range=[-clr * 1.1, clr * 1.1])
+        st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=500),
                         use_container_width=True)
-        st.caption(f"Posición DC del eje: X={gx:.1f}, Y={gy:.1f}. El claro real "
-                   "depende del montaje — referencia relativa.")
+        st.markdown(
+            f"<div style='border-left:4px solid {color};background:#f8fafc;border:1px solid #e2e8f2;"
+            f"border-radius:8px;padding:11px 15px;margin-top:8px'>"
+            f"<span style='background:{color};color:#fff;border-radius:6px;padding:2px 9px;"
+            f"font:700 11px IBM Plex Mono'>{status}</span>  "
+            f"<b>Uso del claro: {util:.0f}%</b> · margen {remaining_margin_pct(util):.0f}% · "
+            f"gap DC X={gx:.1f} Y={gy:.1f} µm (|gap|={gmag:.1f}). "
+            f"Anillos: verde 60% · ámbar 85% · rojo = borde del claro (API 670).</div>",
+            unsafe_allow_html=True)
 
 # ---- Vistas de BARRIDO (Bode/Polar) desde CSV de System1 ----
 def _pick_sweep(key):
