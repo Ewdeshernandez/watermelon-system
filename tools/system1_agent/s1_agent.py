@@ -406,11 +406,14 @@ class System1GearboxCsvReader:
             return []
         parsed_files = []          # (bearing, axis, kind, file, parsed)
         rpm_seen = []
+        exist_prox: Dict[str, set] = {}   # ejes de proximidad con ARCHIVO presente
         for f in sorted(self.folder.glob("*.csv")):
             bearing, axis, kind = sensor_parts(f.stem)
             if not bearing or axis not in ("x", "y") or kind not in ("d", "a", "v"):
                 log.warning("GearBox: nombre no reconocido, salto %s", f.name)
                 continue
+            if kind == "d":
+                exist_prox.setdefault(bearing, set()).add(axis)  # hay archivo de este eje
             try:
                 p = parse_system1_waveform_csv(str(f))
             except Exception as exc:  # noqa: BLE001
@@ -434,6 +437,16 @@ class System1GearboxCsvReader:
             if kind == "d":
                 prox.setdefault(bearing, {})[axis] = (f, p)
         for bearing, ax in sorted(prox.items()):
+            # ANTI-CARRERA: si existe ARCHIVO de un eje que aún no parseó (medio
+            # escrito por el robot), NO subir GB{bearing} a medias → esperar al
+            # próximo ciclo con el par. Un plano de UN solo probe (ej. 3XD sin
+            # 3YD) no tiene archivo del otro eje → se sube igual.
+            want = exist_prox.get(bearing, set(ax.keys()))
+            if set(ax.keys()) < want:
+                log.warning("GearBox GB%s incompleto: parseó %s pero hay archivo "
+                            "de %s — se omite hasta tener el par (anti-carrera)",
+                            bearing, ",".join(sorted(ax)), ",".join(sorted(want)))
+                continue
             base_f, base = (ax.get("x") or ax.get("y"))
             t = base["t_s"]
             channels: Dict[str, np.ndarray] = {}
