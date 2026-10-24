@@ -206,6 +206,16 @@ if rec is None or not rec.channels:
 
 _rpm = rec.rpm
 cur_asset = cur_asset or rec.name or "CSV"
+import datetime as _dt0
+_fecha = (rec.name.split()[0] if rec.name and rec.name[:4].isdigit()
+          else _dt0.date.today().isoformat())
+
+
+def _vfile(view_name):
+    """Nombre de archivo para descargar una vista: '<Vista> <máquina> <fecha>.png'."""
+    return f"{view_name} {cur_asset} {_fecha}.png"
+
+
 st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
            f"{len(rec.bearings)} cojinete(s) con par X/Y"
            + (f"  ·  {_rpm:.0f} rpm" if _rpm else ""))
@@ -292,6 +302,7 @@ def _trend_block():
     fig.update_xaxes(title="Tiempo")
     fig.update_yaxes(title=f"{met} ({unit or 'a.u.'})")
     st.plotly_chart(_layout(fig, f"Tendencia · {pt} · {met}", h=440), use_container_width=True)
+    _download_fig_button(fig, _vfile(f"Tendencia {pt} {met}"), key="trend")
     st.caption(f"{len(ts)} capturas · {pt}.")
 
 
@@ -361,19 +372,21 @@ def _tabular_png(cols, rows, sevs, title="", subtitle=""):
     return buf.getvalue()
 
 
-def _download_png_button(png_bytes, filename):
+def _download_png_button(png_bytes, filename, key="wmdl"):
     """Botón de descarga clase mundial: data-URI (baja DIRECTO a Downloads con el
     nombre correcto, sin pasar por el endpoint /media de Streamlit que a veces da
     'Site wasn't available') + lluvia de sandías 🍉 al descargar."""
     import base64
     import html as _h
+    import re as _re2
 
     import streamlit.components.v1 as _components
     b64 = base64.b64encode(png_bytes).decode()
     fn = _h.escape(filename, quote=True)
+    eid = "wmdl_" + _re2.sub(r"[^a-zA-Z0-9]", "", str(key))[:24]  # id único por vista
     html = """
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600&display=swap" rel="stylesheet">
-<a id="wmdl" href="data:image/png;base64,__B64__" download="__FN__" onclick="wmMelons()"
+<a id="__EID__" href="data:image/png;base64,__B64__" download="__FN__" onclick="wmMelons()"
    style="display:inline-flex;align-items:center;gap:9px;text-decoration:none;
           font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:600;font-size:13.5px;
           background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;padding:10px 18px;
@@ -385,7 +398,7 @@ def _download_png_button(png_bytes, filename):
   Descargar imagen
 </a>
 <script>
-const a=document.getElementById('wmdl');
+const a=document.getElementById('__EID__');
 a.onmouseenter=()=>{a.style.transform='translateY(-1px)';a.style.boxShadow='0 6px 16px rgba(11,31,58,.28)';};
 a.onmouseleave=()=>{a.style.transform='none';a.style.boxShadow='0 2px 6px rgba(11,31,58,.18)';};
 function wmMelons(){
@@ -402,8 +415,18 @@ function wmMelons(){
 }
 </script>
 """
-    html = html.replace("__B64__", b64).replace("__FN__", fn)
+    html = html.replace("__EID__", eid).replace("__B64__", b64).replace("__FN__", fn)
     _components.html(html, height=120)
+
+
+def _download_fig_button(fig, filename, key):
+    """Descarga una figura Plotly como PNG (kaleido) con el mismo botón+sandías."""
+    try:
+        png = fig.to_image(format="png", scale=2)
+    except Exception:  # noqa: BLE001
+        st.caption("Descarga PNG no disponible (kaleido).")
+        return
+    _download_png_button(png, filename, key=key)
 
 
 # ====================== DISPATCH DE VISTAS (una sola cadena) ======================
@@ -571,15 +594,11 @@ if view == "Tabular":
     if rows:
         html_table(_cols, rows, raw_cols=[0])
         # ---- Descargar la tabla como IMAGEN (un botón) ----
-        import datetime as _dt
-        _fecha = (rec.name.split()[0] if rec.name and rec.name[:4].isdigit()
-                  else _dt.date.today().isoformat())
-        _fname = f"Tabular list {cur_asset} {_fecha}.png"
         _png = _tabular_png(_cols[1:], img_rows, sev_list,
                             title=f"Tabular List · {cur_asset}",
                             subtitle=f"{rec.name}  ·  {rec.rpm or 0:.0f} rpm  ·  "
                                      f"{'setpoints de la máquina' if _cfg_used else 'norma ISO 20816-2'}")
-        _download_png_button(_png, _fname)
+        _download_png_button(_png, f"Tabular list {cur_asset} {_fecha}.png", key="tabular")
         _origen = ("setpoints configurados en la máquina" if _cfg_used
                    else f"norma ISO 20816-2 {grp} (sin setpoints configurados)")
         st.caption(f"{len(rows)} sensor(es) · {rec.rpm or 0:.0f} rpm · límites de **{_origen}** "
@@ -600,6 +619,7 @@ elif view == "Forma de Onda":
     fig.update_xaxes(title="Tiempo (s)")
     fig.update_yaxes(title=f"{ch.label} ({ch.unit or 'a.u.'})")
     st.plotly_chart(_layout(fig, f"Forma de onda · {ch.label}"), use_container_width=True)
+    _download_fig_button(fig, _vfile(f"Forma de onda {ch.label}"), key="wf")
     # Métricas + diagnóstico (reutiliza core.waveform_metrics / waveform_diagnostics)
     from core.waveform_metrics import compute_waveform_metrics
     mx = compute_waveform_metrics(ch.v)
@@ -655,6 +675,7 @@ elif view == "Espectro":
         fig.update_xaxes(title="Frecuencia (Hz)")
         fig.update_yaxes(title=f"Amplitud ({ch.unit or 'a.u.'})")
         st.plotly_chart(_layout(fig, f"Espectro (FFT) · {ch.label}"), use_container_width=True)
+        _download_fig_button(fig, _vfile(f"Espectro {ch.label}"), key="sp")
         # Diagnóstico por norma (reutiliza core.spectrum_diagnostics)
         if ch.rpm:
             from core.spectrum_diagnostics import evaluate_spectrum_diagnostic
@@ -717,6 +738,7 @@ elif view == "Full Spectrum":
             fig.update_yaxes(title=f"Amplitud ({b.x.unit or 'µm'})")
             st.plotly_chart(_layout(fig, f"Full Spectrum · {b.name}", h=500),
                             use_container_width=True)
+            _download_fig_button(fig, _vfile(f"Full Spectrum {b.name}"), key="fs")
             # dominancia forward vs backward
             ef = float(np.sum(amp[fwd] ** 2))
             eb = float(np.sum(amp[~fwd] ** 2))
@@ -770,6 +792,7 @@ elif view == "Órbita":
         if prec:
             _ttl += f"  ·  precesión {prec}"
         st.plotly_chart(_layout(fig, _ttl, h=500), use_container_width=True)
+        _download_fig_button(fig, _vfile(f"Orbita {b.name}"), key="orb")
         _bits = []
         if prec:
             _bits.append(f"Precesión: **{prec}**")
@@ -811,6 +834,7 @@ elif view == "Shaft Centerline":
         fig.update_yaxes(title=f"{b.y.label} (µm)", zeroline=True, range=[-clr * 1.1, clr * 1.1])
         st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=500),
                         use_container_width=True)
+        _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
         st.markdown(
             f"<div style='border-left:4px solid {color};background:#f8fafc;border:1px solid #e2e8f2;"
             f"border-radius:8px;padding:11px 15px;margin-top:8px'>"
@@ -860,6 +884,7 @@ elif view == "Bode":
         fig.update_yaxes(title="Fase (°)", row=2, col=1)
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
         st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=560), use_container_width=True)
+        _download_fig_button(fig, _vfile(f"Bode {sw.label}"), key="bode")
         _diag_panel(diag, zone, zc)
 
 elif view == "Polar":
@@ -894,6 +919,7 @@ elif view == "Polar":
                           polar=dict(angularaxis=dict(direction="clockwise", rotation=90)),
                           margin=dict(l=40, r=40, t=56, b=40))
         st.plotly_chart(fig, use_container_width=True)
+        _download_fig_button(fig, _vfile(f"Polar {sw.label}"), key="polar")
         st.caption(f"Radio = amplitud ({unit}) · ángulo = fase · color = rpm · "
                    "anillos punteados = límites ISO 20816-2 (A/B/C).")
         _diag_panel(diag, zone, zc)
@@ -925,6 +951,7 @@ elif view == "Waterfall":
             fig.update_yaxes(title="Amplitud apilada (offset por sesión)", showticklabels=False)
             st.plotly_chart(_layout(fig, f"Waterfall · {pt} · {len(spectra)} sesiones", h=560),
                             use_container_width=True)
+            _download_fig_button(fig, _vfile(f"Waterfall {pt}"), key="wf3d")
             st.caption("Cada traza = una sesión (offset vertical). Picos que crecen con el "
                        "tiempo = degradación; líneas rectas = síncronos estables.")
 
