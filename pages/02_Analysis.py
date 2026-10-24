@@ -307,18 +307,26 @@ def _tabular_png(cols, rows, sevs, title="", subtitle=""):
     headers = ["Estado"] + list(cols)          # col 0 = punto de color
     body = [["●"] + list(r) for r in rows]  # ● coloreado por severidad
     nrow, ncol = len(body), len(headers)
-    fig_w = min(1.05 * ncol + 1.5, 16)
-    fig_h = 0.42 * nrow + 1.5
+    fig_w = min(1.15 * ncol + 1.2, 16)
+    fig_h = 0.5 * nrow + 1.1                    # ajustado al contenido (sin hueco)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
     ax.axis("off")
+    ax.set_position([0, 0, 1, 1])              # el axes llena TODO el frame
+    # título compacto arriba (identifica máquina+fecha para el reporte); la tabla
+    # llena el resto. Franja del título = fija en pulgadas → sin hueco muerto.
+    _top = 1.0
     if title:
-        ax.set_title(title + (f"\n{subtitle}" if subtitle else ""),
-                     fontsize=12, fontweight="bold", color="#0b1f3a",
-                     loc="left", pad=12)
-    tbl = ax.table(cellText=body, colLabels=headers, loc="center", cellLoc="center")
+        _top = 1.0 - 0.62 / fig_h              # franja del título
+        fig.text(0.010, 0.985, title, fontsize=13.5, fontweight="bold",
+                 color="#12305e", va="top", ha="left")
+        if subtitle:
+            fig.text(0.010, 0.985 - 0.30 / fig_h, subtitle, fontsize=9.5,
+                     color="#5a6b85", va="top", ha="left")
+    # la tabla LLENA el frame (bbox), título ocupa la franja superior
+    tbl = ax.table(cellText=body, colLabels=headers, cellLoc="center",
+                   bbox=[0.006, 0.0, 0.988, _top])
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(8.5)
-    tbl.scale(1, 1.35)
+    tbl.set_fontsize(9.5)
     for j in range(ncol):                      # header navy
         h = tbl[0, j]
         h.set_facecolor("#12305e")
@@ -332,11 +340,23 @@ def _tabular_png(cols, rows, sevs, title="", subtitle=""):
             cc.get_text().set_color("#0b1f3a")
         cc0 = tbl[i + 1, 0]                      # punto de estado coloreado
         cc0.get_text().set_color(sv)
-        cc0.get_text().set_fontsize(14)
+        cc0.get_text().set_fontsize(15)
         tbl[i + 1, 1].get_text().set_fontweight("bold")   # Sensor en negrita
-    tbl.auto_set_column_width(col=list(range(ncol)))
+    # anchos de columna PROPORCIONALES al contenido (con bbox las columnas son
+    # iguales por defecto → 'Tipo' se apretaría). Estado fijo angosto.
+    colw = []
+    for j, h in enumerate(headers):
+        if j == 0:
+            colw.append(2.8)                   # 'Estado' + punto, que no se corte
+            continue
+        colw.append(max([len(str(h))] + [len(str(body[i][j])) for i in range(nrow)]))
+    _tot = float(sum(colw)) or 1.0
+    for j in range(ncol):
+        w = colw[j] / _tot
+        for i in range(nrow + 1):
+            tbl[i, j].set_width(w)
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white")
+    fig.savefig(buf, format="png", facecolor="white")
     plt.close(fig)
     return buf.getvalue()
 
