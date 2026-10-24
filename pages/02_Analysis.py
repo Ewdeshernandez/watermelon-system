@@ -341,6 +341,51 @@ def _tabular_png(cols, rows, sevs, title="", subtitle=""):
     return buf.getvalue()
 
 
+def _download_png_button(png_bytes, filename):
+    """Botón de descarga clase mundial: data-URI (baja DIRECTO a Downloads con el
+    nombre correcto, sin pasar por el endpoint /media de Streamlit que a veces da
+    'Site wasn't available') + lluvia de sandías 🍉 al descargar."""
+    import base64
+    import html as _h
+
+    import streamlit.components.v1 as _components
+    b64 = base64.b64encode(png_bytes).decode()
+    fn = _h.escape(filename, quote=True)
+    html = """
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600&display=swap" rel="stylesheet">
+<a id="wmdl" href="data:image/png;base64,__B64__" download="__FN__" onclick="wmMelons()"
+   style="display:inline-flex;align-items:center;gap:9px;text-decoration:none;
+          font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:600;font-size:13.5px;
+          background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;padding:10px 18px;
+          border-radius:10px;border:1px solid #0e2547;box-shadow:0 2px 6px rgba(11,31,58,.18);
+          transition:transform .08s ease,box-shadow .15s ease;cursor:pointer">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8890c"
+       stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
+  Descargar imagen
+</a>
+<script>
+const a=document.getElementById('wmdl');
+a.onmouseenter=()=>{a.style.transform='translateY(-1px)';a.style.boxShadow='0 6px 16px rgba(11,31,58,.28)';};
+a.onmouseleave=()=>{a.style.transform='none';a.style.boxShadow='0 2px 6px rgba(11,31,58,.18)';};
+function wmMelons(){
+  for(let i=0;i<30;i++){
+    const m=document.createElement('div'); m.textContent='🍉';
+    m.style.cssText='position:fixed;left:'+(Math.random()*100)+'vw;top:-24px;'+
+      'font-size:'+(15+Math.random()*20)+'px;z-index:99999;pointer-events:none;'+
+      'transition:transform '+(1.3+Math.random()*1.1)+'s ease-in,opacity .5s ease-out';
+    document.body.appendChild(m);
+    requestAnimationFrame(()=>{m.style.transform='translateY(130vh) rotate('+(Math.random()*720-360)+'deg)';});
+    setTimeout(()=>{m.style.opacity='0';},1400);
+    setTimeout(()=>{m.remove();},2600);
+  }
+}
+</script>
+"""
+    html = html.replace("__B64__", b64).replace("__FN__", fn)
+    _components.html(html, height=120)
+
+
 # ====================== DISPATCH DE VISTAS (una sola cadena) ======================
 if view == "Tabular":
     from core.ui_industrial import dot, html_table
@@ -514,8 +559,7 @@ if view == "Tabular":
                             title=f"Tabular List · {cur_asset}",
                             subtitle=f"{rec.name}  ·  {rec.rpm or 0:.0f} rpm  ·  "
                                      f"{'setpoints de la máquina' if _cfg_used else 'norma ISO 20816-2'}")
-        st.download_button("Descargar tabla (PNG)", data=_png, file_name=_fname,
-                           mime="image/png", key="tab_dl")
+        _download_png_button(_png, _fname)
         _origen = ("setpoints configurados en la máquina" if _cfg_used
                    else f"norma ISO 20816-2 {grp} (sin setpoints configurados)")
         st.caption(f"{len(rows)} sensor(es) · {rec.rpm or 0:.0f} rpm · límites de **{_origen}** "
