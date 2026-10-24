@@ -276,37 +276,77 @@ def session_stamps(caps_meta, gap_s: int = 1800):
     return out
 
 
+def _sensor_name(point_name: str, point: str, axis: str = "") -> str:
+    """Nombre System1 del canal desde el 'Point Name' (ej '4XD GEARBOX'→'4XD',
+    '1XD TURBINA DE'→'1XD'). `axis` sobre-escribe el eje para el miembro Y del par
+    ('4XD'+axis='Y'→'4YD'). Fallback al point ('GB_4YA'→'4YA')."""
+    m = re.match(r"\s*(\d+)\s*([XYZ])\s*([A-Z]?)", (point_name or "").upper())
+    if m:
+        brg, ax, kind = m.group(1), m.group(2), m.group(3)
+        if axis in ("X", "Y", "Z"):
+            ax = axis
+        return f"{brg}{ax}{kind}"
+    base = re.sub(r"[^0-9A-Z]", "", (point or "").upper()
+                  .replace("GB", "").replace("BRG", ""))
+    return (base + axis) if (axis and base) else (base or (point or ""))
+
+
+def _name_sort_key(lbl: str):
+    """Orden: cojinete asc → D/A/V → X/Y (como System1)."""
+    m = re.match(r"(\d+)([XYZ])([A-Z]?)", (lbl or "").upper())
+    if not m:
+        return (99, 9, 9, lbl or "")
+    return (int(m.group(1)), {"D": 0, "A": 1, "V": 2}.get(m.group(3), 3),
+            {"X": 0, "Y": 1, "Z": 2}.get(m.group(2), 3), lbl or "")
+
+
 def record_from_history(label: str, keys) -> AnalysisRecord:
-    """Carga una SESIÓN de capturas (lista de keys del bucket dynamic_raw) al
-    MISMO modelo. El robot System1 ya subió la onda cruda con X/Y/KPH por cojinete
-    (BRG1=cojinete emparejado → órbita lista). Automático: sin subir CSV."""
+    """Carga una SESIÓN de capturas (keys del bucket dynamic_raw) al modelo.
+    Nombres System1 reales (4XD, 1YD, 3YV…). DEDUP: si la sesión trae la misma
+    señal dos veces (p.ej. una corrida parcial + una completa), gana la MÁS NUEVA
+    (se procesan viejo→nuevo). El robot sube la onda con X/Y/KPH por cojinete."""
     from core.dynamic_raw import CH_X, CH_Y, download_capture  # noqa: PLC0415
-    chans: List[Channel] = []
-    bearings: List[Bearing] = []
-    for key in keys or []:
+
+    def _ts(k):
+        m = re.search(r"/(\d{8})/(\d{6})__", k or "")
+        return (m.group(1), m.group(2)) if m else ("", "")
+
+    ch_by_label: Dict[str, Channel] = {}      # label → Channel (último gana = dedup)
+    pair_by_brg: Dict[str, Tuple[str, str]] = {}
+    for key in sorted(keys or [], key=_ts):   # viejo→nuevo
         cap = download_capture(key)
         if cap is None:
             continue
         point = str(cap.meta.get("point", "") or "")
-        rpm = cap.rpm
-        spr = cap.samples_per_rev
+        pn = str(cap.meta.get("point_name", "") or "")
+        rpm, spr = cap.rpm, cap.samples_per_rev
+        n = _bnum(pn) or _bnum(point)
         if cap.has(CH_X) and cap.has(CH_Y):          # par X/Y → cojinete + órbita
-            n = _bnum(point)
-            cx = Channel(label=f"{point} · X", bearing=n, axis="X", t=cap.t,
-                         v=cap.get(CH_X), rpm=rpm, spr=spr,
-                         unit=cap.unit_of(CH_X), source=point)
-            cy = Channel(label=f"{point} · Y", bearing=n, axis="Y", t=cap.t,
-                         v=cap.get(CH_Y), rpm=rpm, spr=spr,
-                         unit=cap.unit_of(CH_Y), source=point)
-            chans += [cx, cy]
-            bearings.append(Bearing(name=point, x=cx, y=cy))
+            xlab = _sensor_name(pn, point, "X")
+            ylab = _sensor_name(pn, point, "Y")
+            cx = Channel(label=xlab, bearing=n, axis="X", t=cap.t, v=cap.get(CH_X),
+                         rpm=rpm, spr=spr, unit=cap.unit_of(CH_X), source=xlab)
+            cy = Channel(label=ylab, bearing=n, axis="Y", t=cap.t, v=cap.get(CH_Y),
+                         rpm=rpm, spr=spr, unit=cap.unit_of(CH_Y), source=ylab)
+            ch_by_label[xlab] = cx
+            ch_by_label[ylab] = cy
+            pair_by_brg[n] = (xlab, ylab)
         else:                                        # canal único (acel/vel GB)
             v = cap.get(CH_X)
-            if v is not None and v.size:
-                chans.append(Channel(label=point, bearing=_bnum(point), t=cap.t,
-                                     v=v, rpm=rpm, spr=spr,
-                                     unit=cap.unit_of(CH_X), source=point))
-    return AnalysisRecord(name=label, channels=chans, bearings=bearings)
+            if v is None or not v.size:
+                continue
+            lab = _sensor_name(pn, point, "")
+            ch_by_label[lab] = Channel(label=lab, bearing=n, axis="", t=cap.t, v=v,
+                                       rpm=rpm, spr=spr, unit=cap.unit_of(CH_X),
+                                       source=lab)
+    channels = [ch_by_label[k] for k in sorted(ch_by_label, key=_name_sort_key)]
+    bearings = []
+    for n, (xl, yl) in pair_by_brg.items():
+        if xl in ch_by_label and yl in ch_by_label:
+            bearings.append(Bearing(name=f"{xl}/{yl}",
+                                    x=ch_by_label[xl], y=ch_by_label[yl]))
+    bearings.sort(key=lambda b: _name_sort_key(b.x.label))
+    return AnalysisRecord(name=label, channels=channels, bearings=bearings)
 
 
 def _amp_1x(v: np.ndarray, rpm: float, fs: float) -> float:
