@@ -419,10 +419,18 @@ function wmMelons(){
     _components.html(html, height=120)
 
 
+@st.cache_data(show_spinner=False)
+def _fig_png_cached(fig_json):
+    import plotly.io as _pio
+    return _pio.from_json(fig_json).to_image(format="png", scale=2)
+
+
 def _download_fig_button(fig, filename, key):
-    """Descarga una figura Plotly como PNG (kaleido) con el mismo botón+sandías."""
+    """Descarga una figura Plotly como PNG (kaleido) con el mismo botón+sandías.
+    Cacheado por contenido → no re-renderiza en cada interacción (kaleido es lento)."""
     try:
-        png = fig.to_image(format="png", scale=2)
+        import plotly.io as _pio
+        png = _fig_png_cached(_pio.to_json(fig))
     except Exception:  # noqa: BLE001
         st.caption("Descarga PNG no disponible (kaleido).")
         return
