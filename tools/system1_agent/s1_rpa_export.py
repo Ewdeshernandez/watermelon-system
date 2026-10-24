@@ -784,19 +784,28 @@ def _save_as_win32(full_path: str, timeout: float = 25.0) -> bool:
     time.sleep(0.4)
 
     def _confirm_overwrite():
+        # El 'already exists · Replace?' es OTRO #32770 (hermano del Save As). Hay
+        # que recorrer TODOS los #32770 y dar Yes en el que tenga ese botón; si se
+        # agarra el primero (el Save As, sin 'Yes') se queda colgado. Fallback: Alt+Y.
+        from pywinauto import Desktop
         try:
-            a = Application(backend="win32").connect(
-                class_name="#32770", timeout=0.6)
-            c = a.window(class_name="#32770")
-            if c.exists():
-                for tt in ("&Yes", "Yes", "&Sí", "Sí"):
-                    try:
-                        yb = c.child_window(title=tt, class_name="Button")
-                        if yb.exists():
-                            yb.click_input()
-                            return
-                    except Exception:  # noqa: BLE001
-                        continue
+            wins = Desktop(backend="win32").windows(class_name="#32770",
+                                                    top_level_only=False)
+        except Exception:  # noqa: BLE001
+            wins = []
+        for c in wins:
+            for tt in ("&Yes", "Yes", "&Sí", "Sí", "&Reemplazar", "Reemplazar"):
+                try:
+                    yb = c.child_window(title=tt, class_name="Button")
+                    if yb.exists():
+                        yb.click_input()
+                        return
+                except Exception:  # noqa: BLE001
+                    continue
+        # último recurso: Alt+Y (acelerador Yes) sobre el diálogo en foco
+        try:
+            from pywinauto.keyboard import send_keys as _sk
+            _sk("%y")
         except Exception:  # noqa: BLE001
             pass
 
