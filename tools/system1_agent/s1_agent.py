@@ -593,6 +593,25 @@ def run_once(cfg: dict, source: str = "csv", dry: bool = False) -> dict:
         reader = System1CsvFolderReader(cfg)
     caps = reader.fetch_new()
     log.info("Capturas nuevas: %d", len(caps))
+    # DEDUP por captured_at: no re-subir una captura ya subida (mismo punto y
+    # timestamp interno del CSV). Evita que una re-lectura de un CSV SIN cambios
+    # (p.ej. 4xd.csv estable mientras 4yd.csv está transitoriamente ausente) PISE
+    # una captura buena con una parcial. Un export NUEVO (timestamp mayor) sí sube.
+    if not dry:
+        fresh = []
+        for cap in caps:
+            last = get_last(cap.point)
+            if last:
+                try:
+                    if cap.captured_at.astimezone(timezone.utc) <= \
+                            datetime.fromisoformat(last):
+                        log.info("DEDUP: %s ts %s ya subida (<= %s) — se omite",
+                                 cap.point, cap.captured_at.isoformat(), last)
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+            fresh.append(cap)
+        caps = fresh
     stats = {"found": len(caps), "uploaded": 0, "failed": 0, "keys": []}
     client = None if dry else _supabase(cfg)
     for cap in caps:
