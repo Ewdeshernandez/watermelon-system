@@ -157,6 +157,7 @@ src = st.radio("Fuente", ["Histórico del activo (automático)", "CSV manual (Sy
 rec: AnalysisRecord | None = None
 hist_caps = None          # capturas del histórico (para Trends, solo en modo histórico)
 cur_iid = None            # instance_id activo (modo histórico) → setpoints configurados
+cur_asset = ""            # nombre del activo (para el nombre del archivo descargado)
 
 if src.startswith("Histórico"):
     assets = _list_assets()
@@ -169,6 +170,7 @@ if src.startswith("Histórico"):
         tsel = st.selectbox("Activo", tags, key="an_asset")
         iid = assets[tags.index(tsel)][0]
         cur_iid = iid
+        cur_asset = tsel
     caps = _list_caps(iid)
     if not caps:
         st.info(f"**{tsel}** aún no tiene onda cruda en el histórico. El robot System1 "
@@ -203,6 +205,7 @@ if rec is None or not rec.channels:
     st.stop()
 
 _rpm = rec.rpm
+cur_asset = cur_asset or rec.name or "CSV"
 st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
            f"{len(rec.bearings)} cojinete(s) con par X/Y"
            + (f"  ·  {_rpm:.0f} rpm" if _rpm else ""))
@@ -290,6 +293,52 @@ def _trend_block():
     fig.update_yaxes(title=f"{met} ({unit or 'a.u.'})")
     st.plotly_chart(_layout(fig, f"Tendencia · {pt} · {met}", h=440), use_container_width=True)
     st.caption(f"{len(ts)} capturas · {pt}.")
+
+
+def _tabular_png(cols, rows, sevs, title="", subtitle=""):
+    """Renderiza la tabla como PNG (header navy + zebra + columna de estado de
+    color), clase System1. Devuelve bytes PNG para st.download_button."""
+    import io
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    SEV = {"ok": "#1f9d55", "warn": "#e8890c", "dang": "#dc3545", "info": "#8090a6"}
+    headers = ["Estado"] + list(cols)          # col 0 = punto de color
+    body = [["●"] + list(r) for r in rows]  # ● coloreado por severidad
+    nrow, ncol = len(body), len(headers)
+    fig_w = min(1.05 * ncol + 1.5, 16)
+    fig_h = 0.42 * nrow + 1.5
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
+    ax.axis("off")
+    if title:
+        ax.set_title(title + (f"\n{subtitle}" if subtitle else ""),
+                     fontsize=12, fontweight="bold", color="#0b1f3a",
+                     loc="left", pad=12)
+    tbl = ax.table(cellText=body, colLabels=headers, loc="center", cellLoc="center")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(8.5)
+    tbl.scale(1, 1.35)
+    for j in range(ncol):                      # header navy
+        h = tbl[0, j]
+        h.set_facecolor("#12305e")
+        h.get_text().set_color("white")
+        h.get_text().set_fontweight("bold")
+    for i in range(nrow):                       # filas + estado
+        sv = SEV.get(sevs[i] if i < len(sevs) else "info", "#8090a6")
+        for j in range(ncol):
+            cc = tbl[i + 1, j]
+            cc.set_facecolor("#f4f7fb" if i % 2 else "#ffffff")
+            cc.get_text().set_color("#0b1f3a")
+        cc0 = tbl[i + 1, 0]                      # punto de estado coloreado
+        cc0.get_text().set_color(sv)
+        cc0.get_text().set_fontsize(14)
+        tbl[i + 1, 1].get_text().set_fontweight("bold")   # Sensor en negrita
+    tbl.auto_set_column_width(col=list(range(ncol)))
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return buf.getvalue()
 
 
 # ====================== DISPATCH DE VISTAS (una sola cadena) ======================
@@ -380,6 +429,8 @@ if view == "Tabular":
         return None
 
     rows = []
+    img_rows = []            # filas planas (sin HTML) para la imagen PNG
+    sev_list = []            # severidad por fila (para colorear la imagen)
     n_alarm = n_dang = 0
     for c in rec.channels:
         vv = c.v[np.isfinite(c.v)]
@@ -447,9 +498,24 @@ if view == "Tabular":
         _p = lambda x: "—" if x is None else f"{x:.0f}°"  # noqa: E731
         rows.append([dot(sev), c.label, tipo, unit, _f(alarm), _f(danger),
                      _f(overall), _f(a1), _p(ph1), _f(a2), _p(ph2)])
+        img_rows.append([c.label, tipo, unit, _f(alarm), _f(danger),
+                         _f(overall), _f(a1), _p(ph1), _f(a2), _p(ph2)])
+        sev_list.append(sev)
+    _cols = ["", "Sensor", "Tipo", "Unidades", "Alarma", "Danger", "Directa",
+             "1X", "1X ∠", "2X", "2X ∠"]
     if rows:
-        html_table(["", "Sensor", "Tipo", "Unidades", "Alarma", "Danger", "Directa",
-                    "1X", "1X ∠", "2X", "2X ∠"], rows, raw_cols=[0])
+        html_table(_cols, rows, raw_cols=[0])
+        # ---- Descargar la tabla como IMAGEN (un botón) ----
+        import datetime as _dt
+        _fecha = (rec.name.split()[0] if rec.name and rec.name[:4].isdigit()
+                  else _dt.date.today().isoformat())
+        _fname = f"Tabular list {cur_asset} {_fecha}.png"
+        _png = _tabular_png(_cols[1:], img_rows, sev_list,
+                            title=f"Tabular List · {cur_asset}",
+                            subtitle=f"{rec.name}  ·  {rec.rpm or 0:.0f} rpm  ·  "
+                                     f"{'setpoints de la máquina' if _cfg_used else 'norma ISO 20816-2'}")
+        st.download_button("Descargar tabla (PNG)", data=_png, file_name=_fname,
+                           mime="image/png", key="tab_dl")
         _origen = ("setpoints configurados en la máquina" if _cfg_used
                    else f"norma ISO 20816-2 {grp} (sin setpoints configurados)")
         st.caption(f"{len(rows)} sensor(es) · {rec.rpm or 0:.0f} rpm · límites de **{_origen}** "
