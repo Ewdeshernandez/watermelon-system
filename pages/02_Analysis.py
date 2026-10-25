@@ -1391,10 +1391,18 @@ elif view == "Órbita":
                                           line=dict(color="white", width=0.8)),
                               name="keyphasor (c/vuelta)"))
             else:
+                # Par punto BRILLANTE (trigger, inicio) + punto BLANCO (sig. muestra en el
+                # sentido de recorrido) — Bently pág 78: la secuencia blanco→brillante marca
+                # visualmente la dirección de PRECESIÓN de la órbita.
                 fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
                               marker=dict(color="#1f9d55", size=13,
                                           line=dict(color="white", width=1.6)),
-                              name="keyphasor"))
+                              name="keyphasor (brillante)"))
+                if len(xv) > 1:
+                    fig.add_trace(go.Scatter(x=[xv[0]], y=[yv[0]], mode="markers",
+                                  marker=dict(color="white", size=11,
+                                              line=dict(color="#1f9d55", width=2)),
+                                  name="blanco (dir. precesión)"))
         # FLECHA = sentido de PRECESIÓN de la órbita (cómo recorre el lazo: CCW→izq / CW→der).
         _ad = -1.0 if orbit_dir == "CCW" else 1.0
         _ya = (smax if smax else 1.0) * 1.02
