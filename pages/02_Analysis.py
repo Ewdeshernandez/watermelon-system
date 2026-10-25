@@ -1178,19 +1178,19 @@ elif view == "Full Spectrum":
                     cf, cb = _NAVY, _AMBER      # clásico: fwd navy / bwd ámbar
                 fig.add_trace(go.Scatter(x=cpm[fwd], y=amp[fwd], mode="lines",
                               line=dict(color=cf, width=1.2),
-                              name=f"{nm} →" if _multi else "Forward (+)",
+                              name=f"{nm} →" if _multi else "Forward · hacia adelante (+)",
                               hovertemplate=f"<b>{nm} fwd</b><br>%{{x:,.0f}} cpm<br>"
                                             f"%{{y:.2f}} {ud}<extra></extra>"))
                 fig.add_trace(go.Scatter(x=cpm[~fwd], y=amp[~fwd], mode="lines",
                               line=dict(color=cb, width=1.2,
                                         dash="dot" if _multi else "solid"),
-                              name=f"{nm} ←" if _multi else "Backward (−)",
-                              hovertemplate=f"<b>{nm} bwd</b><br>%{{x:,.0f}} cpm<br>"
+                              name=f"{nm} ←" if _multi else "Reverse · inversa (−)",
+                              hovertemplate=f"<b>{nm} rev</b><br>%{{x:,.0f}} cpm<br>"
                                             f"%{{y:.2f}} {ud}<extra></extra>"))
                 ef = float(np.sum(amp[fwd] ** 2))
                 eb = float(np.sum(amp[~fwd] ** 2))
                 tot = ef + eb or 1.0
-                dom = "Forward" if ef >= eb else "Backward"
+                dom = "Forward" if ef >= eb else "Reverse"
                 if b.x.rpm and _ordref is None:
                     _ordref = b.x.rpm
                 _frows.append([nm, f"{b.x.rpm:,.0f}" if b.x.rpm else "—",
@@ -1212,7 +1212,8 @@ elif view == "Full Spectrum":
                                           annotation_position="top", annotation_font_size=10)
                 fig = _layout(fig, "Full Spectrum", h=500)
                 fig.update_xaxes(
-                    title="Frecuencia direccional (cpm) · + forward / − backward",
+                    title="Frecuencia direccional (cpm) · + forward (hacia adelante) / "
+                          "− reverse (inversa)",
                     showgrid=True, gridcolor="rgba(120,140,170,.12)", showline=True,
                     linecolor="#d9e1ec", zeroline=True, zerolinecolor="rgba(120,140,170,.45)",
                     range=[-_fxmax, _fxmax] if _fxmax else None)
@@ -1225,32 +1226,36 @@ elif view == "Full Spectrum":
                     margin=dict(l=64, r=28, t=52, b=72), hovermode="x unified",
                     plot_bgcolor="white", paper_bgcolor="white")
                 st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+                _fscols = ["Cojinete", "RPM", "Forward %", "Reverse %", "Precesión"]
                 _download_fig_table_button(
-                    fig, ["Cojinete", "RPM", "Forward %", "Backward %", "Dominante"], _frows,
+                    fig, _fscols, _frows,
                     _vfile(f"Full Spectrum {'-'.join(fsel[:3])}"), key="fs",
                     table_title=f"Full Spectrum · {cur_asset} · {_fecha}")
                 from core.ui_industrial import html_table
-                html_table(["Cojinete", "RPM", "Forward %", "Backward %", "Dominante"], _frows)
-                # Interpretación (del primer cojinete)
+                html_table(_fscols, _frows)
+                # Interpretación (del primer cojinete) — nomenclatura Bently Nevada
                 if _frows:
                     _b0 = _frows[0]
-                    _bwd = float(_b0[3].rstrip("%"))
+                    _rev = float(_b0[3].rstrip("%"))
                     _dc = "#1f9d55" if _b0[4] == "Forward" else "#e8890c"
-                    _warn = (" Backward >30% → sospecha de roce (rub), anisotropía de "
-                             "soporte o inestabilidad." if _bwd > 30 else
-                             " Precesión mayormente forward = sano (sincrónico normal).")
+                    _warn = (" Reverse (inversa) >30% → sospecha de roce (rub), anisotropía "
+                             "de soporte, desalineación o inestabilidad por fluido." if _rev > 30
+                             else " Precesión mayormente hacia adelante (forward) = sano "
+                             "(sincrónico normal, p.ej. desbalance puro = 1X forward).")
                     st.markdown(
                         f"<div style='border-left:4px solid {_dc};background:#f8fafc;border:1px "
                         f"solid #e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
                         f"<span style='background:{_dc};color:#fff;border-radius:6px;padding:2px "
                         f"9px;font:700 11px IBM Plex Mono'>{_b0[4].upper()}</span>  "
-                        f"<b>{_b0[0]}: {_b0[2]} fwd / {_b0[3]} bwd.</b>"
+                        f"<b>{_b0[0]}: {_b0[2]} forward / {_b0[3]} reverse.</b>"
                         f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{_warn} "
-                        f"El espectro direccional separa fuerzas co- y contra-rotatorias "
-                        f"(no lo da System1 estándar).</div></div>", unsafe_allow_html=True)
-                st.caption("X direccional en cpm: +forward / −backward · default por tipo "
-                           "(despl 60k · vel 300k · accel 600k) · órdenes ±1X,±2X,±3X. "
-                           "Varios cojinetes = color por cojinete (fwd sólido / bwd punteado).")
+                        f"Nomenclatura Bently Nevada (hacia adelante / inversa). Suma fwd+rev "
+                        f"≈ eje mayor de la órbita; diferencia ≈ eje menor; la componente mayor "
+                        f"marca la dirección de precesión.</div></div>", unsafe_allow_html=True)
+                st.caption("X direccional en cpm: +forward (hacia adelante) / −reverse (inversa) "
+                           "· default por tipo (despl 60k · vel 300k · accel 600k) · órdenes "
+                           "±1X,±2X,±3X. Varios cojinetes = color por cojinete (fwd sólido / "
+                           "rev punteado). Base: curso Bently Nevada de diagnósticos.")
 
 elif view == "Órbita":
     b = _pick_bearing("orb_b")
