@@ -796,11 +796,16 @@ elif view == "Forma de Onda":
         st.info("Elegí al menos un canal.")
     else:
         fig = go.Figure()
-        _wunits, _wrows = set(), []
+        _wunits, _wrows, _wtmax, _wymax = set(), [], 0.0, 0.0
         for i, lab in enumerate(wsel):
             ch = _wcmap[lab]
             vv = ch.v
             t_ms = ch.t * 1000.0 if ch.t.size else np.arange(vv.size) * 1.0
+            if t_ms.size:
+                _wtmax = max(_wtmax, float(t_ms[-1]))
+            _vf = vv[np.isfinite(vv)]
+            if _vf.size:
+                _wymax = max(_wymax, float(np.max(np.abs(_vf))))
             col = _TREND_PAL[i % len(_TREND_PAL)]
             fig.add_trace(go.Scatter(
                 x=t_ms, y=vv, mode="lines", name=lab,
@@ -828,13 +833,20 @@ elif view == "Forma de Onda":
                            f"{ch.rpm:,.0f}" if ch.rpm else "—"])
         _wu = next(iter(_wunits)) if len(_wunits) == 1 else "mixto"
         fig = _layout(fig, "Forma de onda", h=500)
+        _ym = _wymax * 1.08 if _wymax else None
+        # X ARRANCA EN 0 (sin padding) hasta el fin de la captura; Y CENTRADO en 0
+        # y simétrico (como System1) → el 0 queda al medio.
         fig.update_xaxes(title="Tiempo (ms)", showgrid=True,
                          gridcolor="rgba(120,140,170,.12)", showline=True,
-                         linecolor="#d9e1ec", zeroline=False)
+                         linecolor="#d9e1ec", zeroline=False,
+                         range=[0, _wtmax] if _wtmax else None,
+                         ticks="outside", ticklen=4, tickcolor="#d9e1ec")
         fig.update_layout(
             yaxis=dict(title=f"Amplitud ({_wu or 'a.u.'})", showgrid=True,
                        gridcolor="rgba(120,140,170,.12)", zeroline=True,
-                       zerolinecolor="rgba(120,140,170,.35)"),
+                       zerolinecolor="rgba(120,140,170,.45)", zerolinewidth=1.2,
+                       range=[-_ym, _ym] if _ym else None,
+                       ticks="outside", ticklen=4, tickcolor="#d9e1ec"),
             showlegend=True,
             legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center",
                         x=0.5, font=dict(size=12)),
