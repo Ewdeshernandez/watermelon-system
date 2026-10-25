@@ -30,6 +30,8 @@ class Channel:
     spr: Optional[int] = None       # samples per rev (keyphasor)
     unit: str = ""
     source: str = ""                # nombre de archivo
+    cap_point: str = ""             # punto de la captura (BRG1/GB4/GB_4XA) para Tendencias
+    cap_axis: str = "X"             # eje dentro de la captura (X|Y) para trend_series
 
     @property
     def fs_hz(self) -> Optional[float]:
@@ -325,9 +327,11 @@ def record_from_history(label: str, keys) -> AnalysisRecord:
             xlab = _sensor_name(pn, point, "X")
             ylab = _sensor_name(pn, point, "Y")
             cx = Channel(label=xlab, bearing=n, axis="X", t=cap.t, v=cap.get(CH_X),
-                         rpm=rpm, spr=spr, unit=cap.unit_of(CH_X), source=xlab)
+                         rpm=rpm, spr=spr, unit=cap.unit_of(CH_X), source=xlab,
+                         cap_point=point, cap_axis="X")
             cy = Channel(label=ylab, bearing=n, axis="Y", t=cap.t, v=cap.get(CH_Y),
-                         rpm=rpm, spr=spr, unit=cap.unit_of(CH_Y), source=ylab)
+                         rpm=rpm, spr=spr, unit=cap.unit_of(CH_Y), source=ylab,
+                         cap_point=point, cap_axis="Y")
             ch_by_label[xlab] = cx
             ch_by_label[ylab] = cy
             pair_by_brg[n] = (xlab, ylab)
@@ -338,7 +342,7 @@ def record_from_history(label: str, keys) -> AnalysisRecord:
             lab = _sensor_name(pn, point, "")
             ch_by_label[lab] = Channel(label=lab, bearing=n, axis="", t=cap.t, v=v,
                                        rpm=rpm, spr=spr, unit=cap.unit_of(CH_X),
-                                       source=lab)
+                                       source=lab, cap_point=point, cap_axis="X")
     channels = [ch_by_label[k] for k in sorted(ch_by_label, key=_name_sort_key)]
     bearings = []
     for n, (xl, yl) in pair_by_brg.items():
@@ -363,13 +367,15 @@ def _amp_1x(v: np.ndarray, rpm: float, fs: float) -> float:
     return float(np.max(sp[lo:hi])) if hi > lo else float("nan")
 
 
-def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40):
-    """Serie temporal de una métrica para un PUNTO a lo largo del histórico. Baja
-    la captura de ese punto en cada sesión y calcula pp / rms / 1X. Devuelve
-    ([datetime], [valor], unidad)."""
+def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40,
+                 axis: str = "X"):
+    """Serie temporal de una métrica para un PUNTO (eje X o Y) a lo largo del
+    histórico. Baja la captura de ese punto en cada sesión y calcula pp / rms /
+    1X. Devuelve ([datetime], [valor], unidad)."""
     import datetime as _dt
 
-    from core.dynamic_raw import CH_X, download_capture  # noqa: PLC0415
+    from core.dynamic_raw import CH_X, CH_Y, download_capture  # noqa: PLC0415
+    ch = CH_Y if str(axis).upper() == "Y" else CH_X
     rows = sorted((c.get("day", ""), c.get("time", ""), c.get("key", ""))
                   for c in (caps_meta or [])
                   if c.get("point") == point and c.get("day") and c.get("time"))
@@ -379,7 +385,7 @@ def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40):
         cap = download_capture(key)
         if cap is None:
             continue
-        v = cap.get(CH_X)
+        v = cap.get(ch)
         if v is None or not getattr(v, "size", 0):
             continue
         vf = v[np.isfinite(v)]
@@ -399,7 +405,7 @@ def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40):
         except Exception:  # noqa: BLE001
             continue
         vals.append(val)
-        unit = unit or cap.unit_of(CH_X)
+        unit = unit or cap.unit_of(ch)
     return ts, vals, unit
 
 

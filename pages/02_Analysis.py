@@ -13,6 +13,8 @@ se avisan (requieren fuente de sweep/historial, no una sola captura).
 """
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
@@ -78,11 +80,11 @@ def _rec_history(label, keys):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _trend(caps_tuple, point, metric):
+def _trend(caps_tuple, point, metric, axis="X"):
     from core.analysis.model import trend_series
     caps = [{"point": p, "day": d, "time": t, "key": k}
             for p, d, t, k in caps_tuple]
-    return trend_series(caps, point, metric)
+    return trend_series(caps, point, metric, axis=axis)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -216,6 +218,43 @@ def _vfile(view_name):
     return f"{view_name} {cur_asset} {_fecha}.png"
 
 
+# ---- Setpoints de la máquina (compartido Tabular + Tendencias) ----
+_sensors_map, _m_alert, _m_danger, _m_unit = _inst_cfg(cur_iid)
+
+
+def _sp_tok(s):
+    m = re.search(r"(\d+)\s*([XYZ])\s*([A-Z]?)",
+                  (s or "").upper().replace(" ", "").replace("_", ""))
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
+_SP_LUT = {}
+for _s in (_sensors_map or []):
+    _t = _sp_tok(_s.get("csv_match_pattern", ""))
+    _a = float(_s.get("alarm", 0.0) or 0.0)
+    _d = float(_s.get("danger", 0.0) or 0.0)
+    if _t and _a > 0 and _d > 0:
+        _SP_LUT[_t] = (_a, _d, str(_s.get("unit_native", "") or ""))
+
+
+def _ch_setpoint(ch):
+    """(alarma, danger, unidad) configurado de un Channel, por token coj/eje/letra."""
+    if ch.axis in ("X", "Y", "Z"):
+        for _l in ("D", "A", "V", ""):
+            if (ch.bearing, ch.axis, _l) in _SP_LUT:
+                return _SP_LUT[(ch.bearing, ch.axis, _l)]
+        return None
+    k = _sp_tok(ch.source or ch.label or "")
+    if not k:
+        return None
+    if k in _SP_LUT:
+        return _SP_LUT[k]
+    for _l in ("D", "A", "V", ""):
+        if (k[0], k[1], _l) in _SP_LUT:
+            return _SP_LUT[(k[0], k[1], _l)]
+    return None
+
+
 st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
            f"{len(rec.bearings)} cojinete(s) con par X/Y"
            + (f"  ·  {_rpm:.0f} rpm" if _rpm else ""))
@@ -277,33 +316,76 @@ def _sweep_controls(sw, key):
     return op, unit, diag, s, s.get("iso_zone", "—")
 
 
+_TREND_PAL = ["#12305e", "#e8890c", "#1f9d55", "#8b5cf6", "#0ea5e9", "#dc3545",
+              "#84cc16", "#d946ef", "#14b8a6", "#f59e0b"]
+
+
 def _trend_block():
     if not hist_caps:
         st.info("**Tendencias** — overall vs tiempo. Requiere varias capturas en el "
                 "tiempo (modo **Histórico del activo**).")
         return
-    points = sorted({c.get("point", "") for c in hist_caps if c.get("point")})
-    cc1, cc2 = st.columns([2, 1])
-    with cc1:
-        pt = st.selectbox("Punto", points, key="tr_pt")
-    with cc2:
+    # Canales reales del registro (nombres System1), con su captura/eje para trend.
+    chans = [c for c in rec.channels]
+    labels = [c.label for c in chans]
+    cmap = {c.label: c for c in chans}
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        sel = st.multiselect("Canales (uno o varios)", labels,
+                             default=labels[:2] if len(labels) >= 2 else labels,
+                             key="tr_chs")
+    with c2:
         met = st.selectbox("Métrica", ["Overall pp", "RMS", "1X amp"], key="tr_met")
     mk = {"Overall pp": "pp", "RMS": "rms", "1X amp": "1x"}[met]
+    if not sel:
+        st.info("Elegí al menos un canal.")
+        return
     _ct = tuple((c["point"], c["day"], c["time"], c["key"]) for c in hist_caps
                 if c.get("point") and c.get("day") and c.get("time") and c.get("key"))
-    with st.spinner("Calculando tendencia…"):
-        ts, vals, unit = _trend(_ct, pt, mk)
-    if not ts:
-        st.warning(f"Sin datos para {pt}.")
+
+    fig = go.Figure()
+    units_seen, n_pts, lim_lines = set(), 0, {}
+    with st.spinner("Calculando tendencias…"):
+        for i, lab in enumerate(sel):
+            ch = cmap[lab]
+            ts, vals, unit = _trend(_ct, ch.cap_point, mk, axis=ch.cap_axis)
+            if not ts:
+                continue
+            n_pts = max(n_pts, len(ts))
+            units_seen.add(unit or ch.unit or "")
+            col = _TREND_PAL[i % len(_TREND_PAL)]
+            fig.add_trace(go.Scatter(x=ts, y=vals, mode="lines+markers", name=lab,
+                                     line=dict(color=col, width=1.8),
+                                     marker=dict(size=5, color=col)))
+            # alarma/danger configurados del canal (solo si la métrica es overall/pp)
+            if mk == "pp":
+                sp = _ch_setpoint(ch)
+                if sp:
+                    a, d, _su = sp
+                    lim_lines.setdefault(round(a, 2), ("#e8890c", f"Alarma {lab}"))
+                    lim_lines.setdefault(round(d, 2), ("#dc3545", f"Danger {lab}"))
+    if not fig.data:
+        st.warning("Sin datos para los canales elegidos.")
         return
-    fig = go.Figure(go.Scatter(x=ts, y=vals, mode="lines+markers",
-                               line=dict(color=_NAVY, width=1.6),
-                               marker=dict(size=5, color=_NAVY)))
+    # líneas de alarma/danger (dedup por valor; si varios canales comparten, una línea)
+    for val, (col, _txt) in lim_lines.items():
+        fig.add_hline(y=val, line=dict(color=col, width=1.2, dash="dash"),
+                      annotation_text=f"{'Danger' if col == '#dc3545' else 'Alarma'} {val:g}",
+                      annotation_position="right", annotation_font_size=10,
+                      annotation_font_color=col)
+    _unit = next(iter(units_seen)) if len(units_seen) == 1 else "mixto"
     fig.update_xaxes(title="Tiempo")
-    fig.update_yaxes(title=f"{met} ({unit or 'a.u.'})")
-    st.plotly_chart(_layout(fig, f"Tendencia · {pt} · {met}", h=440), use_container_width=True)
-    _download_fig_button(fig, _vfile(f"Tendencia {pt} {met}"), key="trend")
-    st.caption(f"{len(ts)} capturas · {pt}.")
+    fig.update_yaxes(title=f"{met} ({_unit or 'a.u.'})")
+    fig = _layout(fig, f"Tendencia · {met} · {len(sel)} canal(es)", h=480)
+    fig.update_layout(showlegend=True, legend=dict(orientation="h", yanchor="bottom",
+                      y=1.02, xanchor="left", x=0))
+    st.plotly_chart(fig, use_container_width=True)
+    _download_fig_button(fig, _vfile(f"Tendencia {met}"), key="trend")
+    _nota = (f" · unidades {_unit}" if _unit != "mixto"
+             else " · unidades mixtas (ojo: distinto tipo de medición)")
+    st.caption(f"{n_pts} capturas por canal · líneas punteadas = alarma (ámbar) / "
+               f"danger (rojo) configurados{_nota}. Métrica 1X/RMS no muestra límites "
+               "(los setpoints son de overall pp).")
 
 
 def _tabular_png(cols, rows, sevs, title="", subtitle=""):
