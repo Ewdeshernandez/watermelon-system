@@ -1263,15 +1263,21 @@ elif view == "Órbita":
         st.warning("Órbita: necesita el **par X/Y** de un cojinete. Sube ambos CSV "
                    "(ej. 1xd.csv + 1yd.csv).")
     else:
-        oc1, oc2, oc3 = st.columns([2, 1, 1])
+        oc1, oc2, oc3, oc4 = st.columns([2, 2, 1, 1])
         with oc1:
             fmode = st.selectbox("Filtro", ["Direct", "1X", "2X"], index=0, key="orb_f")
         with oc2:
-            ang_x = st.number_input("X · ° derecha del TOP", value=45, step=5,
-                                    key="orb_ax", help="Montaje de la sonda X (System1).")
+            shaft_dir = st.selectbox("Sentido de giro del EJE", ["CW (horario)",
+                                     "CCW (antihorario)"], index=0, key="orb_rot",
+                                     help="Giro físico del eje (placa/config). Define la "
+                                          "precesión forward/reverse; NO se deduce de la órbita.")
         with oc3:
-            ang_y = st.number_input("Y · ° izquierda del TOP", value=45, step=5,
-                                    key="orb_ay")
+            ang_x = st.number_input("X · °R del TOP", value=45, step=5,
+                                    key="orb_ax", help="Montaje de la sonda X, lado R.")
+        with oc4:
+            ang_y = st.number_input("Y · °L del TOP", value=45, step=5,
+                                    key="orb_ay", help="Montaje de la sonda Y, lado L.")
+        _shaft = "CW" if shaft_dir.startswith("CW") else "CCW"
         # ====== Órbita método Live Monitoring (validado = idéntico a System1) ======
         px, py = np.asarray(b.x.v, float), np.asarray(b.y.v, float)
         _n = min(px.size, py.size)
@@ -1327,21 +1333,15 @@ elif view == "Órbita":
             xv, yv = Hf, Vf
             sp = (float(Hf[0]), float(Vf[0])) if Hf.size else None
             _kmarks = [sp] if sp else []
-        # 3) Sentido de giro por el signo del área (Green); precesión fwd/rev por el
-        #    1X direccional (z=H+iV → +f1 forward vs −f1 reverse).
+        # 3) TRAVERSAL de la órbita (cómo el centro recorre el lazo) por el signo del
+        #    área (Green). PRECESIÓN = forward si el traversal va IGUAL que el giro
+        #    físico del eje (_shaft), reverse si va contrario (def. Bently). El giro
+        #    del eje NO se deduce de la órbita: viene del selector/placa.
         _area = float(np.sum(xv[:-1] * yv[1:] - xv[1:] * yv[:-1])) if xv.size > 2 else 0.0
-        trav = "CCW" if _area > 0 else "CW"
-        prec = ""
-        if fs and rpm:
-            _z = _ofilt(H, 1) + 1j * _ofilt(V, 1)
-            _Z = np.fft.fftshift(np.fft.fft(_z))
-            _frz = np.fft.fftshift(np.fft.fftfreq(_z.size, 1.0 / fs))
-            _f1 = rpm / 60.0
-            _kf = int(np.argmin(np.abs(_frz - _f1)))
-            _kr = int(np.argmin(np.abs(_frz + _f1)))
-            prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
+        orbit_dir = "CCW" if _area > 0 else "CW"
+        prec = "Forward" if orbit_dir == _shaft else "Reverse"
         _precd = ("Hacia adelante (forward)" if prec == "Forward"
-                  else "Inversa (reverse)" if prec == "Reverse" else "")
+                  else "Inversa (reverse)")
         # ---- Métricas de forma (Bently pág 69): eje mayor/menor + elipticidad + Smax ----
         cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
         _pc = np.column_stack([xv - cx, yv - cy])
@@ -1394,14 +1394,15 @@ elif view == "Órbita":
                               marker=dict(color="#1f9d55", size=13,
                                           line=dict(color="white", width=1.6)),
                               name="keyphasor"))
-        # FLECHA de sentido de giro (arriba de la órbita; CCW→izquierda, CW→derecha).
-        _ad = -1.0 if trav == "CCW" else 1.0
+        # FLECHA del SENTIDO DE GIRO DEL EJE (arriba; CCW→izquierda, CW→derecha).
+        _ad = -1.0 if _shaft == "CCW" else 1.0
         _ya = (smax if smax else 1.0) * 1.02
         fig.add_annotation(x=_ad * (smax if smax else 1.0) * 0.42, y=_ya,
                            ax=-_ad * (smax if smax else 1.0) * 0.42, ay=_ya,
                            xref="x", yref="y", axref="x", ayref="y", showarrow=True,
                            arrowhead=2, arrowsize=1.4, arrowwidth=2.2, arrowcolor="#e8890c")
-        fig.add_annotation(x=0, y=_ya, text=f"<b>{'↺ CCW' if trav == 'CCW' else '↻ CW'}</b>",
+        fig.add_annotation(x=0, y=_ya,
+                           text=f"<b>{'↺ CCW' if _shaft == 'CCW' else '↻ CW'} eje</b>",
                            showarrow=False, yshift=16,
                            font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
         fig.update_xaxes(title=f"Horizontal → ({b.x.unit or 'µm'})",
@@ -1420,11 +1421,11 @@ elif view == "Órbita":
                                       xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
         _u = b.x.unit or "µm"
-        _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _precd or "—",
-                   trav or "—", f"{major:.1f} {_u}", f"{minor:.1f} {_u}",
+        _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _shaft,
+                   orbit_dir, _precd, f"{major:.1f} {_u}", f"{minor:.1f} {_u}",
                    f"{ellip:.2f}", f"{smax:.1f} {_u}"]]
-        _ocols = ["Cojinete", "RPM", "Precesión", "Sentido giro", "Eje mayor",
-                  "Eje menor", "Elipticidad", "Smax"]
+        _ocols = ["Cojinete", "RPM", "Giro eje", "Traversal órbita", "Precesión",
+                  "Eje mayor", "Eje menor", "Elipticidad", "Smax"]
         _download_fig_table_button(fig, _ocols, _orows,
                                    _vfile(f"Orbita {b.name} {fmode}"), key="orb",
                                    table_title=f"Órbita · {cur_asset} · {b.name} · {fmode}")
