@@ -1519,12 +1519,17 @@ def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 1800.0) -> int:
                     nav_tree  = tuple(rpa.get("nav_tree",  [130, 128]))
                     nav_plots = tuple(rpa.get("nav_plots", [555, 78]))
                     nav_sheet = tuple(rpa.get("nav_sheet", [357, 116]))
-                    time.sleep(4)                       # la máquina tarda en cargar
-                    mouse.click(coords=nav_tree);  time.sleep(1.5)
-                    mouse.click(coords=nav_plots); time.sleep(1.5)
-                    mouse.click(coords=nav_sheet); time.sleep(1.0)
+                    # Tras abrir la base, el ÁRBOL de máquinas tarda en poblar;
+                    # un wait corto hacía que el clic al nodo cayera en vacío →
+                    # System1 quedaba sin máquina/Plots. Esperar más + 2 pasadas
+                    # (clics idempotentes) deja la VM lista al boot, sin manual.
+                    time.sleep(10)
+                    for _ in range(2):
+                        mouse.click(coords=nav_tree);  time.sleep(2.0)
+                        mouse.click(coords=nav_plots); time.sleep(2.0)
+                        mouse.click(coords=nav_sheet); time.sleep(1.5)
                     log.info("open_welcome: navegado SGT300A->Plots->Export CSV1 "
-                             "%s %s %s", nav_tree, nav_plots, nav_sheet)
+                             "%s %s %s (2 pasadas)", nav_tree, nav_plots, nav_sheet)
                     print("OPENWELCOME: navegado a Export CSV1")
                 except Exception:  # noqa: BLE001
                     pass
