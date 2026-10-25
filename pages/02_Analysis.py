@@ -782,46 +782,94 @@ elif view == "Tendencias":
     _trend_block()
 
 elif view == "Forma de Onda":
-    ch = _pick_channel("wf_ch")
-    fig = go.Figure(go.Scatter(x=ch.t, y=ch.v, mode="lines",
-                               line=dict(color=_NAVY, width=1.3)))
-    fig.update_xaxes(title="Tiempo (s)")
-    fig.update_yaxes(title=f"{ch.label} ({ch.unit or 'a.u.'})")
-    st.plotly_chart(_layout(fig, f"Forma de onda · {ch.label}"), use_container_width=True, config=_NOBAR)
-    _download_fig_button(fig, _vfile(f"Forma de onda {ch.label}"), key="wf")
-    # Métricas + diagnóstico (reutiliza core.waveform_metrics / waveform_diagnostics)
     from core.waveform_metrics import compute_waveform_metrics
-    mx = compute_waveform_metrics(ch.v)
-    if mx:
-        u = ch.unit or ""
-        cells = [("RMS", f"{mx.get('rms',0):.2f} {u}"), ("Pico", f"{mx.get('peak',0):.2f} {u}"),
-                 ("Pico-pico", f"{mx.get('peak_to_peak',0):.2f} {u}"),
-                 ("Crest", f"{mx.get('crest_factor',0):.2f}"),
-                 ("Kurtosis", f"{mx.get('kurtosis',0):.2f}")]
-        cols = st.columns(len(cells))
-        for col, (lbl, val) in zip(cols, cells):
-            col.markdown(f"<div style='background:#f7f9fc;border:1px solid #e2e8f2;border-radius:8px;"
-                         f"padding:8px 10px'><div style='font:600 10px IBM Plex Mono;color:#8090a6;"
-                         f"text-transform:uppercase;letter-spacing:.08em'>{lbl}</div>"
-                         f"<div style='font:700 17px IBM Plex Sans;color:#0b1f3a'>{val}</div></div>",
-                         unsafe_allow_html=True)
-        try:
-            from core.waveform_diagnostics import build_waveform_diagnostics_rotordyn
-            dW = build_waveform_diagnostics_rotordyn(
-                time_s=ch.t, amplitude=ch.v, metrics=mx, machine_label=rec.name,
-                point_label=ch.label, amplitude_unit=u)
-            _sev = str(dW.get("severity_global", "")).upper()
-            _c = {"DANGER": "#dc3545", "CRITICAL": "#dc3545", "WARNING": "#e8890c",
-                  "CAUTION": "#84cc16"}.get(_sev, "#1f9d55")
-            st.markdown(
-                f"<div style='border-left:4px solid {_c};background:#f8fafc;border:1px solid #e2e8f2;"
-                f"border-radius:8px;padding:11px 15px;margin-top:10px'>"
-                f"<b style='font-size:13px'>{dW.get('headline','')}</b>"
-                f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{dW.get('detail','')}</div>"
-                f"<div style='color:#0b1f3a;font-size:12.5px;margin-top:4px'><b>Acción:</b> "
-                f"{dW.get('action','')}</div></div>", unsafe_allow_html=True)
-        except Exception:  # noqa: BLE001
-            pass
+    _wcmap = {c.label: c for c in rec.channels}
+    _wlabels = [c.label for c in rec.channels]
+    wc1, wc2 = st.columns([3, 1])
+    with wc1:
+        wsel = st.multiselect("Canales (uno o varios)", _wlabels,
+                              default=_wlabels[:2] if len(_wlabels) >= 2 else _wlabels,
+                              key="wf_chs")
+    with wc2:
+        wkph = st.checkbox("Marcar keyphasor (1X)", value=True, key="wf_kph")
+    if not wsel:
+        st.info("Elegí al menos un canal.")
+    else:
+        fig = go.Figure()
+        _wunits, _wrows = set(), []
+        for i, lab in enumerate(wsel):
+            ch = _wcmap[lab]
+            vv = ch.v
+            t_ms = ch.t * 1000.0 if ch.t.size else np.arange(vv.size) * 1.0
+            col = _TREND_PAL[i % len(_TREND_PAL)]
+            fig.add_trace(go.Scatter(
+                x=t_ms, y=vv, mode="lines", name=lab,
+                line=dict(color=col, width=1.4, shape="spline", smoothing=0.4),
+                hovertemplate=f"<b>{lab}</b><br>%{{x:.2f}} ms<br>"
+                              f"%{{y:.2f}} {ch.unit or ''}<extra></extra>"))
+            _wunits.add(ch.unit or "")
+            # marcas de KEYPHASOR (una por vuelta, t=k·60/rpm) — como los puntos de System1
+            if wkph and ch.rpm and t_ms.size:
+                Tms = 60000.0 / ch.rpm
+                if Tms < (t_ms[-1] - t_ms[0]):
+                    kts = np.arange(float(t_ms[0]), float(t_ms[-1]), Tms)
+                    kvs = np.interp(kts, t_ms, vv)
+                    fig.add_trace(go.Scatter(
+                        x=kts, y=kvs, mode="markers",
+                        marker=dict(color=col, size=7, symbol="circle",
+                                    line=dict(color="white", width=1)),
+                        name=f"KPH {lab}", showlegend=False, hoverinfo="skip"))
+            # métricas por canal (para la tabla System1-class)
+            mx = compute_waveform_metrics(vv) or {}
+            _u = ch.unit or ""
+            _wrows.append([lab, f"{mx.get('peak_to_peak',0):.2f} {_u}",
+                           f"{mx.get('rms',0):.2f} {_u}", f"{mx.get('peak',0):.2f} {_u}",
+                           f"{mx.get('crest_factor',0):.2f}",
+                           f"{ch.rpm:,.0f}" if ch.rpm else "—"])
+        _wu = next(iter(_wunits)) if len(_wunits) == 1 else "mixto"
+        fig = _layout(fig, "Forma de onda", h=500)
+        fig.update_xaxes(title="Tiempo (ms)", showgrid=True,
+                         gridcolor="rgba(120,140,170,.12)", showline=True,
+                         linecolor="#d9e1ec", zeroline=False)
+        fig.update_layout(
+            yaxis=dict(title=f"Amplitud ({_wu or 'a.u.'})", showgrid=True,
+                       gridcolor="rgba(120,140,170,.12)", zeroline=True,
+                       zerolinecolor="rgba(120,140,170,.35)"),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center",
+                        x=0.5, font=dict(size=12)),
+            margin=dict(l=64, r=28, t=52, b=72), hovermode="x unified",
+            plot_bgcolor="white", paper_bgcolor="white")
+        st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+        _download_fig_button(fig, _vfile(f"Forma de onda {'-'.join(wsel[:3])}"), key="wf")
+        # Panel de métricas clase System1 (pp · RMS · Pico · Crest · RPM por canal)
+        from core.ui_industrial import html_table
+        html_table(["Sensor", "Pico-pico", "RMS", "Pico", "Crest", "RPM"], _wrows)
+        # Diagnóstico por norma solo con UN canal (evita saturar con varios)
+        if len(wsel) == 1:
+            ch = _wcmap[wsel[0]]
+            mx = compute_waveform_metrics(ch.v) or {}
+            try:
+                from core.waveform_diagnostics import build_waveform_diagnostics_rotordyn
+                dW = build_waveform_diagnostics_rotordyn(
+                    time_s=ch.t, amplitude=ch.v, metrics=mx, machine_label=rec.name,
+                    point_label=ch.label, amplitude_unit=ch.unit or "")
+                _sev = str(dW.get("severity_global", "")).upper()
+                _c = {"DANGER": "#dc3545", "CRITICAL": "#dc3545", "WARNING": "#e8890c",
+                      "CAUTION": "#84cc16"}.get(_sev, "#1f9d55")
+                st.markdown(
+                    f"<div style='border-left:4px solid {_c};background:#f8fafc;border:1px "
+                    f"solid #e2e8f2;border-radius:8px;padding:11px 15px;margin-top:10px'>"
+                    f"<b style='font-size:13px'>{dW.get('headline','')}</b>"
+                    f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>"
+                    f"{dW.get('detail','')}</div><div style='color:#0b1f3a;font-size:12.5px;"
+                    f"margin-top:4px'><b>Acción:</b> {dW.get('action','')}</div></div>",
+                    unsafe_allow_html=True)
+            except Exception:  # noqa: BLE001
+                pass
+        st.caption("Tiempo en ms · puntos = marca de keyphasor (1 por vuelta) · "
+                   f"amplitud en {_wu}. Varios canales = compará X/Y o cojinetes en el "
+                   "mismo eje de tiempo.")
 
 elif view == "Espectro":
     ch = _pick_channel("sp_ch")
