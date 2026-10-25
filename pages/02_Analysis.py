@@ -80,11 +80,11 @@ def _rec_history(label, keys):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _trend(caps_tuple, point, metric, axis="X"):
+def _trend(caps_tuple, point, metric, axis="X", limit=800):
     from core.analysis.model import trend_series
     caps = [{"point": p, "day": d, "time": t, "key": k}
             for p, d, t, k in caps_tuple]
-    return trend_series(caps, point, metric, axis=axis)
+    return trend_series(caps, point, metric, axis=axis, limit=limit)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -329,14 +329,18 @@ def _trend_block():
     chans = [c for c in rec.channels]
     labels = [c.label for c in chans]
     cmap = {c.label: c for c in chans}
-    c1, c2 = st.columns([3, 1])
+    c1, c2, c3 = st.columns([3, 1, 1])
     with c1:
         sel = st.multiselect("Canales (uno o varios)", labels,
                              default=labels[:2] if len(labels) >= 2 else labels,
                              key="tr_chs")
     with c2:
         met = st.selectbox("Métrica", ["Overall pp", "RMS", "1X amp"], key="tr_met")
+    with c3:
+        win = st.selectbox("Ventana", ["Todo", "30 días", "7 días", "24 h"],
+                           key="tr_win")
     mk = {"Overall pp": "pp", "RMS": "rms", "1X amp": "1x"}[met]
+    wlim = {"24 h": 30, "7 días": 180, "30 días": 800, "Todo": 5000}[win]
     if not sel:
         st.info("Elegí al menos un canal.")
         return
@@ -348,15 +352,17 @@ def _trend_block():
     with st.spinner("Calculando tendencias…"):
         for i, lab in enumerate(sel):
             ch = cmap[lab]
-            ts, vals, unit = _trend(_ct, ch.cap_point, mk, axis=ch.cap_axis)
+            ts, vals, unit = _trend(_ct, ch.cap_point, mk, axis=ch.cap_axis, limit=wlim)
             if not ts:
                 continue
             n_pts = max(n_pts, len(ts))
             units_seen.add(unit or ch.unit or "")
             col = _TREND_PAL[i % len(_TREND_PAL)]
-            fig.add_trace(go.Scatter(x=ts, y=vals, mode="lines+markers", name=lab,
-                                     line=dict(color=col, width=1.8),
-                                     marker=dict(size=5, color=col)))
+            fig.add_trace(go.Scatter(
+                x=ts, y=vals, mode="lines", name=lab,
+                line=dict(color=col, width=2.4, shape="spline", smoothing=0.6),
+                hovertemplate=f"<b>{lab}</b><br>%{{x|%d %b %H:%M}}<br>"
+                              f"%{{y:.1f}} {unit or ''}<extra></extra>"))
             # alarma/danger configurados del canal (solo si la métrica es overall/pp)
             if mk == "pp":
                 sp = _ch_setpoint(ch)
@@ -367,25 +373,36 @@ def _trend_block():
     if not fig.data:
         st.warning("Sin datos para los canales elegidos.")
         return
-    # líneas de alarma/danger (dedup por valor; si varios canales comparten, una línea)
+    # líneas de alarma/danger (dedup por valor; etiqueta a la IZQUIERDA, dentro del
+    # plot, sobre fondo claro → no se corta en el borde derecho).
     for val, (col, _txt) in lim_lines.items():
-        fig.add_hline(y=val, line=dict(color=col, width=1.2, dash="dash"),
-                      annotation_text=f"{'Danger' if col == '#dc3545' else 'Alarma'} {val:g}",
-                      annotation_position="right", annotation_font_size=10,
-                      annotation_font_color=col)
+        _lbl = f"{'Danger' if col == '#dc3545' else 'Alarma'} {val:g}"
+        fig.add_hline(y=val, line=dict(color=col, width=1.4, dash="dash"),
+                      annotation_text=_lbl, annotation_position="top left",
+                      annotation_font=dict(size=10.5, color=col, family="IBM Plex Mono"),
+                      annotation_bgcolor="rgba(255,255,255,0.75)")
     _unit = next(iter(units_seen)) if len(units_seen) == 1 else "mixto"
-    fig.update_xaxes(title="Tiempo")
-    fig.update_yaxes(title=f"{met} ({_unit or 'a.u.'})")
-    fig = _layout(fig, f"Tendencia · {met} · {len(sel)} canal(es)", h=480)
-    fig.update_layout(showlegend=True, legend=dict(orientation="h", yanchor="bottom",
-                      y=1.02, xanchor="left", x=0))
+    fig = _layout(fig, f"Tendencia · {met}", h=500)
+    fig.update_xaxes(title="", showgrid=True, gridcolor="rgba(120,140,170,.12)",
+                     showline=True, linecolor="#d9e1ec",
+                     rangeslider=dict(visible=False))
+    fig.update_yaxes(title=f"{met} ({_unit or 'a.u.'})", showgrid=True,
+                     gridcolor="rgba(120,140,170,.12)", zeroline=False)
+    # leyenda ABAJO (no choca con el título) + márgenes amplios + hover unificado
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center", x=0.5,
+                    font=dict(size=12), bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=64, r=28, t=52, b=72),
+        hovermode="x unified",
+        plot_bgcolor="white", paper_bgcolor="white")
     st.plotly_chart(fig, use_container_width=True)
     _download_fig_button(fig, _vfile(f"Tendencia {met}"), key="trend")
     _nota = (f" · unidades {_unit}" if _unit != "mixto"
              else " · unidades mixtas (ojo: distinto tipo de medición)")
-    st.caption(f"{n_pts} capturas por canal · líneas punteadas = alarma (ámbar) / "
-               f"danger (rojo) configurados{_nota}. Métrica 1X/RMS no muestra límites "
-               "(los setpoints son de overall pp).")
+    st.caption(f"Ventana: {win} · {n_pts} puntos por canal · líneas punteadas = alarma "
+               f"(ámbar) / danger (rojo) de la máquina{_nota}. Overall pp muestra límites "
+               "(los setpoints son de overall).")
 
 
 def _tabular_png(cols, rows, sevs, title="", subtitle=""):
