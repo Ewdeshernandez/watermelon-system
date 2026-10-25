@@ -576,7 +576,7 @@ function wmMelons(){
 </script>
 """
     html = html.replace("__EID__", eid).replace("__B64__", b64).replace("__FN__", fn)
-    _components.html(html, height=120)
+    _components.html(html, height=58)
 
 
 @st.cache_data(show_spinner=False)
@@ -613,9 +613,9 @@ def _table_png(cols, rows, title=""):
     ax.set_position([0, 0, 1, 1])
     _top = 1.0
     if title:
-        _top = 1.0 - 0.5 / fig_h
-        fig.text(0.010, 0.985, title, fontsize=12.5, fontweight="bold",
-                 color="#12305e", va="top", ha="left")
+        _top = 1.0 - 0.42 / fig_h
+        fig.text(0.010, 0.97, title, fontsize=9.5, fontweight="normal",
+                 color="#5a6b85", va="top", ha="left")      # chico, suave, discreto
     tbl = ax.table(cellText=rows, colLabels=cols, cellLoc="center",
                    bbox=[0.006, 0.0, 0.988, _top])
     tbl.auto_set_font_size(False)
@@ -640,6 +640,25 @@ def _table_png(cols, rows, title=""):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", facecolor="white")
     plt.close(fig)
+    return _round_png(buf.getvalue())      # esquinas redondeadas
+
+
+def _round_png(png_bytes, radius=18, border="#e2e8f2", border_w=2):
+    """Redondea las esquinas de un PNG (fondo blanco) + marco fino → tablas con
+    borde redondeado consistente con las de pantalla."""
+    import io
+
+    from PIL import Image, ImageDraw
+    im = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    w, h = im.size
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
+    im = Image.composite(im, Image.new("RGB", (w, h), "white"), mask)
+    ImageDraw.Draw(im).rounded_rectangle([border_w // 2, border_w // 2,
+                                          w - 1 - border_w // 2, h - 1 - border_w // 2],
+                                         radius=radius, outline=border, width=border_w)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
     return buf.getvalue()
 
 
