@@ -1039,9 +1039,9 @@ elif view == "Espectro":
                     return float(np.max(ampd[lo:hi])) if hi > lo else 0.0
                 f1 = ch.rpm / 60.0
                 _ov = float(np.ptp(v)) if mode == "pp" else float(np.std(v))
-                _hrows.append([lab, f"{_aat(f1):.2f}", f"{_aat(2*f1):.2f}",
-                               f"{_aat(3*f1):.2f}", f"{_ov:.2f} {ch.unit or ''}",
-                               f"{ch.rpm:,.0f}"])
+                _hrows.append([lab, f"{ch.rpm:,.0f}", f"{_ov:.2f} {ch.unit or ''}",
+                               f"{_aat(f1):.2f}", f"{_aat(2*f1):.2f}",
+                               f"{_aat(3*f1):.2f}", f"{_aat(4*f1):.2f}"])
         if not fig.data:
             st.warning("Espectro: faltan muestras o no se pudo estimar la fs.")
         else:
@@ -1072,12 +1072,13 @@ elif view == "Espectro":
                 plot_bgcolor="white", paper_bgcolor="white")
             st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
             if _hrows:
+                _spcols = ["Sensor", "RPM", "Overall", "1X", "2X", "3X", "4X"]
                 _download_fig_table_button(
-                    fig, ["Sensor", "1X", "2X", "3X", "Overall", "RPM"], _hrows,
+                    fig, _spcols, _hrows,
                     _vfile(f"Espectro {'-'.join(ssel[:3])}"), key="sp",
                     table_title=f"Espectro · {cur_asset} · {_fecha}")
                 from core.ui_industrial import html_table
-                html_table(["Sensor", "1X", "2X", "3X", "Overall", "RPM"], _hrows)
+                html_table(_spcols, _hrows)
             else:
                 _download_fig_button(fig, _vfile(f"Espectro {'-'.join(ssel[:3])}"), key="sp")
             # Diagnóstico por norma con UN canal (reutiliza core.spectrum_diagnostics)
