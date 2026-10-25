@@ -1446,7 +1446,7 @@ def _setup_logging():
                   logging.FileHandler(LOG_DIR / "s1_rpa.log", encoding="utf-8")])
 
 
-def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 1800.0) -> int:
+def open_welcome(cfg, db_name: str = "PAREX A", timeout: float = 3600.0) -> int:
     """Tras reiniciar: abre la base de System1 sin intervención. El diálogo de
     bienvenida es un HIJO de 'System 1' (Dialog 'Open Enterprise', base
     PRESELECCIONADA + botón 'Open'). Clica Open y REINTENTA: si el server aún
