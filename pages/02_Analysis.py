@@ -1118,57 +1118,139 @@ elif view == "Espectro":
                        "Amplitud: pp (desplazamiento) / rms (vel·accel). Picos sin suavizar.")
 
 elif view == "Full Spectrum":
-    b = _pick_bearing("fs_b")
-    if b is None:
+    _fbs = [bb for bb in rec.bearings if bb.has_xy]
+    if not _fbs:
         st.warning("Full Spectrum: necesita el **par X/Y** de un cojinete (espectro "
                    "direccional · precesión forward/backward · supera a System1).")
     else:
-        n = min(b.x.v.size, b.y.v.size)
-        xv = b.x.v[:n] - np.nanmean(b.x.v[:n])
-        yv = b.y.v[:n] - np.nanmean(b.y.v[:n])
-        fs = b.x.fs_hz or b.y.fs_hz
-        if n < 16 or not fs:
-            st.warning("Full Spectrum: faltan muestras o frecuencia de muestreo.")
+        _fnames = [bb.name for bb in _fbs]
+        _fbmap = {bb.name: bb for bb in _fbs}
+
+        def _spk2(u):
+            u = (u or "").lower()
+            if "mm/s" in u:
+                return "vel", 300000
+            if u.strip() in ("g", "g pk", "g rms") or "m/s2" in u or "m/s²" in u:
+                return "accel", 600000
+            return "disp", 60000
+
+        fc1, fc2 = st.columns([3, 1])
+        with fc1:
+            fsel = st.multiselect("Cojinetes (par X/Y)", _fnames,
+                                 default=_fnames[:1], key="fs_brs")
+        with fc2:
+            fxsc = st.selectbox("Escala X", ["Auto (por tipo)", "60.000 cpm (despl)",
+                               "300.000 cpm (vel)", "600.000 cpm (accel)", "Completo"],
+                               key="fs_xsc")
+        if not fsel:
+            st.info("Elegí al menos un cojinete.")
         else:
-            # z = X + iY → FFT complejo → +f = precesión forward, −f = backward
-            win = np.hanning(n)
-            z = (xv * win) + 1j * (yv * win)
-            sp = np.fft.fftshift(np.fft.fft(z)) * (2.0 / n)
-            fr = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / fs))
-            amp = np.abs(sp)
-            fwd = fr >= 0
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=fr[fwd], y=amp[fwd], mode="lines",
-                          line=dict(color=_NAVY, width=1.2), name="Forward (+)"))
-            fig.add_trace(go.Scatter(x=fr[~fwd], y=amp[~fwd], mode="lines",
-                          line=dict(color=_AMBER, width=1.2), name="Backward (−)"))
-            if b.x.rpm:
-                f1 = b.x.rpm / 60.0
-                for k, lab in [(1, "+1X"), (2, "+2X"), (-1, "−1X")]:
-                    if abs(k) * f1 < fr[-1]:
-                        fig.add_vline(x=k * f1, line=dict(color="#8090a6", width=1, dash="dot"),
-                                      annotation_text=lab, annotation_position="top")
-            fig.update_xaxes(title="Frecuencia direccional (Hz) · + forward / − backward")
-            fig.update_yaxes(title=f"Amplitud ({b.x.unit or 'µm'})")
-            st.plotly_chart(_layout(fig, f"Full Spectrum · {b.name}", h=500),
-                            use_container_width=True, config=_NOBAR)
-            _download_fig_button(fig, _vfile(f"Full Spectrum {b.name}"), key="fs")
-            # dominancia forward vs backward
-            ef = float(np.sum(amp[fwd] ** 2))
-            eb = float(np.sum(amp[~fwd] ** 2))
-            tot = ef + eb or 1.0
-            dom = "FORWARD" if ef >= eb else "BACKWARD"
-            dc = "#1f9d55" if dom == "FORWARD" else "#e8890c"
-            st.markdown(
-                f"<div style='border-left:4px solid {dc};background:#f8fafc;border:1px solid "
-                f"#e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
-                f"<span style='background:{dc};color:#fff;border-radius:6px;padding:2px 9px;"
-                f"font:700 11px IBM Plex Mono'>{dom}</span>  "
-                f"<b>Precesión {ef/tot*100:.0f}% fwd / {eb/tot*100:.0f}% bwd.</b>"
-                f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>Backward fuerte "
-                f"(&gt;30%) sugiere roce (rub), anisotropía de soporte o inestabilidad. "
-                f"El espectro direccional separa fuerzas co- y contra-rotatorias (no lo da "
-                f"System1 estándar).</div></div>", unsafe_allow_html=True)
+            _funits, _frows, _cpauto, _ordref = set(), [], 0, None
+            _multi = len(fsel) > 1
+            for i, nm in enumerate(fsel):
+                b = _fbmap[nm]
+                n = min(b.x.v.size, b.y.v.size)
+                if n < 16:
+                    continue
+                xv = b.x.v[:n] - np.nanmean(b.x.v[:n])
+                yv = b.y.v[:n] - np.nanmean(b.y.v[:n])
+                fs = b.x.fs_hz or b.y.fs_hz
+                if not fs:
+                    continue
+                win = np.hanning(n)
+                z = (xv * win) + 1j * (yv * win)
+                sp = np.fft.fftshift(np.fft.fft(z)) * (2.0 / np.sum(win))
+                fr = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / fs))
+                cpm = fr * 60.0
+                kind, cpmx = _spk2(b.x.unit)
+                amp = np.abs(sp) * (2.0 if kind == "disp" else 1.0 / np.sqrt(2.0))
+                ud = b.x.unit or ("µm pp" if kind == "disp" else
+                                  "mm/s rms" if kind == "vel" else "g")
+                _funits.add(ud)
+                _cpauto = max(_cpauto, cpmx)
+                fwd = cpm >= 0
+                # color por cojinete; forward sólido, backward punteado
+                if _multi:
+                    col = _TREND_PAL[i % len(_TREND_PAL)]
+                    cf, cb = col, col
+                else:
+                    cf, cb = _NAVY, _AMBER      # clásico: fwd navy / bwd ámbar
+                fig.add_trace(go.Scatter(x=cpm[fwd], y=amp[fwd], mode="lines",
+                              line=dict(color=cf, width=1.2),
+                              name=f"{nm} →" if _multi else "Forward (+)",
+                              hovertemplate=f"<b>{nm} fwd</b><br>%{{x:,.0f}} cpm<br>"
+                                            f"%{{y:.2f}} {ud}<extra></extra>"))
+                fig.add_trace(go.Scatter(x=cpm[~fwd], y=amp[~fwd], mode="lines",
+                              line=dict(color=cb, width=1.2,
+                                        dash="dot" if _multi else "solid"),
+                              name=f"{nm} ←" if _multi else "Backward (−)",
+                              hovertemplate=f"<b>{nm} bwd</b><br>%{{x:,.0f}} cpm<br>"
+                                            f"%{{y:.2f}} {ud}<extra></extra>"))
+                ef = float(np.sum(amp[fwd] ** 2))
+                eb = float(np.sum(amp[~fwd] ** 2))
+                tot = ef + eb or 1.0
+                dom = "Forward" if ef >= eb else "Backward"
+                if b.x.rpm and _ordref is None:
+                    _ordref = b.x.rpm
+                _frows.append([nm, f"{b.x.rpm:,.0f}" if b.x.rpm else "—",
+                               f"{ef/tot*100:.0f}%", f"{eb/tot*100:.0f}%", dom])
+            if not fig.data:
+                st.warning("Full Spectrum: faltan muestras o frecuencia de muestreo.")
+            else:
+                _fxmax = {"Auto (por tipo)": _cpauto, "60.000 cpm (despl)": 60000,
+                          "300.000 cpm (vel)": 300000, "600.000 cpm (accel)": 600000,
+                          "Completo": None}[fxsc]
+                _fu = next(iter(_funits)) if len(_funits) == 1 else "mixto"
+                if _ordref:
+                    for _k, _ol in [(1, "+1X"), (2, "+2X"), (3, "+3X"),
+                                    (-1, "−1X"), (-2, "−2X")]:
+                        _xo = _k * _ordref
+                        if _fxmax is None or abs(_xo) <= _fxmax:
+                            fig.add_vline(x=_xo, line=dict(color="#8090a6", width=1,
+                                          dash="dot"), annotation_text=_ol,
+                                          annotation_position="top", annotation_font_size=10)
+                fig = _layout(fig, "Full Spectrum", h=500)
+                fig.update_xaxes(
+                    title="Frecuencia direccional (cpm) · + forward / − backward",
+                    showgrid=True, gridcolor="rgba(120,140,170,.12)", showline=True,
+                    linecolor="#d9e1ec", zeroline=True, zerolinecolor="rgba(120,140,170,.45)",
+                    range=[-_fxmax, _fxmax] if _fxmax else None)
+                fig.update_layout(
+                    yaxis=dict(title=f"Amplitud ({_fu})", showgrid=True,
+                               gridcolor="rgba(120,140,170,.12)", rangemode="tozero"),
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center",
+                                x=0.5, font=dict(size=12)),
+                    margin=dict(l=64, r=28, t=52, b=72), hovermode="x unified",
+                    plot_bgcolor="white", paper_bgcolor="white")
+                st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+                _download_fig_table_button(
+                    fig, ["Cojinete", "RPM", "Forward %", "Backward %", "Dominante"], _frows,
+                    _vfile(f"Full Spectrum {'-'.join(fsel[:3])}"), key="fs",
+                    table_title=f"Full Spectrum · {cur_asset} · {_fecha}")
+                from core.ui_industrial import html_table
+                html_table(["Cojinete", "RPM", "Forward %", "Backward %", "Dominante"], _frows)
+                # Interpretación (del primer cojinete)
+                if _frows:
+                    _b0 = _frows[0]
+                    _bwd = float(_b0[3].rstrip("%"))
+                    _dc = "#1f9d55" if _b0[4] == "Forward" else "#e8890c"
+                    _warn = (" Backward >30% → sospecha de roce (rub), anisotropía de "
+                             "soporte o inestabilidad." if _bwd > 30 else
+                             " Precesión mayormente forward = sano (sincrónico normal).")
+                    st.markdown(
+                        f"<div style='border-left:4px solid {_dc};background:#f8fafc;border:1px "
+                        f"solid #e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
+                        f"<span style='background:{_dc};color:#fff;border-radius:6px;padding:2px "
+                        f"9px;font:700 11px IBM Plex Mono'>{_b0[4].upper()}</span>  "
+                        f"<b>{_b0[0]}: {_b0[2]} fwd / {_b0[3]} bwd.</b>"
+                        f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{_warn} "
+                        f"El espectro direccional separa fuerzas co- y contra-rotatorias "
+                        f"(no lo da System1 estándar).</div></div>", unsafe_allow_html=True)
+                st.caption("X direccional en cpm: +forward / −backward · default por tipo "
+                           "(despl 60k · vel 300k · accel 600k) · órdenes ±1X,±2X,±3X. "
+                           "Varios cojinetes = color por cojinete (fwd sólido / bwd punteado).")
 
 elif view == "Órbita":
     b = _pick_bearing("orb_b")
