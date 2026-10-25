@@ -1263,46 +1263,115 @@ elif view == "Órbita":
         st.warning("Órbita: necesita el **par X/Y** de un cojinete. Sube ambos CSV "
                    "(ej. 1xd.csv + 1yd.csv).")
     else:
-        fmode = st.selectbox("Filtro", ["Direct", "1X", "2X"], index=0, key="orb_f")
-        xv, yv, prec, trav, sub = b.x.v, b.y.v, "", "", ""
+        oc1, oc2 = st.columns([1, 3])
+        with oc1:
+            fmode = st.selectbox("Filtro", ["Direct", "1X", "2X"], index=0, key="orb_f")
+        xv, yv, prec, trav = b.x.v, b.y.v, "", ""
 
         class _Sig:
             def __init__(self, t, x): self.time = t; self.x = x; self.metadata = {}
+        sp = None
         try:
             from core.orbit import compute_orbit
             res = compute_orbit(_Sig(b.x.t, b.x.v), _Sig(b.y.t, b.y.v),
                                 filter_mode=fmode, samples_per_rev=b.x.spr or None,
                                 rpm_override=b.x.rpm)
-            xv = np.asarray(res.plot_x, float); yv = np.asarray(res.plot_y, float)
+            xv = np.asarray(res.plot_x, float)
+            yv = np.asarray(res.plot_y, float)
             prec = str(getattr(res, "precession", "") or "")
             trav = str(getattr(res, "traversal", "") or "")
             sp = getattr(res, "start_point", None)
         except Exception:  # noqa: BLE001
-            n = min(b.x.v.size, b.y.v.size); xv, yv = b.x.v[:n], b.y.v[:n]; sp = None
+            n = min(b.x.v.size, b.y.v.size)
+            xv, yv = b.x.v[:n], b.y.v[:n]
+        # ---- Métricas de forma (Bently pág 69): eje mayor/menor + elipticidad + Smax ----
+        cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
+        _pc = np.column_stack([xv - cx, yv - cy])
+        major = minor = ellip = smax = 0.0
+        if _pc.shape[0] > 2:
+            try:
+                _, _, _vt = np.linalg.svd(_pc, full_matrices=False)
+                _pj = _pc @ _vt[0]
+                _pn = _pc @ _vt[1]
+                major = float(_pj.max() - _pj.min())
+                minor = float(_pn.max() - _pn.min())
+                ellip = (minor / major) if major else 0.0
+                smax = float(np.max(np.hypot(_pc[:, 0], _pc[:, 1])))
+            except Exception:  # noqa: BLE001
+                pass
+        # diagnóstico de forma por Bently
+        if ellip >= 0.8:
+            shp, shc = "Circular — desbalance / condición sana", "#1f9d55"
+        elif ellip >= 0.4:
+            shp, shc = "Elíptica — precarga o anisotropía de rigidez", "#e8890c"
+        else:
+            shp, shc = "Muy plana — precarga fuerte / desalineación", "#dc3545"
+        # precesión en nomenclatura Bently
+        _precd = prec
+        if prec.lower().startswith("back") or "invers" in prec.lower():
+            _precd = "Inversa (reverse)"
+        elif prec.lower().startswith("forw") or "adel" in prec.lower():
+            _precd = "Hacia adelante (forward)"
+
         fig = go.Figure(go.Scatter(x=xv, y=yv, mode="lines",
-                                   line=dict(color=_NAVY, width=1.4)))
-        _sx = sp[0] if (sp is not None and len(sp) == 2) else (xv[0] if xv.size else 0)
-        _sy = sp[1] if (sp is not None and len(sp) == 2) else (yv[0] if yv.size else 0)
-        fig.add_trace(go.Scatter(x=[_sx], y=[_sy], mode="markers",
-                      marker=dict(color="#1f9d55", size=10),
-                      name="keyphasor"))
+                                   line=dict(color=_NAVY, width=1.6), name=b.name))
+        # Marcas de KEYPHASOR = ORDEN (Bently pág 70: nº de marcas = frecuencia relativa).
+        _ord = {"Direct": 1, "1X": 1, "2X": 2}.get(fmode, 1)
+        if xv.size:
+            _idx = [int(round(k / _ord * (xv.size - 1))) for k in range(_ord)]
+            if sp is not None and len(sp) == 2:
+                _kx, _ky = [sp[0]], [sp[1]]
+            else:
+                _kx, _ky = [], []
+            for j in _idx:
+                _kx.append(float(xv[j]))
+                _ky.append(float(yv[j]))
+            fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
+                          marker=dict(color="#1f9d55", size=12, line=dict(color="white",
+                                      width=1.5)), name="keyphasor (inicio)"))
+            if len(_kx) > 1:
+                fig.add_trace(go.Scatter(x=_kx[1:], y=_ky[1:], mode="markers",
+                              marker=dict(color="#1f9d55", size=8, symbol="circle-open"),
+                              name="keyphasor", showlegend=False, hoverinfo="skip"))
         fig.update_xaxes(title=f"{b.x.label} ({b.x.unit or 'µm'})",
-                         scaleanchor="y", scaleratio=1, zeroline=True)
-        fig.update_yaxes(title=f"{b.y.label} ({b.y.unit or 'µm'})", zeroline=True)
+                         scaleanchor="y", scaleratio=1, zeroline=True,
+                         zerolinecolor="rgba(120,140,170,.45)",
+                         gridcolor="rgba(120,140,170,.12)")
+        fig.update_yaxes(title=f"{b.y.label} ({b.y.unit or 'µm'})", zeroline=True,
+                         zerolinecolor="rgba(120,140,170,.45)",
+                         gridcolor="rgba(120,140,170,.12)")
         _ttl = f"Órbita · {b.name} · {fmode}"
-        if prec:
-            _ttl += f"  ·  precesión {prec}"
-        st.plotly_chart(_layout(fig, _ttl, h=500), use_container_width=True, config=_NOBAR)
-        _download_fig_button(fig, _vfile(f"Orbita {b.name}"), key="orb")
-        _bits = []
-        if prec:
-            _bits.append(f"Precesión: **{prec}**")
-        if trav:
-            _bits.append(f"sentido: {trav}")
-        if b.x.rpm:
-            _bits.append(f"{b.x.rpm:.0f} rpm")
-        st.caption(" · ".join(_bits) + ("  ·  punto verde = marca keyphasor." if _bits
-                   else "Punto verde = keyphasor."))
+        if _precd:
+            _ttl += f"  ·  precesión {_precd}"
+        fig = _layout(fig, _ttl, h=560)
+        fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                          legend=dict(orientation="h", yanchor="top", y=-0.1,
+                                      xanchor="center", x=0.5))
+        st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+        _u = b.x.unit or "µm"
+        _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _precd or "—",
+                   trav or "—", f"{major:.1f} {_u}", f"{minor:.1f} {_u}",
+                   f"{ellip:.2f}", f"{smax:.1f} {_u}"]]
+        _ocols = ["Cojinete", "RPM", "Precesión", "Sentido giro", "Eje mayor",
+                  "Eje menor", "Elipticidad", "Smax"]
+        _download_fig_table_button(fig, _ocols, _orows,
+                                   _vfile(f"Orbita {b.name} {fmode}"), key="orb",
+                                   table_title=f"Órbita · {cur_asset} · {b.name} · {fmode}")
+        from core.ui_industrial import html_table
+        html_table(_ocols, _orows)
+        st.markdown(
+            f"<div style='border-left:4px solid {shc};background:#f8fafc;border:1px solid "
+            f"#e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
+            f"<span style='background:{shc};color:#fff;border-radius:6px;padding:2px 9px;"
+            f"font:700 11px IBM Plex Mono'>FORMA</span>  <b>{shp}.</b>"
+            f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>Elipticidad "
+            f"{ellip:.2f} (1 = círculo · 0 = línea) · eje mayor {major:.1f} {_u} · menor "
+            f"{minor:.1f} {_u} · Smax {smax:.1f} {_u}. Bently: círculo = solo desbalance con "
+            f"rigidez igual en todas direcciones; elíptica/plana = precarga o rigidez "
+            f"desigual (desalineación). El punto verde = keyphasor; nº de marcas = orden "
+            f"({_ord}× aquí).</div></div>", unsafe_allow_html=True)
+        st.caption("Movimiento del eje X vs Y · aspecto 1:1 real · punto verde = marca "
+                   "keyphasor (referencia de ángulo del rotor). Base: curso Bently Nevada.")
 
 elif view == "Shaft Centerline":
     b = _pick_bearing("sc_b")
