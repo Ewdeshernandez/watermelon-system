@@ -255,9 +255,18 @@ def _ch_setpoint(ch):
     return None
 
 
+# Keyphasor por tren: turbina (coj 1,2 + gbx) ~14000 · generador (coj 5,6) ~1800.
+_rpm_turb = next((c.rpm for c in rec.channels if c.bearing in ("1", "2") and c.rpm), None)
+_rpm_gen = next((c.rpm for c in rec.channels if c.bearing in ("5", "6") and c.rpm), None)
+_kph = []
+if _rpm_turb:
+    _kph.append(f"Keyphasor 1 (turbina) {_rpm_turb:,.0f} rpm")
+if _rpm_gen and (not _rpm_turb or abs(_rpm_gen - _rpm_turb) > 50):
+    _kph.append(f"Keyphasor 2 (generador) {_rpm_gen:,.0f} rpm")
 st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
            f"{len(rec.bearings)} cojinete(s) con par X/Y"
-           + (f"  ·  {_rpm:.0f} rpm" if _rpm else ""))
+           + ("  ·  " + " · ".join(_kph) if _kph
+              else (f"  ·  {_rpm:.0f} rpm" if _rpm else "")))
 
 
 # =========================================================
@@ -349,6 +358,7 @@ def _trend_block():
 
     fig = go.Figure()
     units_seen, n_pts, lim_lines = set(), 0, {}
+    ends, t_min, t_max = [], None, None     # último punto de cada canal + rango X
     with st.spinner("Calculando tendencias…"):
         for i, lab in enumerate(sel):
             ch = cmap[lab]
@@ -363,6 +373,9 @@ def _trend_block():
                 line=dict(color=col, width=2.4, shape="spline", smoothing=0.6),
                 hovertemplate=f"<b>{lab}</b><br>%{{x|%d %b %H:%M}}<br>"
                               f"%{{y:.1f}} {unit or ''}<extra></extra>"))
+            ends.append((ts[-1], vals[-1], col, lab))
+            t_min = ts[0] if t_min is None else min(t_min, ts[0])
+            t_max = ts[-1] if t_max is None else max(t_max, ts[-1])
             # alarma/danger configurados del canal (solo si la métrica es overall/pp)
             if mk == "pp":
                 sp = _ch_setpoint(ch)
@@ -373,6 +386,15 @@ def _trend_block():
     if not fig.data:
         st.warning("Sin datos para los canales elegidos.")
         return
+    # VALOR ACTUAL al final de cada línea (marcador + etiqueta, color del canal)
+    for xt, yv, col, lab in ends:
+        fig.add_trace(go.Scatter(x=[xt], y=[yv], mode="markers",
+                                 marker=dict(color=col, size=7),
+                                 hoverinfo="skip", showlegend=False))
+        fig.add_annotation(x=xt, y=yv, text=f"<b>{yv:.1f}</b>", showarrow=False,
+                           xanchor="left", xshift=9, font=dict(color=col, size=12.5,
+                           family="IBM Plex Mono"),
+                           bgcolor="rgba(255,255,255,0.72)")
     # líneas de alarma/danger (dedup por valor; etiqueta a la IZQUIERDA, dentro del
     # plot, sobre fondo claro → no se corta en el borde derecho).
     for val, (col, _txt) in lim_lines.items():
@@ -383,8 +405,14 @@ def _trend_block():
                       annotation_bgcolor="rgba(255,255,255,0.75)")
     _unit = next(iter(units_seen)) if len(units_seen) == 1 else "mixto"
     fig = _layout(fig, f"Tendencia · {met}", h=500)
+    # Rango X PEGADO al inicio (sin padding a la izquierda) + ~6% a la derecha
+    # para que quepa la etiqueta del valor actual al final de cada línea.
+    _xr = None
+    if t_min is not None and t_max is not None and t_max > t_min:
+        _pad = (t_max - t_min) * 0.06
+        _xr = [t_min, t_max + _pad]
     fig.update_xaxes(title="", showgrid=True, gridcolor="rgba(120,140,170,.12)",
-                     showline=True, linecolor="#d9e1ec",
+                     showline=True, linecolor="#d9e1ec", range=_xr,
                      rangeslider=dict(visible=False))
     fig.update_yaxes(title=f"{met} ({_unit or 'a.u.'})", showgrid=True,
                      gridcolor="rgba(120,140,170,.12)", zeroline=False)
@@ -393,7 +421,7 @@ def _trend_block():
         showlegend=True,
         legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center", x=0.5,
                     font=dict(size=12), bgcolor="rgba(0,0,0,0)"),
-        margin=dict(l=64, r=28, t=52, b=72),
+        margin=dict(l=64, r=52, t=52, b=72),
         hovermode="x unified",
         plot_bgcolor="white", paper_bgcolor="white")
     st.plotly_chart(fig, use_container_width=True)
@@ -691,12 +719,13 @@ if view == "Tabular":
             n_dang += sev == "dang"
         _f = lambda x: "—" if x is None else f"{x:.1f}"  # noqa: E731
         _p = lambda x: "—" if x is None else f"{x:.0f}°"  # noqa: E731
-        rows.append([dot(sev), c.label, tipo, unit, _f(alarm), _f(danger),
+        _rp = "—" if not c.rpm else f"{c.rpm:,.0f}"       # rpm del keyphasor del canal
+        rows.append([dot(sev), c.label, tipo, unit, _rp, _f(alarm), _f(danger),
                      _f(overall), _f(a1), _p(ph1), _f(a2), _p(ph2)])
-        img_rows.append([c.label, tipo, unit, _f(alarm), _f(danger),
+        img_rows.append([c.label, tipo, unit, _rp, _f(alarm), _f(danger),
                          _f(overall), _f(a1), _p(ph1), _f(a2), _p(ph2)])
         sev_list.append(sev)
-    _cols = ["", "Sensor", "Tipo", "Unidades", "Alarma", "Danger", "Directa",
+    _cols = ["", "Sensor", "Tipo", "Unidades", "RPM", "Alarma", "Danger", "Directa",
              "1X", "1X ∠", "2X", "2X ∠"]
     if rows:
         html_table(_cols, rows, raw_cols=[0])
