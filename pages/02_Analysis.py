@@ -1308,6 +1308,7 @@ elif view == "Órbita":
         # 2) Direct = TODAS las vueltas (como System1 [All Data], keyphasor por vuelta).
         #    1X/2X = promedio SÍNCRONO + órbita ABIERTA con hueco en el keyphasor (Bently).
         sp = None
+        bp = None                                                # punto BLANCO (antes del trigger)
         _kmarks = []
         if spr and spr > 4 and Hf.size >= 2 * spr:
             _nr = Hf.size // spr
@@ -1321,7 +1322,8 @@ elif view == "Órbita":
                 _g = max(2, spr // 14)                           # HUECO en el keyphasor
                 xv = Ha[_g:]
                 yv = Va[_g:]
-                sp = (float(Ha[0]), float(Va[0]))
+                sp = (float(Ha[0]), float(Va[0]))                # BRILLANTE = trigger (muestra 0)
+                bp = (float(Ha[-1]), float(Va[-1]))              # BLANCO = muestra ANTES del trigger
                 _kmarks = [sp]
         else:
             xv, yv = Hf, Vf
@@ -1391,18 +1393,18 @@ elif view == "Órbita":
                                           line=dict(color="white", width=0.8)),
                               name="keyphasor (c/vuelta)"))
             else:
-                # Par punto BRILLANTE (trigger, inicio) + punto BLANCO (sig. muestra en el
-                # sentido de recorrido) — Bently pág 78: la secuencia blanco→brillante marca
-                # visualmente la dirección de PRECESIÓN de la órbita.
+                # Par punto BLANCO (muestra ANTES del trigger, lado de entrada) + punto
+                # BRILLANTE (trigger, muestra 0) — Bently pág 78: la secuencia blanco→brillante
+                # apunta en el sentido de recorrido (precesión) de la órbita.
+                if bp is not None:
+                    fig.add_trace(go.Scatter(x=[bp[0]], y=[bp[1]], mode="markers",
+                                  marker=dict(color="white", size=11,
+                                              line=dict(color="#1f9d55", width=2)),
+                                  name="blanco (antes del trigger)"))
                 fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
                               marker=dict(color="#1f9d55", size=13,
                                           line=dict(color="white", width=1.6)),
                               name="keyphasor (brillante)"))
-                if len(xv) > 1:
-                    fig.add_trace(go.Scatter(x=[xv[0]], y=[yv[0]], mode="markers",
-                                  marker=dict(color="white", size=11,
-                                              line=dict(color="#1f9d55", width=2)),
-                                  name="blanco (dir. precesión)"))
         # FLECHA = sentido de PRECESIÓN de la órbita (cómo recorre el lazo: CCW→izq / CW→der).
         _ad = -1.0 if orbit_dir == "CCW" else 1.0
         _ya = (smax if smax else 1.0) * 1.02
@@ -1410,9 +1412,14 @@ elif view == "Órbita":
                            ax=-_ad * (smax if smax else 1.0) * 0.42, ay=_ya,
                            xref="x", yref="y", axref="x", ayref="y", showarrow=True,
                            arrowhead=2, arrowsize=1.4, arrowwidth=2.2, arrowcolor="#e8890c")
+        # Headline = PRECESIÓN (forward/reverse): diagnóstico independiente del extremo de
+        # observación y concordante con el full spectrum. El glifo = sentido EN EL GRÁFICO
+        # (desde las sondas); en el NDE una máquina CW-en-DE se dibuja CCW.
+        _gl = "↺" if orbit_dir == "CCW" else "↻"
         fig.add_annotation(x=0, y=_ya,
-                           text=f"<b>{'↺ CCW' if orbit_dir == 'CCW' else '↻ CW'} · "
-                                f"{prec}</b>",
+                           text=f"<b>Precesión: {_precd}</b>   "
+                                f"<span style='color:#8090a6'>{_gl} sentido en gráfico "
+                                f"(desde sondas)</span>",
                            showarrow=False, yshift=16,
                            font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
         fig.update_xaxes(title=f"Horizontal → ({b.x.unit or 'µm'})",
