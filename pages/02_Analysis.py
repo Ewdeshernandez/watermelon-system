@@ -373,7 +373,7 @@ def _trend_block():
             col = _TREND_PAL[i % len(_TREND_PAL)]
             fig.add_trace(go.Scatter(
                 x=ts, y=vals, mode="lines", name=lab,
-                line=dict(color=col, width=2.4, shape="spline", smoothing=0.6),
+                line=dict(color=col, width=1.7, shape="spline", smoothing=1.0),
                 hovertemplate=f"<b>{lab}</b><br>%{{x|%d %b %H:%M}}<br>"
                               f"%{{y:.1f}} {unit or ''}<extra></extra>"))
             ends.append((ts[-1], vals[-1], col, lab))
@@ -402,20 +402,21 @@ def _trend_block():
     # canales elegidos (turbina ~14000 / generador ~1800). Escala aparte de la vibración.
     rpm_on_axis = False
     if rpm_on:
-        _seen_pts, _rcol = set(), "#8090a6"
+        # dedupe por KEYPHASOR (turbina/generador), no por punto: 1XD y 2XD comparten
+        # la turbina → una sola línea RPM, no dos iguales.
+        _seen_kph, _rcol = set(), "#8090a6"
         for lab in sel:
             ch = cmap[lab]
-            if ch.cap_point in _seen_pts:
+            _kname = "turbina" if (ch.rpm or 0) > 5000 else "generador"
+            if _kname in _seen_kph:
                 continue
-            _seen_pts.add(ch.cap_point)
             rts, rvals, _ = _trend(_ct, ch.cap_point, "rpm", axis=ch.cap_axis, limit=wlim)
             if not rts:
                 continue
-            _med = float(np.nanmedian(rvals))
-            _kname = "turbina" if _med > 5000 else "generador"
+            _seen_kph.add(_kname)
             fig.add_trace(go.Scatter(
                 x=rts, y=rvals, mode="lines", name=f"RPM {_kname}", yaxis="y2",
-                line=dict(color=_rcol, width=1.6, dash="dot", shape="spline", smoothing=0.5),
+                line=dict(color=_rcol, width=1.3, dash="dot", shape="spline", smoothing=1.0),
                 hovertemplate=f"<b>RPM {_kname}</b><br>%{{x|%d %b %H:%M}}<br>"
                               f"%{{y:,.0f}} rpm<extra></extra>"))
             fig.add_annotation(x=rts[-1], y=rvals[-1], yref="y2", text=f"{rvals[-1]:,.0f}",
