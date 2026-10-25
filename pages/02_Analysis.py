@@ -348,6 +348,8 @@ def _trend_block():
     with c3:
         win = st.selectbox("Ventana", ["Todo", "30 días", "7 días", "24 h"],
                            key="tr_win")
+    rpm_on = st.checkbox("Superponer RPM (eje derecho) — comparar vibración vs velocidad",
+                         key="tr_rpm")
     mk = {"Overall pp": "pp", "RMS": "rms", "1X amp": "1x"}[met]
     wlim = {"24 h": 30, "7 días": 180, "30 días": 800, "Todo": 5000}[win]
     if not sel:
@@ -395,6 +397,31 @@ def _trend_block():
                            xanchor="left", xshift=9, font=dict(color=col, size=12.5,
                            family="IBM Plex Mono"),
                            bgcolor="rgba(255,255,255,0.72)")
+    # SUPERPONER RPM en el eje DERECHO (y2): una línea por keyphasor distinto de los
+    # canales elegidos (turbina ~14000 / generador ~1800). Escala aparte de la vibración.
+    rpm_on_axis = False
+    if rpm_on:
+        _seen_pts, _rcol = set(), "#8090a6"
+        for lab in sel:
+            ch = cmap[lab]
+            if ch.cap_point in _seen_pts:
+                continue
+            _seen_pts.add(ch.cap_point)
+            rts, rvals, _ = _trend(_ct, ch.cap_point, "rpm", axis=ch.cap_axis, limit=wlim)
+            if not rts:
+                continue
+            _med = float(np.nanmedian(rvals))
+            _kname = "turbina" if _med > 5000 else "generador"
+            fig.add_trace(go.Scatter(
+                x=rts, y=rvals, mode="lines", name=f"RPM {_kname}", yaxis="y2",
+                line=dict(color=_rcol, width=1.6, dash="dot", shape="spline", smoothing=0.5),
+                hovertemplate=f"<b>RPM {_kname}</b><br>%{{x|%d %b %H:%M}}<br>"
+                              f"%{{y:,.0f}} rpm<extra></extra>"))
+            fig.add_annotation(x=rts[-1], y=rvals[-1], yref="y2", text=f"{rvals[-1]:,.0f}",
+                               showarrow=False, xanchor="left", xshift=9,
+                               font=dict(color=_rcol, size=11, family="IBM Plex Mono"),
+                               bgcolor="rgba(255,255,255,0.72)")
+            rpm_on_axis = True
     # líneas de alarma/danger (dedup por valor; etiqueta a la IZQUIERDA, dentro del
     # plot, sobre fondo claro → no se corta en el borde derecho).
     for val, (col, _txt) in lim_lines.items():
@@ -414,16 +441,20 @@ def _trend_block():
     fig.update_xaxes(title="", showgrid=True, gridcolor="rgba(120,140,170,.12)",
                      showline=True, linecolor="#d9e1ec", range=_xr,
                      rangeslider=dict(visible=False))
-    fig.update_yaxes(title=f"{met} ({_unit or 'a.u.'})", showgrid=True,
-                     gridcolor="rgba(120,140,170,.12)", zeroline=False)
+    fig.update_layout(yaxis=dict(title=f"{met} ({_unit or 'a.u.'})", showgrid=True,
+                                 gridcolor="rgba(120,140,170,.12)", zeroline=False))
     # leyenda ABAJO (no choca con el título) + márgenes amplios + hover unificado
     fig.update_layout(
         showlegend=True,
         legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center", x=0.5,
                     font=dict(size=12), bgcolor="rgba(0,0,0,0)"),
-        margin=dict(l=64, r=52, t=52, b=72),
+        margin=dict(l=64, r=78 if rpm_on_axis else 52, t=52, b=72),
         hovermode="x unified",
         plot_bgcolor="white", paper_bgcolor="white")
+    if rpm_on_axis:
+        fig.update_layout(yaxis2=dict(title="RPM", overlaying="y", side="right",
+                                      showgrid=False, color="#5a6b85",
+                                      rangemode="tozero"))
     st.plotly_chart(fig, use_container_width=True)
     _download_fig_button(fig, _vfile(f"Tendencia {met}"), key="trend")
     _nota = (f" · unidades {_unit}" if _unit != "mixto"

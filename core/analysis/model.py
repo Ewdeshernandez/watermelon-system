@@ -391,7 +391,9 @@ def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40,
         vf = v[np.isfinite(v)]
         if not vf.size:
             continue
-        if metric == "rms":
+        if metric == "rpm":
+            val = float(cap.rpm) if cap.rpm else float("nan")
+        elif metric == "rms":
             val = float(np.std(vf))
         elif metric == "1x":
             val = _amp_1x(vf, cap.rpm or 0.0, cap.fs_hz or 0.0)
@@ -405,7 +407,7 @@ def trend_series(caps_meta, point: str, metric: str = "pp", limit: int = 40,
         except Exception:  # noqa: BLE001
             continue
         vals.append(val)
-        unit = unit or cap.unit_of(ch)
+        unit = ("rpm" if metric == "rpm" else (unit or cap.unit_of(ch)))
     return ts, vals, unit
 
 
