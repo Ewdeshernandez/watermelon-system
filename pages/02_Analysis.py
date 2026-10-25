@@ -1305,18 +1305,28 @@ elif view == "Órbita":
             return np.fft.irfft(out, sig.size)
         _order = {"Direct": 0, "1X": 1, "2X": 2}.get(fmode, 0)
         Hf, Vf = _ofilt(H, _order), _ofilt(V, _order)
-        # 2) Promedio SÍNCRONO vuelta a vuelta → órbita limpia + keyphasor en la muestra 0.
+        # 2) Direct = TODAS las vueltas (como System1 [All Data], keyphasor por vuelta).
+        #    1X/2X = promedio SÍNCRONO + órbita ABIERTA con hueco en el keyphasor (Bently).
         sp = None
+        _kmarks = []
         if spr and spr > 4 and Hf.size >= 2 * spr:
             _nr = Hf.size // spr
-            Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
-            Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
-            xv = np.append(Ha, Ha[0])
-            yv = np.append(Va, Va[0])
-            sp = (float(Ha[0]), float(Va[0]))
+            if _order == 0:
+                xv, yv = Hf, Vf                                  # todas las vueltas
+                _kmarks = [(float(Hf[i * spr]), float(Vf[i * spr])) for i in range(_nr)]
+                sp = _kmarks[0] if _kmarks else None
+            else:
+                Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
+                Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
+                _g = max(2, spr // 14)                           # HUECO en el keyphasor
+                xv = Ha[_g:]
+                yv = Va[_g:]
+                sp = (float(Ha[0]), float(Va[0]))
+                _kmarks = [sp]
         else:
             xv, yv = Hf, Vf
             sp = (float(Hf[0]), float(Vf[0])) if Hf.size else None
+            _kmarks = [sp] if sp else []
         # 3) Sentido de giro por el signo del área (Green); precesión fwd/rev por el
         #    1X direccional (z=H+iV → +f1 forward vs −f1 reverse).
         _area = float(np.sum(xv[:-1] * yv[1:] - xv[1:] * yv[:-1])) if xv.size > 2 else 0.0
@@ -1357,24 +1367,43 @@ elif view == "Órbita":
 
         fig = go.Figure(go.Scatter(x=xv, y=yv, mode="lines",
                                    line=dict(color=_NAVY, width=1.6), name=b.name))
-        # Marcas de KEYPHASOR = ORDEN (Bently pág 70: nº de marcas = frecuencia relativa).
-        _ord = {"Direct": 1, "1X": 1, "2X": 2}.get(fmode, 1)
-        if xv.size:
-            _idx = [int(round(k / _ord * (xv.size - 1))) for k in range(_ord)]
-            if sp is not None and len(sp) == 2:
-                _kx, _ky = [sp[0]], [sp[1]]
+        _L = (smax if smax else 1.0) * 1.22            # alcance para ejes de sonda / arreglo
+        # EJES DE SONDA (convención Bently: desde el TOP, R→derecha / L→izquierda, 0°→180°).
+        # X en el lado R a ang_x° del top; Y en el lado L a ang_y° del top.
+        _dxh, _dxv = np.sin(np.radians(ang_x)), np.cos(np.radians(ang_x))     # X (R)
+        _dyh, _dyv = -np.sin(np.radians(ang_y)), np.cos(np.radians(ang_y))    # Y (L)
+        for _dh, _dv, _plab, _pcol in [(_dxh, _dxv, f"X {int(ang_x)}°R", "#8090a6"),
+                                       (_dyh, _dyv, f"Y {int(ang_y)}°L", "#8090a6")]:
+            fig.add_trace(go.Scatter(x=[-_L * _dh, _L * _dh], y=[-_L * _dv, _L * _dv],
+                          mode="lines", line=dict(color=_pcol, width=1, dash="dot"),
+                          hoverinfo="skip", showlegend=False))
+            fig.add_annotation(x=_L * _dh, y=_L * _dv, text=_plab, showarrow=False,
+                               font=dict(color=_pcol, size=10, family="IBM Plex Mono"))
+        # KEYPHASOR: Direct = una marca por vuelta (cluster, como System1); 1X/2X = punto
+        # grande en el HUECO (inicio). El trazo filtrado queda ABIERTO → no toca el punto.
+        if _kmarks:
+            _kx = [p[0] for p in _kmarks]
+            _ky = [p[1] for p in _kmarks]
+            if _order == 0 and len(_kmarks) > 1:
+                fig.add_trace(go.Scatter(x=_kx, y=_ky, mode="markers",
+                              marker=dict(color="#1f9d55", size=7,
+                                          line=dict(color="white", width=0.8)),
+                              name="keyphasor (c/vuelta)"))
             else:
-                _kx, _ky = [], []
-            for j in _idx:
-                _kx.append(float(xv[j]))
-                _ky.append(float(yv[j]))
-            fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
-                          marker=dict(color="#1f9d55", size=12, line=dict(color="white",
-                                      width=1.5)), name="keyphasor (inicio)"))
-            if len(_kx) > 1:
-                fig.add_trace(go.Scatter(x=_kx[1:], y=_ky[1:], mode="markers",
-                              marker=dict(color="#1f9d55", size=8, symbol="circle-open"),
-                              name="keyphasor", showlegend=False, hoverinfo="skip"))
+                fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
+                              marker=dict(color="#1f9d55", size=13,
+                                          line=dict(color="white", width=1.6)),
+                              name="keyphasor"))
+        # FLECHA de sentido de giro (arriba de la órbita; CCW→izquierda, CW→derecha).
+        _ad = -1.0 if trav == "CCW" else 1.0
+        _ya = (smax if smax else 1.0) * 1.02
+        fig.add_annotation(x=_ad * (smax if smax else 1.0) * 0.42, y=_ya,
+                           ax=-_ad * (smax if smax else 1.0) * 0.42, ay=_ya,
+                           xref="x", yref="y", axref="x", ayref="y", showarrow=True,
+                           arrowhead=2, arrowsize=1.4, arrowwidth=2.2, arrowcolor="#e8890c")
+        fig.add_annotation(x=0, y=_ya, text=f"<b>{'↺ CCW' if trav == 'CCW' else '↻ CW'}</b>",
+                           showarrow=False, yshift=16,
+                           font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
         fig.update_xaxes(title=f"Horizontal → ({b.x.unit or 'µm'})",
                          scaleanchor="y", scaleratio=1, zeroline=True,
                          zerolinecolor="rgba(120,140,170,.45)",
@@ -1385,7 +1414,7 @@ elif view == "Órbita":
         _ttl = f"Órbita · {b.name} · {fmode}"
         if _precd:
             _ttl += f"  ·  precesión {_precd}"
-        fig = _layout(fig, _ttl, h=560)
+        fig = _layout(fig, _ttl, h=580)
         fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
                           legend=dict(orientation="h", yanchor="top", y=-0.1,
                                       xanchor="center", x=0.5))
@@ -1408,10 +1437,11 @@ elif view == "Órbita":
             f"font:700 11px IBM Plex Mono'>FORMA</span>  <b>{shp}.</b>"
             f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>Elipticidad "
             f"{ellip:.2f} (1 = círculo · 0 = línea) · eje mayor {major:.1f} {_u} · menor "
-            f"{minor:.1f} {_u} · Smax {smax:.1f} {_u}. Bently: círculo = solo desbalance con "
+            f"{minor:.1f} {_u} · Smax {smax:.1f} {_u}. Círculo = solo desbalance con "
             f"rigidez igual en todas direcciones; elíptica/plana = precarga o rigidez "
-            f"desigual (desalineación). El punto verde = keyphasor; nº de marcas = orden "
-            f"({_ord}× aquí).</div></div>", unsafe_allow_html=True)
+            f"desigual (desalineación). Punto verde = keyphasor (inicio) · flecha ámbar = "
+            f"sentido de giro · líneas punteadas = ejes de las sondas X (R) / Y (L).</div></div>",
+            unsafe_allow_html=True)
         st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde "
                    "su ángulo de montaje) · aspecto 1:1 real · promedio síncrono vuelta a "
                    "vuelta · punto verde = keyphasor (muestra 0 = referencia de ángulo del "
