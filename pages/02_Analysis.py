@@ -980,53 +980,141 @@ elif view == "Forma de Onda":
                    "mismo eje de tiempo.")
 
 elif view == "Espectro":
-    ch = _pick_channel("sp_ch")
-    v = ch.v[np.isfinite(ch.v)]
-    fs = ch.fs_hz
-    if v.size < 8 or not fs:
-        st.warning("Espectro: faltan muestras o no se pudo estimar la frecuencia de muestreo.")
-    else:
-        w = v - np.mean(v)
-        amp = np.abs(np.fft.rfft(w * np.hanning(w.size))) * (2.0 / w.size)
-        fr = np.fft.rfftfreq(w.size, d=1.0 / fs)
-        fig = go.Figure(go.Scatter(x=fr, y=amp, mode="lines",
-                                   line=dict(color=_NAVY, width=1.1)))
-        if ch.rpm:
-            f1 = ch.rpm / 60.0
-            for k, lab in [(1, "1X"), (2, "2X"), (3, "3X")]:
-                if k * f1 < fr[-1]:
-                    fig.add_vline(x=k * f1, line=dict(color=_AMBER, width=1, dash="dot"),
-                                  annotation_text=lab, annotation_position="top")
-        fig.update_xaxes(title="Frecuencia (Hz)")
-        fig.update_yaxes(title=f"Amplitud ({ch.unit or 'a.u.'})")
-        st.plotly_chart(_layout(fig, f"Espectro (FFT) · {ch.label}"), use_container_width=True, config=_NOBAR)
-        _download_fig_button(fig, _vfile(f"Espectro {ch.label}"), key="sp")
-        # Diagnóstico por norma (reutiliza core.spectrum_diagnostics)
-        if ch.rpm:
-            from core.spectrum_diagnostics import evaluate_spectrum_diagnostic
-            f1 = ch.rpm / 60.0
+    _scmap = {c.label: c for c in rec.channels}
+    _slabels = [c.label for c in rec.channels]
 
-            def _amp_at(fhz):
-                k = int(np.argmin(np.abs(fr - fhz)))
-                lo, hi = max(0, k - 2), min(amp.size, k + 3)
-                return float(np.max(amp[lo:hi])) if hi > lo else 0.0
-            harms = [{"order": k, "amp_peak": _amp_at(k * f1),
-                      "freq_cpm": k * f1 * 60.0} for k in range(1, 7)]
-            dk = int(np.argmax(amp))
-            diagS = evaluate_spectrum_diagnostic(
-                one_x_amp=harms[0]["amp_peak"], harmonics=harms,
-                overall_spec_rms=float(np.sqrt(np.mean(w ** 2))),
-                dominant_peak_freq_cpm=float(fr[dk] * 60.0),
-                dominant_peak_amp=float(amp[dk]), rpm=ch.rpm)
-            _col = diagS.get("color", "#8090a6")
-            st.markdown(
-                f"<div style='border-left:4px solid {_col};background:#f8fafc;border:1px solid "
-                f"#e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
-                f"<span style='background:{_col};color:#fff;border-radius:6px;padding:2px 9px;"
-                f"font:700 11px IBM Plex Mono'>{diagS.get('status','')}</span>  "
-                f"<b style='font-size:13px'>{diagS.get('headline','')}</b>"
-                f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>{diagS.get('narrative','')}</div>"
-                f"</div>", unsafe_allow_html=True)
+    def _spk(u):
+        u = (u or "").lower()
+        if "mm/s" in u:
+            return "vel"
+        if u.strip() in ("g", "g pk", "g rms") or "m/s2" in u or "m/s²" in u:
+            return "accel"
+        return "disp"
+    _CPMAX = {"disp": 60000, "vel": 300000, "accel": 600000}
+
+    sc1, sc2 = st.columns([3, 1])
+    with sc1:
+        ssel = st.multiselect("Canales (uno o varios)", _slabels,
+                              default=_slabels[:1], key="sp_chs")
+    with sc2:
+        xsc = st.selectbox("Escala X", ["Auto (por tipo)", "60.000 cpm (despl)",
+                           "300.000 cpm (vel)", "600.000 cpm (accel)", "Completo"],
+                           key="sp_xsc")
+    if not ssel:
+        st.info("Elegí al menos un canal.")
+    else:
+        fig = go.Figure()
+        _sunits, _hrows, _cpmax_auto, _ord_ref = set(), [], 0, None
+        for i, lab in enumerate(ssel):
+            ch = _scmap[lab]
+            v = ch.v[np.isfinite(ch.v)]
+            fs = ch.fs_hz
+            if v.size < 8 or not fs:
+                continue
+            w = v - np.mean(v)
+            win = np.hanning(w.size)
+            am = np.abs(np.fft.rfft(w * win)) * 2.0 / np.sum(win)   # cero-a-pico corregido
+            fr = np.fft.rfftfreq(w.size, d=1.0 / fs)
+            cpm = fr * 60.0
+            kind = _spk(ch.unit)
+            mode = "pp" if kind == "disp" else "rms"
+            ampd = am * (2.0 if mode == "pp" else 1.0 / np.sqrt(2.0))
+            ud = ch.unit or ("µm pp" if kind == "disp" else
+                             "mm/s rms" if kind == "vel" else "g")
+            _sunits.add(ud)
+            _cpmax_auto = max(_cpmax_auto, _CPMAX[kind])
+            col = _TREND_PAL[i % len(_TREND_PAL)]
+            fig.add_trace(go.Scatter(
+                x=cpm, y=ampd, mode="lines", name=lab,
+                line=dict(color=col, width=1.2),      # sin spline: los picos deben ser nítidos
+                hovertemplate=f"<b>{lab}</b><br>%{{x:,.0f}} cpm<br>"
+                              f"%{{y:.2f}} {ud}<extra></extra>"))
+            if ch.rpm:
+                if _ord_ref is None:
+                    _ord_ref = ch.rpm                 # 1X en cpm = rpm del primer keyphasor
+
+                def _aat(fh):
+                    k = int(np.argmin(np.abs(fr - fh)))
+                    lo, hi = max(0, k - 2), min(ampd.size, k + 3)
+                    return float(np.max(ampd[lo:hi])) if hi > lo else 0.0
+                f1 = ch.rpm / 60.0
+                _ov = float(np.ptp(v)) if mode == "pp" else float(np.std(v))
+                _hrows.append([lab, f"{_aat(f1):.2f}", f"{_aat(2*f1):.2f}",
+                               f"{_aat(3*f1):.2f}", f"{_ov:.2f} {ch.unit or ''}",
+                               f"{ch.rpm:,.0f}"])
+        if not fig.data:
+            st.warning("Espectro: faltan muestras o no se pudo estimar la fs.")
+        else:
+            _xmax = {"Auto (por tipo)": _cpmax_auto, "60.000 cpm (despl)": 60000,
+                     "300.000 cpm (vel)": 300000, "600.000 cpm (accel)": 600000,
+                     "Completo": None}[xsc]
+            _su = next(iter(_sunits)) if len(_sunits) == 1 else "mixto"
+            # marcas de ORDEN 1X-4X (del primer keyphasor) en cpm
+            if _ord_ref:
+                for _k, _ol in [(1, "1X"), (2, "2X"), (3, "3X"), (4, "4X")]:
+                    _xo = _k * _ord_ref
+                    if _xmax is None or _xo <= _xmax:
+                        fig.add_vline(x=_xo, line=dict(color="#8090a6", width=1, dash="dot"),
+                                      annotation_text=_ol, annotation_position="top",
+                                      annotation_font_size=10)
+            fig = _layout(fig, "Espectro (FFT)", h=500)
+            fig.update_xaxes(title="Frecuencia (cpm)", showgrid=True,
+                             gridcolor="rgba(120,140,170,.12)", showline=True,
+                             linecolor="#d9e1ec", zeroline=False,
+                             range=[0, _xmax] if _xmax else None)
+            fig.update_layout(
+                yaxis=dict(title=f"Amplitud ({_su})", showgrid=True,
+                           gridcolor="rgba(120,140,170,.12)", rangemode="tozero"),
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center",
+                            x=0.5, font=dict(size=12)),
+                margin=dict(l=64, r=28, t=52, b=72), hovermode="x unified",
+                plot_bgcolor="white", paper_bgcolor="white")
+            st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+            if _hrows:
+                _download_fig_table_button(
+                    fig, ["Sensor", "1X", "2X", "3X", "Overall", "RPM"], _hrows,
+                    _vfile(f"Espectro {'-'.join(ssel[:3])}"), key="sp",
+                    table_title=f"Espectro · {cur_asset} · {_fecha}")
+                from core.ui_industrial import html_table
+                html_table(["Sensor", "1X", "2X", "3X", "Overall", "RPM"], _hrows)
+            else:
+                _download_fig_button(fig, _vfile(f"Espectro {'-'.join(ssel[:3])}"), key="sp")
+            # Diagnóstico por norma con UN canal (reutiliza core.spectrum_diagnostics)
+            if len(ssel) == 1 and _scmap[ssel[0]].rpm:
+                ch = _scmap[ssel[0]]
+                v = ch.v[np.isfinite(ch.v)]
+                w = v - np.mean(v)
+                win = np.hanning(w.size)
+                amp = np.abs(np.fft.rfft(w * win)) * 2.0 / np.sum(win)
+                fr = np.fft.rfftfreq(w.size, d=1.0 / (ch.fs_hz or 1.0))
+                from core.spectrum_diagnostics import evaluate_spectrum_diagnostic
+                f1 = ch.rpm / 60.0
+
+                def _amp_at(fhz):
+                    k = int(np.argmin(np.abs(fr - fhz)))
+                    lo, hi = max(0, k - 2), min(amp.size, k + 3)
+                    return float(np.max(amp[lo:hi])) if hi > lo else 0.0
+                harms = [{"order": k, "amp_peak": _amp_at(k * f1),
+                          "freq_cpm": k * f1 * 60.0} for k in range(1, 7)]
+                dk = int(np.argmax(amp))
+                diagS = evaluate_spectrum_diagnostic(
+                    one_x_amp=harms[0]["amp_peak"], harmonics=harms,
+                    overall_spec_rms=float(np.sqrt(np.mean(w ** 2))),
+                    dominant_peak_freq_cpm=float(fr[dk] * 60.0),
+                    dominant_peak_amp=float(amp[dk]), rpm=ch.rpm)
+                _col = diagS.get("color", "#8090a6")
+                st.markdown(
+                    f"<div style='border-left:4px solid {_col};background:#f8fafc;border:1px "
+                    f"solid #e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
+                    f"<span style='background:{_col};color:#fff;border-radius:6px;padding:2px "
+                    f"9px;font:700 11px IBM Plex Mono'>{diagS.get('status','')}</span>  "
+                    f"<b style='font-size:13px'>{diagS.get('headline','')}</b>"
+                    f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>"
+                    f"{diagS.get('narrative','')}</div></div>", unsafe_allow_html=True)
+            st.caption("X en cpm (ciclos/min) · default por tipo: desplazamiento 60.000 · "
+                       "velocidad 300.000 · aceleración 600.000 · órdenes 1X-4X marcados. "
+                       "Amplitud: pp (desplazamiento) / rms (vel·accel). Picos sin suavizar.")
 
 elif view == "Full Spectrum":
     b = _pick_bearing("fs_b")
