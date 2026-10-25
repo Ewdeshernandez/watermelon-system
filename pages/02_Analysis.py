@@ -1263,27 +1263,75 @@ elif view == "Órbita":
         st.warning("Órbita: necesita el **par X/Y** de un cojinete. Sube ambos CSV "
                    "(ej. 1xd.csv + 1yd.csv).")
     else:
-        oc1, oc2 = st.columns([1, 3])
+        oc1, oc2, oc3 = st.columns([2, 1, 1])
         with oc1:
             fmode = st.selectbox("Filtro", ["Direct", "1X", "2X"], index=0, key="orb_f")
-        xv, yv, prec, trav = b.x.v, b.y.v, "", ""
+        with oc2:
+            ang_x = st.number_input("X · ° derecha del TOP", value=45, step=5,
+                                    key="orb_ax", help="Montaje de la sonda X (System1).")
+        with oc3:
+            ang_y = st.number_input("Y · ° izquierda del TOP", value=45, step=5,
+                                    key="orb_ay")
+        # ====== Órbita método Live Monitoring (validado = idéntico a System1) ======
+        px, py = np.asarray(b.x.v, float), np.asarray(b.y.v, float)
+        _n = min(px.size, py.size)
+        px, py = px[:_n], py[:_n]
+        fs = b.x.fs_hz or b.y.fs_hz
+        spr = b.x.spr or b.y.spr
+        rpm = b.x.rpm
+        # 1) Rotar a COORDENADAS DE MÁQUINA (H→derecha, V→arriba). Sondas a ±45° del
+        #    TOP → se resuelve el 2×2 (igual que Live Monitoring). Ortonormal = conserva forma.
+        _ax = np.radians(float(ang_x)); _ay = np.radians(-float(ang_y))
+        _ca, _cb = np.sin(_ax), np.cos(_ax)
+        _cc, _cd = np.sin(_ay), np.cos(_ay)
+        _det = _ca * _cd - _cb * _cc
+        if abs(_det) > 1e-6:
+            H = (_cd * px - _cb * py) / _det
+            V = (-_cc * px + _ca * py) / _det
+        else:
+            H, V = px, py
+        H = H - np.nanmean(H)
+        V = V - np.nanmean(V)
 
-        class _Sig:
-            def __init__(self, t, x): self.time = t; self.x = x; self.metadata = {}
+        def _ofilt(sig, order):
+            """Componente síncrona del orden pedido (bin FFT). order=0 → todo (Direct)."""
+            if not order or not fs or not rpm or sig.size < 8:
+                return sig
+            spc = np.fft.rfft(sig)
+            frq = np.fft.rfftfreq(sig.size, 1.0 / fs)
+            k = int(np.argmin(np.abs(frq - order * rpm / 60.0)))
+            out = np.zeros_like(spc)
+            out[k] = spc[k]
+            return np.fft.irfft(out, sig.size)
+        _order = {"Direct": 0, "1X": 1, "2X": 2}.get(fmode, 0)
+        Hf, Vf = _ofilt(H, _order), _ofilt(V, _order)
+        # 2) Promedio SÍNCRONO vuelta a vuelta → órbita limpia + keyphasor en la muestra 0.
         sp = None
-        try:
-            from core.orbit import compute_orbit
-            res = compute_orbit(_Sig(b.x.t, b.x.v), _Sig(b.y.t, b.y.v),
-                                filter_mode=fmode, samples_per_rev=b.x.spr or None,
-                                rpm_override=b.x.rpm)
-            xv = np.asarray(res.plot_x, float)
-            yv = np.asarray(res.plot_y, float)
-            prec = str(getattr(res, "precession", "") or "")
-            trav = str(getattr(res, "traversal", "") or "")
-            sp = getattr(res, "start_point", None)
-        except Exception:  # noqa: BLE001
-            n = min(b.x.v.size, b.y.v.size)
-            xv, yv = b.x.v[:n], b.y.v[:n]
+        if spr and spr > 4 and Hf.size >= 2 * spr:
+            _nr = Hf.size // spr
+            Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
+            Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
+            xv = np.append(Ha, Ha[0])
+            yv = np.append(Va, Va[0])
+            sp = (float(Ha[0]), float(Va[0]))
+        else:
+            xv, yv = Hf, Vf
+            sp = (float(Hf[0]), float(Vf[0])) if Hf.size else None
+        # 3) Sentido de giro por el signo del área (Green); precesión fwd/rev por el
+        #    1X direccional (z=H+iV → +f1 forward vs −f1 reverse).
+        _area = float(np.sum(xv[:-1] * yv[1:] - xv[1:] * yv[:-1])) if xv.size > 2 else 0.0
+        trav = "CCW" if _area > 0 else "CW"
+        prec = ""
+        if fs and rpm:
+            _z = _ofilt(H, 1) + 1j * _ofilt(V, 1)
+            _Z = np.fft.fftshift(np.fft.fft(_z))
+            _frz = np.fft.fftshift(np.fft.fftfreq(_z.size, 1.0 / fs))
+            _f1 = rpm / 60.0
+            _kf = int(np.argmin(np.abs(_frz - _f1)))
+            _kr = int(np.argmin(np.abs(_frz + _f1)))
+            prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
+        _precd = ("Hacia adelante (forward)" if prec == "Forward"
+                  else "Inversa (reverse)" if prec == "Reverse" else "")
         # ---- Métricas de forma (Bently pág 69): eje mayor/menor + elipticidad + Smax ----
         cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
         _pc = np.column_stack([xv - cx, yv - cy])
@@ -1306,12 +1354,6 @@ elif view == "Órbita":
             shp, shc = "Elíptica — precarga o anisotropía de rigidez", "#e8890c"
         else:
             shp, shc = "Muy plana — precarga fuerte / desalineación", "#dc3545"
-        # precesión en nomenclatura Bently
-        _precd = prec
-        if prec.lower().startswith("back") or "invers" in prec.lower():
-            _precd = "Inversa (reverse)"
-        elif prec.lower().startswith("forw") or "adel" in prec.lower():
-            _precd = "Hacia adelante (forward)"
 
         fig = go.Figure(go.Scatter(x=xv, y=yv, mode="lines",
                                    line=dict(color=_NAVY, width=1.6), name=b.name))
@@ -1333,11 +1375,11 @@ elif view == "Órbita":
                 fig.add_trace(go.Scatter(x=_kx[1:], y=_ky[1:], mode="markers",
                               marker=dict(color="#1f9d55", size=8, symbol="circle-open"),
                               name="keyphasor", showlegend=False, hoverinfo="skip"))
-        fig.update_xaxes(title=f"{b.x.label} ({b.x.unit or 'µm'})",
+        fig.update_xaxes(title=f"Horizontal → ({b.x.unit or 'µm'})",
                          scaleanchor="y", scaleratio=1, zeroline=True,
                          zerolinecolor="rgba(120,140,170,.45)",
                          gridcolor="rgba(120,140,170,.12)")
-        fig.update_yaxes(title=f"{b.y.label} ({b.y.unit or 'µm'})", zeroline=True,
+        fig.update_yaxes(title=f"Vertical ↑ ({b.y.unit or 'µm'})", zeroline=True,
                          zerolinecolor="rgba(120,140,170,.45)",
                          gridcolor="rgba(120,140,170,.12)")
         _ttl = f"Órbita · {b.name} · {fmode}"
@@ -1370,8 +1412,11 @@ elif view == "Órbita":
             f"rigidez igual en todas direcciones; elíptica/plana = precarga o rigidez "
             f"desigual (desalineación). El punto verde = keyphasor; nº de marcas = orden "
             f"({_ord}× aquí).</div></div>", unsafe_allow_html=True)
-        st.caption("Movimiento del eje X vs Y · aspecto 1:1 real · punto verde = marca "
-                   "keyphasor (referencia de ángulo del rotor). Base: curso Bently Nevada.")
+        st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde "
+                   "su ángulo de montaje) · aspecto 1:1 real · promedio síncrono vuelta a "
+                   "vuelta · punto verde = keyphasor (muestra 0 = referencia de ángulo del "
+                   "rotor), idéntico a System1. Base: Bently Nevada + Machinery Malfunction "
+                   "Diagnosis (Eisenmann).")
 
 elif view == "Shaft Centerline":
     b = _pick_bearing("sc_b")
