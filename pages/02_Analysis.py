@@ -38,6 +38,7 @@ SS = st.session_state
 _NAVY = "#12305e"
 _AMBER = "#e8890c"
 _STEEL = "#274b7d"
+_NOBAR = {"displayModeBar": False}   # oculta la modebar de Plotly (barra fea de Streamlit)
 
 
 @st.cache_data(show_spinner=False)
@@ -455,7 +456,7 @@ def _trend_block():
         fig.update_layout(yaxis2=dict(title="RPM", overlaying="y", side="right",
                                       showgrid=False, color="#5a6b85",
                                       rangemode="tozero"))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
     _download_fig_button(fig, _vfile(f"Tendencia {met}"), key="trend")
     _nota = (f" · unidades {_unit}" if _unit != "mixto"
              else " · unidades mixtas (ojo: distinto tipo de medición)")
@@ -785,7 +786,7 @@ elif view == "Forma de Onda":
                                line=dict(color=_NAVY, width=1.3)))
     fig.update_xaxes(title="Tiempo (s)")
     fig.update_yaxes(title=f"{ch.label} ({ch.unit or 'a.u.'})")
-    st.plotly_chart(_layout(fig, f"Forma de onda · {ch.label}"), use_container_width=True)
+    st.plotly_chart(_layout(fig, f"Forma de onda · {ch.label}"), use_container_width=True, config=_NOBAR)
     _download_fig_button(fig, _vfile(f"Forma de onda {ch.label}"), key="wf")
     # Métricas + diagnóstico (reutiliza core.waveform_metrics / waveform_diagnostics)
     from core.waveform_metrics import compute_waveform_metrics
@@ -841,7 +842,7 @@ elif view == "Espectro":
                                   annotation_text=lab, annotation_position="top")
         fig.update_xaxes(title="Frecuencia (Hz)")
         fig.update_yaxes(title=f"Amplitud ({ch.unit or 'a.u.'})")
-        st.plotly_chart(_layout(fig, f"Espectro (FFT) · {ch.label}"), use_container_width=True)
+        st.plotly_chart(_layout(fig, f"Espectro (FFT) · {ch.label}"), use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Espectro {ch.label}"), key="sp")
         # Diagnóstico por norma (reutiliza core.spectrum_diagnostics)
         if ch.rpm:
@@ -904,7 +905,7 @@ elif view == "Full Spectrum":
             fig.update_xaxes(title="Frecuencia direccional (Hz) · + forward / − backward")
             fig.update_yaxes(title=f"Amplitud ({b.x.unit or 'µm'})")
             st.plotly_chart(_layout(fig, f"Full Spectrum · {b.name}", h=500),
-                            use_container_width=True)
+                            use_container_width=True, config=_NOBAR)
             _download_fig_button(fig, _vfile(f"Full Spectrum {b.name}"), key="fs")
             # dominancia forward vs backward
             ef = float(np.sum(amp[fwd] ** 2))
@@ -958,7 +959,7 @@ elif view == "Órbita":
         _ttl = f"Órbita · {b.name} · {fmode}"
         if prec:
             _ttl += f"  ·  precesión {prec}"
-        st.plotly_chart(_layout(fig, _ttl, h=500), use_container_width=True)
+        st.plotly_chart(_layout(fig, _ttl, h=500), use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Orbita {b.name}"), key="orb")
         _bits = []
         if prec:
@@ -1000,7 +1001,7 @@ elif view == "Shaft Centerline":
                          range=[-clr * 1.1, clr * 1.1])
         fig.update_yaxes(title=f"{b.y.label} (µm)", zeroline=True, range=[-clr * 1.1, clr * 1.1])
         st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=500),
-                        use_container_width=True)
+                        use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
         st.markdown(
             f"<div style='border-left:4px solid {color};background:#f8fafc;border:1px solid #e2e8f2;"
@@ -1050,7 +1051,7 @@ elif view == "Bode":
         fig.update_yaxes(title=f"Amplitud ({unit})", row=1, col=1)
         fig.update_yaxes(title="Fase (°)", row=2, col=1)
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
-        st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=560), use_container_width=True)
+        st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=560), use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Bode {sw.label}"), key="bode")
         _diag_panel(diag, zone, zc)
 
@@ -1085,7 +1086,7 @@ elif view == "Polar":
                           font=dict(family="IBM Plex Sans"),
                           polar=dict(angularaxis=dict(direction="clockwise", rotation=90)),
                           margin=dict(l=40, r=40, t=56, b=40))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Polar {sw.label}"), key="polar")
         st.caption(f"Radio = amplitud ({unit}) · ángulo = fase · color = rpm · "
                    "anillos punteados = límites ISO 20816-2 (A/B/C).")
@@ -1117,7 +1118,7 @@ elif view == "Waterfall":
             fig.update_xaxes(title="Frecuencia (Hz)")
             fig.update_yaxes(title="Amplitud apilada (offset por sesión)", showticklabels=False)
             st.plotly_chart(_layout(fig, f"Waterfall · {pt} · {len(spectra)} sesiones", h=560),
-                            use_container_width=True)
+                            use_container_width=True, config=_NOBAR)
             _download_fig_button(fig, _vfile(f"Waterfall {pt}"), key="wf3d")
             st.caption("Cada traza = una sesión (offset vertical). Picos que crecen con el "
                        "tiempo = degradación; líneas rectas = síncronos estables.")
