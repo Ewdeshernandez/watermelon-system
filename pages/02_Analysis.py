@@ -597,6 +597,80 @@ def _download_fig_button(fig, filename, key):
     _download_png_button(png, filename, key=key)
 
 
+def _table_png(cols, rows, title=""):
+    """Tabla simple como PNG (header navy + zebra, sin columna de estado) para
+    adjuntar debajo de un gráfico en la descarga."""
+    import io
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    ncol, nrow = len(cols), len(rows)
+    fig_w = min(1.2 * ncol + 1.0, 16)
+    fig_h = 0.5 * nrow + (0.85 if title else 0.35)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
+    ax.axis("off")
+    ax.set_position([0, 0, 1, 1])
+    _top = 1.0
+    if title:
+        _top = 1.0 - 0.5 / fig_h
+        fig.text(0.010, 0.985, title, fontsize=12.5, fontweight="bold",
+                 color="#12305e", va="top", ha="left")
+    tbl = ax.table(cellText=rows, colLabels=cols, cellLoc="center",
+                   bbox=[0.006, 0.0, 0.988, _top])
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9.5)
+    for j in range(ncol):
+        h = tbl[0, j]
+        h.set_facecolor("#12305e")
+        h.get_text().set_color("white")
+        h.get_text().set_fontweight("bold")
+    for i in range(nrow):
+        for j in range(ncol):
+            cc = tbl[i + 1, j]
+            cc.set_facecolor("#f4f7fb" if i % 2 else "#ffffff")
+            cc.get_text().set_color("#0b1f3a")
+        tbl[i + 1, 0].get_text().set_fontweight("bold")
+    colw = [max([len(str(cols[j]))] + [len(str(rows[i][j])) for i in range(nrow)])
+            for j in range(ncol)]
+    _tot = float(sum(colw)) or 1.0
+    for j in range(ncol):
+        for i in range(nrow + 1):
+            tbl[i, j].set_width(colw[j] / _tot)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor="white")
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def _combine_vertical(png_top, png_bottom, gap=22):
+    """Apila dos PNG verticalmente (centrados, fondo blanco) → un solo PNG."""
+    import io
+
+    from PIL import Image
+    a = Image.open(io.BytesIO(png_top)).convert("RGB")
+    b = Image.open(io.BytesIO(png_bottom)).convert("RGB")
+    w = max(a.width, b.width)
+    out = Image.new("RGB", (w, a.height + gap + b.height), "white")
+    out.paste(a, ((w - a.width) // 2, 0))
+    out.paste(b, ((w - b.width) // 2, a.height + gap))
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _download_fig_table_button(fig, cols, rows, filename, key, table_title=""):
+    """Descarga el gráfico + una tabla de métricas apilados en una sola imagen."""
+    try:
+        import plotly.io as _pio
+        top = _fig_png_cached(_pio.to_json(fig))
+        combined = _combine_vertical(top, _table_png(cols, rows, table_title))
+    except Exception:  # noqa: BLE001
+        _download_fig_button(fig, filename, key)
+        return
+    _download_png_button(combined, filename, key=key)
+
+
 # ====================== DISPATCH DE VISTAS (una sola cadena) ======================
 if view == "Tabular":
     from core.ui_industrial import dot, html_table
@@ -853,7 +927,10 @@ elif view == "Forma de Onda":
             margin=dict(l=64, r=28, t=52, b=72), hovermode="x unified",
             plot_bgcolor="white", paper_bgcolor="white")
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
-        _download_fig_button(fig, _vfile(f"Forma de onda {'-'.join(wsel[:3])}"), key="wf")
+        _download_fig_table_button(
+            fig, ["Sensor", "Pico-pico", "RMS", "Pico", "Crest", "RPM"], _wrows,
+            _vfile(f"Forma de onda {'-'.join(wsel[:3])}"), key="wf",
+            table_title=f"Forma de onda · {cur_asset} · {_fecha}")
         # Panel de métricas clase System1 (pp · RMS · Pico · Crest · RPM por canal)
         from core.ui_industrial import html_table
         html_table(["Sensor", "Pico-pico", "RMS", "Pico", "Crest", "RPM"], _wrows)
