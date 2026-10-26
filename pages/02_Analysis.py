@@ -1326,7 +1326,7 @@ elif view == "Órbita":
             else:
                 Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
                 Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
-                _g = max(2, spr // 14)                           # HUECO en el keyphasor
+                _g = max(1, spr // 40)                           # notch mínimo (estilo Bently)
                 xv = Ha[_g:]
                 yv = Va[_g:]
                 sp = (float(Ha[0]), float(Va[0]))                # BRILLANTE = trigger (muestra 0)
@@ -1398,7 +1398,16 @@ elif view == "Órbita":
                                           line=dict(color="white", width=0.8)),
                               name="keyphasor (c/vuelta)"))
             else:
-                # KEYPHASOR = 1 punto brillante en el HUECO (inicio de la órbita, muestra 0).
+                # KEYPHASOR estilo Bently: punto brillante SOBRE la órbita (notch mínimo) +
+                # pequeños ticks radiantes (la marca "sunburst" del disparo).
+                _ksun = (smax if smax else 1.0) * 0.07
+                for _th in range(0, 360, 60):
+                    _rad = np.radians(_th)
+                    fig.add_trace(go.Scatter(
+                        x=[_kx[0], _kx[0] + _ksun * np.sin(_rad)],
+                        y=[_ky[0], _ky[0] + _ksun * np.cos(_rad)],
+                        mode="lines", line=dict(color="#1f9d55", width=1.3),
+                        hoverinfo="skip", showlegend=False))
                 fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
                               marker=dict(color="#1f9d55", size=13,
                                           line=dict(color="white", width=1.6)),
