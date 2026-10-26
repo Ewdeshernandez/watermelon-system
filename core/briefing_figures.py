@@ -1458,6 +1458,44 @@ def figures_available(instance_id: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Orquestador F1
 # ---------------------------------------------------------------------------
+def _meas_dt_from_payload(payload: Dict[str, Any]):
+    """Fecha REAL de medición (primer csv_timestamp del snapshot), o None.
+    Las figuras salen del último snapshot de análisis (CSV de System1); su
+    csv_timestamp es la fecha de la MEDICIÓN, no la de subida."""
+    from datetime import datetime as _dt
+    if not payload:
+        return None
+    coll = "bearings" if payload.get("bearings") else "sensors"
+    for s in (payload.get(coll) or []):
+        sv = str(s.get("csv_timestamp") or "").strip()
+        if not sv:
+            continue
+        try:
+            return _dt.fromisoformat(sv.replace("Z", "+00:00"))
+        except Exception:
+            pass
+        for _f in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d",
+                   "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
+                   "%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
+            try:
+                return _dt.strptime(sv, _f)
+            except Exception:
+                pass
+    return None
+
+
+def measurement_date(instance_id: str, key: str) -> str:
+    """'DD/MM/YYYY' de la última medición real del snapshot `key`
+    ('spectrum'|'waveform'|'orbit'), o '' si no se puede determinar."""
+    try:
+        p = _load_merged_snapshot(instance_id, key) or _load_latest_snapshot(instance_id, key)
+        dt = _meas_dt_from_payload(p or {})
+        return dt.strftime("%d/%m/%Y") if dt else ""
+    except Exception as e:  # noqa: BLE001
+        log.warning("measurement_date(%s/%s) falló: %s", instance_id, key, e)
+        return ""
+
+
 def collect_asset_figures(instance_id: str,
                           instance_obj: Any = None,
                           period_label: str = "Semanal") -> Dict[str, Any]:
@@ -1490,4 +1528,5 @@ def collect_asset_figures(instance_id: str,
 __all__ = ["collect_asset_figures", "figures_available",
            "spectrum_png", "waveform_png",
            "orbit_png", "trend_png", "build_trend_figures",
-           "spectrum_bundle", "waveform_bundle", "orbit_bundle"]
+           "spectrum_bundle", "waveform_bundle", "orbit_bundle",
+           "measurement_date"]

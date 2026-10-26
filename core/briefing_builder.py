@@ -322,11 +322,15 @@ def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict
                 f"{tag} está DETENIDA (velocidad {_rpm_txt}) al momento del dato. El "
                 "colector sí reporta en línea; los valores y la tabular mostrados son "
                 "los ACTUALES con la máquina parada, por lo que NO representan su "
-                "condición en operación y la salud no aplica a 0 rpm."),
+                "condición en operación y la salud no aplica a 0 rpm. Las figuras de "
+                "análisis (espectro, forma de onda y órbita) corresponden a la ÚLTIMA "
+                "medición con la máquina en operación —la fecha se indica en cada "
+                "figura—, no al momento actual de parada."),
             "diagnosis": (
                 f"Máquina detenida ({_rpm_txt}). A 0 rpm la vibración no refleja el estado "
                 "mecánico en marcha, por lo que no se emite diagnóstico de condición. Los "
-                "datos se presentan como referencia del estado actual (parada)."),
+                "datos tabulares se presentan como referencia del estado actual (parada); "
+                "las figuras son de la última medición en operación (fecha en cada figura)."),
             "recommendations": _rec_out,
         }
 
@@ -1044,6 +1048,24 @@ def build_asset_briefing(
             _apply_ai_figure_comments(figures, sections, tag, data, instance_obj)
         except Exception as e:
             log.warning("comentarios de figura IA fallaron (se usa base): %s", e)
+
+    # v25: ESTAMPAR la fecha REAL de medición (csv_timestamp del snapshot) en el
+    # caption de cada figura. Las figuras salen del ÚLTIMO snapshot de análisis;
+    # si la máquina está detenida o System1 re-exporta el mismo CSV, pueden ser de
+    # días atrás → debe quedar EXPLÍCITO de qué fecha son (no son el dato de hoy).
+    # Se hace DESPUÉS de la IA para que sobreviva al comentario experto.
+    if figures:
+        try:
+            from core.briefing_figures import measurement_date
+            for _fk in ("spectrum", "waveform", "orbit"):
+                if figures.get(_fk):
+                    _md = measurement_date(instance_id, _fk)
+                    _ak = f"{_fk}_analysis"
+                    _cur = figures.get(_ak) or ""
+                    if _md and not _cur.lstrip().startswith("Medición:"):
+                        figures[_ak] = f"Medición: {_md}. " + _cur
+        except Exception as e:  # noqa: BLE001
+            log.warning("estampar fecha de figura falló: %s", e)
 
     # Override del flujo de APROBACIÓN: el especialista editó resumen y
     # diagnóstico en la cola de revisión → esos textos mandan sobre lo
