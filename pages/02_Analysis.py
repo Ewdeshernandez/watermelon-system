@@ -1386,8 +1386,8 @@ elif view == "Órbita":
         # X en el lado R a ang_x° del top; Y en el lado L a ang_y° del top.
         _dxh, _dxv = np.sin(np.radians(ang_x)), np.cos(np.radians(ang_x))     # X (R) → derecha
         _dyh, _dyv = -np.sin(np.radians(ang_y)), np.cos(np.radians(ang_y))    # Y (L) → izquierda
-        for _dh, _dv, _plab, _pcol in [(_dxh, _dxv, f"X {int(ang_x)}°R", "#8090a6"),
-                                       (_dyh, _dyv, f"Y {int(ang_y)}°L", "#8090a6")]:
+        for _dh, _dv, _plab, _pcol in [(_dxh, _dxv, f"{b.x.label} · {int(ang_x)}°R", "#8090a6"),
+                                       (_dyh, _dyv, f"{b.y.label} · {int(ang_y)}°L", "#8090a6")]:
             fig.add_trace(go.Scatter(x=[-_L * _dh, _L * _dh], y=[-_L * _dv, _L * _dv],
                           mode="lines", line=dict(color=_pcol, width=1, dash="dot"),
                           hoverinfo="skip", showlegend=False))
@@ -1409,6 +1409,14 @@ elif view == "Órbita":
                               marker=dict(color="#1f9d55", size=13,
                                           line=dict(color="white", width=1.6)),
                               name="keyphasor"))
+        # POSICIÓN del keyphasor: ángulo desde el TOP (0°), + hacia R / − hacia L (Bently).
+        _kpos = ""
+        if sp is not None:
+            _kang = float(np.degrees(np.arctan2(sp[0], sp[1])))
+            _kpos = f"{abs(_kang):.0f}°{'R' if _kang >= 0 else 'L'}"
+            fig.add_annotation(x=sp[0], y=sp[1], text=f"KΦ {_kpos}", showarrow=False,
+                               yshift=-15, font=dict(color="#1f9d55", size=10,
+                                                     family="IBM Plex Mono"))
         # FLECHA = sentido en que se recorre la órbita YA en el marco del giro real del eje.
         _ad = -1.0 if _disp_orbit == "CCW" else 1.0
         _ya = (smax if smax else 1.0) * 1.02
@@ -1426,11 +1434,11 @@ elif view == "Órbita":
                                 f"eje {rot_sel} en placa</span>",
                            showarrow=False, yshift=16,
                            font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
-        fig.update_xaxes(title=f"Horizontal → ({b.x.unit or 'µm'})",
+        fig.update_xaxes(title=f"{b.x.unit or 'µm'}",
                          scaleanchor="y", scaleratio=1, zeroline=True,
                          zerolinecolor="rgba(120,140,170,.45)",
                          gridcolor="rgba(120,140,170,.12)")
-        fig.update_yaxes(title=f"Vertical ↑ ({b.y.unit or 'µm'})", zeroline=True,
+        fig.update_yaxes(title=f"{b.y.unit or 'µm'}", zeroline=True,
                          zerolinecolor="rgba(120,140,170,.45)",
                          gridcolor="rgba(120,140,170,.12)")
         _ttl = f"Órbita · {b.name} · {fmode}"
@@ -1447,7 +1455,8 @@ elif view == "Órbita":
             f"observan el extremo opuesto, por eso la órbita se traza **{_disp_orbit}** "
             f"(idéntico a System1). El diagnóstico es la **precesión {prec}**: forward = el eje "
             f"y la órbita giran en el mismo sentido (desbalance); reverse = opuesto (roce/"
-            f"inestabilidad).")
+            f"inestabilidad)."
+            + (f" Keyphasor (KΦ) en **{_kpos}** desde el top." if _kpos else ""))
         _u = b.x.unit or "µm"
         _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _precd,
                    f"{_disp_orbit} · eje {rot_sel} placa", f"{major:.1f} {_u}",
