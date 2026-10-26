@@ -1352,8 +1352,21 @@ elif view == "Órbita":
             prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
         _precd = ("Hacia adelante (forward)" if prec == "Forward"
                   else "Inversa (reverse)" if prec == "Reverse" else prec)
-        # Marco de las sondas (= System1): la órbita se traza tal cual.
-        _disp_orbit = orbit_dir
+        # --- SENTIDO DE GIRO por API 670: visto desde el COJINETE #1 (conductor→conducido).
+        #     Turbina = CW; tras el gearbox el generador INVIERTE a CCW. La órbita se dibuja
+        #     en ESE marco. La data de sondas cae en el extremo opuesto → si el giro que
+        #     implica la data difiere del de API 670, se ESPEJA horizontal (forma intacta).
+        _lbl_b = (b.x.label or b.name or "")
+        _bnum = next((int(c) for c in _lbl_b if c.isdigit()), 0)
+        rot_api = "CCW" if _bnum >= 5 else "CW"        # gen (≥5) CCW · turbina/GB CW
+        _flip = {"CCW": "CW", "CW": "CCW"}
+        _prec_fwd = (prec != "Reverse")
+        _rot_probe = orbit_dir if _prec_fwd else _flip[orbit_dir]
+        if _rot_probe != rot_api:                      # vista opuesta → espejo horizontal
+            xv = -xv
+            sp = (-sp[0], sp[1]) if sp is not None else None
+            _kmarks = [(-p[0], p[1]) for p in _kmarks]
+        _disp_orbit = rot_api if _prec_fwd else _flip[rot_api]
         # ---- Métricas de forma (Bently pág 69): eje mayor/menor + elipticidad + Smax ----
         cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
         _pc = np.column_stack([xv - cx, yv - cy])
@@ -1422,13 +1435,12 @@ elif view == "Órbita":
         # Headline = PRECESIÓN (forward/reverse): diagnóstico independiente del extremo de
         # observación y concordante con el full spectrum. El glifo = sentido EN EL GRÁFICO
         # (desde las sondas); en el NDE una máquina CW-en-DE se dibuja CCW.
-        # Caption estilo BENTLY (manual 3-8 / 9-7): "Rotación [antihoraria/horaria] de
-        # X a Y" = el sentido tal como se traza la órbita. La precesión forward/reverse
-        # (del full spectrum) se anota en gris como diagnóstico.
-        _rot_word = "antihoraria" if _disp_orbit == "CCW" else "horaria"
+        # Headline = GIRO por API 670 (desde cojinete #1) + precesión (forward/reverse) del
+        # full spectrum. El glifo/flecha = sentido tal como se recorre la órbita en ese marco.
+        _maq = "generador" if _bnum >= 5 else "turbina"
         _gl = "↺" if _disp_orbit == "CCW" else "↻"
         fig.add_annotation(x=0, y=_ya,
-                           text=f"<b>{_gl} Rotación {_rot_word} de X a Y</b>   "
+                           text=f"<b>{_gl} Giro {rot_api} · {_maq} (API 670)</b>   "
                                 f"<span style='color:#8090a6'>precesión {prec}</span>",
                            showarrow=False, yshift=16,
                            font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
@@ -1448,16 +1460,17 @@ elif view == "Órbita":
                                       xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
         st.caption(
-            "Marco de las sondas (= System1). Punto verde = keyphasor (posición del eje "
-            "en el disparo, muestra 0)" + (f", en **{_kpos}** desde el top" if _kpos else "") +
-            f". Flecha = sentido de giro **{_disp_orbit}**. El diagnóstico es la "
-            f"**precesión {prec}**: forward = eje y órbita giran igual (desbalance); "
-            f"reverse = opuesto (roce/inestabilidad).")
+            f"Giro del eje por **API 670** (visto desde el cojinete #1, conductor→conducido): "
+            f"**{_maq} = {rot_api}** (turbina CW; tras el gearbox el generador invierte a CCW). "
+            f"Punto verde = keyphasor (posición del eje en el disparo, muestra 0)"
+            + (f", en **{_kpos}**" if _kpos else "") +
+            f". El diagnóstico es la **precesión {prec}**: forward = eje y órbita giran igual "
+            f"(desbalance); reverse = opuesto (roce/inestabilidad).")
         _u = b.x.unit or "µm"
         _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _precd,
-                   _disp_orbit, f"{major:.1f} {_u}",
+                   f"{rot_api} ({_maq})", f"{major:.1f} {_u}",
                    f"{minor:.1f} {_u}", f"{ellip:.2f}", f"{smax:.1f} {_u}"]]
-        _ocols = ["Cojinete", "RPM", "Precesión", "Sentido órbita",
+        _ocols = ["Cojinete", "RPM", "Precesión", "Giro (API 670)",
                   "Eje mayor", "Eje menor", "Elipticidad", "Smax"]
         _download_fig_table_button(fig, _ocols, _orows,
                                    _vfile(f"Orbita {b.name} {fmode}"), key="orb",
