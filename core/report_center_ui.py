@@ -305,7 +305,7 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
     _sum = _d.get("summary", "")
     _diag = _d.get("diagnosis", "")
     _per = _d.get("period", "Semanal")           # v25: periodo de ESTE borrador
-    _ck = f"{_ck}_{_per}"                        # sufijo de keys/estado por tarjeta
+    _ck = f"{_iid}_{_per}"                       # sufijo de keys/estado por tarjeta
     _sg = get_signers(_iid)  # firmantes por defecto del activo
     with st.container(border=True):
         with st.expander("👁 Executive summary and diagnosis (read-only)", expanded=False):
