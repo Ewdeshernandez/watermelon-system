@@ -274,7 +274,8 @@ st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
 # 2) VISTAS (segmented control) — dato compartido
 # =========================================================
 VIEWS = ["Tabular", "Tendencias", "Forma de Onda", "Espectro", "Full Spectrum",
-         "Órbita", "Shaft Centerline", "Bode", "Polar", "Waterfall", "Cascada"]
+         "Órbita", "Deflexión del eje", "Shaft Centerline", "Bode", "Polar",
+         "Waterfall", "Cascada"]
 view = st.segmented_control("Vista", VIEWS, default="Tabular",
                             selection_mode="single") or "Tabular"
 
@@ -1427,11 +1428,14 @@ elif view == "Órbita":
         # Headline = PRECESIÓN (forward/reverse): diagnóstico independiente del extremo de
         # observación y concordante con el full spectrum. El glifo = sentido EN EL GRÁFICO
         # (desde las sondas); en el NDE una máquina CW-en-DE se dibuja CCW.
+        # Caption estilo BENTLY (manual 3-8 / 9-7): "Rotación [antihoraria/horaria] de
+        # X a Y" = el sentido tal como se traza la órbita. La precesión forward/reverse
+        # (del full spectrum) se anota en gris como diagnóstico.
+        _rot_word = "antihoraria" if _disp_orbit == "CCW" else "horaria"
         _gl = "↺" if _disp_orbit == "CCW" else "↻"
         fig.add_annotation(x=0, y=_ya,
-                           text=f"<b>Precesión: {_precd}</b>   "
-                                f"<span style='color:#8090a6'>{_gl} órbita {_disp_orbit} · "
-                                f"eje {rot_sel} en placa</span>",
+                           text=f"<b>{_gl} Rotación {_rot_word} de X a Y</b>   "
+                                f"<span style='color:#8090a6'>precesión {prec}</span>",
                            showarrow=False, yshift=16,
                            font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
         fig.update_xaxes(title=f"{b.x.unit or 'µm'}",
@@ -1485,6 +1489,98 @@ elif view == "Órbita":
                    "vuelta · punto verde = keyphasor (muestra 0 = referencia de ángulo del "
                    "rotor), idéntico a System1. Base: Bently Nevada + Machinery Malfunction "
                    "Diagnosis (Eisenmann).")
+
+elif view == "Deflexión del eje":
+    # FORMA DE DEFLEXIÓN DEL EJE (Bently manual 3-8 / 9-4): se colocan las órbitas
+    # 1X de cada cojinete a lo largo de la posición axial y se UNEN los puntos
+    # Keyphasor → se ve la deflexión aparente del eje (forma modal del rotor:
+    # cilíndrico/traslacional, pivotal/cónico, etc.) al disparo del keyphasor.
+    import re as _re2
+    _brgs = [b for b in rec.bearings if b.has_xy]
+    if len(_brgs) < 2:
+        st.warning("Deflexión del eje: necesita **≥2 cojinetes** con par X/Y "
+                   "(sube los CSV X/Y de cada cojinete del tren).")
+    else:
+        def _bnum(b):
+            m = _re2.match(r"\s*(\d+)", (b.x.label or b.name or ""))
+            return int(m.group(1)) if m else 999
+        _brgs = sorted(_brgs, key=_bnum)
+        _ord = st.selectbox("Filtro", ["1X", "2X"], index=0, key="defl_f")
+        _order_d = {"1X": 1, "2X": 2}[_ord]
+
+        def _f_ord(sig, fs, rpm, order):
+            if not fs or not rpm or sig.size < 8:
+                return sig
+            spc = np.fft.rfft(sig)
+            frq = np.fft.rfftfreq(sig.size, 1.0 / fs)
+            k = int(np.argmin(np.abs(frq - order * rpm / 60.0)))
+            out = np.zeros_like(spc); out[k] = spc[k]
+            return np.fft.irfft(out, sig.size)
+
+        _stations = []
+        _maxr = 1e-9
+        for b in _brgs:
+            px = np.asarray(b.x.v, float); py = np.asarray(b.y.v, float)
+            _n = min(px.size, py.size); px, py = px[:_n], py[:_n]
+            fs = b.x.fs_hz or b.y.fs_hz; spr = b.x.spr or b.y.spr; rpm = b.x.rpm
+            # Coords de máquina (sondas a 45°): H=(X−Y)/√2, V=(X+Y)/√2
+            H = (px - py) / np.sqrt(2.0); V = (px + py) / np.sqrt(2.0)
+            H = H - np.nanmean(H); V = V - np.nanmean(V)
+            Hf = _f_ord(H, fs, rpm, _order_d); Vf = _f_ord(V, fs, rpm, _order_d)
+            if spr and spr > 4 and Hf.size >= 2 * spr:
+                nr = Hf.size // spr
+                Ha = Hf[:nr * spr].reshape(nr, spr).mean(0)
+                Va = Vf[:nr * spr].reshape(nr, spr).mean(0)
+            else:
+                Ha, Va = Hf, Vf
+            kp = (float(Ha[0]), float(Va[0])) if Ha.size else (0.0, 0.0)
+            _r = float(np.max(np.hypot(Ha, Va))) if Ha.size else 0.0
+            _maxr = max(_maxr, _r)
+            _stations.append({"name": b.name, "label": b.x.label,
+                              "H": Ha, "V": Va, "kp": kp, "rpm": rpm})
+
+        _dx = 1.0
+        _S = (0.40 * _dx / _maxr) if _maxr > 0 else 1.0
+        _xs = [i * _dx for i in range(len(_stations))]
+        _u = _brgs[0].x.unit or "µm"
+
+        fig = go.Figure()
+        # línea de centros (eje sin deflexión) = referencia
+        fig.add_trace(go.Scatter(x=[_xs[0] - 0.5 * _dx, _xs[-1] + 0.5 * _dx], y=[0, 0],
+                      mode="lines", line=dict(color="#c0c8d4", width=1, dash="dot"),
+                      hoverinfo="skip", showlegend=False))
+        _kp = []
+        for i, s in enumerate(_stations):
+            x0 = _xs[i]
+            fig.add_trace(go.Scatter(x=x0 + _S * s["H"], y=_S * s["V"], mode="lines",
+                          line=dict(color=_NAVY, width=1.5), name=s["label"],
+                          hovertemplate=f"{s['label']}<extra></extra>", showlegend=False))
+            kx, ky = x0 + _S * s["kp"][0], _S * s["kp"][1]
+            _kp.append((kx, ky))
+            fig.add_trace(go.Scatter(x=[kx], y=[ky], mode="markers",
+                          marker=dict(color="#1f9d55", size=11,
+                                      line=dict(color="white", width=1.3)),
+                          hoverinfo="skip", showlegend=False))
+            fig.add_annotation(x=x0, y=-0.5 * _dx, text=s["label"], showarrow=False,
+                               font=dict(size=10, family="IBM Plex Mono", color="#5a6b85"))
+        # CURVA de deflexión = une los keyphasor (posición del eje en el disparo)
+        fig.add_trace(go.Scatter(x=[p[0] for p in _kp], y=[p[1] for p in _kp],
+                      mode="lines", line=dict(color="#e8890c", width=2.4),
+                      name="deflexión (keyphasor)"))
+        fig.update_xaxes(showticklabels=False, zeroline=False,
+                         title="posición axial del tren →",
+                         gridcolor="rgba(120,140,170,.10)")
+        fig.update_yaxes(title=f"{_u}", zeroline=False,
+                         gridcolor="rgba(120,140,170,.12)")
+        fig = _layout(fig, f"Forma de deflexión del eje · {cur_asset} · {_ord}", h=470)
+        fig.update_layout(plot_bgcolor="white", paper_bgcolor="white")
+        st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+        _download_fig_button(fig, _vfile(f"Deflexion eje {cur_asset} {_ord}"), key="defl")
+        st.caption("Cada órbita " + _ord + " en su posición axial; la **curva ámbar** une "
+                   "los puntos **Keyphasor** (posición del eje en el disparo, muestra 0) → "
+                   "**forma de deflexión aparente del eje** = forma modal del rotor "
+                   "(cilíndrico/traslacional, pivotal/cónico…). Base: Bently manual 3-8 / 9-4. "
+                   "Cojinetes ordenados por número (posición axial).")
 
 elif view == "Shaft Centerline":
     b = _pick_bearing("sc_b")
