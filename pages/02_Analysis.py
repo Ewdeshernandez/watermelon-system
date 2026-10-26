@@ -1268,9 +1268,11 @@ elif view == "Órbita":
         with oc1:
             fmode = st.selectbox("Filtro", ["Direct", "1X", "2X"], index=0, key="orb_f")
         with oc2:
-            rot_sel = st.selectbox("Giro del eje", ["CW", "CCW"], index=0, key="orb_rot",
-                                   help="Sentido REAL del eje (placa, visto desde DE). "
-                                        "La órbita se dibuja en ese marco.")
+            vista_sel = st.selectbox("Vista", ["NDE (sondas)", "DE (placa)"], index=0,
+                                     key="orb_vista",
+                                     help="NDE = marco de las sondas (= System1). DE = vista "
+                                          "desde el acople: espejo horizontal, la órbita se "
+                                          "dibuja en el sentido de placa (R/L se intercambian).")
         with oc3:
             ang_x = st.number_input("X · °R del TOP", value=45, step=5,
                                     key="orb_ax", help="Montaje de la sonda X, lado R.")
@@ -1350,13 +1352,16 @@ elif view == "Órbita":
             prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
         _precd = ("Hacia adelante (forward)" if prec == "Forward"
                   else "Inversa (reverse)" if prec == "Reverse" else prec)
-        # --- Marco FIJO de Bently (manual 3-8): X(R) → derecha, Y(L) → izquierda SIEMPRE.
-        #     La referencia de rotación es "de X a Y"; en ese marco esta órbita se traza como
-        #     en System1 (no se espeja, no se mueven las sondas). El giro de placa (rot_sel,
-        #     visto desde el DE) solo se anota: las sondas observan el extremo opuesto, por eso
-        #     una máquina CW en placa se ve con sentido CCW en la órbita. La precesión
-        #     (forward/reverse) viene del full spectrum y es el diagnóstico real. ---
-        _disp_orbit = orbit_dir                 # sentido tal como se traza (marco de sondas)
+        # --- VISTA NDE (sondas, = System1) vs DE (placa). NDE = marco de las sondas, la
+        #     órbita se traza tal cual (idéntico a System1). DE = vista desde el acople =
+        #     ESPEJO horizontal: la órbita gira en el sentido de placa (R/L se intercambian).
+        #     La forma y la precesión (forward/reverse, del full spectrum) no cambian. ---
+        _de = str(vista_sel).startswith("DE")
+        if _de:
+            xv = -xv
+            sp = (-sp[0], sp[1]) if sp is not None else None
+            _kmarks = [(-p[0], p[1]) for p in _kmarks]
+        _disp_orbit = (("CW" if orbit_dir == "CCW" else "CCW") if _de else orbit_dir)
         # ---- Métricas de forma (Bently pág 69): eje mayor/menor + elipticidad + Smax ----
         cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
         _pc = np.column_stack([xv - cx, yv - cy])
@@ -1382,18 +1387,6 @@ elif view == "Órbita":
 
         fig = go.Figure(go.Scatter(x=xv, y=yv, mode="lines",
                                    line=dict(color=_NAVY, width=1.6), name=b.name))
-        _L = (smax if smax else 1.0) * 1.22            # alcance para ejes de sonda / arreglo
-        # EJES DE SONDA (convención Bently: desde el TOP, R→derecha / L→izquierda, 0°→180°).
-        # X en el lado R a ang_x° del top; Y en el lado L a ang_y° del top.
-        _dxh, _dxv = np.sin(np.radians(ang_x)), np.cos(np.radians(ang_x))     # X (R) → derecha
-        _dyh, _dyv = -np.sin(np.radians(ang_y)), np.cos(np.radians(ang_y))    # Y (L) → izquierda
-        for _dh, _dv, _plab, _pcol in [(_dxh, _dxv, f"{b.x.label} · {int(ang_x)}°R", "#8090a6"),
-                                       (_dyh, _dyv, f"{b.y.label} · {int(ang_y)}°L", "#8090a6")]:
-            fig.add_trace(go.Scatter(x=[-_L * _dh, _L * _dh], y=[-_L * _dv, _L * _dv],
-                          mode="lines", line=dict(color=_pcol, width=1, dash="dot"),
-                          hoverinfo="skip", showlegend=False))
-            fig.add_annotation(x=_L * _dh, y=_L * _dv, text=_plab, showarrow=False,
-                               font=dict(color=_pcol, size=10, family="IBM Plex Mono"))
         # KEYPHASOR: Direct = una marca por vuelta (cluster, como System1); 1X/2X = punto
         # grande en el HUECO (inicio). El trazo filtrado queda ABIERTO → no toca el punto.
         if _kmarks:
@@ -1453,17 +1446,19 @@ elif view == "Órbita":
                           legend=dict(orientation="h", yanchor="top", y=-0.1,
                                       xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+        _vista_txt = "DE (placa)" if _de else "NDE (sondas, = System1)"
+        _de_nota = (" **Vista DE**: espejo horizontal de la vista de sondas → la órbita "
+                    "gira en sentido de placa y los lados R/L aparecen intercambiados."
+                    if _de else "")
         st.caption(
-            f"Marco Bently (manual 3-8): **X(R) derecha · Y(L) izquierda**, referencia de "
-            f"rotación *de X a Y*. El eje gira **{rot_sel} en placa (vista DE)**; las sondas "
-            f"observan el extremo opuesto, por eso la órbita se traza **{_disp_orbit}** "
-            f"(idéntico a System1). El diagnóstico es la **precesión {prec}**: forward = el eje "
-            f"y la órbita giran en el mismo sentido (desbalance); reverse = opuesto (roce/"
-            f"inestabilidad)."
-            + (f" Keyphasor (KΦ) en **{_kpos}** desde el top." if _kpos else ""))
+            f"Vista **{_vista_txt}**. Punto verde = keyphasor (posición del eje en el "
+            f"disparo, muestra 0)" + (f", en **{_kpos}** desde el top" if _kpos else "") +
+            f". Flecha = sentido de giro **{_disp_orbit}**. El diagnóstico es la "
+            f"**precesión {prec}**: forward = eje y órbita giran igual (desbalance); "
+            f"reverse = opuesto (roce/inestabilidad)." + _de_nota)
         _u = b.x.unit or "µm"
         _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _precd,
-                   f"{_disp_orbit} · eje {rot_sel} placa", f"{major:.1f} {_u}",
+                   f"{_disp_orbit} · vista {'DE' if _de else 'NDE'}", f"{major:.1f} {_u}",
                    f"{minor:.1f} {_u}", f"{ellip:.2f}", f"{smax:.1f} {_u}"]]
         _ocols = ["Cojinete", "RPM", "Precesión", "Sentido órbita",
                   "Eje mayor", "Eje menor", "Elipticidad", "Smax"]
@@ -1482,7 +1477,7 @@ elif view == "Órbita":
             f"{minor:.1f} {_u} · Smax {smax:.1f} {_u}. Círculo = solo desbalance con "
             f"rigidez igual en todas direcciones; elíptica/plana = precarga o rigidez "
             f"desigual (desalineación). Punto verde = keyphasor (inicio) · flecha ámbar = "
-            f"sentido de giro · líneas punteadas = ejes de las sondas X (R) / Y (L).</div></div>",
+            f"sentido de giro.</div></div>",
             unsafe_allow_html=True)
         st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde "
                    "su ángulo de montaje) · aspecto 1:1 real · promedio síncrono vuelta a "
