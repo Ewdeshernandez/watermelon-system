@@ -1327,10 +1327,13 @@ elif view == "Órbita":
                 Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
                 Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
                 _g = max(1, spr // 40)                           # notch mínimo (estilo Bently)
-                xv = Ha[_g:]
-                yv = Va[_g:]
+                # El punto LIDERA: se dibuja desde la muestra 0 hacia ADELANTE y el notch
+                # queda DETRÁS (justo antes de cerrar) → secuencia blanco→brillante en el
+                # sentido de giro (Bently: el punto va adelante del hueco, no atrás).
+                xv = Ha[:max(1, spr - _g)]
+                yv = Va[:max(1, spr - _g)]
                 sp = (float(Ha[0]), float(Va[0]))                # BRILLANTE = trigger (muestra 0)
-                bp = (float(Ha[-1]), float(Va[-1]))              # BLANCO = muestra ANTES del trigger
+                bp = (float(Ha[-1]), float(Va[-1]))              # muestra antes del trigger (detrás)
                 _kmarks = [sp]
         else:
             xv, yv = Hf, Vf
