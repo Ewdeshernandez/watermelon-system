@@ -299,7 +299,9 @@ def _pick_bearing(key):
     if not brgs:
         return None
     names = [b.name for b in brgs]
-    sel = st.selectbox("Cojinete (par X/Y)", names, key=key)
+    sel = st.segmented_control("Cojinete (par X/Y)", names, default=names[0], key=key)
+    if sel not in names:
+        sel = names[0]
     return brgs[names.index(sel)]
 
 
@@ -1264,19 +1266,14 @@ elif view == "Órbita":
         st.warning("Órbita: necesita el **par X/Y** de un cojinete. Sube ambos CSV "
                    "(ej. 1xd.csv + 1yd.csv).")
     else:
-        oc1, oc2, oc3, oc4 = st.columns([2, 1.1, 1, 1])
+        oc1, oc2, oc3 = st.columns([2, 1, 1])
         with oc1:
-            fmode = st.selectbox("Filtro", ["Direct", "1X", "2X"], index=0, key="orb_f")
+            fmode = st.segmented_control("Tipo de órbita", ["Direct", "1X", "2X"],
+                                         default="Direct", key="orb_f") or "Direct"
         with oc2:
-            vista_sel = st.selectbox("Vista", ["NDE (sondas)", "DE (placa)"], index=0,
-                                     key="orb_vista",
-                                     help="NDE = marco de las sondas (= System1). DE = vista "
-                                          "desde el acople: espejo horizontal, la órbita se "
-                                          "dibuja en el sentido de placa (R/L se intercambian).")
-        with oc3:
             ang_x = st.number_input("X · °R del TOP", value=45, step=5,
                                     key="orb_ax", help="Montaje de la sonda X, lado R.")
-        with oc4:
+        with oc3:
             ang_y = st.number_input("Y · °L del TOP", value=45, step=5,
                                     key="orb_ay", help="Montaje de la sonda Y, lado L.")
         # ====== Órbita método Live Monitoring (validado = idéntico a System1) ======
@@ -1355,16 +1352,8 @@ elif view == "Órbita":
             prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
         _precd = ("Hacia adelante (forward)" if prec == "Forward"
                   else "Inversa (reverse)" if prec == "Reverse" else prec)
-        # --- VISTA NDE (sondas, = System1) vs DE (placa). NDE = marco de las sondas, la
-        #     órbita se traza tal cual (idéntico a System1). DE = vista desde el acople =
-        #     ESPEJO horizontal: la órbita gira en el sentido de placa (R/L se intercambian).
-        #     La forma y la precesión (forward/reverse, del full spectrum) no cambian. ---
-        _de = str(vista_sel).startswith("DE")
-        if _de:
-            xv = -xv
-            sp = (-sp[0], sp[1]) if sp is not None else None
-            _kmarks = [(-p[0], p[1]) for p in _kmarks]
-        _disp_orbit = (("CW" if orbit_dir == "CCW" else "CCW") if _de else orbit_dir)
+        # Marco de las sondas (= System1): la órbita se traza tal cual.
+        _disp_orbit = orbit_dir
         # ---- Métricas de forma (Bently pág 69): eje mayor/menor + elipticidad + Smax ----
         cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
         _pc = np.column_stack([xv - cx, yv - cy])
@@ -1458,19 +1447,15 @@ elif view == "Órbita":
                           legend=dict(orientation="h", yanchor="top", y=-0.1,
                                       xanchor="center", x=0.5))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
-        _vista_txt = "DE (placa)" if _de else "NDE (sondas, = System1)"
-        _de_nota = (" **Vista DE**: espejo horizontal de la vista de sondas → la órbita "
-                    "gira en sentido de placa y los lados R/L aparecen intercambiados."
-                    if _de else "")
         st.caption(
-            f"Vista **{_vista_txt}**. Punto verde = keyphasor (posición del eje en el "
-            f"disparo, muestra 0)" + (f", en **{_kpos}** desde el top" if _kpos else "") +
+            "Marco de las sondas (= System1). Punto verde = keyphasor (posición del eje "
+            "en el disparo, muestra 0)" + (f", en **{_kpos}** desde el top" if _kpos else "") +
             f". Flecha = sentido de giro **{_disp_orbit}**. El diagnóstico es la "
             f"**precesión {prec}**: forward = eje y órbita giran igual (desbalance); "
-            f"reverse = opuesto (roce/inestabilidad)." + _de_nota)
+            f"reverse = opuesto (roce/inestabilidad).")
         _u = b.x.unit or "µm"
         _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _precd,
-                   f"{_disp_orbit} · vista {'DE' if _de else 'NDE'}", f"{major:.1f} {_u}",
+                   _disp_orbit, f"{major:.1f} {_u}",
                    f"{minor:.1f} {_u}", f"{ellip:.2f}", f"{smax:.1f} {_u}"]]
         _ocols = ["Cojinete", "RPM", "Precesión", "Sentido órbita",
                   "Eje mayor", "Eje menor", "Elipticidad", "Smax"]
@@ -1512,7 +1497,8 @@ elif view == "Deflexión del eje":
             m = _re2.match(r"\s*(\d+)", (b.x.label or b.name or ""))
             return int(m.group(1)) if m else 999
         _brgs = sorted(_brgs, key=_bnum)
-        _ord = st.selectbox("Filtro", ["1X", "2X"], index=0, key="defl_f")
+        _ord = st.segmented_control("Tipo de órbita", ["1X", "2X"],
+                                    default="1X", key="defl_f") or "1X"
         _order_d = {"1X": 1, "2X": 2}[_ord]
 
         def _f_ord(sig, fs, rpm, order):
