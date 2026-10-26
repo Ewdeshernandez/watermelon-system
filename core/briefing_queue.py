@@ -37,7 +37,22 @@ from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
-PARAM_KEY = "briefing_draft"
+PARAM_KEY = "briefing_draft"              # LEGACY (pre-v25): un solo borrador por activo
+
+# v25: borrador SEPARADO por periodo → Semanal y Mensual coexisten sin pisarse.
+_DRAFT_KEYS = {"semanal": "briefing_draft_semanal",
+               "mensual": "briefing_draft_mensual",
+               "rapido": "briefing_draft_rapido"}
+
+
+def _draft_key(period: str) -> str:
+    p = (period or "Semanal").strip().lower()
+    if p.startswith("mens"):
+        return _DRAFT_KEYS["mensual"]
+    if p.startswith("ráp") or p.startswith("rap"):
+        return _DRAFT_KEYS["rapido"]
+    return _DRAFT_KEYS["semanal"]
+
 
 STATUS_PENDING = "pendiente"
 STATUS_APPROVED = "aprobado"
@@ -51,35 +66,46 @@ def _now_iso() -> str:
         return datetime.now().isoformat(timespec="minutes")
 
 
-def get_draft(instance_id: str) -> Optional[Dict[str, Any]]:
+def get_draft(instance_id: str, period: str = "Semanal") -> Optional[Dict[str, Any]]:
+    """Borrador del activo PARA ESE PERIODO. Lee la clave por-periodo (v25); si
+    no existe, cae al borrador LEGACY solo si su periodo coincide (migración)."""
     try:
         from core.instance_state import get_instance_parameters
-        d = get_instance_parameters(instance_id).get(PARAM_KEY)
-        return dict(d) if isinstance(d, dict) else None
+        params = get_instance_parameters(instance_id)
+        d = params.get(_draft_key(period))
+        if isinstance(d, dict):
+            return dict(d)
+        leg = params.get(PARAM_KEY)
+        if (isinstance(leg, dict)
+                and _draft_key(leg.get("period", "Semanal")) == _draft_key(period)):
+            return dict(leg)
+        return None
     except Exception as e:
         log.warning("get_draft(%s) falló: %s", instance_id, e)
         return None
 
 
-def save_draft(instance_id: str, draft: Dict[str, Any]) -> bool:
+def save_draft(instance_id: str, draft: Dict[str, Any],
+               period: Optional[str] = None) -> bool:
     try:
         from core.instance_state import update_instance_parameter
-        return update_instance_parameter(instance_id, PARAM_KEY, dict(draft))
+        per = period or draft.get("period") or "Semanal"
+        return update_instance_parameter(instance_id, _draft_key(per), dict(draft))
     except Exception as e:
         log.warning("save_draft(%s) falló: %s", instance_id, e)
         return False
 
 
-def update_draft(instance_id: str, **fields: Any) -> bool:
-    d = get_draft(instance_id) or {}
+def update_draft(instance_id: str, period: str = "Semanal", **fields: Any) -> bool:
+    d = get_draft(instance_id, period) or {}
     d.update({k: v for k, v in fields.items() if v is not None})
-    return save_draft(instance_id, d)
+    return save_draft(instance_id, d, period=d.get("period") or period)
 
 
-def clear_draft(instance_id: str) -> bool:
+def clear_draft(instance_id: str, period: str = "Semanal") -> bool:
     try:
         from core.instance_state import update_instance_parameter
-        return update_instance_parameter(instance_id, PARAM_KEY, None)
+        return update_instance_parameter(instance_id, _draft_key(period), None)
     except Exception as e:
         log.warning("clear_draft(%s) falló: %s", instance_id, e)
         return False
@@ -100,7 +126,7 @@ def new_pending_draft(instance_id: str, period: str,
         "approved_by": "", "approved_role": "",
         "approved_at": "", "sent_at": "", "sent_result": "",
         "health": health or {}, "kpis": kpis or {},
-    })
+    }, period=period)
 
 
 def list_pending() -> List[Tuple[str, str, Dict[str, Any]]]:
@@ -114,9 +140,11 @@ def list_pending() -> List[Tuple[str, str, Dict[str, Any]]]:
             tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
             if not iid:
                 continue
-            d = get_draft(iid)
-            if d and d.get("status") == STATUS_PENDING:
-                out.append((iid, tag, d))
+            # v25: Semanal y Mensual son borradores independientes → una fila c/u.
+            for per in ("Semanal", "Mensual"):
+                d = get_draft(iid, per)
+                if d and d.get("status") == STATUS_PENDING:
+                    out.append((iid, tag, d))
     except Exception as e:
         log.warning("list_pending falló: %s", e)
     out.sort(key=lambda t: t[2].get("created_at", ""), reverse=True)
@@ -154,9 +182,9 @@ def build_signed_meta_extra(instance_id: str, *, prepared_by: str, approved_by: 
     return me
 
 
-def claim_consecutive(instance_id: str) -> str:
+def claim_consecutive(instance_id: str, period: str = "Semanal") -> str:
     """Reclama (o devuelve el ya reclamado) el consecutivo del borrador."""
-    draft = get_draft(instance_id) or {}
+    draft = get_draft(instance_id, period) or {}
     _c = (draft.get("consecutive") or "").strip()
     if _c:
         return _c
@@ -171,6 +199,7 @@ def claim_consecutive(instance_id: str) -> str:
 
 
 def approve_and_send(instance_id: str, *,
+                     period: str = "Semanal",
                      prepared_by: str, approved_by: str,
                      prepared_role: str = "", approved_role: str = "",
                      send: bool = True,
@@ -186,10 +215,11 @@ def approve_and_send(instance_id: str, *,
     Devuelve {"ok", "pdf", "meta", "delivery", "error"}."""
     out: Dict[str, Any] = {"ok": False, "pdf": None, "meta": {},
                            "delivery": None, "error": ""}
-    draft = get_draft(instance_id)
+    draft = get_draft(instance_id, period)
     if not draft:
         out["error"] = "No hay borrador para este activo."
         return out
+    period = draft.get("period") or period
     if not (prepared_by or "").strip() or not (approved_by or "").strip():
         out["error"] = "El briefing requiere 'Elaborado por' y 'Aprobado por'."
         return out
@@ -197,7 +227,7 @@ def approve_and_send(instance_id: str, *,
     try:
         from core.instance_state import get_instance
         inst = get_instance(instance_id)
-        _consec = claim_consecutive(instance_id)
+        _consec = claim_consecutive(instance_id, period)
         if prebuilt_pdf:
             # Reusar el PDF de la vista previa — sin re-render (instantáneo).
             pdf = prebuilt_pdf
@@ -239,7 +269,7 @@ def approve_and_send(instance_id: str, *,
             out["delivery"] = {"any_ok": False, "error": str(e)}
 
     update_draft(
-        instance_id,
+        instance_id, period,
         status=STATUS_APPROVED,
         prepared_by=prepared_by.strip(), approved_by=approved_by.strip(),
         prepared_role=(prepared_role or "").strip(),
@@ -469,8 +499,16 @@ def schedule_due(cfg: Dict[str, Any], now: Optional[datetime] = None) -> bool:
     try:
         slots = cfg.get("slots") or [[d, int(cfg.get("hour", -1))]
                                      for d in (cfg.get("days") or [])]
-        return any(now.weekday() == int(s[0]) and now.hour == int(s[1])
-                   for s in slots if len(s) >= 2)
+        hit = any(now.weekday() == int(s[0]) and now.hour == int(s[1])
+                  for s in slots if len(s) >= 2)
+        if not hit:
+            return False
+        # MENSUAL = solo la PRIMERA vez que ese día de semana ocurre en el mes
+        # (p. ej. el 1er lunes). Sin esto, un "Mensual lun 06:00" dispararía
+        # TODOS los lunes (bug) y pisaría al Semanal. El Semanal no se restringe.
+        if str(cfg.get("period", "")).strip().lower().startswith("mens"):
+            return now.day <= 7
+        return True
     except Exception:
         return False
 

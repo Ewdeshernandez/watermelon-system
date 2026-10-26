@@ -338,6 +338,7 @@ if not _pending:
 _open_iid = st.session_state.get("bfq_open", "")
 
 for _iid, _tag, _d in _pending:
+    _cid = f"{_iid}_{_d.get('period', 'Semanal')}"  # v25: id por tarjeta (iid+periodo)
     _r1, _r2 = st.columns([4, 1])
     with _r1:
         _st_txt = (_d.get("kpis") or {}).get("status", "—")
@@ -359,18 +360,18 @@ for _iid, _tag, _d in _pending:
             unsafe_allow_html=True,
         )
     with _r2:
-        if _open_iid == _iid:
-            if st.button("✖ Close", key=f"bfq_close_{_iid}",
+        if _open_iid == _cid:
+            if st.button("✖ Close", key=f"bfq_close_{_cid}",
                          use_container_width=True):
                 st.session_state.pop("bfq_open", None)
                 st.rerun()
         else:
-            if st.button("✅ Approve…", key=f"bfq_openbtn_{_iid}",
+            if st.button("✅ Approve…", key=f"bfq_openbtn_{_cid}",
                          use_container_width=True):
-                st.session_state["bfq_open"] = _iid
+                st.session_state["bfq_open"] = _cid
                 st.rerun()
 
-    if _open_iid != _iid:
+    if _open_iid != _cid:
         st.markdown("")
         continue
 
@@ -396,7 +397,7 @@ for _iid, _tag, _d in _pending:
             list_recommendations as _qlist,
             save_recommendations as _qsave,
         )
-        _q_ss = f"recs_cache_{_iid}"
+        _q_ss = f"recs_cache_{_cid}"
         if _q_ss not in st.session_state:
             st.session_state[_q_ss] = _qlist(_iid)
 
@@ -407,7 +408,7 @@ for _iid, _tag, _d in _pending:
         from core.briefing_recommendations import (
             add_recommendation as _q_add, dismiss_proposal as _q_dismiss,
             clear_dismissed as _q_cleardis)
-        _props_ss = f"reco_props_{_iid}"
+        _props_ss = f"reco_props_{_cid}"
         if _props_ss not in st.session_state:
             try:
                 st.session_state[_props_ss] = system_recommendation_proposals(_iid)
@@ -423,13 +424,13 @@ for _iid, _tag, _d in _pending:
                 for _pi, _ptxt in enumerate(_props):
                     _pc1, _pc2, _pc3 = st.columns([0.72, 0.14, 0.14])
                     _pc1.write(_ptxt)
-                    if _pc2.button("Adopt", key=f"adopt_{_iid}_{_pi}",
+                    if _pc2.button("Adopt", key=f"adopt_{_cid}_{_pi}",
                                    use_container_width=True):
                         _q_add(_iid, _ptxt)
                         st.session_state[_q_ss] = _qlist(_iid)
                         st.session_state.pop(_props_ss, None)
                         st.rerun()
-                    if _pc3.button("Dismiss", key=f"dismiss_{_iid}_{_pi}",
+                    if _pc3.button("Dismiss", key=f"dismiss_{_cid}_{_pi}",
                                    use_container_width=True):
                         _q_dismiss(_iid, _ptxt)
                         st.session_state.pop(_props_ss, None)
@@ -437,7 +438,7 @@ for _iid, _tag, _d in _pending:
         else:
             _pc = st.columns([0.8, 0.2])
             _pc[0].caption("No new system proposals (all adopted or dismissed).")
-            if _pc[1].button("Reset dismissed", key=f"reco_reset_{_iid}",
+            if _pc[1].button("Reset dismissed", key=f"reco_reset_{_cid}",
                              use_container_width=True):
                 _q_cleardis(_iid)
                 st.session_state.pop(_props_ss, None)
@@ -456,7 +457,7 @@ for _iid, _tag, _d in _pending:
             columns=["id", "Recomendación", "Fecha de inicio"],
         )
         _qedited = st.data_editor(
-            _qdf, key=f"bfq_recs_{_iid}", num_rows="dynamic",
+            _qdf, key=f"bfq_recs_{_cid}", num_rows="dynamic",
             use_container_width=True, hide_index=True,
             column_config={
                 "id": None,
@@ -471,23 +472,23 @@ for _iid, _tag, _d in _pending:
         _s1, _s2 = st.columns(2)
         with _s1:
             _elab = st.text_input("Prepared by", value="Ángel Daniel Leiva",
-                                  key=f"bfq_elab_{_iid}")
+                                  key=f"bfq_elab_{_cid}")
             _elab_rol = st.text_input("Role (prepared)",
                                       value="Senior Machinery Diagnostics Engineer",
-                                      key=f"bfq_elabr_{_iid}",
+                                      key=f"bfq_elabr_{_cid}",
                                       placeholder="optional")
         with _s2:
             _aprb = st.text_input("Reviewed by", value="Ewdes Andrés Hernández",
-                                  key=f"bfq_aprb_{_iid}",
+                                  key=f"bfq_aprb_{_cid}",
                                   placeholder="required to approve")
             _aprb_rol = st.text_input("Role (reviewed)",
                                       value="Machinery Diagnostic Champion",
-                                      key=f"bfq_aprbr_{_iid}",
+                                      key=f"bfq_aprbr_{_cid}",
                                       placeholder="optional")
 
         _b2, _b3 = st.columns([1, 1.6])
         with _b2:
-            if st.button("👁 PDF preview", key=f"bfq_prev_{_iid}",
+            if st.button("👁 PDF preview", key=f"bfq_prev_{_cid}",
                          use_container_width=True):
                 # Persistir recomendaciones en pantalla antes de rasterizar
                 try:
@@ -513,9 +514,9 @@ for _iid, _tag, _d in _pending:
                             "consecutive": _d.get("consecutive", ""),
                         },
                     )
-                st.session_state[f"bfq_pdf_{_iid}"] = _pdf
+                st.session_state[f"bfq_pdf_{_cid}"] = _pdf
         with _b3:
-            if st.button("✅ Approve and send to client", key=f"bfq_go_{_iid}",
+            if st.button("✅ Approve and send to client", key=f"bfq_go_{_cid}",
                          type="primary", use_container_width=True):
                 if not (_aprb or "").strip():
                     st.error("'Approved by' is missing — the report must always "
@@ -537,7 +538,8 @@ for _iid, _tag, _d in _pending:
                     with st.spinner("Approving, generating final PDF and "
                                     "sending to client…"):
                         _res = approve_and_send(
-                            _iid, prepared_by=_elab, approved_by=_aprb,
+                            _iid, period=_d.get("period", "Semanal"),
+                            prepared_by=_elab, approved_by=_aprb,
                             prepared_role=_elab_rol, approved_role=_aprb_rol,
                             send=True,
                         )
@@ -551,19 +553,19 @@ for _iid, _tag, _d in _pending:
                                 f"has no channels configured: "
                                 f"{_dv.get('error', _dv)}. Download the PDF and "
                                 f"send it manually.")
-                        st.session_state[f"bfq_pdf_{_iid}"] = _res.get("pdf")
+                        st.session_state[f"bfq_pdf_{_cid}"] = _res.get("pdf")
                         st.session_state.pop("bfq_open", None)
                         from core.briefing_queue import list_pending
                         st.session_state["bfq_cache"] = list_pending()
                     else:
                         st.error(f"Could not approve: {_res.get('error')}")
 
-        if st.session_state.get(f"bfq_pdf_{_iid}"):
+        if st.session_state.get(f"bfq_pdf_{_cid}"):
             st.download_button(
                 "⬇ Download PDF (latest generated version)",
-                data=st.session_state[f"bfq_pdf_{_iid}"],
+                data=st.session_state[f"bfq_pdf_{_cid}"],
                 file_name=f"Report_{_tag}_{_d.get('period','Semanal')}.pdf",
-                mime="application/pdf", key=f"bfq_dl_{_iid}",
+                mime="application/pdf", key=f"bfq_dl_{_cid}",
                 use_container_width=True,
             )
     st.markdown("")

@@ -214,7 +214,8 @@ def main() -> int:
                 log.info("[DRY-RUN] auto-send %s (%s)", m.get("tag", iid), iid)
                 continue
             r = approve_and_send(
-                iid, prepared_by="Watermelon System",
+                iid, period=m.get("period", "Semanal"),
+                prepared_by="Watermelon System",
                 approved_by="Watermelon System (automático)",
                 prepared_role="Motor de monitoreo", approved_role="Envío automático",
                 send=True)

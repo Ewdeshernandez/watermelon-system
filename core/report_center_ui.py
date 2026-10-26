@@ -243,6 +243,9 @@ def render_approval(me_name: str = "") -> None:
 
     _open_iid = st.session_state.get("rc_open", "")
     for _iid, _tag, _d in _pending:
+        # v25: un activo puede tener Semanal Y Mensual pendientes → id por tarjeta
+        # (iid+periodo) para que las keys/estado no colisionen entre ambas.
+        _cid = f"{_iid}_{_d.get('period', 'Semanal')}"
         _r1, _r2 = st.columns([4, 1])
         with _r1:
             _st_txt = (_d.get("kpis") or {}).get("status", "—")
@@ -263,16 +266,16 @@ def render_approval(me_name: str = "") -> None:
                 unsafe_allow_html=True,
             )
         with _r2:
-            if _open_iid == _iid:
-                if st.button("✖ Close", key=f"rc_close_{_iid}", use_container_width=True):
+            if _open_iid == _cid:
+                if st.button("✖ Close", key=f"rc_close_{_cid}", use_container_width=True):
                     st.session_state.pop("rc_open", None)
                     st.rerun()
             else:
-                if st.button("✅ Approve…", key=f"rc_openbtn_{_iid}", use_container_width=True):
-                    st.session_state["rc_open"] = _iid
+                if st.button("✅ Approve…", key=f"rc_openbtn_{_cid}", use_container_width=True):
+                    st.session_state["rc_open"] = _cid
                     st.rerun()
 
-        if _open_iid == _iid:
+        if _open_iid == _cid:
             _render_approval_detail(_iid, _tag, _d, me_name)
         st.markdown("")
 
@@ -301,6 +304,8 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
 
     _sum = _d.get("summary", "")
     _diag = _d.get("diagnosis", "")
+    _per = _d.get("period", "Semanal")           # v25: periodo de ESTE borrador
+    _ck = f"{_ck}_{_per}"                        # sufijo de keys/estado por tarjeta
     _sg = get_signers(_iid)  # firmantes por defecto del activo
     with st.container(border=True):
         with st.expander("👁 Executive summary and diagnosis (read-only)", expanded=False):
@@ -311,12 +316,12 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
         st.markdown("**Recommendations** (brought from the previous report — edit, add, "
                     "or delete the ones the client has already done):")
 
-        _q_ss = f"rc_recs_cache_{_iid}"
+        _q_ss = f"rc_recs_cache_{_ck}"
         if _q_ss not in st.session_state:
             st.session_state[_q_ss] = _qlist(_iid)
 
         from core.briefing_builder import system_recommendation_proposals
-        _props_ss = f"rc_reco_props_{_iid}"
+        _props_ss = f"rc_reco_props_{_ck}"
         if _props_ss not in st.session_state:
             try:
                 st.session_state[_props_ss] = system_recommendation_proposals(_iid)
@@ -330,19 +335,19 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                 for _pi, _ptxt in enumerate(_props):
                     _pc1, _pc2, _pc3 = st.columns([0.72, 0.14, 0.14])
                     _pc1.write(_ptxt)
-                    if _pc2.button("Adopt", key=f"rc_adopt_{_iid}_{_pi}", use_container_width=True):
+                    if _pc2.button("Adopt", key=f"rc_adopt_{_ck}_{_pi}", use_container_width=True):
                         _q_add(_iid, _ptxt)
                         st.session_state[_q_ss] = _qlist(_iid)
                         st.session_state.pop(_props_ss, None)
                         st.rerun()
-                    if _pc3.button("Dismiss", key=f"rc_dismiss_{_iid}_{_pi}", use_container_width=True):
+                    if _pc3.button("Dismiss", key=f"rc_dismiss_{_ck}_{_pi}", use_container_width=True):
                         _q_dismiss(_iid, _ptxt)
                         st.session_state.pop(_props_ss, None)
                         st.rerun()
         else:
             _pc = st.columns([0.8, 0.2])
             _pc[0].caption("No new system proposals (all adopted or dismissed).")
-            if _pc[1].button("Reset dismissed", key=f"rc_reco_reset_{_iid}", use_container_width=True):
+            if _pc[1].button("Reset dismissed", key=f"rc_reco_reset_{_ck}", use_container_width=True):
                 _q_cleardis(_iid)
                 st.session_state.pop(_props_ss, None)
                 st.rerun()
@@ -360,7 +365,7 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
             columns=["id", "Recomendación", "Fecha de inicio"],
         )
         _qedited = st.data_editor(
-            _qdf, key=f"rc_recs_{_iid}", num_rows="dynamic",
+            _qdf, key=f"rc_recs_{_ck}", num_rows="dynamic",
             use_container_width=True, hide_index=True,
             column_config={
                 "id": None,
@@ -375,20 +380,20 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                     unsafe_allow_html=True)
         _s1, _s2 = st.columns(2)
         with _s1:
-            _elab = st.text_input("Prepared by", value=_sg.get("prepared_by", ""), key=f"rc_elab_{_iid}")
+            _elab = st.text_input("Prepared by", value=_sg.get("prepared_by", ""), key=f"rc_elab_{_ck}")
             _elab_rol = st.text_input("Role (prepared)", value=_sg.get("prepared_role", ""),
-                                      key=f"rc_elabr_{_iid}", placeholder="optional")
+                                      key=f"rc_elabr_{_ck}", placeholder="optional")
         with _s2:
             _aprb = st.text_input("Reviewed by", value=_sg.get("reviewed_by", ""),
-                                  key=f"rc_aprb_{_iid}", placeholder="required to approve")
+                                  key=f"rc_aprb_{_ck}", placeholder="required to approve")
             _aprb_rol = st.text_input("Role (reviewed)", value=_sg.get("reviewed_role", ""),
-                                      key=f"rc_aprbr_{_iid}", placeholder="optional")
+                                      key=f"rc_aprbr_{_ck}", placeholder="optional")
 
         # --- Gate de aprobación: primero VISTA PREVIA + REVISAR recomendaciones ---
         st.caption("⏳ La vista previa arma el **reporte completo** (refresca datos del "
                    "robot y renderiza espectros / onda / órbitas): tarda **~2-4 min**. "
                    "No cierres la pestaña; al terminar aparece la vista previa aquí.")
-        if st.button("👁 Generate report preview", key=f"rc_prev_{_iid}",
+        if st.button("👁 Generate report preview", key=f"rc_prev_{_ck}",
                      use_container_width=True):
             try:
                 _qsave(_iid, [{"id": r.get("id") or "", "text": r.get("Recomendación") or "",
@@ -410,8 +415,8 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                     _iid, _d.get("period", "Semanal"), use_ai=False,
                     sections_override={"summary": _sum, "diagnosis": _diag},
                     meta_extra=_meta_extra)
-            st.session_state[f"rc_pdf_{_iid}"] = _pdf
-            st.session_state[f"rc_pdfmeta_{_iid}"] = _m
+            st.session_state[f"rc_pdf_{_ck}"] = _pdf
+            st.session_state[f"rc_pdfmeta_{_ck}"] = _m
             # Render de páginas para vista previa inline
             _imgs = []
             try:
@@ -420,15 +425,15 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                 # TODAS las páginas (cap de seguridad) a buena resolución.
                 for _pg in _doc[: min(40, _doc.page_count)]:
                     _imgs.append(_pg.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0)).tobytes("png"))
-                st.session_state[f"rc_prevn_{_iid}"] = _doc.page_count
+                st.session_state[f"rc_prevn_{_ck}"] = _doc.page_count
             except Exception:
                 _imgs = []
-            st.session_state[f"rc_prevpng_{_iid}"] = _imgs
+            st.session_state[f"rc_prevpng_{_ck}"] = _imgs
 
-        _has_preview = bool(st.session_state.get(f"rc_pdf_{_iid}"))
-        _imgs = st.session_state.get(f"rc_prevpng_{_iid}") or []
+        _has_preview = bool(st.session_state.get(f"rc_pdf_{_ck}"))
+        _imgs = st.session_state.get(f"rc_prevpng_{_ck}") or []
         if _imgs:
-            _npag = st.session_state.get(f"rc_prevn_{_iid}", len(_imgs))
+            _npag = st.session_state.get(f"rc_prevn_{_ck}", len(_imgs))
             with st.expander(f"👁 Report preview — {_npag} page(s) "
                              f"(scroll to review all · download below for full quality)",
                              expanded=True):
@@ -439,7 +444,7 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
 
         # Confirmación explícita de revisión de recomendaciones
         _ack = st.checkbox("He revisado las recomendaciones y la vista previa del reporte.",
-                           key=f"rc_ack_{_iid}")
+                           key=f"rc_ack_{_ck}")
         _ready = _has_preview and _ack
         if not _ready:
             _missing = []
@@ -451,7 +456,7 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
 
         _b3 = st.container()
         with _b3:
-            if st.button("✅ Approve and send to client", key=f"rc_go_{_iid}",
+            if st.button("✅ Approve and send to client", key=f"rc_go_{_ck}",
                          type="primary", use_container_width=True, disabled=not _ready):
                 if not (_aprb or "").strip():
                     st.error("'Approved by' is missing — the report must carry both signatures.")
@@ -467,11 +472,11 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                         pass
                     with st.spinner("Approving and sending to client…"):
                         _res = approve_and_send(
-                            _iid, prepared_by=_elab, approved_by=_aprb,
+                            _iid, period=_per, prepared_by=_elab, approved_by=_aprb,
                             prepared_role=_elab_rol, approved_role=_aprb_rol, send=True,
                             # Reusa el PDF de la vista previa (idéntico) → instantáneo.
-                            prebuilt_pdf=st.session_state.get(f"rc_pdf_{_iid}"),
-                            prebuilt_meta=st.session_state.get(f"rc_pdfmeta_{_iid}"))
+                            prebuilt_pdf=st.session_state.get(f"rc_pdf_{_ck}"),
+                            prebuilt_meta=st.session_state.get(f"rc_pdfmeta_{_ck}"))
                     if _res.get("ok"):
                         _dv = _res.get("delivery") or {}
                         if _dv.get("any_ok"):
@@ -480,20 +485,20 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                             st.warning(f"Approved, but sending failed or the asset has no "
                                        f"channels configured: {_dv.get('error', _dv)}. "
                                        f"Download the PDF and send it manually.")
-                        st.session_state[f"rc_pdf_{_iid}"] = _res.get("pdf")
-                        for _k in (f"rc_ack_{_iid}", f"rc_prevpng_{_iid}",
-                                   f"rc_prevn_{_iid}", f"rc_pdfmeta_{_iid}"):
+                        st.session_state[f"rc_pdf_{_ck}"] = _res.get("pdf")
+                        for _k in (f"rc_ack_{_ck}", f"rc_prevpng_{_ck}",
+                                   f"rc_prevn_{_ck}", f"rc_pdfmeta_{_ck}"):
                             st.session_state.pop(_k, None)
                         st.session_state.pop("rc_open", None)
                         st.session_state["rc_cache"] = list_pending()
                     else:
                         st.error(f"Could not approve: {_res.get('error')}")
 
-        if st.session_state.get(f"rc_pdf_{_iid}"):
+        if st.session_state.get(f"rc_pdf_{_ck}"):
             st.download_button("⬇ Download PDF (latest generated version)",
-                               data=st.session_state[f"rc_pdf_{_iid}"],
+                               data=st.session_state[f"rc_pdf_{_ck}"],
                                file_name=f"Report_{_tag}_{_d.get('period','Semanal')}.pdf",
-                               mime="application/pdf", key=f"rc_dl_{_iid}",
+                               mime="application/pdf", key=f"rc_dl_{_ck}",
                                use_container_width=True)
 
 

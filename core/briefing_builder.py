@@ -1253,7 +1253,7 @@ def build_asset_draft(
         from core.briefing_queue import new_pending_draft, get_draft
         # Un consecutivo por CICLO de reporte: si ya hay borrador pendiente
         # con número (re-corrida del cron), se conserva; si no, se reclama.
-        _prev = get_draft(instance_id) or {}
+        _prev = get_draft(instance_id, period_label) or {}
         if _prev.get("status") == "pendiente" and _prev.get("consecutive"):
             _consec = _prev["consecutive"]
         else:
