@@ -1542,24 +1542,28 @@ elif view == "Órbita":
             fig.add_annotation(x=sp[0], y=sp[1], text=f"KΦ {_kpos}", showarrow=False,
                                yshift=-15, font=dict(color="#1f9d55", size=10,
                                                      family="IBM Plex Mono"))
-        # FLECHA = sentido tal como se RECORRE la órbita en el gráfico (vista de sondas).
-        _ad = -1.0 if _disp_orbit == "CCW" else 1.0
-        _ya = (smax if smax else 1.0) * 1.02
-        fig.add_annotation(x=_ad * (smax if smax else 1.0) * 0.42, y=_ya,
-                           ax=-_ad * (smax if smax else 1.0) * 0.42, ay=_ya,
+        # FLECHA REDONDA = giro REAL de la máquina (API 670), suave, arriba de la órbita.
+        _R1 = _Rp if _Rp else 1.0
+        _rr, _cy0 = _R1 * 0.13, _R1 * 1.20
+        _arc = np.linspace(np.radians(35), np.radians(325), 48)
+        if rot_api == "CW":                       # horario = ángulo decreciente
+            _arc = _arc[::-1]
+        _axx, _ayy = _rr * np.cos(_arc), _cy0 + _rr * np.sin(_arc)
+        fig.add_trace(go.Scatter(x=_axx, y=_ayy, mode="lines",
+                      line=dict(color="#64748b", width=2.2), hoverinfo="skip", showlegend=False))
+        fig.add_annotation(x=_axx[-1], y=_ayy[-1], ax=_axx[-4], ay=_ayy[-4],
                            xref="x", yref="y", axref="x", ayref="y", showarrow=True,
-                           arrowhead=2, arrowsize=1.4, arrowwidth=2.2, arrowcolor="#e8890c")
-        # Headline = GIRO del eje por API 670 (dato de máquina) + precesión (forward/reverse).
-        # La órbita NO se mueve (vista de sondas = System1); en esa vista se recorre al revés
-        # del giro de placa, por eso se anota el sentido en el gráfico en gris.
-        _gla = "↻" if rot_api == "CW" else "↺"
+                           arrowhead=2, arrowsize=1.5, arrowwidth=2.2, arrowcolor="#64748b")
+        fig.add_annotation(x=0, y=_cy0, text=rot_api, showarrow=False,
+                           font=dict(color="#64748b", size=9.5, family="IBM Plex Mono"))
+        # Headline = GIRO del eje por API 670 + precesión (forward/reverse), arriba de todo.
         _glg = "↻ CW" if _disp_orbit == "CW" else "↺ CCW"
-        fig.add_annotation(x=0, y=_ya,
-                           text=f"<b>{_gla} Giro {rot_api} · {_maq} (API 670)</b>   "
+        fig.add_annotation(x=0, y=_R1 * 1.46,
+                           text=f"<b>Giro {rot_api} · {_maq} (API 670)</b>   "
                                 f"<span style='color:#8090a6'>precesión {prec} · "
                                 f"en gráfico {_glg} (vista sondas)</span>",
-                           showarrow=False, yshift=16,
-                           font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
+                           showarrow=False, font=dict(color="#e8890c", size=12,
+                                                      family="IBM Plex Mono"))
         _orng = _Rp * 1.55 if _Rp else None
         fig.update_xaxes(title=f"{b.x.unit or 'µm'}",
                          scaleanchor="y", scaleratio=1, zeroline=True,
