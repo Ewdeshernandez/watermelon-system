@@ -341,6 +341,30 @@ _SGT300_CLEARANCE_UM = {
 }
 
 
+def _ecc_status(eps: float):
+    """Semáforo por relación de excentricidad ε = |pos| / claro radial (Bently 12-13).
+    ε→1 contacto/precarga · ε medio-alto = cargado normal · ε→0 centrado = riesgo de
+    inestabilidad (oil whirl/whip, Bently 14; Eisenmann p267)."""
+    if eps >= 0.95:
+        return "CONTACTO / PRECARGA SEVERA", "#dc3545"
+    if eps >= 0.50:
+        return "CARGADO NORMAL", "#1f9d55"
+    if eps >= 0.30:
+        return "POCO CARGADO", "#e8890c"
+    return "MUY CENTRADO · RIESGO WHIRL", "#dc3545"
+
+
+def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray):
+    """Convierte cambios de gap de las sondas a ±45° del tope (X=45° derecha,
+    Y=45° izquierda) a desplazamiento en el marco de máquina (H derecha+, V arriba+).
+    Modelo: Δgap = −(d·û_sonda); û_X=(+a,+a), û_Y=(−a,+a), a=cos45°. Resolviendo:
+    V = −(Δgx+Δgy)/(2a) ; H = (Δgy−Δgx)/(2a)."""
+    a = np.sqrt(0.5)
+    V = -(dgx + dgy) / (2.0 * a)
+    H = (dgy - dgx) / (2.0 * a)
+    return H, V
+
+
 def _trend_block():
     if not hist_caps:
         st.info("**Tendencias** — overall vs tiempo. Requiere varias capturas en el "
@@ -1598,84 +1622,156 @@ elif view == "Shaft Centerline":
                    "Sube el export **Gap** de System1 (par 1XD/1YD) o usa el histórico.")
     else:
         _is_gap = getattr(b.x, "kind", "wave") == "gap"
-        _xv = np.asarray(b.x.v, float)
-        _yv = np.asarray(b.y.v, float)
-        # gap referido al reposo (1ª muestra = origen) para ver el ascenso del eje
-        if _is_gap:
-            _xv = _xv - _xv[0]
-            _yv = _yv - _yv[0]
-        _m = np.isfinite(_xv) & np.isfinite(_yv)
-        _xv, _yv = _xv[_m], _yv[_m]
-        _sp = np.asarray(getattr(b.x, "speed", np.array([])), float)
-        _sp = _sp[_m] if _sp.size == _m.size else np.array([])
-        # posición de operación = último punto (a velocidad); reposo = origen
-        gx, gy = float(_xv[-1]), float(_yv[-1])
-        gmag = float(np.hypot(gx, gy))
-        _rise = float(np.nanmax(np.hypot(_xv, _yv))) if _xv.size else gmag
+        _rawx = np.asarray(b.x.v, float)
+        _rawy = np.asarray(b.y.v, float)
+        _spraw = np.asarray(getattr(b.x, "speed", np.array([])), float)
+        _has_spd = _is_gap and _spraw.size == _rawx.size and np.isfinite(_spraw).any()
+
         _bn = str(getattr(b.x, "bearing", "") or getattr(b.y, "bearing", ""))
         _oem_clr = _SGT300_CLEARANCE_UM.get(_bn)
-        _auto_clr = float(round(max(_rise * 2.2, 100.0) / 10) * 10)
+
+        # --- Selección de GIRO LENTO (slow roll) = reposo/referencia (Bently 5-5) ---
+        # El gap a giro lento = muñón en el FONDO del claro → origen del recorrido.
+        _sr_n, _sr_lo, _sr_hi = 0, None, None
+        if _has_spd:
+            _smin = float(np.nanmin(_spraw))
+            _smax = float(np.nanmax(_spraw))
+            _dflt = float(round(_smin + 0.08 * (_smax - _smin)))
+            _cap = max(_dflt, float(round(_smin + 0.30 * (_smax - _smin))))
+            sr_thr = st.slider("Velocidad de giro lento (slow roll) — define el reposo",
+                               min_value=float(round(_smin)), max_value=float(round(_cap)),
+                               value=min(_dflt, _cap), step=10.0,
+                               help="Giro lento = rpm sin respuesta dinámica (virador/cranking). "
+                                    "El gap promedio por debajo de esta velocidad = muñón en el "
+                                    "FONDO del claro = origen. Debajo de ~10% de la 1ª crítica.")
+            _srm = np.isfinite(_spraw) & (_spraw <= sr_thr)
+            if _srm.sum() >= 1:
+                _ox, _oy = float(np.nanmean(_rawx[_srm])), float(np.nanmean(_rawy[_srm]))
+                _sr_n = int(_srm.sum())
+                _sv = _spraw[_srm]
+                _sr_lo, _sr_hi = float(np.nanmin(_sv)), float(np.nanmax(_sv))
+            else:
+                _ox, _oy = float(_rawx[0]), float(_rawy[0])
+        else:
+            _ox = float(_rawx[0]) if _is_gap and _rawx.size else 0.0
+            _oy = float(_rawy[0]) if _is_gap and _rawy.size else 0.0
+
+        # cambios de gap referidos al giro lento
+        _dgx = _rawx - _ox
+        _dgy = _rawy - _oy
+        _m = np.isfinite(_dgx) & np.isfinite(_dgy)
+        _dgx, _dgy = _dgx[_m], _dgy[_m]
+        _sp = _spraw[_m] if _has_spd else np.array([])
+
+        # claro
+        _rise0 = float(np.nanmax(np.hypot(_dgx, _dgy))) if _dgx.size else 100.0
+        _auto_clr = float(round(max(_rise0 * 2.2, 100.0) / 10) * 10)
         clr = st.number_input("Claro diametral del cojinete (µm)",
                               value=_oem_clr if _oem_clr is not None else _auto_clr, step=10.0,
-                              help="Del montaje / API 670. Define la zona de operación segura. "
-                                   "El radio del claro = la mitad. Default OEM SGT-300: "
-                                   "cojinete 1 (Inlet)=152, 2 (CT)=317 µm · turbina de potencia pendiente.")
+                              help="Del montaje / API 670. Radio del claro = la mitad. "
+                                   "Default OEM SGT-300: cojinete 1 (Inlet)=152, 2 (CT)=317 µm · "
+                                   "turbina de potencia pendiente.")
         if _oem_clr is not None:
-            st.caption(f"⬤ Claro de armado OEM (dossier SGT-300) cargado para el cojinete {_bn}: "
+            st.caption(f"⬤ Claro de armado OEM (dossier SGT-300) para el cojinete {_bn}: "
                        f"{_oem_clr:.0f} µm diametral · radio {_oem_clr / 2:.0f} µm.")
+        if _sr_n:
+            st.caption(f"⬤ Giro lento: {_sr_n} muestras promediadas "
+                       f"({_sr_lo:.0f}–{_sr_hi:.0f} rpm) = reposo (fondo del claro).")
         rad = clr / 2.0
-        from core.diagnostics import (boundary_utilization_pct,  # noqa: PLC0415
-                                      get_semaforo_status, remaining_margin_pct)
-        util = boundary_utilization_pct(gx, gy, 0.0, 0.0, rad, rad)
-        status, color = get_semaforo_status(util)
+
+        if _is_gap:
+            # --- orientación física: sondas ±45° → marco máquina (H der+, V arriba+) ---
+            _H0, _V0 = _gap_to_vh(_dgx, _dgy)
+            # signo global: a velocidad el muñón SUBE (Bently 12-10) → V_operación > 0
+            _iop = int(np.nanargmax(_sp)) if _sp.size else (_H0.size - 1)
+            _sgn = -1.0 if _V0[_iop] < 0 else 1.0
+            _H, _V = _sgn * _H0, _sgn * _V0
+            # posición del muñón EN EL COJINETE: reposo en el fondo (0,−rad)
+            _px = _H
+            _py = _V - rad
+            gx_op, gy_op = float(_px[_iop]), float(_py[_iop])
+            eps = float(np.hypot(gx_op, gy_op) / rad) if rad > 0 else 0.0
+            eps = min(eps, 1.2)
+            _rise = float(_V[_iop])  # ascenso neto desde el fondo
+            status, color = _ecc_status(eps)
+            # ángulo de actitud: desde la carga (vertical abajo) a la línea centro→muñón
+            _emag = float(np.hypot(gx_op, gy_op))
+            _att = float(np.degrees(np.arccos(max(-1.0, min(1.0, -gy_op / _emag))))) if _emag > 1e-6 else 0.0
+            _side = "derecha" if gx_op >= 0 else "izquierda"
+        else:
+            # fallback sin gap DC (canales de onda): no es un centerline real
+            _px, _py = _dgx, _dgy
+            gx_op, gy_op = (float(_px[-1]), float(_py[-1])) if _px.size else (0.0, 0.0)
+            eps = float(np.hypot(gx_op, gy_op) / rad) if rad > 0 else 0.0
+            _rise = _rise0
+            status, color = _ecc_status(min(eps, 1.2))
+            _att, _side = 0.0, ""
+
         fig = go.Figure()
-        th = np.linspace(0, 2 * np.pi, 160)
-        # zonas semáforo (60% verde / 85% ámbar / resto rojo) sobre el RADIO del claro
-        for frac, c in [(1.0, "#dc3545"), (0.85, "#e8890c"), (0.60, "#1f9d55")]:
+        th = np.linspace(0, 2 * np.pi, 180)
+        # claro (borde físico) + anillos de excentricidad de referencia
+        fig.add_trace(go.Scatter(x=rad * np.cos(th), y=rad * np.sin(th), mode="lines",
+                      line=dict(color="#334155", width=1.6), hoverinfo="skip",
+                      name="claro", showlegend=False))
+        for frac, c in [(0.95, "#dc3545"), (0.30, "#0ea5e9")]:
             fig.add_trace(go.Scatter(x=rad * frac * np.cos(th), y=rad * frac * np.sin(th),
                           mode="lines", line=dict(color=c, width=1, dash="dot"),
                           hoverinfo="skip", showlegend=False))
-        # recorrido reposo→velocidad, coloreado por rpm si lo hay
-        if _is_gap and _sp.size and np.isfinite(_sp).any():
-            fig.add_trace(go.Scatter(x=_xv, y=_yv, mode="markers",
+        # recorrido reposo→velocidad coloreado por rpm
+        if _sp.size and np.isfinite(_sp).any():
+            fig.add_trace(go.Scatter(x=_px, y=_py, mode="markers",
                           marker=dict(color=_sp, colorscale="Turbo", size=4,
                                       showscale=True, colorbar=dict(title="rpm", thickness=12)),
-                          hovertemplate="X %{x:.1f} · Y %{y:.1f} µm · %{marker.color:.0f} rpm<extra></extra>",
+                          hovertemplate="H %{x:.1f} · V %{y:.1f} µm · %{marker.color:.0f} rpm<extra></extra>",
                           showlegend=False))
-        fig.add_trace(go.Scatter(x=_xv, y=_yv, mode="lines",
+        fig.add_trace(go.Scatter(x=_px, y=_py, mode="lines",
                       line=dict(color="#94a3b8", width=0.9), hoverinfo="skip", showlegend=False))
-        # reposo (origen) y posición de operación
+        # centro del cojinete + flecha de carga (hacia abajo) + reposo (fondo)
         fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers+text",
-                      marker=dict(color="#64748b", size=10, symbol="circle-open",
+                      marker=dict(color="#64748b", size=8, symbol="cross-thin",
                                   line=dict(color="#334155", width=2)),
-                      text=["reposo"], textposition="bottom center",
+                      text=["centro"], textposition="top right",
                       hoverinfo="skip", showlegend=False))
-        fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text",
+        if _is_gap:
+            fig.add_annotation(x=0, y=-rad * 0.78, ax=0, ay=0, xref="x", yref="y",
+                               axref="x", ayref="y", showarrow=True, arrowhead=2,
+                               arrowwidth=1.4, arrowcolor="#94a3b8", text="")
+            fig.add_trace(go.Scatter(x=[0], y=[-rad], mode="markers+text",
+                          marker=dict(color="#64748b", size=10, symbol="circle-open",
+                                      line=dict(color="#334155", width=2)),
+                          text=["reposo (fondo)"], textposition="bottom center",
+                          hoverinfo="skip", showlegend=False))
+        fig.add_trace(go.Scatter(x=[gx_op], y=[gy_op], mode="markers+text",
                       marker=dict(color=color, size=15, line=dict(color="#fff", width=1.5)),
                       text=[f"{b.x.rpm:.0f} rpm" if b.x.rpm else "operación"],
                       textposition="top center", hoverinfo="skip", showlegend=False))
-        _xl = f"{b.x.label} gap (µm) · {b.x.probe_angle}" if _is_gap else f"{b.x.label} (µm)"
-        _yl = f"{b.y.label} gap (µm) · {b.y.probe_angle}" if _is_gap else f"{b.y.label} (µm)"
+        if _is_gap:
+            _xl, _yl = "Horizontal H (µm)", "Vertical V (µm) · arriba +"
+        else:
+            _xl = f"{b.x.label} (µm)"
+            _yl = f"{b.y.label} (µm)"
         fig.update_xaxes(title=_xl, scaleanchor="y", scaleratio=1, zeroline=True,
-                         range=[-rad * 1.1, rad * 1.1])
-        fig.update_yaxes(title=_yl, zeroline=True, range=[-rad * 1.1, rad * 1.1])
-        st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=520),
+                         range=[-rad * 1.15, rad * 1.15])
+        fig.update_yaxes(title=_yl, zeroline=True, range=[-rad * 1.15, rad * 1.15])
+        st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=540),
                         use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
-        # ángulo de actitud = dirección de la posición de operación (0°=+X sonda)
-        _att = float(np.degrees(np.arctan2(gy, gx))) % 360.0
-        _note = (f"gap DC a operación X={gx:.1f} Y={gy:.1f} µm · ascenso del eje "
-                 f"{_rise:.1f} µm · ángulo de actitud {_att:.0f}° (marco sondas)."
-                 if _is_gap else
-                 f"posición X={gx:.1f} Y={gy:.1f} µm (|r|={gmag:.1f}).")
+        _att_ok = "✓ normal (20–50°)" if 20 <= _att <= 50 else "⚠ fuera de 20–50°"
+        if _is_gap:
+            _note = (f"ε = <b>{eps:.2f}</b> (0=centro, 1=contacto) · ascenso del eje "
+                     f"{_rise:.0f} µm · ángulo de actitud {_att:.0f}° hacia la {_side} "
+                     f"({_att_ok}). Muñón en el fondo en reposo; sube con la cuña de aceite.")
+        else:
+            _note = (f"posición X={gx_op:.1f} Y={gy_op:.1f} µm · ε≈{eps:.2f}. "
+                     f"Sin gap DC: no es un centerline físico, sube el export <b>Gap</b> de System1.")
         st.markdown(
             f"<div style='border-left:4px solid {color};background:#f8fafc;border:1px solid #e2e8f2;"
             f"border-radius:8px;padding:11px 15px;margin-top:8px'>"
             f"<span style='background:{color};color:#fff;border-radius:6px;padding:2px 9px;"
-            f"font:700 11px IBM Plex Mono'>{status}</span>  "
-            f"<b>Uso del claro: {util:.0f}%</b> · margen {remaining_margin_pct(util):.0f}% · "
-            f"{_note} Reposo = origen; el punto de color = eje a velocidad. "
-            f"Anillos sobre el RADIO del claro: verde 60% · ámbar 85% · rojo = borde (API 670).</div>",
+            f"font:700 11px IBM Plex Mono'>{status}</span>  {_note}<br>"
+            f"<span style='color:#64748b;font-size:12px'>Círculo = claro · anillo rojo ε=0.95 "
+            f"(contacto) · anillo azul ε=0.30 (riesgo whirl) · flecha = carga. "
+            f"Sondas X=45°R / Y=45°L del tope → H/V real.</span></div>",
             unsafe_allow_html=True)
 
 elif view == "Bode":
