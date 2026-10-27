@@ -332,6 +332,14 @@ def _sweep_controls(sw, key):
 _TREND_PAL = ["#12305e", "#e8890c", "#1f9d55", "#8b5cf6", "#0ea5e9", "#dc3545",
               "#84cc16", "#d946ef", "#14b8a6", "#f59e0b"]
 
+# Claros DIAMETRALES de armado (µm) del gas generator SGT-300 — dossier OEM RW166
+# (Section 05 Core Engine). Mismo modelo en SGT300A y SGT300B → por nº de cojinete.
+# El cojinete de la TURBINA DE POTENCIA queda PENDIENTE (sin valor OEM) → auto.
+_SGT300_CLEARANCE_UM = {
+    "1": 152.0,   # Inlet bearing  (compresor/frío, muñón ~100 mm): Ø99.980 − Ø99.828
+    "2": 317.0,   # CT bearing     (turbina/caliente, muñón ~150 mm): Ø150.006 − Ø149.689
+}
+
 
 def _trend_block():
     if not hist_caps:
@@ -1604,10 +1612,17 @@ elif view == "Shaft Centerline":
         gx, gy = float(_xv[-1]), float(_yv[-1])
         gmag = float(np.hypot(gx, gy))
         _rise = float(np.nanmax(np.hypot(_xv, _yv))) if _xv.size else gmag
+        _bn = str(getattr(b.x, "bearing", "") or getattr(b.y, "bearing", ""))
+        _oem_clr = _SGT300_CLEARANCE_UM.get(_bn)
+        _auto_clr = float(round(max(_rise * 2.2, 100.0) / 10) * 10)
         clr = st.number_input("Claro diametral del cojinete (µm)",
-                              value=float(round(max(_rise * 2.2, 100.0) / 10) * 10), step=10.0,
+                              value=_oem_clr if _oem_clr is not None else _auto_clr, step=10.0,
                               help="Del montaje / API 670. Define la zona de operación segura. "
-                                   "El radio del claro = la mitad.")
+                                   "El radio del claro = la mitad. Default OEM SGT-300: "
+                                   "cojinete 1 (Inlet)=152, 2 (CT)=317 µm · turbina de potencia pendiente.")
+        if _oem_clr is not None:
+            st.caption(f"⬤ Claro de armado OEM (dossier SGT-300) cargado para el cojinete {_bn}: "
+                       f"{_oem_clr:.0f} µm diametral · radio {_oem_clr / 2:.0f} µm.")
         rad = clr / 2.0
         from core.diagnostics import (boundary_utilization_pct,  # noqa: PLC0415
                                       get_semaforo_status, remaining_margin_pct)
