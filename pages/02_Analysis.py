@@ -1617,11 +1617,33 @@ elif view == "Deflexión del eje":
                    "Cojinetes ordenados por número (posición axial).")
 
 elif view == "Shaft Centerline":
-    b = _pick_bearing("sc_b")
-    if b is None:
+    _brgs = [bb for bb in rec.bearings if bb.has_xy]
+    if not _brgs:
         st.warning("Shaft Centerline: necesita el **par X/Y** (gap DC de los proximitores). "
                    "Sube el export **Gap** de System1 (par 1XD/1YD) o usa el histórico.")
     else:
+        st.markdown(
+            "<style>"
+            "div[data-testid='stPopover'] button{border-radius:9px;border:1px solid #cbd5e1;"
+            "background:#fff;padding:5px 14px;font:600 12.5px 'IBM Plex Sans';color:#1e293b}"
+            "div[data-testid='stPopover'] button:hover{border-color:#12305e;color:#12305e}"
+            ".sc-bar{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:0 0 10px}"
+            ".sc-pill{background:#fff;border:1px solid #e2e8f2;border-radius:999px;"
+            "padding:4px 13px;font:600 12px 'IBM Plex Sans';color:#475569;white-space:nowrap}"
+            ".sc-pill b{color:#0f172a;font-weight:700}"
+            ".sc-badge{color:#fff;border-radius:999px;padding:4px 13px;font:700 11px 'IBM Plex Mono';"
+            "letter-spacing:.3px;white-space:nowrap}"
+            ".sc-hint{color:#94a3b8;font:400 11.5px 'IBM Plex Sans';margin:6px 0 0}"
+            "</style>", unsafe_allow_html=True)
+        _tb1, _tb2 = st.columns([5, 1], vertical_alignment="center")
+        with _tb1:
+            _names = [bb.name for bb in _brgs]
+            _seln = st.segmented_control("Cojinete", _names, default=_names[0],
+                                         key="sc_b", label_visibility="collapsed")
+            b = _brgs[_names.index(_seln)] if _seln in _names else _brgs[0]
+        with _tb2:
+            _pop = st.popover("⚙ Ajustes", use_container_width=True)
+
         _is_gap = getattr(b.x, "kind", "wave") == "gap"
         _rawx = np.asarray(b.x.v, float)
         _rawy = np.asarray(b.y.v, float)
@@ -1639,8 +1661,8 @@ elif view == "Shaft Centerline":
             except Exception:  # noqa: BLE001
                 return ts or "—"
 
-        # Todos los controles colapsados → la gráfica manda. Defaults ya buenos.
-        with st.expander("⚙ Ajustes · recorte · giro lento · claro", expanded=False):
+        # Controles en el popover flotante → la gráfica manda. Defaults ya buenos.
+        with _pop:
             # --- recorte: ventana de muestras (orden de captura = línea de tiempo) ---
             if _ntot >= 3:
                 _rng = st.slider("Rango de muestras (recorte · orden de captura)",
@@ -1785,23 +1807,28 @@ elif view == "Shaft Centerline":
         st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=540),
                         use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
-        _att_ok = "✓ normal (20–50°)" if 20 <= _att <= 50 else "⚠ fuera de 20–50°"
         if _is_gap:
-            _note = (f"ε = <b>{eps:.2f}</b> (0=centro, 1=contacto) · ascenso del eje "
-                     f"{_rise:.0f} µm · ángulo de actitud {_att:.0f}° hacia la {_side} "
-                     f"({_att_ok}). Muñón en el fondo en reposo; sube con la cuña de aceite.")
+            _attf = "#1f9d55" if 20 <= _att <= 50 else "#e8890c"
+            _chips = (
+                f"<div class='sc-bar'>"
+                f"<span class='sc-badge' style='background:{color}'>{status}</span>"
+                f"<span class='sc-pill'>ε <b>{eps:.2f}</b></span>"
+                f"<span class='sc-pill' style='border-color:{_attf}44'>actitud "
+                f"<b>{_att:.0f}°</b> {_side}</span>"
+                f"<span class='sc-pill'>ascenso <b>{_rise:.0f} µm</b></span>"
+                f"<span class='sc-pill'>claro <b>{clr:.0f} µm</b></span>"
+                f"<span class='sc-pill'>op <b>{(b.x.rpm or 0):.0f} rpm</b></span></div>"
+                f"<div class='sc-hint'>Círculo = claro · anillo rojo ε 0.95 (contacto) · "
+                f"anillo azul ε 0.30 (riesgo whirl) · flecha = carga · sondas abajo "
+                f"X 135°R / Y 135°L (Bently) → H/V real. ε 0=centro, 1=contacto.</div>")
         else:
-            _note = (f"posición X={gx_op:.1f} Y={gy_op:.1f} µm · ε≈{eps:.2f}. "
-                     f"Sin gap DC: no es un centerline físico, sube el export <b>Gap</b> de System1.")
-        st.markdown(
-            f"<div style='border-left:4px solid {color};background:#f8fafc;border:1px solid #e2e8f2;"
-            f"border-radius:8px;padding:11px 15px;margin-top:8px'>"
-            f"<span style='background:{color};color:#fff;border-radius:6px;padding:2px 9px;"
-            f"font:700 11px IBM Plex Mono'>{status}</span>  {_note}<br>"
-            f"<span style='color:#64748b;font-size:12px'>Círculo = claro · anillo rojo ε=0.95 "
-            f"(contacto) · anillo azul ε=0.30 (riesgo whirl) · flecha = carga. "
-            f"Sondas abajo: X=135°R / Y=135°L del tope (Bently) → H/V real.</span></div>",
-            unsafe_allow_html=True)
+            _chips = (
+                f"<div class='sc-bar'><span class='sc-badge' style='background:{color}'>{status}</span>"
+                f"<span class='sc-pill'>X <b>{gx_op:.1f}</b> · Y <b>{gy_op:.1f} µm</b></span>"
+                f"<span class='sc-pill'>ε≈<b>{eps:.2f}</b></span></div>"
+                f"<div class='sc-hint'>Sin gap DC: no es un centerline físico. "
+                f"Sube el export <b>Gap</b> de System1.</div>")
+        st.markdown(_chips, unsafe_allow_html=True)
 
 elif view == "Bode":
     sw = _pick_sweep("bode_sw")
