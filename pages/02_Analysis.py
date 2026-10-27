@@ -1542,22 +1542,22 @@ elif view == "Órbita":
             fig.add_annotation(x=sp[0], y=sp[1], text=f"KΦ {_kpos}", showarrow=False,
                                yshift=-15, font=dict(color="#1f9d55", size=10,
                                                      family="IBM Plex Mono"))
-        # Giro REAL de la máquina (API 670) estilo Bently: MEDIO arco arriba (dome plano),
-        # mínimo espacio. Arrowhead marca el sentido. Sin headline voluminoso (va en caption).
+        # Giro REAL (API 670) en una ESQUINITA (arriba-derecha, donde está vacío porque las
+        # sondas van abajo) → arco abierto y chico, NO le roba espacio a la órbita.
         _R1 = _Rp if _Rp else 1.0
-        _rr, _cy0 = _R1 * 0.16, _R1 * 1.04
-        _arc = np.linspace(np.radians(168), np.radians(12), 40)   # izq→der por el tope (CW)
+        _cx, _cy0, _rr = _R1 * 1.00, _R1 * 1.00, _R1 * 0.19
+        _arc = np.linspace(np.radians(150), np.radians(-20), 36)   # abierto (~170°), gentil
         if rot_api == "CCW":
             _arc = _arc[::-1]
-        _axx, _ayy = _rr * np.cos(_arc), _cy0 + _rr * np.sin(_arc)
+        _axx, _ayy = _cx + _rr * np.cos(_arc), _cy0 + _rr * np.sin(_arc)
         fig.add_trace(go.Scatter(x=_axx, y=_ayy, mode="lines",
-                      line=dict(color="#64748b", width=2.4), hoverinfo="skip", showlegend=False))
+                      line=dict(color="#94a3b8", width=2.2), hoverinfo="skip", showlegend=False))
         fig.add_annotation(x=_axx[-1], y=_ayy[-1], ax=_axx[-4], ay=_ayy[-4],
                            xref="x", yref="y", axref="x", ayref="y", showarrow=True,
-                           arrowhead=2, arrowsize=1.6, arrowwidth=2.4, arrowcolor="#64748b")
-        fig.add_annotation(x=0, y=_cy0 + _rr * 0.58, yshift=6,
-                           text=f"Giro {rot_api} · {_maq} (API 670)", showarrow=False,
-                           font=dict(color="#64748b", size=10.5, family="IBM Plex Mono"))
+                           arrowhead=2, arrowsize=1.4, arrowwidth=2.2, arrowcolor="#94a3b8")
+        fig.add_annotation(x=_cx, y=_cy0 - _rr * 0.65, yshift=-4,
+                           text=f"giro {rot_api}", showarrow=False,
+                           font=dict(color="#94a3b8", size=9.5, family="IBM Plex Mono"))
         _orng = _Rp * 1.55 if _Rp else None
         fig.update_xaxes(title=f"{b.x.unit or 'µm'}",
                          scaleanchor="y", scaleratio=1, zeroline=True,
