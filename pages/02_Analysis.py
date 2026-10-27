@@ -447,6 +447,135 @@ def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with
                       hoverinfo="skip", showlegend=False))
 
 
+def _orbit_data(b, fmode, ang_x, ang_y):
+    """Calcula la órbita de un cojinete (método Live Monitoring = idéntico a System1):
+    rota a coords de máquina, filtra el orden, arma keyphasor, precesión, forma."""
+    px, py = np.asarray(b.x.v, float), np.asarray(b.y.v, float)
+    _n = min(px.size, py.size); px, py = px[:_n], py[:_n]
+    fs = b.x.fs_hz or b.y.fs_hz; spr = b.x.spr or b.y.spr; rpm = b.x.rpm
+    _ax = np.radians(float(ang_x)); _ay = np.radians(-float(ang_y))
+    _ca, _cb = np.sin(_ax), np.cos(_ax); _cc, _cd = np.sin(_ay), np.cos(_ay)
+    _det = _ca * _cd - _cb * _cc
+    if abs(_det) > 1e-6:
+        H = (_cd * px - _cb * py) / _det; V = (-_cc * px + _ca * py) / _det
+    else:
+        H, V = px, py
+    H = H - np.nanmean(H); V = V - np.nanmean(V)
+
+    def _ofilt(sig, order):
+        if not order or not fs or not rpm or sig.size < 8:
+            return sig
+        spc = np.fft.rfft(sig); frq = np.fft.rfftfreq(sig.size, 1.0 / fs)
+        k = int(np.argmin(np.abs(frq - order * rpm / 60.0)))
+        out = np.zeros_like(spc); out[k] = spc[k]
+        return np.fft.irfft(out, sig.size)
+    _order = {"Direct": 0, "1X": 1, "2X": 2}.get(fmode, 0)
+    Hf, Vf = _ofilt(H, _order), _ofilt(V, _order)
+    sp = None; _kmarks = []
+    if spr and spr > 4 and Hf.size >= 2 * spr:
+        _nr = Hf.size // spr
+        if _order == 0:
+            xv, yv = Hf, Vf
+            _kmarks = [(float(Hf[i * spr]), float(Vf[i * spr])) for i in range(_nr)]
+            sp = _kmarks[0] if _kmarks else None
+        else:
+            Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
+            Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
+            _g = max(1, spr // 40)
+            xv = Ha[:max(1, spr - _g)]; yv = Va[:max(1, spr - _g)]
+            sp = (float(Ha[0]), float(Va[0])); _kmarks = [sp]
+    else:
+        xv, yv = Hf, Vf
+        sp = (float(Hf[0]), float(Vf[0])) if Hf.size else None
+        _kmarks = [sp] if sp else []
+    _area = float(np.sum(xv[:-1] * yv[1:] - xv[1:] * yv[:-1])) if xv.size > 2 else 0.0
+    prec = "CCW" if _area > 0 else "CW"
+    if fs and rpm:
+        _z = _ofilt(H, 1) + 1j * _ofilt(V, 1)
+        _Z = np.fft.fftshift(np.fft.fft(_z))
+        _frz = np.fft.fftshift(np.fft.fftfreq(_z.size, 1.0 / fs)); _f1 = rpm / 60.0
+        _kf = int(np.argmin(np.abs(_frz - _f1))); _kr = int(np.argmin(np.abs(_frz + _f1)))
+        prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
+    _precd = ("Hacia adelante (forward)" if prec == "Forward"
+              else "Inversa (reverse)" if prec == "Reverse" else prec)
+    _lbl_b = (b.x.label or b.name or ""); _bnum = next((int(c) for c in _lbl_b if c.isdigit()), 0)
+    rot_api = "CCW" if _bnum >= 5 else "CW"; _maq = "generador" if _bnum >= 5 else "turbina"
+    cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
+    _pc = np.column_stack([xv - cx, yv - cy]); major = minor = ellip = smax = 0.0
+    if _pc.shape[0] > 2:
+        try:
+            _, _, _vt = np.linalg.svd(_pc, full_matrices=False)
+            _pj = _pc @ _vt[0]; _pn = _pc @ _vt[1]
+            major = float(_pj.max() - _pj.min()); minor = float(_pn.max() - _pn.min())
+            ellip = (minor / major) if major else 0.0
+            smax = float(np.max(np.hypot(_pc[:, 0], _pc[:, 1])))
+        except Exception:  # noqa: BLE001
+            pass
+    if ellip >= 0.8:
+        shp, shc = "Circular — desbalance / condición sana", "#1f9d55"
+    elif ellip >= 0.4:
+        shp, shc = "Elíptica — precarga o anisotropía de rigidez", "#e8890c"
+    else:
+        shp, shc = "Muy plana — precarga fuerte / desalineación", "#dc3545"
+    _kpos = ""
+    if sp is not None:
+        _kang = float(np.degrees(np.arctan2(sp[0], sp[1])))
+        _kpos = f"{abs(_kang):.0f}°{'R' if _kang >= 0 else 'L'}"
+    Rp = max(float(smax) if smax else 0.0,
+             float(np.nanmax(np.hypot(xv, yv))) if len(xv) else 0.0)
+    return dict(xv=xv, yv=yv, kmarks=_kmarks, sp=sp, order=_order, smax=smax, Rp=Rp,
+                prec=prec, precd=_precd, rot_api=rot_api, maq=_maq, shp=shp, shc=shc,
+                major=major, minor=minor, ellip=ellip, kpos=_kpos, rpm=rpm)
+
+
+def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):
+    """Arma la figura de UNA órbita con escala forzada R (misma para todas). El sentido
+    de giro real (API 670) = solo texto CW/CCW en la esquina (sin arco)."""
+    fig = go.Figure()
+    _add_probe_glyphs(fig, R, ang_x, ang_y, b.x.label, b.y.label,
+                      with_top=False, with_cone=not compact)
+    fig.add_trace(go.Scatter(x=d["xv"], y=d["yv"], mode="lines",
+                  line=dict(color=_NAVY, width=1.6), name=b.name, showlegend=False))
+    km = d["kmarks"]
+    if km:
+        _kx = [p[0] for p in km]; _ky = [p[1] for p in km]
+        if d["order"] == 0 and len(km) > 1:
+            fig.add_trace(go.Scatter(x=_kx, y=_ky, mode="markers",
+                          marker=dict(color="#1f9d55", size=6,
+                                      line=dict(color="white", width=0.8)), showlegend=False))
+        else:
+            _ks = (d["smax"] if d["smax"] else 1.0) * 0.07
+            for _th in range(0, 360, 60):
+                _r = np.radians(_th)
+                fig.add_trace(go.Scatter(x=[_kx[0], _kx[0] + _ks * np.sin(_r)],
+                              y=[_ky[0], _ky[0] + _ks * np.cos(_r)], mode="lines",
+                              line=dict(color="#1f9d55", width=1.2),
+                              hoverinfo="skip", showlegend=False))
+            fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
+                          marker=dict(color="#1f9d55", size=12,
+                                      line=dict(color="white", width=1.5)), showlegend=False))
+    if d["sp"] is not None and not compact:
+        fig.add_annotation(x=d["sp"][0], y=d["sp"][1], text=f"KΦ {d['kpos']}", showarrow=False,
+                           yshift=-14, font=dict(color="#1f9d55", size=10, family="IBM Plex Mono"))
+    # GIRO real (API 670) = SOLO texto CW/CCW en la esquina (sin arco, no roba espacio).
+    fig.add_annotation(xref="paper", yref="paper", x=0.985, y=0.985, xanchor="right",
+                       yanchor="top", text=f"<b>{d['rot_api']}</b>", showarrow=False,
+                       font=dict(color="#64748b", size=13, family="IBM Plex Mono"),
+                       bgcolor="rgba(255,255,255,0.65)")
+    _rng = R * 1.5 if R else None
+    fig.update_xaxes(title=(b.x.unit or "µm") if not compact else "", scaleanchor="y",
+                     scaleratio=1, zeroline=True, zerolinecolor="rgba(120,140,170,.45)",
+                     gridcolor="rgba(120,140,170,.12)", range=[-_rng, _rng] if _rng else None)
+    fig.update_yaxes(title=(b.y.unit or "µm") if not compact else "", zeroline=True,
+                     zerolinecolor="rgba(120,140,170,.45)", gridcolor="rgba(120,140,170,.12)",
+                     range=[-_rng, _rng] if _rng else None)
+    _ttl = (f"{b.name} · {fmode}" if compact
+            else f"Órbita · {b.name} · {fmode}  ·  precesión {d['precd']}")
+    fig = _layout(fig, _ttl, h=h)
+    fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", showlegend=False)
+    return fig
+
+
 def _trend_block():
     if not hist_caps:
         st.info("**Tendencias** — overall vs tiempo. Requiere varias capturas en el "
@@ -1375,8 +1504,8 @@ elif view == "Full Spectrum":
                            "rev punteado). Base: curso Bently Nevada de diagnósticos.")
 
 elif view == "Órbita":
-    b = _pick_bearing("orb_b")
-    if b is None:
+    _obrgs = [bb for bb in rec.bearings if bb.has_xy]
+    if not _obrgs:
         st.warning("Órbita: necesita el **par X/Y** de un cojinete. Sube ambos CSV "
                    "(ej. 1xd.csv + 1yd.csv).")
     else:
@@ -1392,225 +1521,66 @@ elif view == "Órbita":
             ang_y = st.number_input("Y · °L del TOP", value=135, step=5,
                                     key="orb_ay", help="Montaje de la sonda Y, lado L, grados "
                                     "desde el tope. SGT-300 real = 135° (abajo-izquierda).")
-        # ====== Órbita método Live Monitoring (validado = idéntico a System1) ======
-        px, py = np.asarray(b.x.v, float), np.asarray(b.y.v, float)
-        _n = min(px.size, py.size)
-        px, py = px[:_n], py[:_n]
-        fs = b.x.fs_hz or b.y.fs_hz
-        spr = b.x.spr or b.y.spr
-        rpm = b.x.rpm
-        # 1) Rotar a COORDENADAS DE MÁQUINA (H→derecha, V→arriba). Sondas a ±45° del
-        #    TOP → se resuelve el 2×2 (igual que Live Monitoring). Ortonormal = conserva forma.
-        _ax = np.radians(float(ang_x)); _ay = np.radians(-float(ang_y))
-        _ca, _cb = np.sin(_ax), np.cos(_ax)
-        _cc, _cd = np.sin(_ay), np.cos(_ay)
-        _det = _ca * _cd - _cb * _cc
-        if abs(_det) > 1e-6:
-            H = (_cd * px - _cb * py) / _det
-            V = (-_cc * px + _ca * py) / _det
-        else:
-            H, V = px, py
-        H = H - np.nanmean(H)
-        V = V - np.nanmean(V)
-
-        def _ofilt(sig, order):
-            """Componente síncrona del orden pedido (bin FFT). order=0 → todo (Direct)."""
-            if not order or not fs or not rpm or sig.size < 8:
-                return sig
-            spc = np.fft.rfft(sig)
-            frq = np.fft.rfftfreq(sig.size, 1.0 / fs)
-            k = int(np.argmin(np.abs(frq - order * rpm / 60.0)))
-            out = np.zeros_like(spc)
-            out[k] = spc[k]
-            return np.fft.irfft(out, sig.size)
-        _order = {"Direct": 0, "1X": 1, "2X": 2}.get(fmode, 0)
-        Hf, Vf = _ofilt(H, _order), _ofilt(V, _order)
-        # 2) Direct = TODAS las vueltas (como System1 [All Data], keyphasor por vuelta).
-        #    1X/2X = promedio SÍNCRONO + órbita ABIERTA con hueco en el keyphasor (Bently).
-        sp = None
-        bp = None                                                # punto BLANCO (antes del trigger)
-        _kmarks = []
-        if spr and spr > 4 and Hf.size >= 2 * spr:
-            _nr = Hf.size // spr
-            if _order == 0:
-                xv, yv = Hf, Vf                                  # todas las vueltas
-                _kmarks = [(float(Hf[i * spr]), float(Vf[i * spr])) for i in range(_nr)]
-                sp = _kmarks[0] if _kmarks else None
-            else:
-                Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
-                Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
-                _g = max(1, spr // 40)                           # notch mínimo (estilo Bently)
-                # El punto LIDERA: se dibuja desde la muestra 0 hacia ADELANTE y el notch
-                # queda DETRÁS (justo antes de cerrar) → secuencia blanco→brillante en el
-                # sentido de giro (Bently: el punto va adelante del hueco, no atrás).
-                xv = Ha[:max(1, spr - _g)]
-                yv = Va[:max(1, spr - _g)]
-                sp = (float(Ha[0]), float(Va[0]))                # BRILLANTE = trigger (muestra 0)
-                bp = (float(Ha[-1]), float(Va[-1]))              # muestra antes del trigger (detrás)
-                _kmarks = [sp]
-        else:
-            xv, yv = Hf, Vf
-            sp = (float(Hf[0]), float(Vf[0])) if Hf.size else None
-            _kmarks = [sp] if sp else []
-        # 3) PRECESIÓN = del 1X DIRECCIONAL (z=H+iV → +f forward / −f reverse), igual que
-        #    el FULL SPECTRUM y System1 (Bently pág 77: órbita y full spectrum concuerdan).
-        #    Forward = componente +f mayor que −f. NO se compara con un giro externo.
-        _area = float(np.sum(xv[:-1] * yv[1:] - xv[1:] * yv[:-1])) if xv.size > 2 else 0.0
-        orbit_dir = "CCW" if _area > 0 else "CW"
-        prec = orbit_dir   # fallback si no hay fs/rpm
-        if fs and rpm:
-            _z = _ofilt(H, 1) + 1j * _ofilt(V, 1)
-            _Z = np.fft.fftshift(np.fft.fft(_z))
-            _frz = np.fft.fftshift(np.fft.fftfreq(_z.size, 1.0 / fs))
-            _f1 = rpm / 60.0
-            _kf = int(np.argmin(np.abs(_frz - _f1)))
-            _kr = int(np.argmin(np.abs(_frz + _f1)))
-            prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
-        _precd = ("Hacia adelante (forward)" if prec == "Forward"
-                  else "Inversa (reverse)" if prec == "Reverse" else prec)
-        # --- SENTIDO DE GIRO por API 670: visto desde el COJINETE #1 (conductor→conducido).
-        #     Turbina = CW; tras el gearbox el generador INVIERTE a CCW. La órbita se dibuja
-        #     en ESE marco. La data de sondas cae en el extremo opuesto → si el giro que
-        #     implica la data difiere del de API 670, se ESPEJA horizontal (forma intacta).
-        #     NO se mueve la órbita (queda como System1, keyphasor en su sitio). El giro de
-        #     API 670 es solo RÓTULO; el gráfico es la vista de sondas (sentido opuesto).
-        _lbl_b = (b.x.label or b.name or "")
-        _bnum = next((int(c) for c in _lbl_b if c.isdigit()), 0)
-        rot_api = "CCW" if _bnum >= 5 else "CW"        # gen (≥5) CCW · turbina/GB CW
-        _maq = "generador" if _bnum >= 5 else "turbina"
-        _disp_orbit = orbit_dir                        # sentido tal como se dibuja (sondas)
-        # ---- Métricas de forma (Bently pág 69): eje mayor/menor + elipticidad + Smax ----
-        cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
-        _pc = np.column_stack([xv - cx, yv - cy])
-        major = minor = ellip = smax = 0.0
-        if _pc.shape[0] > 2:
-            try:
-                _, _, _vt = np.linalg.svd(_pc, full_matrices=False)
-                _pj = _pc @ _vt[0]
-                _pn = _pc @ _vt[1]
-                major = float(_pj.max() - _pj.min())
-                minor = float(_pn.max() - _pn.min())
-                ellip = (minor / major) if major else 0.0
-                smax = float(np.max(np.hypot(_pc[:, 0], _pc[:, 1])))
-            except Exception:  # noqa: BLE001
-                pass
-        # diagnóstico de forma por Bently
-        if ellip >= 0.8:
-            shp, shc = "Circular — desbalance / condición sana", "#1f9d55"
-        elif ellip >= 0.4:
-            shp, shc = "Elíptica — precarga o anisotropía de rigidez", "#e8890c"
-        else:
-            shp, shc = "Muy plana — precarga fuerte / desalineación", "#dc3545"
-
-        fig = go.Figure()
-        # sondas de proximidad dibujadas en su posición real (igual que el Shaft Centerline)
-        _Rp = max(float(smax) if smax else 0.0,
-                  float(np.nanmax(np.hypot(xv, yv))) if len(xv) else 0.0)
-        _add_probe_glyphs(fig, _Rp, ang_x, ang_y, b.x.label, b.y.label, with_top=False)
-        fig.add_trace(go.Scatter(x=xv, y=yv, mode="lines",
-                                 line=dict(color=_NAVY, width=1.6), name=b.name))
-        # KEYPHASOR: Direct = una marca por vuelta (cluster, como System1); 1X/2X = punto
-        # grande en el HUECO (inicio). El trazo filtrado queda ABIERTO → no toca el punto.
-        if _kmarks:
-            _kx = [p[0] for p in _kmarks]
-            _ky = [p[1] for p in _kmarks]
-            if _order == 0 and len(_kmarks) > 1:
-                fig.add_trace(go.Scatter(x=_kx, y=_ky, mode="markers",
-                              marker=dict(color="#1f9d55", size=7,
-                                          line=dict(color="white", width=0.8)),
-                              name="keyphasor (c/vuelta)"))
-            else:
-                # KEYPHASOR estilo Bently: punto brillante SOBRE la órbita (notch mínimo) +
-                # pequeños ticks radiantes (la marca "sunburst" del disparo).
-                _ksun = (smax if smax else 1.0) * 0.07
-                for _th in range(0, 360, 60):
-                    _rad = np.radians(_th)
-                    fig.add_trace(go.Scatter(
-                        x=[_kx[0], _kx[0] + _ksun * np.sin(_rad)],
-                        y=[_ky[0], _ky[0] + _ksun * np.cos(_rad)],
-                        mode="lines", line=dict(color="#1f9d55", width=1.3),
-                        hoverinfo="skip", showlegend=False))
-                fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
-                              marker=dict(color="#1f9d55", size=13,
-                                          line=dict(color="white", width=1.6)),
-                              name="keyphasor"))
-        # POSICIÓN del keyphasor: ángulo desde el TOP (0°), + hacia R / − hacia L (Bently).
-        _kpos = ""
-        if sp is not None:
-            _kang = float(np.degrees(np.arctan2(sp[0], sp[1])))
-            _kpos = f"{abs(_kang):.0f}°{'R' if _kang >= 0 else 'L'}"
-            fig.add_annotation(x=sp[0], y=sp[1], text=f"KΦ {_kpos}", showarrow=False,
-                               yshift=-15, font=dict(color="#1f9d55", size=10,
-                                                     family="IBM Plex Mono"))
-        # Giro REAL (API 670) en una ESQUINITA (arriba-derecha, donde está vacío porque las
-        # sondas van abajo) → arco abierto y chico, NO le roba espacio a la órbita.
-        _R1 = _Rp if _Rp else 1.0
-        _cx, _cy0, _rr = _R1 * 1.00, _R1 * 1.00, _R1 * 0.19
-        _arc = np.linspace(np.radians(150), np.radians(-20), 36)   # abierto (~170°), gentil
-        if rot_api == "CCW":
-            _arc = _arc[::-1]
-        _axx, _ayy = _cx + _rr * np.cos(_arc), _cy0 + _rr * np.sin(_arc)
-        fig.add_trace(go.Scatter(x=_axx, y=_ayy, mode="lines",
-                      line=dict(color="#94a3b8", width=2.2), hoverinfo="skip", showlegend=False))
-        fig.add_annotation(x=_axx[-1], y=_ayy[-1], ax=_axx[-4], ay=_ayy[-4],
-                           xref="x", yref="y", axref="x", ayref="y", showarrow=True,
-                           arrowhead=2, arrowsize=1.4, arrowwidth=2.2, arrowcolor="#94a3b8")
-        fig.add_annotation(x=_cx, y=_cy0 - _rr * 0.65, yshift=-4,
-                           text=f"giro {rot_api}", showarrow=False,
-                           font=dict(color="#94a3b8", size=9.5, family="IBM Plex Mono"))
-        _orng = _Rp * 1.55 if _Rp else None
-        fig.update_xaxes(title=f"{b.x.unit or 'µm'}",
-                         scaleanchor="y", scaleratio=1, zeroline=True,
-                         zerolinecolor="rgba(120,140,170,.45)",
-                         gridcolor="rgba(120,140,170,.12)",
-                         range=[-_orng, _orng] if _orng else None)
-        fig.update_yaxes(title=f"{b.y.unit or 'µm'}", zeroline=True,
-                         zerolinecolor="rgba(120,140,170,.45)",
-                         gridcolor="rgba(120,140,170,.12)",
-                         range=[-_orng, _orng] if _orng else None)
-        _ttl = f"Órbita · {b.name} · {fmode}"
-        if _precd:
-            _ttl += f"  ·  precesión {_precd}"
-        fig = _layout(fig, _ttl, h=580)
-        fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
-                          legend=dict(orientation="h", yanchor="top", y=-0.1,
-                                      xanchor="center", x=0.5))
-        st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
-        st.caption(
-            f"Giro del eje por **API 670** (visto desde el cojinete #1, conductor→conducido): "
-            f"**{_maq} = {rot_api}** (turbina CW; tras el gearbox el generador invierte a CCW). "
-            f"Punto verde = keyphasor (posición del eje en el disparo, muestra 0)"
-            + (f", en **{_kpos}**" if _kpos else "") +
-            f". El diagnóstico es la **precesión {prec}**: forward = eje y órbita giran igual "
-            f"(desbalance); reverse = opuesto (roce/inestabilidad).")
-        _u = b.x.unit or "µm"
-        _orows = [[b.name, f"{b.x.rpm:,.0f}" if b.x.rpm else "—", _precd,
-                   f"{rot_api} ({_maq})", f"{major:.1f} {_u}",
-                   f"{minor:.1f} {_u}", f"{ellip:.2f}", f"{smax:.1f} {_u}"]]
+        _onames = [bb.name for bb in _obrgs]
+        _osel = st.multiselect("Cojinetes (órbitas)", _onames, default=[_onames[0]],
+                               key="orb_sel",
+                               help="Elegí uno o varios. Varias órbitas = MISMA escala para "
+                                    "comparar tamaños a ojo (como System1).")
+        _bsel = [_obrgs[_onames.index(n)] for n in _osel] or [_obrgs[0]]
+        from core.ui_industrial import html_table  # noqa: PLC0415
+        # Pass 1: data de cada órbita → escala GLOBAL (misma para todas)
+        _datas = [(bb, _orbit_data(bb, fmode, ang_x, ang_y)) for bb in _bsel]
+        _gR = max((d["Rp"] for _, d in _datas), default=1.0) or 1.0
         _ocols = ["Cojinete", "RPM", "Precesión", "Giro (API 670)",
                   "Eje mayor", "Eje menor", "Elipticidad", "Smax"]
-        _download_fig_table_button(fig, _ocols, _orows,
-                                   _vfile(f"Orbita {b.name} {fmode}"), key="orb",
-                                   table_title=f"Órbita · {cur_asset} · {b.name} · {fmode}")
-        from core.ui_industrial import html_table
-        html_table(_ocols, _orows)
-        st.markdown(
-            f"<div style='border-left:4px solid {shc};background:#f8fafc;border:1px solid "
-            f"#e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
-            f"<span style='background:{shc};color:#fff;border-radius:6px;padding:2px 9px;"
-            f"font:700 11px IBM Plex Mono'>FORMA</span>  <b>{shp}.</b>"
-            f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>Elipticidad "
-            f"{ellip:.2f} (1 = círculo · 0 = línea) · eje mayor {major:.1f} {_u} · menor "
-            f"{minor:.1f} {_u} · Smax {smax:.1f} {_u}. Círculo = solo desbalance con "
-            f"rigidez igual en todas direcciones; elíptica/plana = precarga o rigidez "
-            f"desigual (desalineación). Punto verde = keyphasor (inicio) · flecha ámbar = "
-            f"sentido de giro.</div></div>",
-            unsafe_allow_html=True)
-        st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde "
-                   "su ángulo de montaje) · aspecto 1:1 real · promedio síncrono vuelta a "
-                   "vuelta · punto verde = keyphasor (muestra 0 = referencia de ángulo del "
-                   "rotor), idéntico a System1. Base: Bently Nevada + Machinery Malfunction "
-                   "Diagnosis (Eisenmann).")
+
+        def _orow(bb, d):
+            _u = bb.x.unit or "µm"
+            return [bb.name, f"{d['rpm']:,.0f}" if d["rpm"] else "—", d["precd"],
+                    f"{d['rot_api']} ({d['maq']})", f"{d['major']:.1f} {_u}",
+                    f"{d['minor']:.1f} {_u}", f"{d['ellip']:.2f}", f"{d['smax']:.1f} {_u}"]
+
+        if len(_datas) == 1:
+            bb, d = _datas[0]
+            fig = _orbit_fig(bb, d, _gR, ang_x, ang_y, fmode, h=580, compact=False)
+            st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+            _u = bb.x.unit or "µm"
+            st.caption(
+                f"Giro del eje por **API 670** (visto desde el cojinete #1, conductor→conducido): "
+                f"**{d['maq']} = {d['rot_api']}** (turbina CW; tras el gearbox el generador "
+                f"invierte a CCW). Punto verde = keyphasor (disparo, muestra 0)"
+                + (f", en **{d['kpos']}**" if d["kpos"] else "") +
+                f". Diagnóstico = **precesión {d['prec']}**: forward = eje y órbita giran igual "
+                f"(desbalance); reverse = opuesto (roce/inestabilidad).")
+            _orows = [_orow(bb, d)]
+            _download_fig_table_button(fig, _ocols, _orows,
+                                       _vfile(f"Orbita {bb.name} {fmode}"), key="orb",
+                                       table_title=f"Órbita · {cur_asset} · {bb.name} · {fmode}")
+            html_table(_ocols, _orows)
+            st.markdown(
+                f"<div style='border-left:4px solid {d['shc']};background:#f8fafc;border:1px solid "
+                f"#e2e8f2;border-radius:8px;padding:11px 15px;margin-top:8px'>"
+                f"<span style='background:{d['shc']};color:#fff;border-radius:6px;padding:2px 9px;"
+                f"font:700 11px IBM Plex Mono'>FORMA</span>  <b>{d['shp']}.</b>"
+                f"<div style='color:#3a4c66;font-size:12.5px;margin-top:5px'>Elipticidad "
+                f"{d['ellip']:.2f} (1 = círculo · 0 = línea) · eje mayor {d['major']:.1f} {_u} · "
+                f"menor {d['minor']:.1f} {_u} · Smax {d['smax']:.1f} {_u}. Círculo = solo "
+                f"desbalance con rigidez igual; elíptica/plana = precarga o rigidez desigual "
+                f"(desalineación). Punto verde = keyphasor · CW/CCW (esquina) = giro real."
+                f"</div></div>", unsafe_allow_html=True)
+        else:
+            st.caption(f"⬤ {len(_datas)} órbitas · **misma escala** (±{_gR * 1.5:,.0f} µm) · "
+                       f"{fmode} · comparables a ojo. CW/CCW (esquina) = giro real por API 670.")
+            _cols = st.columns(2)
+            for _i, (bb, d) in enumerate(_datas):
+                with _cols[_i % 2]:
+                    fig = _orbit_fig(bb, d, _gR, ang_x, ang_y, fmode, h=360, compact=True)
+                    st.plotly_chart(fig, use_container_width=True, config=_NOBAR,
+                                    key=f"orb_fig_{bb.name}")
+            html_table(_ocols, [_orow(bb, d) for bb, d in _datas])
+        st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde su "
+                   "ángulo de montaje) · aspecto 1:1 real · promedio síncrono · punto verde = "
+                   "keyphasor (muestra 0), idéntico a System1. Base: Bently Nevada + Eisenmann.")
 
 elif view == "Deflexión del eje":
     # FORMA DE DEFLEXIÓN DEL EJE (Bently manual 3-8 / 9-4): se colocan las órbitas
