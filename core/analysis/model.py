@@ -32,6 +32,9 @@ class Channel:
     source: str = ""                # nombre de archivo
     cap_point: str = ""             # punto de la captura (BRG1/GB4/GB_4XA) para Tendencias
     cap_axis: str = "X"             # eje dentro de la captura (X|Y) para trend_series
+    kind: str = "wave"              # "wave" (onda dinámica) | "gap" (gap DC / shaft centerline)
+    speed: np.ndarray = field(default_factory=lambda: np.array([]))  # rpm por muestra (gap)
+    probe_angle: str = ""           # ej. "45° Left" (gap/centerline)
 
     @property
     def fs_hz(self) -> Optional[float]:
@@ -206,15 +209,102 @@ def parse_sweep(name: str, data: bytes) -> Optional[Sweep]:
                  amp=amp[m][order], phase=ph[m][order], source=name)
 
 
+def _to_float(s) -> float:
+    try:
+        return float(str(s).strip())
+    except (ValueError, TypeError):
+        return float("nan")
+
+
+def parse_shaft_gap(name: str, data: bytes):
+    """Detecta y parsea un export de GAP / SHAFT CENTERLINE de System1: gap DC
+    (µm) de un par de proximitores X/Y a 45° vs tiempo+rpm. Cabecera con
+    'Paired Point Name' + 'Variable,Gap' y tabla
+    'Point Value,Value Status,Paired Point Value,Paired Value Status,Speed,...'.
+    El 'Point Value' es el gap del punto principal (ej 1YD) y 'Paired Point
+    Value' el del par ortogonal (1XD). Devuelve (chan_X, chan_Y) o None."""
+    try:
+        text = data.decode("utf-8-sig", "replace")
+    except Exception:  # noqa: BLE001
+        return None
+    meta: Dict[str, str] = {}
+    hdr_idx = None
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not s:
+            continue
+        low = s.lower().replace(" ", "")
+        if low.startswith("pointvalue,") and "pairedpointvalue" in low:
+            hdr_idx = i
+            break
+        if "," in s:
+            k, v = s.split(",", 1)
+            meta[k.strip()] = v.strip()
+    if hdr_idx is None:
+        return None
+    if "paired point name" not in {k.lower() for k in meta}:
+        return None
+    header = [c.strip().lower() for c in lines[hdr_idx].split(",")]
+
+    def col(*names):
+        for nm in names:
+            if nm in header:
+                return header.index(nm)
+        return None
+    i_pv = col("point value")
+    i_ppv = col("paired point value")
+    i_spd = col("speed")
+    if i_pv is None or i_ppv is None:
+        return None
+    gy, gx, spd = [], [], []
+    for line in lines[hdr_idx + 1:]:
+        parts = line.split(",")
+        if len(parts) <= max(i_pv, i_ppv):
+            continue
+        y = _to_float(parts[i_pv]); x = _to_float(parts[i_ppv])
+        if np.isnan(y) and np.isnan(x):
+            continue
+        gy.append(y); gx.append(x)
+        spd.append(_to_float(parts[i_spd]) if i_spd is not None
+                   and len(parts) > i_spd else float("nan"))
+    if len(gy) < 2:
+        return None
+    gy = np.asarray(gy, float); gx = np.asarray(gx, float)
+    sp = np.asarray(spd, float)
+    fin = sp[np.isfinite(sp)]
+    rpm = float(fin.max()) if fin.size else None      # velocidad de operación
+    unit = (meta.get("Gap Unit", "") or "µm").strip() or "µm"
+    t = np.arange(gy.size, dtype=float)
+    pname = meta.get("Point Name", "").strip() or name.rsplit(".", 1)[0]
+    xname = meta.get("Paired Point Name", "").strip() or pname
+    bn_y, ax_y = _bearing_axis(pname)
+    bn_x, ax_x = _bearing_axis(xname)
+    bn = bn_y or bn_x
+    cy = Channel(label=pname.split()[0] if pname else "Y", bearing=bn,
+                 axis="Y", t=t, v=gy, rpm=rpm, unit=unit, source=name,
+                 kind="gap", speed=sp, probe_angle=meta.get("Probe Angle", ""))
+    cx = Channel(label=xname.split()[0] if xname else "X", bearing=bn,
+                 axis="X", t=t, v=gx, rpm=rpm, unit=unit, source=name,
+                 kind="gap", speed=sp,
+                 probe_angle=meta.get("Paired Probe Angle", ""))
+    return cx, cy
+
+
 def build_record(files) -> AnalysisRecord:
     """files = lista de UploadedFile (st.file_uploader). Cada archivo puede ser
-    una onda (1 canal) o un barrido Bode/Polar. Empareja X/Y por cojinete."""
+    una onda (1 canal), un barrido Bode/Polar, o un GAP/shaft-centerline (par X/Y
+    en un solo archivo). Empareja X/Y por cojinete."""
     chans: List[Channel] = []
     sweeps: List[Sweep] = []
     for f in files or []:
         sw = parse_sweep(f.name, f.getvalue())
         if sw is not None:
             sweeps.append(sw)
+            continue
+        gap = parse_shaft_gap(f.name, f.getvalue())
+        if gap is not None:
+            chans.extend(g for g in gap if g.v.size)
             continue
         c = parse_csv(f.name, f.getvalue())
         if c is not None and c.v.size:

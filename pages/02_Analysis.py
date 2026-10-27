@@ -1586,43 +1586,81 @@ elif view == "Deflexión del eje":
 elif view == "Shaft Centerline":
     b = _pick_bearing("sc_b")
     if b is None:
-        st.warning("Shaft Centerline: necesita el **par X/Y** (gap DC de los proximitores).")
+        st.warning("Shaft Centerline: necesita el **par X/Y** (gap DC de los proximitores). "
+                   "Sube el export **Gap** de System1 (par 1XD/1YD) o usa el histórico.")
     else:
-        gx, gy = float(np.nanmean(b.x.v)), float(np.nanmean(b.y.v))
+        _is_gap = getattr(b.x, "kind", "wave") == "gap"
+        _xv = np.asarray(b.x.v, float)
+        _yv = np.asarray(b.y.v, float)
+        # gap referido al reposo (1ª muestra = origen) para ver el ascenso del eje
+        if _is_gap:
+            _xv = _xv - _xv[0]
+            _yv = _yv - _yv[0]
+        _m = np.isfinite(_xv) & np.isfinite(_yv)
+        _xv, _yv = _xv[_m], _yv[_m]
+        _sp = np.asarray(getattr(b.x, "speed", np.array([])), float)
+        _sp = _sp[_m] if _sp.size == _m.size else np.array([])
+        # posición de operación = último punto (a velocidad); reposo = origen
+        gx, gy = float(_xv[-1]), float(_yv[-1])
         gmag = float(np.hypot(gx, gy))
-        clr = st.number_input("Claro radial del cojinete (µm)",
-                              value=float(round(max(gmag * 2.0, 50.0))), step=10.0,
-                              help="Del montaje / API 670. Define la zona de operación segura.")
+        _rise = float(np.nanmax(np.hypot(_xv, _yv))) if _xv.size else gmag
+        clr = st.number_input("Claro diametral del cojinete (µm)",
+                              value=float(round(max(_rise * 2.2, 100.0) / 10) * 10), step=10.0,
+                              help="Del montaje / API 670. Define la zona de operación segura. "
+                                   "El radio del claro = la mitad.")
+        rad = clr / 2.0
         from core.diagnostics import (boundary_utilization_pct,  # noqa: PLC0415
                                       get_semaforo_status, remaining_margin_pct)
-        util = boundary_utilization_pct(gx, gy, 0.0, 0.0, clr, clr)
+        util = boundary_utilization_pct(gx, gy, 0.0, 0.0, rad, rad)
         status, color = get_semaforo_status(util)
         fig = go.Figure()
         th = np.linspace(0, 2 * np.pi, 160)
-        # zonas semáforo (60% verde / 85% ámbar / resto rojo) como anillos
+        # zonas semáforo (60% verde / 85% ámbar / resto rojo) sobre el RADIO del claro
         for frac, c in [(1.0, "#dc3545"), (0.85, "#e8890c"), (0.60, "#1f9d55")]:
-            fig.add_trace(go.Scatter(x=clr * frac * np.cos(th), y=clr * frac * np.sin(th),
+            fig.add_trace(go.Scatter(x=rad * frac * np.cos(th), y=rad * frac * np.sin(th),
                           mode="lines", line=dict(color=c, width=1, dash="dot"),
-                          hoverinfo="skip"))
-        fig.add_trace(go.Scatter(x=b.x.v, y=b.y.v, mode="lines",
-                      line=dict(color="#cbd5e1", width=0.8), hoverinfo="skip"))
+                          hoverinfo="skip", showlegend=False))
+        # recorrido reposo→velocidad, coloreado por rpm si lo hay
+        if _is_gap and _sp.size and np.isfinite(_sp).any():
+            fig.add_trace(go.Scatter(x=_xv, y=_yv, mode="markers",
+                          marker=dict(color=_sp, colorscale="Turbo", size=4,
+                                      showscale=True, colorbar=dict(title="rpm", thickness=12)),
+                          hovertemplate="X %{x:.1f} · Y %{y:.1f} µm · %{marker.color:.0f} rpm<extra></extra>",
+                          showlegend=False))
+        fig.add_trace(go.Scatter(x=_xv, y=_yv, mode="lines",
+                      line=dict(color="#94a3b8", width=0.9), hoverinfo="skip", showlegend=False))
+        # reposo (origen) y posición de operación
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers+text",
+                      marker=dict(color="#64748b", size=10, symbol="circle-open",
+                                  line=dict(color="#334155", width=2)),
+                      text=["reposo"], textposition="bottom center",
+                      hoverinfo="skip", showlegend=False))
         fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text",
-                      marker=dict(color=color, size=14, line=dict(color="#fff", width=1.5)),
-                      text=["eje"], textposition="top center"))
-        fig.update_xaxes(title=f"{b.x.label} (µm)", scaleanchor="y", scaleratio=1, zeroline=True,
-                         range=[-clr * 1.1, clr * 1.1])
-        fig.update_yaxes(title=f"{b.y.label} (µm)", zeroline=True, range=[-clr * 1.1, clr * 1.1])
-        st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=500),
+                      marker=dict(color=color, size=15, line=dict(color="#fff", width=1.5)),
+                      text=[f"{b.x.rpm:.0f} rpm" if b.x.rpm else "operación"],
+                      textposition="top center", hoverinfo="skip", showlegend=False))
+        _xl = f"{b.x.label} gap (µm) · {b.x.probe_angle}" if _is_gap else f"{b.x.label} (µm)"
+        _yl = f"{b.y.label} gap (µm) · {b.y.probe_angle}" if _is_gap else f"{b.y.label} (µm)"
+        fig.update_xaxes(title=_xl, scaleanchor="y", scaleratio=1, zeroline=True,
+                         range=[-rad * 1.1, rad * 1.1])
+        fig.update_yaxes(title=_yl, zeroline=True, range=[-rad * 1.1, rad * 1.1])
+        st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=520),
                         use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
+        # ángulo de actitud = dirección de la posición de operación (0°=+X sonda)
+        _att = float(np.degrees(np.arctan2(gy, gx))) % 360.0
+        _note = (f"gap DC a operación X={gx:.1f} Y={gy:.1f} µm · ascenso del eje "
+                 f"{_rise:.1f} µm · ángulo de actitud {_att:.0f}° (marco sondas)."
+                 if _is_gap else
+                 f"posición X={gx:.1f} Y={gy:.1f} µm (|r|={gmag:.1f}).")
         st.markdown(
             f"<div style='border-left:4px solid {color};background:#f8fafc;border:1px solid #e2e8f2;"
             f"border-radius:8px;padding:11px 15px;margin-top:8px'>"
             f"<span style='background:{color};color:#fff;border-radius:6px;padding:2px 9px;"
             f"font:700 11px IBM Plex Mono'>{status}</span>  "
             f"<b>Uso del claro: {util:.0f}%</b> · margen {remaining_margin_pct(util):.0f}% · "
-            f"gap DC X={gx:.1f} Y={gy:.1f} µm (|gap|={gmag:.1f}). "
-            f"Anillos: verde 60% · ámbar 85% · rojo = borde del claro (API 670).</div>",
+            f"{_note} Reposo = origen; el punto de color = eje a velocidad. "
+            f"Anillos sobre el RADIO del claro: verde 60% · ámbar 85% · rojo = borde (API 670).</div>",
             unsafe_allow_html=True)
 
 elif view == "Bode":
