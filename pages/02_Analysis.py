@@ -403,13 +403,15 @@ def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray):
     return H, V
 
 
-def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with_top=True):
+def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with_top=True,
+                      row=None, col=None):
     """Dibuja las sondas de proximidad tipo dibujo técnico (cuerpo + rosca + cara) en su
     ángulo real, FUERA del radio R, + cono de visión hacia el eje + marca TOPE 0°.
     ax_deg = grados del TOP hacia el lado R (sonda X); ay_deg = grados del TOP hacia el
-    lado L (sonda Y). Marco: 0°=arriba, +H=derecha, +V=arriba (igual que el centerline)."""
+    lado L (sonda Y). Marco: 0°=arriba, +H=derecha, +V=arriba. row/col → celda subplot."""
     if R <= 0:
         return
+    _rc = {} if row is None else dict(row=row, col=col)
     for _lbl, _deg, _s in [(lbl_x, float(ax_deg), 1.0), (lbl_y, float(ay_deg), -1.0)]:
         _th = np.radians(_deg)
         _ux, _uy = _s * np.sin(_th), np.cos(_th)
@@ -420,31 +422,31 @@ def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with
                 x=np.concatenate([[0], R * 0.95 * np.cos(_aa), [0]]),
                 y=np.concatenate([[0], R * 0.95 * np.sin(_aa), [0]]),
                 fill="toself", mode="lines", line=dict(color="rgba(18,48,94,0)"),
-                fillcolor="rgba(18,48,94,0.05)", hoverinfo="skip", showlegend=False))
+                fillcolor="rgba(18,48,94,0.05)", hoverinfo="skip", showlegend=False), **_rc)
         _ri, _rb, _ro = R * 1.12, R * 1.20, R * 1.36
         _perp = np.array([-_uy, _ux])
         fig.add_trace(go.Scatter(x=[_ux * _rb, _ux * _ro], y=[_uy * _rb, _uy * _ro],
                       mode="lines", line=dict(color="#12305e", width=10),
-                      hoverinfo="skip", showlegend=False))
+                      hoverinfo="skip", showlegend=False), **_rc)
         for _t in (0.55, 0.70, 0.85):   # rosca
             _cx, _cy = _ux * (_rb + (_ro - _rb) * _t), _uy * (_rb + (_ro - _rb) * _t)
             fig.add_trace(go.Scatter(
                 x=[_cx - _perp[0] * R * 0.045, _cx + _perp[0] * R * 0.045],
                 y=[_cy - _perp[1] * R * 0.045, _cy + _perp[1] * R * 0.045],
                 mode="lines", line=dict(color="#8fa0bf", width=1.5),
-                hoverinfo="skip", showlegend=False))
+                hoverinfo="skip", showlegend=False), **_rc)
         fig.add_trace(go.Scatter(x=[_ux * _ri], y=[_uy * _ri], mode="markers",
                       marker=dict(color="#e8890c", size=12, symbol="circle",
                                   line=dict(color="#12305e", width=2)),
-                      hoverinfo="skip", showlegend=False))
+                      hoverinfo="skip", showlegend=False), **_rc)
         _sd = "R" if _s > 0 else "L"
         fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl}<br>{_deg:.0f}°{_sd}",
                            showarrow=False, yshift=-16,
-                           font=dict(size=10.5, family="IBM Plex Mono", color="#12305e"))
+                           font=dict(size=10.5, family="IBM Plex Mono", color="#12305e"), **_rc)
     if with_top:
         fig.add_trace(go.Scatter(x=[0], y=[R * 1.12], mode="markers",
                       marker=dict(color="#0f172a", size=7, symbol="triangle-down"),
-                      hoverinfo="skip", showlegend=False))
+                      hoverinfo="skip", showlegend=False), **_rc)
 
 
 def _orbit_data(b, fmode, ang_x, ang_y):
@@ -574,6 +576,39 @@ def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):
     fig = _layout(fig, _ttl, h=h)
     fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", showlegend=False)
     return fig
+
+
+def _orbit_add_cell(fig, bb, d, R, ang_x, ang_y, row, col):
+    """Pinta UNA órbita (probetas + trazo + keyphasor + texto CW/CCW) en la celda
+    (row, col) de un subplot, con escala R (misma para todas)."""
+    _rc = dict(row=row, col=col)
+    _add_probe_glyphs(fig, R, ang_x, ang_y, bb.x.label, bb.y.label,
+                      with_top=False, with_cone=False, row=row, col=col)
+    fig.add_trace(go.Scatter(x=d["xv"], y=d["yv"], mode="lines",
+                  line=dict(color=_NAVY, width=1.6), showlegend=False), **_rc)
+    km = d["kmarks"]
+    if km:
+        _kx = [p[0] for p in km]; _ky = [p[1] for p in km]
+        if d["order"] == 0 and len(km) > 1:
+            fig.add_trace(go.Scatter(x=_kx, y=_ky, mode="markers",
+                          marker=dict(color="#1f9d55", size=5,
+                                      line=dict(color="white", width=0.7)),
+                          showlegend=False), **_rc)
+        else:
+            _ks = (d["smax"] if d["smax"] else 1.0) * 0.07
+            for _th in range(0, 360, 60):
+                _r = np.radians(_th)
+                fig.add_trace(go.Scatter(x=[_kx[0], _kx[0] + _ks * np.sin(_r)],
+                              y=[_ky[0], _ky[0] + _ks * np.cos(_r)], mode="lines",
+                              line=dict(color="#1f9d55", width=1.1),
+                              hoverinfo="skip", showlegend=False), **_rc)
+            fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
+                          marker=dict(color="#1f9d55", size=11,
+                                      line=dict(color="white", width=1.4)),
+                          showlegend=False), **_rc)
+    fig.add_annotation(x=R * 1.33, y=R * 1.33, text=f"<b>{d['rot_api']}</b>", showarrow=False,
+                       font=dict(color="#64748b", size=12, family="IBM Plex Mono"),
+                       bgcolor="rgba(255,255,255,0.65)", **_rc)
 
 
 def _trend_block():
@@ -1569,19 +1604,39 @@ elif view == "Órbita":
                 f"(desalineación). Punto verde = keyphasor · CW/CCW (esquina) = giro real."
                 f"</div></div>", unsafe_allow_html=True)
         else:
-            st.caption(f"⬤ {len(_datas)} órbitas · **misma escala** (±{_gR * 1.5:,.0f} µm) · "
-                       f"{fmode} · comparables a ojo. CW/CCW (esquina) = giro real por API 670.")
-            _cols = st.columns(2)
+            from plotly.subplots import make_subplots  # noqa: PLC0415
+            import math as _math  # noqa: PLC0415
+            _ncol = 2
+            _nrow = _math.ceil(len(_datas) / _ncol)
+            _titles = [f"{bb.name} · {d['prec']} · giro {d['rot_api']}" for bb, d in _datas]
+            figM = make_subplots(rows=_nrow, cols=_ncol, subplot_titles=_titles,
+                                 horizontal_spacing=0.08,
+                                 vertical_spacing=0.14 if _nrow > 1 else 0.1)
+            _L = _gR * 1.5
             for _i, (bb, d) in enumerate(_datas):
-                with _cols[_i % 2]:
-                    fig = _orbit_fig(bb, d, _gR, ang_x, ang_y, fmode, h=360, compact=True)
-                    st.plotly_chart(fig, use_container_width=True, config=_NOBAR,
-                                    key=f"orb_fig_{bb.name}")
-                    _download_fig_table_button(
-                        fig, _ocols, [_orow(bb, d)],
-                        _vfile(f"Orbita {bb.name} {fmode}"), key=f"orb_dl_{bb.name}",
-                        table_title=f"Órbita · {cur_asset} · {bb.name} · {fmode}")
-            html_table(_ocols, [_orow(bb, d) for bb, d in _datas])
+                _r, _c = _i // _ncol + 1, _i % _ncol + 1
+                _orbit_add_cell(figM, bb, d, _gR, ang_x, ang_y, _r, _c)
+                _idx = (_r - 1) * _ncol + _c
+                _yid = "y" if _idx == 1 else f"y{_idx}"
+                figM.update_xaxes(range=[-_L, _L], scaleanchor=_yid, scaleratio=1,
+                                  row=_r, col=_c, zeroline=True,
+                                  zerolinecolor="rgba(120,140,170,.4)",
+                                  gridcolor="rgba(120,140,170,.1)")
+                figM.update_yaxes(range=[-_L, _L], row=_r, col=_c, zeroline=True,
+                                  zerolinecolor="rgba(120,140,170,.4)",
+                                  gridcolor="rgba(120,140,170,.1)")
+            figM.update_layout(
+                template="plotly_white", height=360 * _nrow + 40, showlegend=False,
+                title=dict(text=f"Órbitas · {fmode} · misma escala (±{_L:,.0f} µm)",
+                           font=dict(color="#12305e", size=16)),
+                font=dict(family="IBM Plex Sans"), plot_bgcolor="white",
+                paper_bgcolor="white", margin=dict(l=55, r=35, t=66, b=45))
+            st.plotly_chart(figM, use_container_width=True, config=_NOBAR)
+            _orows_all = [_orow(bb, d) for bb, d in _datas]
+            _download_fig_table_button(
+                figM, _ocols, _orows_all, _vfile(f"Orbitas {fmode} {len(_datas)}coj"),
+                key="orb_multi_dl", table_title=f"Órbitas · {cur_asset} · {fmode}")
+            html_table(_ocols, _orows_all)
         st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde su "
                    "ángulo de montaje) · aspecto 1:1 real · promedio síncrono · punto verde = "
                    "keyphasor (muestra 0), idéntico a System1. Base: Bently Nevada + Eisenmann.")
