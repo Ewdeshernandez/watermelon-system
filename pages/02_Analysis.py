@@ -1760,6 +1760,17 @@ elif view == "Shaft Centerline":
 
         fig = go.Figure()
         th = np.linspace(0, 2 * np.pi, 180)
+        _a2 = np.sqrt(0.5)
+        # cono de visión de cada sonda (sector tenue hacia el eje), detrás de todo
+        if _is_gap:
+            for _ux, _uy in [(_a2, -_a2), (-_a2, -_a2)]:
+                _ang = np.arctan2(_uy, _ux)
+                _aa = np.linspace(_ang - np.radians(14), _ang + np.radians(14), 20)
+                fig.add_trace(go.Scatter(
+                    x=np.concatenate([[0], rad * 0.98 * np.cos(_aa), [0]]),
+                    y=np.concatenate([[0], rad * 0.98 * np.sin(_aa), [0]]),
+                    fill="toself", mode="lines", line=dict(color="rgba(18,48,94,0)"),
+                    fillcolor="rgba(18,48,94,0.05)", hoverinfo="skip", showlegend=False))
         # claro (borde físico) + anillos de excentricidad de referencia
         fig.add_trace(go.Scatter(x=rad * np.cos(th), y=rad * np.sin(th), mode="lines",
                       line=dict(color="#334155", width=1.6), hoverinfo="skip",
@@ -1768,23 +1779,6 @@ elif view == "Shaft Centerline":
             fig.add_trace(go.Scatter(x=rad * frac * np.cos(th), y=rad * frac * np.sin(th),
                           mode="lines", line=dict(color=c, width=1, dash="dot"),
                           hoverinfo="skip", showlegend=False))
-        # sondas de proximidad dibujadas en su posición real (abajo, 135° R/L del tope)
-        if _is_gap:
-            _a2 = np.sqrt(0.5)
-            for _lbl, _ux, _uy in [(b.x.label, _a2, -_a2), (b.y.label, -_a2, -_a2)]:
-                _ri, _rb, _ro = rad * 1.04, rad * 1.30, rad * 1.40
-                # cuerpo de la probeta (línea gruesa) apuntando al eje + cara del sensor
-                fig.add_trace(go.Scatter(x=[_ux * _rb, _ux * _ro], y=[_uy * _rb, _uy * _ro],
-                              mode="lines", line=dict(color="#12305e", width=7),
-                              hoverinfo="skip", showlegend=False))
-                fig.add_trace(go.Scatter(x=[_ux * _ri], y=[_uy * _ri], mode="markers",
-                              marker=dict(color="#12305e", size=10, symbol="diamond-tall",
-                                          line=dict(color="#fff", width=1)),
-                              hoverinfo="skip", showlegend=False))
-                _sd = "R" if _ux > 0 else "L"
-                fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl} · 135°{_sd}",
-                                   showarrow=False, yshift=-9,
-                                   font=dict(size=10.5, family="IBM Plex Mono", color="#12305e"))
         # recorrido reposo→velocidad coloreado por rpm
         if _sp.size and np.isfinite(_sp).any():
             fig.add_trace(go.Scatter(x=_px, y=_py, mode="markers",
@@ -1813,12 +1807,39 @@ elif view == "Shaft Centerline":
                       marker=dict(color=color, size=15, line=dict(color="#fff", width=1.5)),
                       text=[f"{b.x.rpm:.0f} rpm" if b.x.rpm else "operación"],
                       textposition="top center", hoverinfo="skip", showlegend=False))
+        # marca TOPE 0° (referencia Bently) + sondas tipo dibujo técnico (cuerpo+rosca+cara)
+        if _is_gap:
+            fig.add_trace(go.Scatter(x=[0], y=[rad], mode="markers+text",
+                          marker=dict(color="#0f172a", size=7, symbol="triangle-down"),
+                          text=["TOPE 0°"], textposition="top center",
+                          hoverinfo="skip", showlegend=False))
+            for _lbl, _ux, _uy in [(b.x.label, _a2, -_a2), (b.y.label, -_a2, -_a2)]:
+                _ri, _rb, _ro = rad * 1.03, rad * 1.22, rad * 1.42
+                _perp = np.array([-_uy, _ux])
+                fig.add_trace(go.Scatter(x=[_ux * _rb, _ux * _ro], y=[_uy * _rb, _uy * _ro],
+                              mode="lines", line=dict(color="#12305e", width=10),
+                              hoverinfo="skip", showlegend=False))
+                for _t in (0.55, 0.70, 0.85):   # rosca
+                    _cx, _cy = _ux * (_rb + (_ro - _rb) * _t), _uy * (_rb + (_ro - _rb) * _t)
+                    fig.add_trace(go.Scatter(
+                        x=[_cx - _perp[0] * rad * 0.05, _cx + _perp[0] * rad * 0.05],
+                        y=[_cy - _perp[1] * rad * 0.05, _cy + _perp[1] * rad * 0.05],
+                        mode="lines", line=dict(color="#8fa0bf", width=1.5),
+                        hoverinfo="skip", showlegend=False))
+                fig.add_trace(go.Scatter(x=[_ux * _ri], y=[_uy * _ri], mode="markers",
+                              marker=dict(color="#e8890c", size=12, symbol="circle",
+                                          line=dict(color="#12305e", width=2)),
+                              hoverinfo="skip", showlegend=False))
+                _sd = "R" if _ux > 0 else "L"
+                fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl}<br>135°{_sd}",
+                                   showarrow=False, yshift=-16,
+                                   font=dict(size=11, family="IBM Plex Mono", color="#12305e"))
         if _is_gap:
             _xl, _yl = "Horizontal H (µm)", "Vertical V (µm) · arriba +"
         else:
             _xl = f"{b.x.label} (µm)"
             _yl = f"{b.y.label} (µm)"
-        _axr = rad * (1.5 if _is_gap else 1.15)
+        _axr = rad * (1.55 if _is_gap else 1.15)
         fig.update_xaxes(title=_xl, scaleanchor="y", scaleratio=1, zeroline=True,
                          range=[-_axr, _axr])
         fig.update_yaxes(title=_yl, zeroline=True, range=[-_axr, _axr])
