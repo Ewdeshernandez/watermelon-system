@@ -630,9 +630,6 @@ def _orbit_add_cell(fig, bb, d, R, ang_x, ang_y, row, col):
     fig.add_annotation(x=R * 1.33, y=R * 1.33, text=f"<b>{d['rot_api']}</b>", showarrow=False,
                        font=dict(color="#64748b", size=12, family="IBM Plex Mono"),
                        bgcolor="rgba(255,255,255,0.65)", **_rc)
-    if d.get("stamp"):     # tag de máquina + fecha/hora (24h), discreto (gris, abajo)
-        fig.add_annotation(x=0, y=-R * 1.42, text=d["stamp"], showarrow=False,
-                           font=dict(color="#94a3b8", size=9, family="IBM Plex Mono"), **_rc)
 
 
 def _trend_block():
@@ -1632,10 +1629,13 @@ elif view == "Órbita":
             import math as _math  # noqa: PLC0415
             _ncol = 2
             _nrow = _math.ceil(len(_datas) / _ncol)
-            _titles = [f"{bb.name} · {d['prec']} · giro {d['rot_api']}" for bb, d in _datas]
+            _titles = [f"{bb.name} · {d['prec']} · giro {d['rot_api']}"
+                       + (f"<br><span style='font-size:11px;color:#94a3b8'>{d['stamp']}</span>"
+                          if d.get("stamp") else "")
+                       for bb, d in _datas]
             figM = make_subplots(rows=_nrow, cols=_ncol, subplot_titles=_titles,
                                  horizontal_spacing=0.08,
-                                 vertical_spacing=0.14 if _nrow > 1 else 0.1)
+                                 vertical_spacing=0.18 if _nrow > 1 else 0.12)
             _L = _gR * 1.5
             for _i, (bb, d) in enumerate(_datas):
                 _r, _c = _i // _ncol + 1, _i % _ncol + 1
