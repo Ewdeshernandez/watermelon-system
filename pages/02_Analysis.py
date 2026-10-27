@@ -1631,6 +1631,28 @@ elif view == "Shaft Centerline":
         _bn = str(getattr(b.x, "bearing", "") or getattr(b.y, "bearing", ""))
         _oem_clr = _SGT300_CLEARANCE_UM.get(_bn)
 
+        # --- Recorte del dataset: ventana de muestras (orden de captura = línea de
+        # tiempo). Permite quedarse sólo con arranque, sólo parada, o un tramo. ---
+        _ntot = int(_rawx.size)
+        if _ntot >= 3:
+            _rng = st.slider("Rango de muestras (recorte · orden de captura)",
+                             min_value=0, max_value=_ntot - 1, value=(0, _ntot - 1),
+                             help="La data está en orden de captura (arranque→parada). "
+                                  "Mové los extremos para ver sólo un tramo (ej. sólo el "
+                                  "arranque, quitar la parada, o un rango de velocidades).")
+            _i0, _i1 = int(_rng[0]), int(_rng[1])
+            if _i1 - _i0 >= 2:
+                _rawx = _rawx[_i0:_i1 + 1]
+                _rawy = _rawy[_i0:_i1 + 1]
+                if _spraw.size == _ntot:
+                    _spraw = _spraw[_i0:_i1 + 1]
+                _has_spd = _is_gap and _spraw.size == _rawx.size and np.isfinite(_spraw).any()
+                if _has_spd:
+                    st.caption(f"⬤ Ventana: muestras {_i0}–{_i1} de {_ntot} · "
+                               f"{np.nanmin(_spraw):.0f}–{np.nanmax(_spraw):.0f} rpm.")
+                else:
+                    st.caption(f"⬤ Ventana: muestras {_i0}–{_i1} de {_ntot}.")
+
         # --- Selección de GIRO LENTO (slow roll) = reposo/referencia (Bently 5-5) ---
         # El gap a giro lento = muñón en el FONDO del claro → origen del recorrido.
         _sr_n, _sr_lo, _sr_hi = 0, None, None
