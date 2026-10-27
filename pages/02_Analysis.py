@@ -1542,28 +1542,22 @@ elif view == "Órbita":
             fig.add_annotation(x=sp[0], y=sp[1], text=f"KΦ {_kpos}", showarrow=False,
                                yshift=-15, font=dict(color="#1f9d55", size=10,
                                                      family="IBM Plex Mono"))
-        # FLECHA REDONDA = giro REAL de la máquina (API 670), suave, arriba de la órbita.
+        # Giro REAL de la máquina (API 670) estilo Bently: MEDIO arco arriba (dome plano),
+        # mínimo espacio. Arrowhead marca el sentido. Sin headline voluminoso (va en caption).
         _R1 = _Rp if _Rp else 1.0
-        _rr, _cy0 = _R1 * 0.13, _R1 * 1.20
-        _arc = np.linspace(np.radians(35), np.radians(325), 48)
-        if rot_api == "CW":                       # horario = ángulo decreciente
+        _rr, _cy0 = _R1 * 0.16, _R1 * 1.04
+        _arc = np.linspace(np.radians(168), np.radians(12), 40)   # izq→der por el tope (CW)
+        if rot_api == "CCW":
             _arc = _arc[::-1]
         _axx, _ayy = _rr * np.cos(_arc), _cy0 + _rr * np.sin(_arc)
         fig.add_trace(go.Scatter(x=_axx, y=_ayy, mode="lines",
-                      line=dict(color="#64748b", width=2.2), hoverinfo="skip", showlegend=False))
+                      line=dict(color="#64748b", width=2.4), hoverinfo="skip", showlegend=False))
         fig.add_annotation(x=_axx[-1], y=_ayy[-1], ax=_axx[-4], ay=_ayy[-4],
                            xref="x", yref="y", axref="x", ayref="y", showarrow=True,
-                           arrowhead=2, arrowsize=1.5, arrowwidth=2.2, arrowcolor="#64748b")
-        fig.add_annotation(x=0, y=_cy0, text=rot_api, showarrow=False,
-                           font=dict(color="#64748b", size=9.5, family="IBM Plex Mono"))
-        # Headline = GIRO del eje por API 670 + precesión (forward/reverse), arriba de todo.
-        _glg = "↻ CW" if _disp_orbit == "CW" else "↺ CCW"
-        fig.add_annotation(x=0, y=_R1 * 1.46,
-                           text=f"<b>Giro {rot_api} · {_maq} (API 670)</b>   "
-                                f"<span style='color:#8090a6'>precesión {prec} · "
-                                f"en gráfico {_glg} (vista sondas)</span>",
-                           showarrow=False, font=dict(color="#e8890c", size=12,
-                                                      family="IBM Plex Mono"))
+                           arrowhead=2, arrowsize=1.6, arrowwidth=2.4, arrowcolor="#64748b")
+        fig.add_annotation(x=0, y=_cy0 + _rr * 0.58, yshift=6,
+                           text=f"Giro {rot_api} · {_maq} (API 670)", showarrow=False,
+                           font=dict(color="#64748b", size=10.5, family="IBM Plex Mono"))
         _orng = _Rp * 1.55 if _Rp else None
         fig.update_xaxes(title=f"{b.x.unit or 'µm'}",
                          scaleanchor="y", scaleratio=1, zeroline=True,
