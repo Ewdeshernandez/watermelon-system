@@ -313,6 +313,26 @@ def _pick_sweep(key):
     return rec.sweeps[names.index(sel)]
 
 
+def _runout_comp(rpm, amp, phase, sr_thr):
+    """Compensación de giro lento (runout): resta el vector 1X de baja velocidad
+    (runout eléctrico + mecánico/arqueo) de cada punto (Eisenmann p35/64, Bently 5-5).
+    El vector de giro lento = promedio de los vectores con rpm ≤ sr_thr (o el de rpm
+    mínima). Devuelve amplitud/fase compensadas + el vector restado."""
+    rpm = np.asarray(rpm, float); amp = np.asarray(amp, float)
+    ph = np.radians(np.asarray(phase, float))
+    x = amp * np.cos(ph); y = amp * np.sin(ph)
+    m = np.isfinite(rpm) & (rpm <= sr_thr)
+    if m.sum() >= 1:
+        sx, sy, n = float(np.nanmean(x[m])), float(np.nanmean(y[m])), int(m.sum())
+    else:
+        i = int(np.nanargmin(rpm)); sx, sy, n = float(x[i]), float(y[i]), 1
+    xc, yc = x - sx, y - sy
+    amp_c = np.hypot(xc, yc)
+    phase_c = np.degrees(np.arctan2(yc, xc)) % 360.0
+    srmag = float(np.hypot(sx, sy)); srang = float(np.degrees(np.arctan2(sy, sx)) % 360.0)
+    return amp_c, phase_c, srmag, srang, n
+
+
 def _sweep_controls(sw, key):
     cA, cB, cC = st.columns(3)
     op = cA.number_input("RPM operación", value=float(round(float(np.nanmax(sw.rpm)))),
@@ -322,11 +342,28 @@ def _sweep_controls(sw, key):
                       key=f"{key}_m")
     mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
     unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
-    diag = _sweep_diag(tuple(sw.rpm.tolist()), tuple(sw.amp.tolist()),
-                       tuple(sw.phase.tolist()), op, grp, mtype, unit,
+    rpm = np.asarray(sw.rpm, float)
+    amp_c = np.asarray(sw.amp, float); phase_c = np.asarray(sw.phase, float)
+    cD, cE = st.columns([1, 2], vertical_alignment="center")
+    comp = cD.toggle("Compensar giro lento (runout)", value=False, key=f"{key}_rc",
+                     help="Resta el vector 1X de giro lento (runout eléctrico + mecánico/"
+                          "arqueo) medido a baja velocidad. Sin esto el Bode/Polar puede "
+                          "mentir: pico de crítica corrido, amplitud y fase falsas (Eisenmann p64).")
+    if comp:
+        _smin, _smax = float(np.nanmin(rpm)), float(np.nanmax(rpm))
+        sr_thr = cE.slider("Velocidad de giro lento (rpm)",
+                           min_value=float(round(_smin)),
+                           max_value=float(round(_smin + 0.20 * (_smax - _smin))),
+                           value=float(round(_smin + 0.05 * (_smax - _smin))), step=10.0,
+                           key=f"{key}_srt")
+        amp_c, phase_c, _sm, _sa, _sn = _runout_comp(rpm, sw.amp, sw.phase, sr_thr)
+        cE.caption(f"⬤ Vector de giro lento restado: {_sm:.2f} {unit} ∠{_sa:.0f}° "
+                   f"({_sn} muestras ≤ {sr_thr:.0f} rpm).")
+    diag = _sweep_diag(tuple(rpm.tolist()), tuple(amp_c.tolist()),
+                       tuple(phase_c.tolist()), op, grp, mtype, unit,
                        "Bode" if key == "bode" else "polar")
     s = diag.get("structured", {})
-    return op, unit, diag, s, s.get("iso_zone", "—")
+    return op, unit, diag, s, s.get("iso_zone", "—"), amp_c, phase_c
 
 
 _TREND_PAL = ["#12305e", "#e8890c", "#1f9d55", "#8b5cf6", "#0ea5e9", "#dc3545",
@@ -1875,23 +1912,23 @@ elif view == "Bode":
         st.warning("Bode: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
                    "amplitude + phase).")
     else:
-        op, unit, diag, s, zone = _sweep_controls(sw, "bode")
+        op, unit, diag, s, zone, _ampc, _phc = _sweep_controls(sw, "bode")
         zc = _ISO.get(zone, "#8090a6")
         ab, bc, cd = (s.get("iso_boundary_AB"), s.get("iso_boundary_BC"),
                       s.get("iso_boundary_CD"))
         from plotly.subplots import make_subplots
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.07,
                             row_heights=[0.56, 0.44])
-        amax = max(float(np.nanmax(sw.amp)), cd or 0) * 1.12
+        amax = max(float(np.nanmax(_ampc)), cd or 0) * 1.12
         for lo, hi, z in [(0.0, ab, "A"), (ab, bc, "B"), (bc, cd, "C"), (cd, amax, "D")]:
             if lo is None or hi is None:
                 continue
             fig.add_hrect(y0=lo, y1=hi, line_width=0, fillcolor=_ISO[z],
                           opacity=0.08, row=1, col=1)
-        fig.add_trace(go.Scatter(x=sw.rpm, y=sw.amp, mode="lines+markers",
+        fig.add_trace(go.Scatter(x=sw.rpm, y=_ampc, mode="lines+markers",
                                  line=dict(color=_NAVY, width=1.9),
                                  marker=dict(size=4)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=sw.rpm, y=sw.phase, mode="lines+markers",
+        fig.add_trace(go.Scatter(x=sw.rpm, y=_phc, mode="lines+markers",
                                  line=dict(color=_AMBER, width=1.9),
                                  marker=dict(size=4)), row=2, col=1)
         for c in s.get("criticals", []):
@@ -1917,7 +1954,7 @@ elif view == "Polar":
         st.warning("Polar: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
                    "amplitude + phase).")
     else:
-        op, unit, diag, s, zone = _sweep_controls(sw, "polar")
+        op, unit, diag, s, zone, _ampc, _phc = _sweep_controls(sw, "polar")
         zc = _ISO.get(zone, "#8090a6")
         fig = go.Figure()
         th = list(range(0, 365, 5))
@@ -1928,7 +1965,7 @@ elif view == "Polar":
                               line=dict(color=_ISO[z], width=1, dash="dot"),
                               hoverinfo="skip", showlegend=False))
         fig.add_trace(go.Scatterpolar(
-            r=sw.amp, theta=sw.phase, mode="lines+markers",
+            r=_ampc, theta=_phc, mode="lines+markers",
             line=dict(color=_NAVY, width=1.8),
             marker=dict(size=5, color=sw.rpm, colorscale="Blues", showscale=True,
                         colorbar=dict(title="rpm", thickness=12)),
