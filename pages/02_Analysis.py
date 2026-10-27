@@ -1627,8 +1627,7 @@ elif view == "Órbita":
                                   gridcolor="rgba(120,140,170,.1)")
             figM.update_layout(
                 template="plotly_white", height=360 * _nrow + 40, showlegend=False,
-                title=dict(text=f"Órbitas · {fmode} · misma escala (±{_L:,.0f} µm)",
-                           font=dict(color="#12305e", size=16)),
+                title=dict(text=f"Órbitas · {fmode}", font=dict(color="#12305e", size=16)),
                 font=dict(family="IBM Plex Sans"), plot_bgcolor="white",
                 paper_bgcolor="white", margin=dict(l=55, r=35, t=66, b=45))
             st.plotly_chart(figM, use_container_width=True, config=_NOBAR)
