@@ -37,6 +37,7 @@ class Channel:
     probe_angle: str = ""           # ej. "45° Left" (gap/centerline)
     times: List[str] = field(default_factory=list)  # timestamp por muestra (gap)
     cap_time: str = ""              # timestamp de la captura (onda System1)
+    machine: str = ""               # Machine Name (tag del activo, ej. SGT300A)
 
     @property
     def fs_hz(self) -> Optional[float]:
@@ -106,7 +107,7 @@ def parse_csv(name: str, data: bytes) -> Optional[Channel]:
     """Parsea un CSV: metadatos System1 ('Clave,Valor' + 'X-Axis,Value' + datos) o
     genérico (1ª col tiempo + 1ª col numérica). Devuelve un Channel o None."""
     try:
-        text = data.decode("utf-8", "replace")
+        text = data.decode("utf-8-sig", "replace")   # -sig quita el BOM de la 1ª clave
     except Exception:  # noqa: BLE001
         return None
     meta: Dict[str, str] = {}
@@ -161,7 +162,8 @@ def parse_csv(name: str, data: bytes) -> Optional[Channel]:
     return Channel(label=label, bearing=bn, axis=ax, t=t,
                    v=np.asarray(vs, float), rpm=rpm, spr=spr,
                    unit=str(meta.get("Y-Axis Unit", "")).strip(), source=name,
-                   cap_time=str(meta.get("Timestamp", "")).strip())
+                   cap_time=str(meta.get("Timestamp", "")).strip(),
+                   machine=str(meta.get("Machine Name", "")).strip())
 
 
 def _find_col(cols, aliases) -> Optional[str]:

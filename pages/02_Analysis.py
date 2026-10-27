@@ -450,12 +450,16 @@ def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with
 
 
 def _fmt_dt(s):
-    """'7/12/2026 6:50:38 AM' → '7/12/2026 6:50 AM' (sin segundos)."""
-    try:
-        d, tm, ap = str(s).split(" ")
-        return f"{d} {':'.join(tm.split(':')[:2])} {ap}"
-    except Exception:  # noqa: BLE001
-        return str(s or "")
+    """'7/12/2026 6:50:38 AM' → '12/07/2026 06:50' (24h, día/mes/año)."""
+    from datetime import datetime  # noqa: PLC0415
+    s = str(s or "").strip()
+    for _f in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
+               "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M"):
+        try:
+            return datetime.strptime(s, _f).strftime("%d/%m/%Y %H:%M")
+        except ValueError:
+            continue
+    return s
 
 
 def _orbit_data(b, fmode, ang_x, ang_y):
@@ -535,9 +539,12 @@ def _orbit_data(b, fmode, ang_x, ang_y):
     Rp = max(float(smax) if smax else 0.0,
              float(np.nanmax(np.hypot(xv, yv))) if len(xv) else 0.0)
     _time = getattr(b.x, "cap_time", "") or getattr(b.y, "cap_time", "")
+    _mach = getattr(b.x, "machine", "") or getattr(b.y, "machine", "")
+    _stamp = " · ".join(x for x in (_mach, _fmt_dt(_time)) if x)
     return dict(xv=xv, yv=yv, kmarks=_kmarks, sp=sp, order=_order, smax=smax, Rp=Rp,
                 prec=prec, precd=_precd, rot_api=rot_api, maq=_maq, shp=shp, shc=shc,
-                major=major, minor=minor, ellip=ellip, kpos=_kpos, rpm=rpm, time=_time)
+                major=major, minor=minor, ellip=ellip, kpos=_kpos, rpm=rpm,
+                time=_time, stamp=_stamp)
 
 
 def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):
@@ -574,9 +581,9 @@ def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):
                        yanchor="top", text=f"<b>{d['rot_api']}</b>", showarrow=False,
                        font=dict(color="#64748b", size=13, family="IBM Plex Mono"),
                        bgcolor="rgba(255,255,255,0.65)")
-    if d.get("time"):      # fecha/hora de la captura, discreto (gris, esquina)
+    if d.get("stamp"):     # tag de máquina + fecha/hora (24h), discreto (gris, esquina)
         fig.add_annotation(xref="paper", yref="paper", x=0.015, y=0.015, xanchor="left",
-                           yanchor="bottom", text=_fmt_dt(d["time"]), showarrow=False,
+                           yanchor="bottom", text=d["stamp"], showarrow=False,
                            font=dict(color="#94a3b8", size=10, family="IBM Plex Mono"))
     _rng = R * 1.5 if R else None
     fig.update_xaxes(title=(b.x.unit or "µm") if not compact else "", scaleanchor="y",
@@ -623,8 +630,8 @@ def _orbit_add_cell(fig, bb, d, R, ang_x, ang_y, row, col):
     fig.add_annotation(x=R * 1.33, y=R * 1.33, text=f"<b>{d['rot_api']}</b>", showarrow=False,
                        font=dict(color="#64748b", size=12, family="IBM Plex Mono"),
                        bgcolor="rgba(255,255,255,0.65)", **_rc)
-    if d.get("time"):      # fecha/hora de la captura, discreto (gris, abajo)
-        fig.add_annotation(x=0, y=-R * 1.42, text=_fmt_dt(d["time"]), showarrow=False,
+    if d.get("stamp"):     # tag de máquina + fecha/hora (24h), discreto (gris, abajo)
+        fig.add_annotation(x=0, y=-R * 1.42, text=d["stamp"], showarrow=False,
                            font=dict(color="#94a3b8", size=9, family="IBM Plex Mono"), **_rc)
 
 
