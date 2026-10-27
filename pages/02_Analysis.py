@@ -403,6 +403,50 @@ def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray):
     return H, V
 
 
+def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with_top=True):
+    """Dibuja las sondas de proximidad tipo dibujo técnico (cuerpo + rosca + cara) en su
+    ángulo real, FUERA del radio R, + cono de visión hacia el eje + marca TOPE 0°.
+    ax_deg = grados del TOP hacia el lado R (sonda X); ay_deg = grados del TOP hacia el
+    lado L (sonda Y). Marco: 0°=arriba, +H=derecha, +V=arriba (igual que el centerline)."""
+    if R <= 0:
+        return
+    for _lbl, _deg, _s in [(lbl_x, float(ax_deg), 1.0), (lbl_y, float(ay_deg), -1.0)]:
+        _th = np.radians(_deg)
+        _ux, _uy = _s * np.sin(_th), np.cos(_th)
+        if with_cone:
+            _ang = np.arctan2(_uy, _ux)
+            _aa = np.linspace(_ang - np.radians(13), _ang + np.radians(13), 18)
+            fig.add_trace(go.Scatter(
+                x=np.concatenate([[0], R * 0.95 * np.cos(_aa), [0]]),
+                y=np.concatenate([[0], R * 0.95 * np.sin(_aa), [0]]),
+                fill="toself", mode="lines", line=dict(color="rgba(18,48,94,0)"),
+                fillcolor="rgba(18,48,94,0.05)", hoverinfo="skip", showlegend=False))
+        _ri, _rb, _ro = R * 1.12, R * 1.20, R * 1.36
+        _perp = np.array([-_uy, _ux])
+        fig.add_trace(go.Scatter(x=[_ux * _rb, _ux * _ro], y=[_uy * _rb, _uy * _ro],
+                      mode="lines", line=dict(color="#12305e", width=10),
+                      hoverinfo="skip", showlegend=False))
+        for _t in (0.55, 0.70, 0.85):   # rosca
+            _cx, _cy = _ux * (_rb + (_ro - _rb) * _t), _uy * (_rb + (_ro - _rb) * _t)
+            fig.add_trace(go.Scatter(
+                x=[_cx - _perp[0] * R * 0.045, _cx + _perp[0] * R * 0.045],
+                y=[_cy - _perp[1] * R * 0.045, _cy + _perp[1] * R * 0.045],
+                mode="lines", line=dict(color="#8fa0bf", width=1.5),
+                hoverinfo="skip", showlegend=False))
+        fig.add_trace(go.Scatter(x=[_ux * _ri], y=[_uy * _ri], mode="markers",
+                      marker=dict(color="#e8890c", size=12, symbol="circle",
+                                  line=dict(color="#12305e", width=2)),
+                      hoverinfo="skip", showlegend=False))
+        _sd = "R" if _s > 0 else "L"
+        fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl}<br>{_deg:.0f}°{_sd}",
+                           showarrow=False, yshift=-16,
+                           font=dict(size=10.5, family="IBM Plex Mono", color="#12305e"))
+    if with_top:
+        fig.add_trace(go.Scatter(x=[0], y=[R * 1.12], mode="markers",
+                      marker=dict(color="#0f172a", size=7, symbol="triangle-down"),
+                      hoverinfo="skip", showlegend=False))
+
+
 def _trend_block():
     if not hist_caps:
         st.info("**Tendencias** — overall vs tiempo. Requiere varias capturas en el "
@@ -1341,11 +1385,13 @@ elif view == "Órbita":
             fmode = st.segmented_control("Tipo de órbita", ["Direct", "1X", "2X"],
                                          default="Direct", key="orb_f") or "Direct"
         with oc2:
-            ang_x = st.number_input("X · °R del TOP", value=45, step=5,
-                                    key="orb_ax", help="Montaje de la sonda X, lado R.")
+            ang_x = st.number_input("X · °R del TOP", value=135, step=5,
+                                    key="orb_ax", help="Montaje de la sonda X, lado R, grados "
+                                    "desde el tope. SGT-300 real = 135° (abajo-derecha).")
         with oc3:
-            ang_y = st.number_input("Y · °L del TOP", value=45, step=5,
-                                    key="orb_ay", help="Montaje de la sonda Y, lado L.")
+            ang_y = st.number_input("Y · °L del TOP", value=135, step=5,
+                                    key="orb_ay", help="Montaje de la sonda Y, lado L, grados "
+                                    "desde el tope. SGT-300 real = 135° (abajo-izquierda).")
         # ====== Órbita método Live Monitoring (validado = idéntico a System1) ======
         px, py = np.asarray(b.x.v, float), np.asarray(b.y.v, float)
         _n = min(px.size, py.size)
@@ -1456,8 +1502,13 @@ elif view == "Órbita":
         else:
             shp, shc = "Muy plana — precarga fuerte / desalineación", "#dc3545"
 
-        fig = go.Figure(go.Scatter(x=xv, y=yv, mode="lines",
-                                   line=dict(color=_NAVY, width=1.6), name=b.name))
+        fig = go.Figure()
+        # sondas de proximidad dibujadas en su posición real (igual que el Shaft Centerline)
+        _Rp = max(float(smax) if smax else 0.0,
+                  float(np.nanmax(np.hypot(xv, yv))) if len(xv) else 0.0)
+        _add_probe_glyphs(fig, _Rp, ang_x, ang_y, b.x.label, b.y.label, with_top=False)
+        fig.add_trace(go.Scatter(x=xv, y=yv, mode="lines",
+                                 line=dict(color=_NAVY, width=1.6), name=b.name))
         # KEYPHASOR: Direct = una marca por vuelta (cluster, como System1); 1X/2X = punto
         # grande en el HUECO (inicio). El trazo filtrado queda ABIERTO → no toca el punto.
         if _kmarks:
@@ -1509,13 +1560,16 @@ elif view == "Órbita":
                                 f"en gráfico {_glg} (vista sondas)</span>",
                            showarrow=False, yshift=16,
                            font=dict(color="#e8890c", size=12, family="IBM Plex Mono"))
+        _orng = _Rp * 1.55 if _Rp else None
         fig.update_xaxes(title=f"{b.x.unit or 'µm'}",
                          scaleanchor="y", scaleratio=1, zeroline=True,
                          zerolinecolor="rgba(120,140,170,.45)",
-                         gridcolor="rgba(120,140,170,.12)")
+                         gridcolor="rgba(120,140,170,.12)",
+                         range=[-_orng, _orng] if _orng else None)
         fig.update_yaxes(title=f"{b.y.unit or 'µm'}", zeroline=True,
                          zerolinecolor="rgba(120,140,170,.45)",
-                         gridcolor="rgba(120,140,170,.12)")
+                         gridcolor="rgba(120,140,170,.12)",
+                         range=[-_orng, _orng] if _orng else None)
         _ttl = f"Órbita · {b.name} · {fmode}"
         if _precd:
             _ttl += f"  ·  precesión {_precd}"
