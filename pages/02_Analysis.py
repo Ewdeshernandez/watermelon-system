@@ -449,6 +449,15 @@ def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with
                       hoverinfo="skip", showlegend=False), **_rc)
 
 
+def _fmt_dt(s):
+    """'7/12/2026 6:50:38 AM' → '7/12/2026 6:50 AM' (sin segundos)."""
+    try:
+        d, tm, ap = str(s).split(" ")
+        return f"{d} {':'.join(tm.split(':')[:2])} {ap}"
+    except Exception:  # noqa: BLE001
+        return str(s or "")
+
+
 def _orbit_data(b, fmode, ang_x, ang_y):
     """Calcula la órbita de un cojinete (método Live Monitoring = idéntico a System1):
     rota a coords de máquina, filtra el orden, arma keyphasor, precesión, forma."""
@@ -525,9 +534,10 @@ def _orbit_data(b, fmode, ang_x, ang_y):
         _kpos = f"{abs(_kang):.0f}°{'R' if _kang >= 0 else 'L'}"
     Rp = max(float(smax) if smax else 0.0,
              float(np.nanmax(np.hypot(xv, yv))) if len(xv) else 0.0)
+    _time = getattr(b.x, "cap_time", "") or getattr(b.y, "cap_time", "")
     return dict(xv=xv, yv=yv, kmarks=_kmarks, sp=sp, order=_order, smax=smax, Rp=Rp,
                 prec=prec, precd=_precd, rot_api=rot_api, maq=_maq, shp=shp, shc=shc,
-                major=major, minor=minor, ellip=ellip, kpos=_kpos, rpm=rpm)
+                major=major, minor=minor, ellip=ellip, kpos=_kpos, rpm=rpm, time=_time)
 
 
 def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):
@@ -564,6 +574,10 @@ def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):
                        yanchor="top", text=f"<b>{d['rot_api']}</b>", showarrow=False,
                        font=dict(color="#64748b", size=13, family="IBM Plex Mono"),
                        bgcolor="rgba(255,255,255,0.65)")
+    if d.get("time"):      # fecha/hora de la captura, discreto (gris, esquina)
+        fig.add_annotation(xref="paper", yref="paper", x=0.015, y=0.015, xanchor="left",
+                           yanchor="bottom", text=_fmt_dt(d["time"]), showarrow=False,
+                           font=dict(color="#94a3b8", size=10, family="IBM Plex Mono"))
     _rng = R * 1.5 if R else None
     fig.update_xaxes(title=(b.x.unit or "µm") if not compact else "", scaleanchor="y",
                      scaleratio=1, zeroline=True, zerolinecolor="rgba(120,140,170,.45)",
@@ -609,6 +623,9 @@ def _orbit_add_cell(fig, bb, d, R, ang_x, ang_y, row, col):
     fig.add_annotation(x=R * 1.33, y=R * 1.33, text=f"<b>{d['rot_api']}</b>", showarrow=False,
                        font=dict(color="#64748b", size=12, family="IBM Plex Mono"),
                        bgcolor="rgba(255,255,255,0.65)", **_rc)
+    if d.get("time"):      # fecha/hora de la captura, discreto (gris, abajo)
+        fig.add_annotation(x=0, y=-R * 1.42, text=_fmt_dt(d["time"]), showarrow=False,
+                           font=dict(color="#94a3b8", size=9, family="IBM Plex Mono"), **_rc)
 
 
 def _trend_block():

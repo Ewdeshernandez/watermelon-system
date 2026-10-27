@@ -36,6 +36,7 @@ class Channel:
     speed: np.ndarray = field(default_factory=lambda: np.array([]))  # rpm por muestra (gap)
     probe_angle: str = ""           # ej. "45° Left" (gap/centerline)
     times: List[str] = field(default_factory=list)  # timestamp por muestra (gap)
+    cap_time: str = ""              # timestamp de la captura (onda System1)
 
     @property
     def fs_hz(self) -> Optional[float]:
@@ -159,7 +160,8 @@ def parse_csv(name: str, data: bytes) -> Optional[Channel]:
     spr = int(round(len(vs) / revs)) if (revs and len(vs)) else None
     return Channel(label=label, bearing=bn, axis=ax, t=t,
                    v=np.asarray(vs, float), rpm=rpm, spr=spr,
-                   unit=str(meta.get("Y-Axis Unit", "")).strip(), source=name)
+                   unit=str(meta.get("Y-Axis Unit", "")).strip(), source=name,
+                   cap_time=str(meta.get("Timestamp", "")).strip())
 
 
 def _find_col(cols, aliases) -> Optional[str]:
