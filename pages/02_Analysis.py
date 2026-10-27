@@ -1577,6 +1577,10 @@ elif view == "Órbita":
                     fig = _orbit_fig(bb, d, _gR, ang_x, ang_y, fmode, h=360, compact=True)
                     st.plotly_chart(fig, use_container_width=True, config=_NOBAR,
                                     key=f"orb_fig_{bb.name}")
+                    _download_fig_table_button(
+                        fig, _ocols, [_orow(bb, d)],
+                        _vfile(f"Orbita {bb.name} {fmode}"), key=f"orb_dl_{bb.name}",
+                        table_title=f"Órbita · {cur_asset} · {bb.name} · {fmode}")
             html_table(_ocols, [_orow(bb, d) for bb, d in _datas])
         st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde su "
                    "ángulo de montaje) · aspecto 1:1 real · promedio síncrono · punto verde = "
