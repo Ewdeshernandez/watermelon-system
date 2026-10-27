@@ -1626,58 +1626,79 @@ elif view == "Shaft Centerline":
         _rawx = np.asarray(b.x.v, float)
         _rawy = np.asarray(b.y.v, float)
         _spraw = np.asarray(getattr(b.x, "speed", np.array([])), float)
+        _tsraw = list(getattr(b.x, "times", []) or [])
         _has_spd = _is_gap and _spraw.size == _rawx.size and np.isfinite(_spraw).any()
-
         _bn = str(getattr(b.x, "bearing", "") or getattr(b.y, "bearing", ""))
         _oem_clr = _SGT300_CLEARANCE_UM.get(_bn)
-
-        # --- Recorte del dataset: ventana de muestras (orden de captura = línea de
-        # tiempo). Permite quedarse sólo con arranque, sólo parada, o un tramo. ---
         _ntot = int(_rawx.size)
-        if _ntot >= 3:
-            _rng = st.slider("Rango de muestras (recorte · orden de captura)",
-                             min_value=0, max_value=_ntot - 1, value=(0, _ntot - 1),
-                             help="La data está en orden de captura (arranque→parada). "
-                                  "Mové los extremos para ver sólo un tramo (ej. sólo el "
-                                  "arranque, quitar la parada, o un rango de velocidades).")
-            _i0, _i1 = int(_rng[0]), int(_rng[1])
+
+        def _fmt_ts(ts):  # "7/4/2026 10:09:04 PM" → "7/4/2026 10:09 PM"
+            try:
+                d, tm, ap = ts.split(" ")
+                return f"{d} {':'.join(tm.split(':')[:2])} {ap}"
+            except Exception:  # noqa: BLE001
+                return ts or "—"
+
+        # Todos los controles colapsados → la gráfica manda. Defaults ya buenos.
+        with st.expander("⚙ Ajustes · recorte · giro lento · claro", expanded=False):
+            # --- recorte: ventana de muestras (orden de captura = línea de tiempo) ---
+            if _ntot >= 3:
+                _rng = st.slider("Rango de muestras (recorte · orden de captura)",
+                                 0, _ntot - 1, (0, _ntot - 1),
+                                 help="Data en orden de captura (arranque→parada). Recorta a un "
+                                      "tramo: sólo arranque, quitar la parada, un rango de rpm…")
+                _i0, _i1 = int(_rng[0]), int(_rng[1])
+            else:
+                _i0, _i1 = 0, max(_ntot - 1, 0)
             if _i1 - _i0 >= 2:
                 _rawx = _rawx[_i0:_i1 + 1]
                 _rawy = _rawy[_i0:_i1 + 1]
                 if _spraw.size == _ntot:
                     _spraw = _spraw[_i0:_i1 + 1]
+                if len(_tsraw) == _ntot:
+                    _tsraw = _tsraw[_i0:_i1 + 1]
                 _has_spd = _is_gap and _spraw.size == _rawx.size and np.isfinite(_spraw).any()
-                if _has_spd:
-                    st.caption(f"⬤ Ventana: muestras {_i0}–{_i1} de {_ntot} · "
-                               f"{np.nanmin(_spraw):.0f}–{np.nanmax(_spraw):.0f} rpm.")
-                else:
-                    st.caption(f"⬤ Ventana: muestras {_i0}–{_i1} de {_ntot}.")
+            _nwin = int(_rawx.size)
+            if _nwin != _ntot:
+                _wr = (f" · {np.nanmin(_spraw):.0f}–{np.nanmax(_spraw):.0f} rpm"
+                       if _has_spd else "")
+                st.caption(f"⬤ Ventana: {_i0}–{_i1} de {_ntot} muestras{_wr}.")
 
-        # --- Selección de GIRO LENTO (slow roll) = reposo/referencia (Bently 5-5) ---
-        # El gap a giro lento = muñón en el FONDO del claro → origen del recorrido.
-        _sr_n, _sr_lo, _sr_hi = 0, None, None
-        if _has_spd:
-            _smin = float(np.nanmin(_spraw))
-            _smax = float(np.nanmax(_spraw))
-            _dflt = float(round(_smin + 0.08 * (_smax - _smin)))
-            _cap = max(_dflt, float(round(_smin + 0.30 * (_smax - _smin))))
-            sr_thr = st.slider("Velocidad de giro lento (slow roll) — define el reposo",
-                               min_value=float(round(_smin)), max_value=float(round(_cap)),
-                               value=min(_dflt, _cap), step=10.0,
-                               help="Giro lento = rpm sin respuesta dinámica (virador/cranking). "
-                                    "El gap promedio por debajo de esta velocidad = muñón en el "
-                                    "FONDO del claro = origen. Debajo de ~10% de la 1ª crítica.")
-            _srm = np.isfinite(_spraw) & (_spraw <= sr_thr)
-            if _srm.sum() >= 1:
-                _ox, _oy = float(np.nanmean(_rawx[_srm])), float(np.nanmean(_rawy[_srm]))
-                _sr_n = int(_srm.sum())
-                _sv = _spraw[_srm]
-                _sr_lo, _sr_hi = float(np.nanmin(_sv)), float(np.nanmax(_sv))
+            # --- giro lento (slow roll): stepper estilo Bently (fecha·hora·rpm) ---
+            if _is_gap and _nwin >= 2:
+                if _has_spd:  # default = última muestra ≤ 8% del rango de rpm
+                    _smin, _smax = float(np.nanmin(_spraw)), float(np.nanmax(_spraw))
+                    _cand = np.where(np.isfinite(_spraw) & (_spraw <= _smin + 0.08 * (_smax - _smin)))[0]
+                    _sr_def = int(_cand[-1]) if _cand.size else 0
+                else:
+                    _sr_def = 0
+                _sel = int(st.number_input(
+                    "Muestra de giro lento (reposo) ▲▼", min_value=0, max_value=_nwin - 1,
+                    value=min(_sr_def, _nwin - 1), step=1,
+                    help="Estilo Bently: avanza muestra a muestra (fecha·hora·rpm) y fija el "
+                         "reposo. Reposo = promedio desde el inicio hasta esta muestra = muñón "
+                         "en el FONDO del claro."))
+                _ox = float(np.nanmean(_rawx[:_sel + 1]))
+                _oy = float(np.nanmean(_rawy[:_sel + 1]))
+                _ts_sel = _fmt_ts(_tsraw[_sel]) if _sel < len(_tsraw) else "—"
+                _rpm_sel = _spraw[_sel] if _has_spd and _sel < _spraw.size else float("nan")
+                _rpm_txt = f"{_rpm_sel:.0f} rpm" if np.isfinite(_rpm_sel) else "s/rpm"
+                st.caption(f"⬤ Reposo = promedio muestras 0–{_sel} · fijado en "
+                           f"{_ts_sel} · {_rpm_txt}.")
             else:
-                _ox, _oy = float(_rawx[0]), float(_rawy[0])
-        else:
-            _ox = float(_rawx[0]) if _is_gap and _rawx.size else 0.0
-            _oy = float(_rawy[0]) if _is_gap and _rawy.size else 0.0
+                _ox = float(_rawx[0]) if _is_gap and _rawx.size else 0.0
+                _oy = float(_rawy[0]) if _is_gap and _rawy.size else 0.0
+
+            # --- claro diametral ---
+            _rise0 = float(np.nanmax(np.hypot(_rawx - _ox, _rawy - _oy))) if _rawx.size else 100.0
+            _auto_clr = float(round(max(_rise0 * 2.2, 100.0) / 10) * 10)
+            clr = st.number_input("Claro diametral del cojinete (µm)",
+                                  value=_oem_clr if _oem_clr is not None else _auto_clr, step=10.0,
+                                  help="Del montaje / API 670. Radio del claro = la mitad. "
+                                       "Default OEM SGT-300: cojinete 1 (Inlet)=152, 2 (CT)=317 µm.")
+            if _oem_clr is not None:
+                st.caption(f"⬤ Claro OEM (dossier SGT-300) cojinete {_bn}: {_oem_clr:.0f} µm "
+                           f"diametral · radio {_oem_clr / 2:.0f} µm.")
 
         # cambios de gap referidos al giro lento
         _dgx = _rawx - _ox
@@ -1685,21 +1706,6 @@ elif view == "Shaft Centerline":
         _m = np.isfinite(_dgx) & np.isfinite(_dgy)
         _dgx, _dgy = _dgx[_m], _dgy[_m]
         _sp = _spraw[_m] if _has_spd else np.array([])
-
-        # claro
-        _rise0 = float(np.nanmax(np.hypot(_dgx, _dgy))) if _dgx.size else 100.0
-        _auto_clr = float(round(max(_rise0 * 2.2, 100.0) / 10) * 10)
-        clr = st.number_input("Claro diametral del cojinete (µm)",
-                              value=_oem_clr if _oem_clr is not None else _auto_clr, step=10.0,
-                              help="Del montaje / API 670. Radio del claro = la mitad. "
-                                   "Default OEM SGT-300: cojinete 1 (Inlet)=152, 2 (CT)=317 µm · "
-                                   "turbina de potencia pendiente.")
-        if _oem_clr is not None:
-            st.caption(f"⬤ Claro de armado OEM (dossier SGT-300) para el cojinete {_bn}: "
-                       f"{_oem_clr:.0f} µm diametral · radio {_oem_clr / 2:.0f} µm.")
-        if _sr_n:
-            st.caption(f"⬤ Giro lento: {_sr_n} muestras promediadas "
-                       f"({_sr_lo:.0f}–{_sr_hi:.0f} rpm) = reposo (fondo del claro).")
         rad = clr / 2.0
 
         if _is_gap:

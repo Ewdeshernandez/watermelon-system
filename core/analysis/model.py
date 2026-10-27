@@ -35,6 +35,7 @@ class Channel:
     kind: str = "wave"              # "wave" (onda dinámica) | "gap" (gap DC / shaft centerline)
     speed: np.ndarray = field(default_factory=lambda: np.array([]))  # rpm por muestra (gap)
     probe_angle: str = ""           # ej. "45° Left" (gap/centerline)
+    times: List[str] = field(default_factory=list)  # timestamp por muestra (gap)
 
     @property
     def fs_hz(self) -> Optional[float]:
@@ -255,9 +256,10 @@ def parse_shaft_gap(name: str, data: bytes):
     i_pv = col("point value")
     i_ppv = col("paired point value")
     i_spd = col("speed")
+    i_ts = col("timestamp")
     if i_pv is None or i_ppv is None:
         return None
-    gy, gx, spd = [], [], []
+    gy, gx, spd, tss = [], [], [], []
     for line in lines[hdr_idx + 1:]:
         parts = line.split(",")
         if len(parts) <= max(i_pv, i_ppv):
@@ -268,6 +270,8 @@ def parse_shaft_gap(name: str, data: bytes):
         gy.append(y); gx.append(x)
         spd.append(_to_float(parts[i_spd]) if i_spd is not None
                    and len(parts) > i_spd else float("nan"))
+        tss.append(parts[i_ts].strip() if i_ts is not None
+                   and len(parts) > i_ts else "")
     if len(gy) < 2:
         return None
     gy = np.asarray(gy, float); gx = np.asarray(gx, float)
@@ -283,11 +287,12 @@ def parse_shaft_gap(name: str, data: bytes):
     bn = bn_y or bn_x
     cy = Channel(label=pname.split()[0] if pname else "Y", bearing=bn,
                  axis="Y", t=t, v=gy, rpm=rpm, unit=unit, source=name,
-                 kind="gap", speed=sp, probe_angle=meta.get("Probe Angle", ""))
+                 kind="gap", speed=sp, probe_angle=meta.get("Probe Angle", ""),
+                 times=tss)
     cx = Channel(label=xname.split()[0] if xname else "X", bearing=bn,
                  axis="X", t=t, v=gx, rpm=rpm, unit=unit, source=name,
                  kind="gap", speed=sp,
-                 probe_angle=meta.get("Paired Probe Angle", ""))
+                 probe_angle=meta.get("Paired Probe Angle", ""), times=tss)
     return cx, cy
 
 
