@@ -1768,6 +1768,23 @@ elif view == "Shaft Centerline":
             fig.add_trace(go.Scatter(x=rad * frac * np.cos(th), y=rad * frac * np.sin(th),
                           mode="lines", line=dict(color=c, width=1, dash="dot"),
                           hoverinfo="skip", showlegend=False))
+        # sondas de proximidad dibujadas en su posición real (abajo, 135° R/L del tope)
+        if _is_gap:
+            _a2 = np.sqrt(0.5)
+            for _lbl, _ux, _uy in [(b.x.label, _a2, -_a2), (b.y.label, -_a2, -_a2)]:
+                _ri, _rb, _ro = rad * 1.04, rad * 1.30, rad * 1.40
+                # cuerpo de la probeta (línea gruesa) apuntando al eje + cara del sensor
+                fig.add_trace(go.Scatter(x=[_ux * _rb, _ux * _ro], y=[_uy * _rb, _uy * _ro],
+                              mode="lines", line=dict(color="#12305e", width=7),
+                              hoverinfo="skip", showlegend=False))
+                fig.add_trace(go.Scatter(x=[_ux * _ri], y=[_uy * _ri], mode="markers",
+                              marker=dict(color="#12305e", size=10, symbol="diamond-tall",
+                                          line=dict(color="#fff", width=1)),
+                              hoverinfo="skip", showlegend=False))
+                _sd = "R" if _ux > 0 else "L"
+                fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl} · 135°{_sd}",
+                                   showarrow=False, yshift=-9,
+                                   font=dict(size=10.5, family="IBM Plex Mono", color="#12305e"))
         # recorrido reposo→velocidad coloreado por rpm
         if _sp.size and np.isfinite(_sp).any():
             fig.add_trace(go.Scatter(x=_px, y=_py, mode="markers",
@@ -1801,9 +1818,10 @@ elif view == "Shaft Centerline":
         else:
             _xl = f"{b.x.label} (µm)"
             _yl = f"{b.y.label} (µm)"
+        _axr = rad * (1.5 if _is_gap else 1.15)
         fig.update_xaxes(title=_xl, scaleanchor="y", scaleratio=1, zeroline=True,
-                         range=[-rad * 1.15, rad * 1.15])
-        fig.update_yaxes(title=_yl, zeroline=True, range=[-rad * 1.15, rad * 1.15])
+                         range=[-_axr, _axr])
+        fig.update_yaxes(title=_yl, zeroline=True, range=[-_axr, _axr])
         st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=540),
                         use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
