@@ -355,12 +355,13 @@ def _ecc_status(eps: float):
 
 
 def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray):
-    """Convierte cambios de gap de las sondas a ±45° del tope (X=45° derecha,
-    Y=45° izquierda) a desplazamiento en el marco de máquina (H derecha+, V arriba+).
-    Modelo: Δgap = −(d·û_sonda); û_X=(+a,+a), û_Y=(−a,+a), a=cos45°. Resolviendo:
-    V = −(Δgx+Δgy)/(2a) ; H = (Δgy−Δgx)/(2a)."""
+    """Convierte cambios de gap de las sondas a desplazamiento en el marco de máquina
+    (H derecha+, V arriba+). Geometría real SGT-300 (verificada al destapar, conv.
+    Bently 0°=arriba): sondas montadas ABAJO, X en lado R a 135°, Y en lado L a 135°
+    → û_X=(+a,−a), û_Y=(−a,−a), a=cos45°. Con Δgap = −(d·û_sonda):
+    V = (Δgx+Δgy)/(2a) ; H = (Δgy−Δgx)/(2a)."""
     a = np.sqrt(0.5)
-    V = -(dgx + dgy) / (2.0 * a)
+    V = (dgx + dgy) / (2.0 * a)
     H = (dgy - dgx) / (2.0 * a)
     return H, V
 
@@ -1771,7 +1772,7 @@ elif view == "Shaft Centerline":
             f"font:700 11px IBM Plex Mono'>{status}</span>  {_note}<br>"
             f"<span style='color:#64748b;font-size:12px'>Círculo = claro · anillo rojo ε=0.95 "
             f"(contacto) · anillo azul ε=0.30 (riesgo whirl) · flecha = carga. "
-            f"Sondas X=45°R / Y=45°L del tope → H/V real.</span></div>",
+            f"Sondas abajo: X=135°R / Y=135°L del tope (Bently) → H/V real.</span></div>",
             unsafe_allow_html=True)
 
 elif view == "Bode":
