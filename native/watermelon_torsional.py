@@ -720,11 +720,17 @@ def build_app(simulated: bool = True):
     for lbl, w in [(T("RPM", "RPM"), sb_rpm), (T("Mean", "Media"), sb_mean),
                    ("1×", sb_a1), ("2×", sb_a2), (T("Noise", "Ruido"), sb_noise)]:
         simf.addWidget(QtWidgets.QLabel(lbl)); simf.addWidget(w)
-    btn_start = QtWidgets.QPushButton(T("▶ Start", "▶ Iniciar"))
-    btn_stop = QtWidgets.QPushButton(T("■ Stop", "■ Detener")); btn_stop.setEnabled(False)
-    simf.addStretch(1); simf.addWidget(btn_start); simf.addWidget(btn_stop)
+    simf.addStretch(1)
     live_l.addWidget(gb_sim)
     st["_sim_widgets"].append(gb_sim)      # panel de señal simulada → oculto con NI 9229
+
+    # Start/Stop van FUERA del panel simulado → SIEMPRE visibles (también en modo NI 9229).
+    btn_start = QtWidgets.QPushButton(T("▶ Start", "▶ Iniciar"))
+    btn_stop = QtWidgets.QPushButton(T("■ Stop", "■ Detener")); btn_stop.setEnabled(False)
+    ctrl_row = QtWidgets.QHBoxLayout()
+    ctrl_row.addWidget(QtWidgets.QLabel(T("Acquisition:", "Adquisición:")))
+    ctrl_row.addStretch(1); ctrl_row.addWidget(btn_start); ctrl_row.addWidget(btn_stop)
+    live_l.addLayout(ctrl_row)
 
     # Fila de DATA: guardar cruda en el PC + subir a la nube (como el Modal)
     datarow = QtWidgets.QHBoxLayout()
