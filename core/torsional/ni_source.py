@@ -142,6 +142,24 @@ def nidaqmx_available() -> bool:
         return False
 
 
+def find_ni_voltage_module(preferred: Optional[str] = None) -> Optional[str]:
+    """Nombre del módulo NI de voltaje (9229/9239/9215) conectado AHORA, o None.
+    Si `preferred` ya está entre los devices, lo devuelve tal cual. Sirve para
+    autollenar el campo 'NI 9229 device' sin que el operador adivine el nombre."""
+    try:
+        from core.modal.acq_backend import list_available_devices
+        devs = list_available_devices()
+    except Exception:  # noqa: BLE001
+        return None
+    names = {d.get("name"): str(d.get("product_type", "")) for d in devs}
+    if preferred and preferred in names:
+        return preferred
+    for _name, _pt in names.items():
+        if any(_m in _pt for _m in ("9229", "9239", "9215")):
+            return _name
+    return None
+
+
 class NITorsionalSource:
     """
     Fuente REAL NI 9229. Misma interfaz que `SimulatedTorsionalSource`:
@@ -158,6 +176,17 @@ class NITorsionalSource:
 
     def _phys(self, ai: int) -> str:
         return f"{self.config.device}/ai{ai}"
+
+    @property
+    def actual_rate_hz(self) -> float:
+        """fs REAL que coerció el driver (el 9229 delta-sigma solo admite
+        ciertas tasas; DAQmx ajusta a la más cercana). Útil para timebases/FFT."""
+        if self._task is not None:
+            try:
+                return float(self._task.timing.samp_clk_rate)
+            except Exception:  # noqa: BLE001
+                pass
+        return float(self.config.sample_rate_hz)
 
     def start(self) -> None:
         try:
