@@ -305,6 +305,9 @@ def build_app(simulated: bool = True):
         "kph_sensor": KeyphasorSensor.simulated(),
         "ni_cfg": {"device": "cDAQ1Mod1", "torque_ai": 0, "kph_ai": 1},
         "_sim_widgets": [],               # se ocultan en modo NI (par real de la tarjeta)
+        # --- Flujo guiado (gating como Rotordynamic/Modal) ---
+        "flow": {"cfg_saved": False, "shunt_passed": set(), "has_capture": False},
+        "btn_start": None, "flow_hint": None, "step_fn": None,
     }
 
     # ---- Toolbar: marca + versión + idioma + banner de hardware ----
@@ -384,6 +387,58 @@ def build_app(simulated: bool = True):
     _refresh_hw_banner()
     _hw_timer = QtCore.QTimer(win); _hw_timer.setInterval(5000)
     _hw_timer.timeout.connect(_refresh_hw_banner); _hw_timer.start()
+
+    # --- Stepper de FLUJO guiado: Setup → Config → Shunt → Live ---
+    _sp3 = QtWidgets.QWidget(); _sp3.setFixedWidth(16); tb.addWidget(_sp3)
+    _steps = [("Config", T("1 Config", "1 Config")),
+              ("Shunt", T("2 Shunt", "2 Shunt")),
+              ("Live", T("3 Live", "3 Live"))]
+    _step_lbls = {}
+    for _i, (_k, _txt) in enumerate(_steps):
+        if _i:
+            _sep = QtWidgets.QLabel("›"); _sep.setStyleSheet("color:#44506a;")
+            tb.addWidget(_sep)
+        _sl = QtWidgets.QLabel(_txt); _step_lbls[_k] = _sl; tb.addWidget(_sl)
+
+    def _set_step(active):
+        for _k, _sl in _step_lbls.items():
+            if _k == active:
+                _sl.setStyleSheet("color:#fbbf24; font-weight:800;")
+            else:
+                _sl.setStyleSheet("color:#8aa0c0;")
+    _set_step("Config")
+    st["step_fn"] = _set_step
+
+    def _update_flow():
+        """Gate del flujo: habilita Start solo con Config guardada + Shunt verificado
+        (Ref 1 + Ref 2) + device NI seteado. Resalta el paso activo y dice qué falta."""
+        bs = st.get("btn_start")
+        if bs is None:
+            return
+        f = st.get("flow", {})
+        cfg = bool(f.get("cfg_saved"))
+        need = {REF1_100UE.name, REF2_500UE.name}
+        shunt_ok = need.issubset(f.get("shunt_passed", set()))
+        is_ni = st.get("acq_mode") == "ni"
+        dev_ok = (not is_ni) or bool((st.get("ni_cfg", {}) or {}).get("device"))
+        can = cfg and shunt_ok and dev_ok and not st.get("running")
+        bs.setEnabled(bool(can))
+        miss = []
+        if not cfg:
+            miss.append(T("guardá Configuración", "save Configuration"))
+        if not shunt_ok:
+            miss.append(T("verificá Shunt (Ref 1 + Ref 2)", "verify Shunt (Ref 1 + Ref 2)"))
+        if is_ni and not dev_ok:
+            miss.append(T("seteá el device NI 9229", "set the NI 9229 device"))
+        hint = st.get("flow_hint")
+        if hint is not None:
+            if can or st.get("running"):
+                hint.setText("")
+            else:
+                hint.setText("● " + T("Falta para iniciar: ", "To start: ") + " · ".join(miss))
+        _set_step("Live" if (cfg and shunt_ok and dev_ok)
+                  else ("Shunt" if cfg else "Config"))
+    st["update_flow_fn"] = _update_flow
 
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
 
@@ -615,6 +670,8 @@ def build_app(simulated: bool = True):
             try: _w.setVisible(not _is_ni)
             except Exception: pass  # noqa: BLE001
         _refresh_hw_banner()
+        if st.get("update_flow_fn"):
+            st["update_flow_fn"]()
     cb_acq_mode.currentIndexChanged.connect(_on_acq_mode)
     cb_kph_sensor.currentIndexChanged.connect(lambda _=0: _kph_sensor())
     sb_ppr.valueChanged.connect(lambda _=0: _kph_sensor())
@@ -673,6 +730,11 @@ def build_app(simulated: bool = True):
         _CFG.setValue("kph_sensor", cb_kph_sensor.currentIndex())
         _CFG.setValue("ppr", sb_ppr.value())
         lbl_cfgsaved.setText(T("✅ Configuration saved.", "✅ Configuración guardada."))
+        # Flujo: config lista. La cal cambió → hay que re-verificar el shunt.
+        st["flow"]["cfg_saved"] = True
+        st["flow"]["shunt_passed"] = set()
+        if st.get("update_flow_fn"):
+            st["update_flow_fn"]()
 
     def _load_config():
         if _CFG.value("gage") is None:
@@ -727,10 +789,16 @@ def build_app(simulated: bool = True):
     # Start/Stop van FUERA del panel simulado → SIEMPRE visibles (también en modo NI 9229).
     btn_start = QtWidgets.QPushButton(T("▶ Start", "▶ Iniciar"))
     btn_stop = QtWidgets.QPushButton(T("■ Stop", "■ Detener")); btn_stop.setEnabled(False)
+    lbl_flow = QtWidgets.QLabel(""); lbl_flow.setStyleSheet("color:#b45309; font-weight:700;")
     ctrl_row = QtWidgets.QHBoxLayout()
     ctrl_row.addWidget(QtWidgets.QLabel(T("Acquisition:", "Adquisición:")))
+    ctrl_row.addWidget(lbl_flow)
     ctrl_row.addStretch(1); ctrl_row.addWidget(btn_start); ctrl_row.addWidget(btn_stop)
     live_l.addLayout(ctrl_row)
+    # Flujo guiado: Start arranca BLOQUEADO hasta Config guardada + Shunt verificado.
+    btn_start.setEnabled(False)
+    st["btn_start"] = btn_start; st["flow_hint"] = lbl_flow
+    st["update_flow_fn"]()
 
     # Fila de DATA: guardar cruda en el PC + subir a la nube (como el Modal)
     datarow = QtWidgets.QHBoxLayout()
@@ -902,6 +970,7 @@ def build_app(simulated: bool = True):
         st["buf_torque"] = deque(maxlen=maxlen); st["buf_kph"] = deque(maxlen=maxlen)
         st["buf_volts"] = deque(maxlen=maxlen)      # data CRUDA (voltios del RX10K)
         st["running"] = True
+        st["flow"]["has_capture"] = True
         btn_start.setEnabled(False); btn_stop.setEnabled(True)
         live_timer.start(); _refresh_hw_banner()
 
@@ -909,7 +978,9 @@ def build_app(simulated: bool = True):
         live_timer.stop(); st["running"] = False
         if st["source"] is not None:
             st["source"].stop()
-        btn_start.setEnabled(True); btn_stop.setEnabled(False)
+        btn_stop.setEnabled(False)
+        if st.get("update_flow_fn"):
+            st["update_flow_fn"]()      # re-evalúa el gate (no re-habilita a ciegas)
         _refresh_hw_banner()
 
     def _tick():
@@ -1103,8 +1174,8 @@ def build_app(simulated: bool = True):
     sh_result.setStyleSheet("QTextBrowser{border:none;background:#f4f8fc;}")
     sh_l.addWidget(sh_result, 1)
 
-    def _shunt_html(ref) -> str:
-        """Tarjeta HTML del resultado de UNA referencia (para mostrar 1 o las 2)."""
+    def _shunt_html(ref):
+        """Tarjeta HTML del resultado de UNA referencia. Devuelve (html, passed)."""
         sc = st["scaling"]; gage = st["gage"]
         # En simulado: el RX10K reproduce el shunt con un pequeño error realista.
         from core.torsional.shunt_cal import expected_shunt_voltage, full_scale_strain_torque
@@ -1122,7 +1193,7 @@ def build_app(simulated: bool = True):
             return (f"<td width='33%' style='padding:6px 8px'>"
                     f"<div style='color:#94a3b8;font-size:11px'>{lbl}</div>"
                     f"<div style='color:{col};font-size:17px;font-weight:800'>{val}</div></td>")
-        return (
+        _html = (
             "<table width='100%' cellspacing='0' cellpadding='0' style='margin:0 0 14px 0'><tr>"
             "<td style='background:white;border:1px solid #e6ecf5;border-radius:12px'>"
             "<table width='100%' cellpadding='8' cellspacing='0'>"
@@ -1141,13 +1212,24 @@ def build_app(simulated: bool = True):
             f"{T('Effective Z revealed by shunt', 'Z efectivo del shunt')}: <b>{chk.suggested_z:.4f}</b> "
             f"({T('current', 'actual')}: {sc.scale_factor_z:.4f})</div>"
             "</td></tr></table></td></tr></table>")
+        return _html, _pass
 
     def _run_shunt(refs):
         if not _rebuild_scaling() or st["gage"] is None:
             QtWidgets.QMessageBox.warning(win, "Watermelon Torsional",
                 T("Fix the configuration first.", "Corrige la configuración primero."))
             return
-        sh_result.setHtml("".join(_shunt_html(r) for r in refs))
+        parts = []
+        for r in refs:
+            _h, _ok = _shunt_html(r)
+            parts.append(_h)
+            if _ok:
+                st["flow"]["shunt_passed"].add(r.name)
+            else:
+                st["flow"]["shunt_passed"].discard(r.name)
+        sh_result.setHtml("".join(parts))
+        if st.get("update_flow_fn"):
+            st["update_flow_fn"]()
 
     btn_both.clicked.connect(lambda: _run_shunt([REF1_100UE, REF2_500UE]))
     btn_ref1.clicked.connect(lambda: _run_shunt([REF1_100UE]))
