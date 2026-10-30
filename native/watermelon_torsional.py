@@ -46,7 +46,7 @@ from core.torsional.analysis import (
 from core.torsional.shunt_cal import REF1_100UE, REF2_500UE, verify_shunt
 from core.torsional.ni_source import (
     KeyphasorSensor, NITorsionalConfig, NITorsionalSource,
-    nidaqmx_available, rpm_from_keyphasor,
+    find_ni_voltage_module, nidaqmx_available, rpm_from_keyphasor,
 )
 from core.torsional.monitor import TorsionalMonitor
 
@@ -598,6 +598,15 @@ def build_app(simulated: bool = True):
         _is_ni = st["acq_mode"] == "ni"
         for _w in (ed_ni_device, sb_torque_ai, sb_kph_ai):
             _w.setEnabled(_is_ni)
+        if _is_ni:
+            # Autodetecta el SLOT real del 9229 (evita abrir por error un 9234 vecino).
+            try:
+                _det = find_ni_voltage_module(preferred=ed_ni_device.text().strip())
+                if _det and _det != ed_ni_device.text().strip():
+                    ed_ni_device.setText(_det)
+                    lbl_kph.setText(f"● NI 9229 detectada en <b>{_det}</b> (autollenado).")
+            except Exception:  # noqa: BLE001
+                pass
         st["ni_cfg"] = {"device": ed_ni_device.text() or "cDAQ1Mod1",
                         "torque_ai": sb_torque_ai.value(), "kph_ai": sb_kph_ai.value()}
         # En modo NI el par y las RPM vienen de la tarjeta → oculta los campos del
