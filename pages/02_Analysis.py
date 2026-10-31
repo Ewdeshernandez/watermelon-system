@@ -391,15 +391,43 @@ def _ecc_status(eps: float):
     return "MUY CENTRADO · RIESGO WHIRL", "#dc3545"
 
 
-def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray):
+# Convención de montaje de sondas por cojinete (SGT-300A/B, verificado al destapar,
+# Bently 0°=arriba). Generador (cojinetes 5 y 6): sondas ARRIBA, X=45°R, Y=45°L.
+# Turbina (cojinetes 1 y 2): sondas ABAJO, X=135°R, Y=135°L. Resto → turbina por default.
+_GEN_BEARINGS = {"5", "6"}
+
+
+def _bearing_id(*vals):
+    """Primer número de cojinete hallado en un bearing/label/nombre (ej '5XD' → '5')."""
+    import re  # noqa: PLC0415
+    for v in vals:
+        m = re.search(r"\d+", str(v or ""))
+        if m:
+            return m.group(0)
+    return ""
+
+
+def _probe_angles(bid):
+    """(ang_x, ang_y, zona) por cojinete (conv. Bently 0°=arriba). Generador (5/6) =
+    sondas ARRIBA 45°R/45°L; turbina (1/2) = sondas ABAJO 135°R/135°L."""
+    if str(bid) in _GEN_BEARINGS:
+        return 45.0, 45.0, "generador"
+    return 135.0, 135.0, "turbina"
+
+
+def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray, ang_x: float = 135.0, ang_y: float = 135.0):
     """Convierte cambios de gap de las sondas a desplazamiento en el marco de máquina
-    (H derecha+, V arriba+). Geometría real SGT-300 (verificada al destapar, conv.
-    Bently 0°=arriba): sondas montadas ABAJO, X en lado R a 135°, Y en lado L a 135°
-    → û_X=(+a,−a), û_Y=(−a,−a), a=cos45°. Con Δgap = −(d·û_sonda):
-    V = (Δgx+Δgy)/(2a) ; H = (Δgy−Δgx)/(2a)."""
-    a = np.sqrt(0.5)
-    V = (dgx + dgy) / (2.0 * a)
-    H = (dgy - dgx) / (2.0 * a)
+    (H derecha+, V arriba+). Sondas: X en lado R a ang_x° y Y en lado L a ang_y° del
+    tope (Bently 0°=arriba). La sonda mira radial hacia el centro, así que
+    Δgap = −(d·n̂) con n̂_X=(sin ax, cos ax), n̂_Y=(−sin ay, cos ay). Se invierte el
+    sistema 2×2 (det = sin(ax+ay)); 135/135 → turbina, 45/45 → generador."""
+    ax = np.radians(float(ang_x)); ay = np.radians(float(ang_y))
+    det = np.sin(ax + ay)
+    if abs(det) < 1e-9:                       # geometría degenerada: cae al caso 135
+        a = np.sqrt(0.5)
+        return (dgy - dgx) / (2.0 * a), (dgx + dgy) / (2.0 * a)
+    H = (-np.cos(ay) * dgx + np.cos(ax) * dgy) / det
+    V = (-np.sin(ay) * dgx - np.sin(ax) * dgy) / det
     return H, V
 
 
@@ -1565,28 +1593,50 @@ elif view == "Órbita":
         st.warning("Órbita: necesita el **par X/Y** de un cojinete. Sube ambos CSV "
                    "(ej. 1xd.csv + 1yd.csv).")
     else:
-        oc1, oc2, oc3 = st.columns([2, 1, 1])
+        oc1, oc2 = st.columns([2, 1])
         with oc1:
             fmode = st.segmented_control("Tipo de órbita", ["Direct", "1X", "2X"],
                                          default="Direct", key="orb_f") or "Direct"
         with oc2:
-            ang_x = st.number_input("X · °R del TOP", value=135, step=5,
-                                    key="orb_ax", help="Montaje de la sonda X, lado R, grados "
-                                    "desde el tope. SGT-300 real = 135° (abajo-derecha).")
-        with oc3:
-            ang_y = st.number_input("Y · °L del TOP", value=135, step=5,
-                                    key="orb_ay", help="Montaje de la sonda Y, lado L, grados "
-                                    "desde el tope. SGT-300 real = 135° (abajo-izquierda).")
+            _manual_ang = st.toggle(
+                "Ajuste manual de sondas", value=False, key="orb_manual",
+                help="Por default el ángulo se resuelve POR COJINETE (generador 5/6 = sondas "
+                     "arriba 45°; turbina 1/2 = abajo 135°). Activá para forzar un ángulo a todas.")
+        if _manual_ang:
+            mc1, mc2 = st.columns(2)
+            with mc1:
+                _max_ang = float(st.number_input("X · °R del TOP", value=135, step=5, key="orb_ax"))
+            with mc2:
+                _may_ang = float(st.number_input("Y · °L del TOP", value=135, step=5, key="orb_ay"))
+
+        def _ang_for(bb):
+            """Ángulos de sonda de ESTE cojinete: manual (forzado a todos) o auto por nº."""
+            if _manual_ang:
+                return _max_ang, _may_ang
+            ax, ay, _z = _probe_angles(_bearing_id(
+                getattr(bb.x, "bearing", ""), getattr(bb.y, "bearing", ""),
+                bb.x.label, bb.y.label, bb.name))
+            return ax, ay
+
         _onames = [bb.name for bb in _obrgs]
         _osel = st.multiselect("Cojinetes (órbitas)", _onames, default=[_onames[0]],
                                key="orb_sel",
                                help="Elegí uno o varios. Varias órbitas = MISMA escala para "
-                                    "comparar tamaños a ojo (como System1).")
+                                    "comparar tamaños a ojo (como System1). Cada una usa el "
+                                    "ángulo de sonda de SU cojinete (gen 45° / turbina 135°).")
         _bsel = [_obrgs[_onames.index(n)] for n in _osel] or [_obrgs[0]]
         from core.ui_industrial import html_table  # noqa: PLC0415
-        # Pass 1: data de cada órbita → escala GLOBAL (misma para todas)
-        _datas = [(bb, _orbit_data(bb, fmode, ang_x, ang_y)) for bb in _bsel]
+        # Pass 1: data de cada órbita (ángulo POR cojinete) → escala GLOBAL (misma para todas)
+        _datas = [(bb, _orbit_data(bb, fmode, *_ang_for(bb))) for bb in _bsel]
         _gR = max((d["Rp"] for _, d in _datas), default=1.0) or 1.0
+        _zinfo = []
+        for _bb in _bsel:
+            _zax, _zay = _ang_for(_bb)
+            _zn = ("manual" if _manual_ang else _probe_angles(_bearing_id(
+                getattr(_bb.x, "bearing", ""), getattr(_bb.y, "bearing", ""),
+                _bb.x.label, _bb.y.label, _bb.name))[2])
+            _zinfo.append(f"{_bb.name}: X {_zax:.0f}°R / Y {_zay:.0f}°L ({_zn})")
+        st.caption("⬤ Ángulo de sonda por cojinete → " + " · ".join(_zinfo))
         _ocols = ["Cojinete", "RPM", "Precesión", "Giro (API 670)",
                   "Eje mayor", "Eje menor", "Elipticidad", "Smax"]
 
@@ -1598,7 +1648,7 @@ elif view == "Órbita":
 
         if len(_datas) == 1:
             bb, d = _datas[0]
-            fig = _orbit_fig(bb, d, _gR, ang_x, ang_y, fmode, h=580, compact=False)
+            fig = _orbit_fig(bb, d, _gR, *_ang_for(bb), fmode, h=580, compact=False)
             st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
             _u = bb.x.unit or "µm"
             st.caption(
@@ -1639,7 +1689,7 @@ elif view == "Órbita":
             _L = _gR * 1.5
             for _i, (bb, d) in enumerate(_datas):
                 _r, _c = _i // _ncol + 1, _i % _ncol + 1
-                _orbit_add_cell(figM, bb, d, _gR, ang_x, ang_y, _r, _c)
+                _orbit_add_cell(figM, bb, d, _gR, *_ang_for(bb), _r, _c)
                 _idx = (_r - 1) * _ncol + _c
                 _yid = "y" if _idx == 1 else f"y{_idx}"
                 figM.update_xaxes(range=[-_L, _L], scaleanchor=_yid, scaleratio=1,
@@ -1792,6 +1842,12 @@ elif view == "Shaft Centerline":
         _tsraw = list(getattr(b.x, "times", []) or [])
         _has_spd = _is_gap and _spraw.size == _rawx.size and np.isfinite(_spraw).any()
         _bn = str(getattr(b.x, "bearing", "") or getattr(b.y, "bearing", ""))
+        _bid = _bn or _bearing_id(b.x.label, b.y.label, b.name)
+        _angx_sc, _angy_sc, _zona_sc = _probe_angles(_bid)
+        _axr_sc, _ayr_sc = np.radians(_angx_sc), np.radians(_angy_sc)
+        # direcciones (outward) de montaje: X lado R (+sin), Y lado L (−sin)
+        _probes_sc = [(b.x.label, float(np.sin(_axr_sc)), float(np.cos(_axr_sc)), _angx_sc, "R"),
+                      (b.y.label, float(-np.sin(_ayr_sc)), float(np.cos(_ayr_sc)), _angy_sc, "L")]
         _oem_clr = _SGT300_CLEARANCE_UM.get(_bn)
         _ntot = int(_rawx.size)
 
@@ -1872,8 +1928,8 @@ elif view == "Shaft Centerline":
         rad = clr / 2.0
 
         if _is_gap:
-            # --- orientación física: sondas ±45° → marco máquina (H der+, V arriba+) ---
-            _H0, _V0 = _gap_to_vh(_dgx, _dgy)
+            # --- orientación física: sondas por cojinete → marco máquina (H der+, V arriba+) ---
+            _H0, _V0 = _gap_to_vh(_dgx, _dgy, _angx_sc, _angy_sc)
             # signo global: a velocidad el muñón SUBE (Bently 12-10) → V_operación > 0
             _iop = int(np.nanargmax(_sp)) if _sp.size else (_H0.size - 1)
             _sgn = -1.0 if _V0[_iop] < 0 else 1.0
@@ -1901,10 +1957,9 @@ elif view == "Shaft Centerline":
 
         fig = go.Figure()
         th = np.linspace(0, 2 * np.pi, 180)
-        _a2 = np.sqrt(0.5)
         # cono de visión de cada sonda (sector tenue hacia el eje), detrás de todo
         if _is_gap:
-            for _ux, _uy in [(_a2, -_a2), (-_a2, -_a2)]:
+            for _lbl, _ux, _uy, _dg, _sd in _probes_sc:
                 _ang = np.arctan2(_uy, _ux)
                 _aa = np.linspace(_ang - np.radians(14), _ang + np.radians(14), 20)
                 fig.add_trace(go.Scatter(
@@ -1954,7 +2009,7 @@ elif view == "Shaft Centerline":
                           marker=dict(color="#0f172a", size=7, symbol="triangle-down"),
                           text=["TOPE 0°"], textposition="top center",
                           hoverinfo="skip", showlegend=False))
-            for _lbl, _ux, _uy in [(b.x.label, _a2, -_a2), (b.y.label, -_a2, -_a2)]:
+            for _lbl, _ux, _uy, _dg, _sd in _probes_sc:
                 _ri, _rb, _ro = rad * 1.03, rad * 1.22, rad * 1.42
                 _perp = np.array([-_uy, _ux])
                 fig.add_trace(go.Scatter(x=[_ux * _rb, _ux * _ro], y=[_uy * _rb, _uy * _ro],
@@ -1971,8 +2026,7 @@ elif view == "Shaft Centerline":
                               marker=dict(color="#e8890c", size=12, symbol="circle",
                                           line=dict(color="#12305e", width=2)),
                               hoverinfo="skip", showlegend=False))
-                _sd = "R" if _ux > 0 else "L"
-                fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl}<br>135°{_sd}",
+                fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl}<br>{_dg:.0f}°{_sd}",
                                    showarrow=False, yshift=-16,
                                    font=dict(size=11, family="IBM Plex Mono", color="#12305e"))
         if _is_gap:
@@ -1999,8 +2053,10 @@ elif view == "Shaft Centerline":
                 f"<span class='sc-pill'>claro <b>{clr:.0f} µm</b></span>"
                 f"<span class='sc-pill'>op <b>{(b.x.rpm or 0):.0f} rpm</b></span></div>"
                 f"<div class='sc-hint'>Círculo = claro · anillo rojo ε 0.95 (contacto) · "
-                f"anillo azul ε 0.30 (riesgo whirl) · flecha = carga · sondas abajo "
-                f"X 135°R / Y 135°L (Bently) → H/V real. ε 0=centro, 1=contacto.</div>")
+                f"anillo azul ε 0.30 (riesgo whirl) · flecha = carga · "
+                f"{'generador — sondas arriba' if _zona_sc == 'generador' else 'turbina — sondas abajo'} "
+                f"X {_angx_sc:.0f}°R / Y {_angy_sc:.0f}°L (Bently) → H/V real. "
+                f"ε 0=centro, 1=contacto.</div>")
         else:
             _chips = (
                 f"<div class='sc-bar'><span class='sc-badge' style='background:{color}'>{status}</span>"
