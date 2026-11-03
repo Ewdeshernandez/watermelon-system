@@ -487,6 +487,87 @@ def _saved_scl(bearing_label, key):
         return out
 
 
+def _render_saved_scl_fig(bd):
+    """Dibuja un Shaft Centerline desde un snapshot guardado (trayectoria +
+    claro + punto de operación). Para el visor de histórico."""
+    rad = float(bd.get("clearance_radial") or 0.0)
+    gx = float(bd.get("x_gap_at_op") or 0.0); gy = float(bd.get("y_gap_at_op") or 0.0)
+    ecc = float(bd.get("eccentricity_ratio") or 0.0)
+    unit = bd.get("gap_unit", "µm") or "µm"
+    tx = np.asarray(bd.get("trajectory_x_gap") or [], float)
+    ty = np.asarray(bd.get("trajectory_y_gap") or [], float)
+    ts = np.asarray(bd.get("trajectory_speed") or [], float)
+    if rad <= 0:
+        rad = max(float(np.nanmax(np.hypot(tx, ty))) if tx.size else gy, 1.0) * 1.3
+    fig = go.Figure(); th = np.linspace(0, 2 * np.pi, 180)
+    fig.add_trace(go.Scatter(x=rad * np.cos(th), y=rad * np.sin(th), mode="lines",
+                  line=dict(color="#334155", width=1.6), hoverinfo="skip"))
+    for frac, c in [(0.95, "#dc3545"), (0.30, "#0ea5e9")]:
+        fig.add_trace(go.Scatter(x=rad * frac * np.cos(th), y=rad * frac * np.sin(th),
+                      mode="lines", line=dict(color=c, width=1, dash="dot"),
+                      hoverinfo="skip"))
+    if tx.size and ty.size:
+        if ts.size == tx.size and np.isfinite(ts).any():
+            fig.add_trace(go.Scatter(x=tx, y=ty, mode="markers",
+                          marker=dict(color=ts, colorscale="Turbo", size=4,
+                                      showscale=True,
+                                      colorbar=dict(title="rpm", thickness=12)),
+                          hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=tx, y=ty, mode="lines",
+                      line=dict(color="#94a3b8", width=0.9), hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers+text",
+                  marker=dict(color="#64748b", size=8, symbol="cross-thin",
+                              line=dict(color="#334155", width=2)),
+                  text=["centro"], textposition="top right", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=[0], y=[-rad], mode="markers+text",
+                  marker=dict(color="#64748b", size=9, symbol="circle-open",
+                              line=dict(color="#334155", width=2)),
+                  text=["reposo"], textposition="bottom center", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text",
+                  marker=dict(color="#dc3545" if ecc >= 0.9 else "#1f9d55",
+                              size=15, line=dict(color="#fff", width=1.5)),
+                  text=["operación"], textposition="top center", hoverinfo="skip"))
+    _axr = rad * 1.4
+    fig.update_xaxes(title=f"Horizontal H ({unit})", scaleanchor="y", scaleratio=1,
+                     zeroline=True, range=[-_axr, _axr])
+    fig.update_yaxes(title=f"Vertical V ({unit}) · arriba +", zeroline=True,
+                     range=[-_axr, _axr])
+    return fig, ecc
+
+
+def _view_saved_scl(key="scl_hist"):
+    """Visor de histórico: ver snapshots de Shaft Centerline guardados SIN subir
+    CSV. Elegir máquina + uno o varios snapshots → se dibujan."""
+    assets = _list_assets()
+    if not assets:
+        st.info("No hay máquinas registradas.")
+        return
+    tags = [t for _i, t in assets]
+    _def = tags.index(cur_asset) if cur_asset in tags else 0
+    c0, c1 = st.columns([1, 2])
+    tsel = c0.selectbox("Máquina", tags, index=_def, key=f"{key}_as")
+    iid = assets[tags.index(tsel)][0]
+    from core.scl_history import list_scl_snapshots, load_scl_snapshot
+    snaps = list_scl_snapshots(iid) or []
+    if not snaps:
+        st.info(f"Sin snapshots de Shaft Centerline guardados en **{tsel}**.")
+        return
+    opts = {f"{(s.get('corrida_label') or '—')} · {s.get('timestamp','')[:16]}": s["snapshot_id"]
+            for s in snaps}
+    sel = c1.multiselect("Snapshot(s) guardados", list(opts),
+                         default=list(opts)[:1], key=f"{key}_sel")
+    for lbl in sel:
+        snap = load_scl_snapshot(iid, opts[lbl])
+        if not snap:
+            continue
+        for bd in snap.get("bearings", []):
+            fig, ecc = _render_saved_scl_fig(bd)
+            st.plotly_chart(_layout(fig, f"{bd.get('bearing_label','')} · {lbl}", h=500),
+                            use_container_width=True, config=_NOBAR)
+            st.caption(f"ε≈{ecc:.2f} · actitud {float(bd.get('attitude_angle') or 0):.0f}° "
+                       f"· claro {float(bd.get('clearance_radial') or 0)*2:.0f} µm diametral")
+
+
 def _sweep_controls(sw, key):
     rpm = np.asarray(sw.rpm, float)
     amp_c = np.asarray(sw.amp, float); phase_c = np.asarray(sw.phase, float)
@@ -1980,6 +2061,8 @@ elif view == "Shaft Centerline":
     if not _brgs:
         st.warning("Shaft Centerline: necesita el **par X/Y** (gap DC de los proximitores). "
                    "Sube el export **Gap** de System1 (par 1XD/1YD) o usa el histórico.")
+        st.markdown("#### 📂 Ver snapshots guardados")
+        _view_saved_scl("scl_hist_nodata")
     else:
         st.markdown(
             "<style>"
@@ -2226,6 +2309,8 @@ elif view == "Shaft Centerline":
                                             font=dict(size=10)))
         st.plotly_chart(_figs, use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
+        with st.expander("📂 Ver snapshots guardados (histórico)"):
+            _view_saved_scl("scl_hist_exp")
         if _is_gap:
             def _mk_scl(_iid, _op, _lbl, _bl=b.name, _gx=gx_op, _gy=gy_op,
                         _ec=eps, _at=_att, _cr=rad, _sp_=_sp, _px_=_px, _py_=_py):
