@@ -389,11 +389,13 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
             _aprb_rol = st.text_input("Role (reviewed)", value=_sg.get("reviewed_role", ""),
                                       key=f"rc_aprbr_{_ck}", placeholder="optional")
 
-        # --- Gate de aprobación: primero VISTA PREVIA + REVISAR recomendaciones ---
-        st.caption("⏳ La vista previa arma el **reporte completo** (refresca datos del "
-                   "robot y renderiza espectros / onda / órbitas): tarda **~2-4 min**. "
-                   "No cierres la pestaña; al terminar aparece la vista previa aquí.")
-        if st.button("👁 Generate report preview", key=f"rc_prev_{_ck}",
+        # --- Gate de aprobación: GENERAR → DESCARGAR y revisar el PDF → aprobar ---
+        # (Sin preview inline: el render de páginas a PNG era lo lento. El PDF que se
+        #  descarga es IDÉNTICO al que se envía — approve lo reusa, instantáneo.)
+        st.caption("⏳ Generar arma el **reporte completo** (refresca datos del robot y "
+                   "renderiza espectros / onda / órbitas): tarda **~2-4 min**. No cierres "
+                   "la pestaña. Al terminar se habilita la **descarga** para revisarlo.")
+        if st.button("📄 Generate report for review", key=f"rc_prev_{_ck}",
                      use_container_width=True):
             try:
                 _qsave(_iid, [{"id": r.get("id") or "", "text": r.get("Recomendación") or "",
@@ -402,11 +404,11 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                 st.session_state[_q_ss] = _qlist(_iid)
             except Exception:
                 pass
-            with st.spinner("Generating preview… (~2-4 min)"):
+            with st.spinner("Building the report… (~2-4 min)"):
                 from core.briefing_builder import build_asset_briefing
                 from core.briefing_queue import build_signed_meta_extra, claim_consecutive
-                # Consecutivo definitivo + firmas cursivas → el PDF de la vista
-                # previa es IDÉNTICO al final (así approve lo reusa, instantáneo).
+                # Consecutivo definitivo + firmas cursivas → el PDF descargado es
+                # IDÉNTICO al final (así approve lo reusa, instantáneo).
                 _consec = claim_consecutive(_iid)
                 _meta_extra = build_signed_meta_extra(
                     _iid, prepared_by=(_elab or me_name), approved_by=_aprb,
@@ -417,41 +419,32 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                     meta_extra=_meta_extra)
             st.session_state[f"rc_pdf_{_ck}"] = _pdf
             st.session_state[f"rc_pdfmeta_{_ck}"] = _m
-            # Render de páginas para vista previa inline
-            _imgs = []
-            try:
-                import pymupdf  # type: ignore
-                _doc = pymupdf.open(stream=_pdf, filetype="pdf")
-                # TODAS las páginas (cap de seguridad) a buena resolución.
-                for _pg in _doc[: min(40, _doc.page_count)]:
-                    _imgs.append(_pg.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0)).tobytes("png"))
-                st.session_state[f"rc_prevn_{_ck}"] = _doc.page_count
-            except Exception:
-                _imgs = []
-            st.session_state[f"rc_prevpng_{_ck}"] = _imgs
+            st.session_state[f"rc_dled_{_ck}"] = False   # nuevo build → re-descargar
 
-        _has_preview = bool(st.session_state.get(f"rc_pdf_{_ck}"))
-        _imgs = st.session_state.get(f"rc_prevpng_{_ck}") or []
-        if _imgs:
-            _npag = st.session_state.get(f"rc_prevn_{_ck}", len(_imgs))
-            with st.expander(f"👁 Report preview — {_npag} page(s) "
-                             f"(scroll to review all · download below for full quality)",
-                             expanded=True):
-                for _im in _imgs:
-                    st.image(_im, use_container_width=True)
-        elif _has_preview:
-            st.caption("Preview generated — download below to view.")
+        _has_report = bool(st.session_state.get(f"rc_pdf_{_ck}"))
+        # Descarga OBLIGATORIA del PDF antes de aprobar
+        if _has_report:
+            _dl = st.download_button(
+                "⬇ Download PDF to review", data=st.session_state[f"rc_pdf_{_ck}"],
+                file_name=f"Report_{_tag}_{_d.get('period','Semanal')}.pdf",
+                mime="application/pdf", key=f"rc_dl_{_ck}",
+                type="primary", use_container_width=True)
+            if _dl:
+                st.session_state[f"rc_dled_{_ck}"] = True
+        _downloaded = bool(st.session_state.get(f"rc_dled_{_ck}"))
 
-        # Confirmación explícita de revisión de recomendaciones
-        _ack = st.checkbox("He revisado las recomendaciones y la vista previa del reporte.",
-                           key=f"rc_ack_{_ck}")
-        _ready = _has_preview and _ack
+        # Confirmación explícita de revisión
+        _ack = st.checkbox("Descargué y revisé el PDF completo del reporte y las "
+                           "recomendaciones.", key=f"rc_ack_{_ck}")
+        _ready = _has_report and _downloaded and _ack
         if not _ready:
             _missing = []
-            if not _has_preview:
-                _missing.append("generar la **vista previa** del reporte")
+            if not _has_report:
+                _missing.append("**generar** el reporte")
+            elif not _downloaded:
+                _missing.append("**descargar** el PDF y revisarlo")
             if not _ack:
-                _missing.append("confirmar la **revisión de las recomendaciones**")
+                _missing.append("confirmar que lo **revisaste**")
             st.info("Antes de aprobar, falta: " + " · ".join(_missing) + ".")
 
         _b3 = st.container()
@@ -486,20 +479,13 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                                        f"channels configured: {_dv.get('error', _dv)}. "
                                        f"Download the PDF and send it manually.")
                         st.session_state[f"rc_pdf_{_ck}"] = _res.get("pdf")
-                        for _k in (f"rc_ack_{_ck}", f"rc_prevpng_{_ck}",
-                                   f"rc_prevn_{_ck}", f"rc_pdfmeta_{_ck}"):
+                        for _k in (f"rc_ack_{_ck}", f"rc_dled_{_ck}",
+                                   f"rc_pdfmeta_{_ck}"):
                             st.session_state.pop(_k, None)
                         st.session_state.pop("rc_open", None)
                         st.session_state["rc_cache"] = list_pending()
                     else:
                         st.error(f"Could not approve: {_res.get('error')}")
-
-        if st.session_state.get(f"rc_pdf_{_ck}"):
-            st.download_button("⬇ Download PDF (latest generated version)",
-                               data=st.session_state[f"rc_pdf_{_ck}"],
-                               file_name=f"Report_{_tag}_{_d.get('period','Semanal')}.pdf",
-                               mime="application/pdf", key=f"rc_dl_{_ck}",
-                               use_container_width=True)
 
 
 # =================================================================
