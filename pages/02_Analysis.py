@@ -270,6 +270,43 @@ st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
               else (f"  ·  {_rpm:.0f} rpm" if _rpm else "")))
 
 
+# ---- Guardar snapshot de la vista en una máquina (→ sección Arranque del reporte) ----
+def _save_snapshot_ui(build_fn, *, key: str, default_rpm: float = 0.0,
+                      help_txt: str = "") -> None:
+    """Popover: elegir máquina + etiqueta + rpm de operación y persistir el
+    snapshot de la vista actual. `build_fn(iid, op_rpm, label) -> sid`. La máquina
+    se preselecciona a la del histórico si aplica. El snapshot queda atado a la
+    máquina y lo levanta el reporte semanal/mensual (sección Arranque / Run-up)."""
+    with st.popover("💾 Guardar en reporte", use_container_width=False):
+        assets = _list_assets()
+        if not assets:
+            st.caption("No hay máquinas registradas en Machinery Library.")
+            return
+        tags = [t for _i, t in assets]
+        _def = tags.index(cur_asset) if cur_asset in tags else 0
+        tsel = st.selectbox("Máquina", tags, index=_def, key=f"sv_as_{key}",
+                            help="A qué activo pertenece esta corrida.")
+        iid = assets[tags.index(tsel)][0]
+        lbl = st.text_input("Etiqueta de la corrida", value=f"Arranque {_fecha}",
+                            key=f"sv_lb_{key}",
+                            help="Ej. 'Arranque 2026-11-03'. Se muestra en el reporte.")
+        op = st.number_input("rpm de operación", min_value=0.0,
+                             value=float(default_rpm or _rpm or 0.0), step=100.0,
+                             key=f"sv_op_{key}")
+        if help_txt:
+            st.caption(help_txt)
+        if st.button("Guardar snapshot", key=f"sv_bt_{key}", type="primary"):
+            try:
+                sid = build_fn(iid, float(op), (lbl or "").strip())
+                if sid:
+                    st.success(f"Guardado en **{tsel}**. Aparece en el próximo "
+                               "reporte (sección Arranque / Run-up).")
+                else:
+                    st.warning("No había datos válidos para guardar.")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"No se pudo guardar: {e}")
+
+
 # =========================================================
 # 2) VISTAS (segmented control) — dato compartido
 # =========================================================
@@ -2042,6 +2079,24 @@ elif view == "Shaft Centerline":
                         use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
         if _is_gap:
+            def _mk_scl(_iid, _op, _lbl, _bl=b.name, _gx=gx_op, _gy=gy_op,
+                        _ec=eps, _at=_att, _cr=rad, _sp_=_sp, _px_=_px, _py_=_py):
+                from core.scl_history import save_scl_snapshot
+                bd = {"bearing_label": _bl, "x_gap_at_op": _gx, "y_gap_at_op": _gy,
+                      "gap_unit": "µm", "eccentricity_ratio": _ec,
+                      "attitude_angle": _at, "clearance_radial": _cr}
+                _n = len(_px_)
+                if (_sp_ is not None and len(_sp_) == _n == len(_py_) and _n > 1):
+                    bd["trajectory_speed"] = [float(v) for v in _sp_]
+                    bd["trajectory_x_gap"] = [float(v) for v in _px_]
+                    bd["trajectory_y_gap"] = [float(v) for v in _py_]
+                return save_scl_snapshot(_iid, operating_speed_rpm=_op,
+                                         bearings_data=[bd], corrida_label=_lbl)
+            _save_snapshot_ui(_mk_scl, key=f"scl_{_bid}",
+                              default_rpm=float(b.x.rpm or 0.0),
+                              help_txt="Guarda ESTE cojinete. Repetí por cojinete "
+                                       "para el set completo del arranque.")
+        if _is_gap:
             _attf = "#1f9d55" if 20 <= _att <= 50 else "#e8890c"
             _chips = (
                 f"<div class='sc-bar'>"
@@ -2106,6 +2161,31 @@ elif view == "Bode":
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
         st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=560), use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Bode {sw.label}"), key="bode")
+
+        def _mk_bode(_iid, _op, _lbl, _sw=sw, _u=unit, _a=_ampc, _p=_phc,
+                     _crit=s.get("criticals") or []):
+            from core.bode_history import save_bode_snapshot
+            _r = np.asarray(_sw.rpm, float); _av = np.asarray(_a, float)
+            _pv = np.asarray(_p, float)
+            _o = np.argsort(_r)
+            _rs, _as_, _ps = _r[_o], _av[_o], _pv[_o]
+            _amp_op = float(np.interp(_op, _rs, _as_)) if _rs.size else 0.0
+            _ph_op = float(np.interp(_op, _rs, _ps)) if _rs.size else 0.0
+            ent = {"sensor_label": _sw.label, "amp_at_op": _amp_op,
+                   "phase_at_op": _ph_op, "amp_unit": _u, "phase_unit": "deg",
+                   "trajectory_speed": [float(v) for v in _sw.rpm],
+                   "trajectory_amp": [float(v) for v in _a],
+                   "trajectory_phase": [float(v) for v in _p]}
+            if _crit:
+                c0 = _crit[0]
+                ent["critical_speed_rpm"] = float(c0.get("rpm", 0))
+                ent["critical_speed_amp"] = float(c0.get("amp_peak", 0))
+                ent["critical_speed_phase_delta"] = float(c0.get("phase_change_deg", 0))
+                ent["q_factor"] = float(c0.get("q_factor", 0))
+            return save_bode_snapshot(_iid, operating_speed_rpm=_op,
+                                      sensors_data=[ent], corrida_label=_lbl,
+                                      sensor_id=_sw.label)
+        _save_snapshot_ui(_mk_bode, key=f"bode_{sw.label}", default_rpm=float(op))
         _diag_panel(diag, zone, zc)
 
 elif view == "Polar":
@@ -2141,6 +2221,31 @@ elif view == "Polar":
                           margin=dict(l=40, r=40, t=56, b=40))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Polar {sw.label}"), key="polar")
+
+        def _mk_polar(_iid, _op, _lbl, _sw=sw, _u=unit, _a=_ampc, _p=_phc,
+                      _crit=s.get("criticals") or []):
+            from core.polar_history import save_polar_snapshot
+            _r = np.asarray(_sw.rpm, float); _av = np.asarray(_a, float)
+            _pv = np.asarray(_p, float)
+            _o = np.argsort(_r)
+            _rs, _as_, _ps = _r[_o], _av[_o], _pv[_o]
+            _amp_op = float(np.interp(_op, _rs, _as_)) if _rs.size else 0.0
+            _ph_op = float(np.interp(_op, _rs, _ps)) if _rs.size else 0.0
+            ent = {"sensor_label": _sw.label, "amp_at_op": _amp_op,
+                   "phase_at_op": _ph_op, "amp_unit": _u, "phase_unit": "deg",
+                   "trajectory_speed": [float(v) for v in _sw.rpm],
+                   "trajectory_amp": [float(v) for v in _a],
+                   "trajectory_phase": [float(v) for v in _p]}
+            if _crit:
+                c0 = _crit[0]
+                ent["critical_speed_rpm"] = float(c0.get("rpm", 0))
+                ent["critical_speed_amp"] = float(c0.get("amp_peak", 0))
+                ent["critical_speed_phase"] = float(c0.get("phase_change_deg", 0))
+                ent["q_factor"] = float(c0.get("q_factor", 0))
+            return save_polar_snapshot(_iid, operating_speed_rpm=_op,
+                                       sensors_data=[ent], corrida_label=_lbl,
+                                       sensor_id=_sw.label)
+        _save_snapshot_ui(_mk_polar, key=f"polar_{sw.label}", default_rpm=float(op))
         st.caption(f"Radio = amplitud ({unit}) · ángulo = fase · color = rpm · "
                    "anillos punteados = límites ISO 20816-2 (A/B/C).")
         _diag_panel(diag, zone, zc)
