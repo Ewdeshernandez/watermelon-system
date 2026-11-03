@@ -1012,11 +1012,15 @@ def build_asset_briefing(
         _rr = refresh_from_dynamic_raw(instance_id, instance_obj)
         if _rr.get("ok") and not _rr.get("skipped"):
             log.info("briefing(%s): snapshots refrescados desde dynamic_raw "
-                     "(%d espectro/%d onda/%d órbita)", instance_id,
-                     _rr.get("spectrum", 0), _rr.get("waveform", 0),
-                     _rr.get("orbit", 0))
+                     "(%d espectro/%d onda/%d órbita) ref_rpm=%s full_speed=%s",
+                     instance_id, _rr.get("spectrum", 0), _rr.get("waveform", 0),
+                     _rr.get("orbit", 0), _rr.get("ref_rpm"), _rr.get("full_speed"))
+        _fs_rpm = _rr.get("ref_rpm") or 0
+        _fs_ok = bool(_rr.get("full_speed"))
+        _fs_slow = _rr.get("slow_points") or []
     except Exception as e:  # noqa: BLE001
         log.warning("refresh dynamic_raw snapshots falló: %s", e)
+        _fs_rpm, _fs_ok, _fs_slow = 0, False, []
 
     # Figuras PRIMERO: la IA necesita saber qué análisis ya trae el reporte
     # (espectro/forma de onda/tendencia/órbita) para no afirmar que faltan.
@@ -1062,8 +1066,13 @@ def build_asset_briefing(
                     _md = measurement_date(instance_id, _fk)
                     _ak = f"{_fk}_analysis"
                     _cur = figures.get(_ak) or ""
+                    # rpm de la captura usada → deja EXPLÍCITO que es a plena carga
+                    _rpm_note = ""
+                    if _fs_rpm and _fs_rpm > 0:
+                        _rpm_note = (f" a {_fs_rpm:,.0f} rpm (plena carga)"
+                                     if _fs_ok else f" a {_fs_rpm:,.0f} rpm")
                     if _md and not _cur.lstrip().startswith("Medición:"):
-                        figures[_ak] = f"Medición: {_md}. " + _cur
+                        figures[_ak] = f"Medición: {_md}{_rpm_note}. " + _cur
         except Exception as e:  # noqa: BLE001
             log.warning("estampar fecha de figura falló: %s", e)
 

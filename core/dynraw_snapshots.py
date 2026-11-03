@@ -126,17 +126,60 @@ def refresh_from_dynamic_raw(instance_id: str, instance_obj: Any = None,
             out["ok"] = True
             return out
 
-        # captura más reciente por punto
-        latest: Dict[str, Dict[str, str]] = {}
+        # Capturas por punto, más recientes primero (list_captures ya viene así).
+        by_point: Dict[str, List[Dict[str, str]]] = {}
         for c in caps:
-            pt = c["point"]
-            if pt not in latest:
-                latest[pt] = c
+            by_point.setdefault(c["point"], []).append(c)
+
+        # --- Selección FULL SPEED (auto ≥95% del máx reciente) -----------------
+        # El robot captura c/2h a cualquier rpm (part-load, run-up, coast-down).
+        # Para que el reporte muestre la condición a PLENA CARGA se descarta lo
+        # lento: ref = máx rpm de la captura más nueva de cada punto; luego por
+        # punto se toma la MÁS RECIENTE con rpm ≥ 95% de ref (si la más nueva está
+        # lenta, se camina hacia atrás hasta `_FS_MAX_BACK` capturas).
+        _FS_FRAC = 0.95
+        _FS_MAX_BACK = 10
+        _cache: Dict[str, Any] = {}
+
+        def _dl(row):
+            k = row["key"]
+            if k not in _cache:
+                _cache[k] = download_capture(k)
+            return _cache[k]
+
+        def _rpm_of(cp) -> float:
+            try:
+                r = cp.rpm if cp is not None else None
+                return float(r) if r and float(r) > 0 else 0.0
+            except Exception:  # noqa: BLE001
+                return 0.0
+
+        # ref = máx rpm entre las capturas más nuevas de cada punto
+        ref_rpm = 0.0
+        for pt, rows in by_point.items():
+            ref_rpm = max(ref_rpm, _rpm_of(_dl(rows[0])))
+        _thr = _FS_FRAC * ref_rpm if ref_rpm > 0 else 0.0
+        out["ref_rpm"] = round(ref_rpm, 1)
+        out["fs_threshold_rpm"] = round(_thr, 1)
+
         capobj = {}
-        for pt, row in latest.items():
-            cp = download_capture(row["key"])
-            if cp is not None:
-                capobj[pt] = cp
+        _slow_pts: List[str] = []
+        for pt, rows in by_point.items():
+            chosen = None
+            if _thr > 0:
+                for row in rows[:_FS_MAX_BACK]:
+                    cp = _dl(row)
+                    if cp is not None and _rpm_of(cp) >= _thr:
+                        chosen = cp
+                        break
+            if chosen is None:                  # ninguna a full speed → la más nueva
+                chosen = _dl(rows[0])
+                if _thr > 0 and chosen is not None and _rpm_of(chosen) < _thr:
+                    _slow_pts.append(pt)
+            if chosen is not None:
+                capobj[pt] = chosen
+        out["full_speed"] = (ref_rpm > 0 and not _slow_pts)
+        out["slow_points"] = _slow_pts
         if not capobj:
             out["skipped"] = True
             return out
