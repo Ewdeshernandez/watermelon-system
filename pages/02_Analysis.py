@@ -396,6 +396,97 @@ def _smooth_xy(x, y, nbins: int = 150):
     return np.asarray(xs), np.asarray(ys)
 
 
+def _saved_sweeps(kind, sensor_label, key):
+    """Popover '📊 Comparar guardado': elegir máquina + hasta 3 snapshots
+    guardados del MISMO sensor para superponer (ghost dashed). kind='bode'|'polar'.
+    Devuelve [{'label','rpm','amp','phase'}]. Sirve también para VER los
+    guardados (quedan listados en el multiselect)."""
+    with st.popover("📊 Comparar guardado", use_container_width=True):
+        assets = _list_assets()
+        if not assets:
+            st.caption("No hay máquinas registradas.")
+            return []
+        tags = [t for _i, t in assets]
+        _def = tags.index(cur_asset) if cur_asset in tags else 0
+        tsel = st.selectbox("Máquina", tags, index=_def, key=f"cmp_as_{key}")
+        iid = assets[tags.index(tsel)][0]
+        if kind == "bode":
+            from core.bode_history import (list_bode_snapshots as _lst,
+                                           load_bode_snapshot as _load)
+        else:
+            from core.polar_history import (list_polar_snapshots as _lst,
+                                            load_polar_snapshot as _load)
+        try:
+            snaps = _lst(iid, sensor_id=sensor_label) or []
+        except TypeError:
+            snaps = _lst(iid) or []
+        if not snaps:
+            st.caption(f"Sin snapshots guardados de **{sensor_label}** en {tsel}.")
+            return []
+        opts = {f"{(s.get('corrida_label') or '—')} · {s.get('timestamp','')[:16]}": s["snapshot_id"]
+                for s in snaps}
+        sel = st.multiselect("Comparar con (máx 3)", list(opts),
+                             max_selections=3, key=f"cmp_sel_{key}",
+                             help="Superpone los snapshots elegidos como línea "
+                                  "punteada sobre el barrido actual.")
+        out = []
+        for lbl in sel:
+            snap = _load(iid, opts[lbl])
+            if not snap:
+                continue
+            sensors = snap.get("sensors", [])
+            sdat = next((x for x in sensors
+                         if x.get("sensor_label") == sensor_label), None)
+            if sdat is None and len(sensors) == 1:
+                sdat = sensors[0]
+            if sdat is None:
+                continue
+            out.append({"label": lbl,
+                        "rpm": np.asarray(sdat.get("trajectory_speed") or [], float),
+                        "amp": np.asarray(sdat.get("trajectory_amp") or [], float),
+                        "phase": np.asarray(sdat.get("trajectory_phase") or [], float)})
+        return out
+
+
+def _saved_scl(bearing_label, key):
+    """Popover '📊 Comparar guardado' para Shaft Centerline: hasta 3 snapshots
+    guardados del MISMO cojinete → trayectoria fantasma punteada + punto de
+    operación. Devuelve [{'label','tx','ty','gx','gy'}]."""
+    with st.popover("📊 Comparar guardado", use_container_width=True):
+        assets = _list_assets()
+        if not assets:
+            st.caption("No hay máquinas registradas.")
+            return []
+        tags = [t for _i, t in assets]
+        _def = tags.index(cur_asset) if cur_asset in tags else 0
+        tsel = st.selectbox("Máquina", tags, index=_def, key=f"cmp_as_{key}")
+        iid = assets[tags.index(tsel)][0]
+        from core.scl_history import list_scl_snapshots, load_scl_snapshot
+        snaps = list_scl_snapshots(iid) or []
+        opts = {f"{(s.get('corrida_label') or '—')} · {s.get('timestamp','')[:16]}": s["snapshot_id"]
+                for s in snaps}
+        if not opts:
+            st.caption(f"Sin snapshots guardados en {tsel}.")
+            return []
+        sel = st.multiselect(f"Comparar **{bearing_label}** con (máx 3)",
+                             list(opts), max_selections=3, key=f"cmp_sel_{key}")
+        out = []
+        for lbl in sel:
+            snap = load_scl_snapshot(iid, opts[lbl])
+            if not snap:
+                continue
+            bd = next((x for x in snap.get("bearings", [])
+                       if x.get("bearing_label") == bearing_label), None)
+            if bd is None:
+                continue
+            out.append({"label": lbl,
+                        "tx": np.asarray(bd.get("trajectory_x_gap") or [], float),
+                        "ty": np.asarray(bd.get("trajectory_y_gap") or [], float),
+                        "gx": float(bd.get("x_gap_at_op") or 0.0),
+                        "gy": float(bd.get("y_gap_at_op") or 0.0)})
+        return out
+
+
 def _sweep_controls(sw, key):
     rpm = np.asarray(sw.rpm, float)
     amp_c = np.asarray(sw.amp, float); phase_c = np.asarray(sw.phase, float)
@@ -2115,8 +2206,25 @@ elif view == "Shaft Centerline":
         fig.update_xaxes(title=_xl, scaleanchor="y", scaleratio=1, zeroline=True,
                          range=[-_axr, _axr])
         fig.update_yaxes(title=_yl, zeroline=True, range=[-_axr, _axr])
-        st.plotly_chart(_layout(fig, f"Shaft Centerline · {b.name}", h=540),
-                        use_container_width=True, config=_NOBAR)
+        _cmps = _saved_scl(b.name, "scl")
+        for _ci, _cs in enumerate(_cmps):
+            _ccol = _TREND_PAL[(_ci + 2) % len(_TREND_PAL)]
+            if _cs["tx"].size and _cs["ty"].size:
+                fig.add_trace(go.Scatter(x=_cs["tx"], y=_cs["ty"], mode="lines",
+                              name=_cs["label"],
+                              line=dict(color=_ccol, width=1.4, dash="dash"),
+                              hoverinfo="skip"))
+            fig.add_trace(go.Scatter(x=[_cs["gx"]], y=[_cs["gy"]], mode="markers",
+                          showlegend=False,
+                          marker=dict(color=_ccol, size=12, symbol="diamond",
+                                      line=dict(color="#fff", width=1)),
+                          hoverinfo="skip"))
+        _figs = _layout(fig, f"Shaft Centerline · {b.name}", h=540)
+        if _cmps:
+            _figs.update_layout(showlegend=True,
+                                legend=dict(orientation="h", y=1.06, x=0,
+                                            font=dict(size=10)))
+        st.plotly_chart(_figs, use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Shaft Centerline {b.name}"), key="sc")
         if _is_gap:
             def _mk_scl(_iid, _op, _lbl, _bl=b.name, _gx=gx_op, _gy=gy_op,
@@ -2182,12 +2290,25 @@ elif view == "Bode":
                           opacity=0.08, row=1, col=1)
         _ra, _as = _smooth_xy(sw.rpm, _ampc)
         _rp, _ps = _smooth_xy(sw.rpm, _phc)
-        fig.add_trace(go.Scatter(x=_ra, y=_as, mode="lines",
+        fig.add_trace(go.Scatter(x=_ra, y=_as, mode="lines", name="Actual",
                                  line=dict(color=_NAVY, width=2.4, shape="spline",
                                            smoothing=0.6)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=_rp, y=_ps, mode="lines",
+        fig.add_trace(go.Scatter(x=_rp, y=_ps, mode="lines", showlegend=False,
                                  line=dict(color=_AMBER, width=2.4, shape="spline",
                                            smoothing=0.6)), row=2, col=1)
+        _cmp = _saved_sweeps("bode", sw.label, "bode")
+        for _ci, _cs in enumerate(_cmp):
+            if _cs["rpm"].size < 3:
+                continue
+            _cr, _ca = _smooth_xy(_cs["rpm"], _cs["amp"])
+            _crp, _cp = _smooth_xy(_cs["rpm"], _cs["phase"])
+            _ccol = _TREND_PAL[(_ci + 2) % len(_TREND_PAL)]
+            fig.add_trace(go.Scatter(x=_cr, y=_ca, mode="lines", name=_cs["label"],
+                          line=dict(color=_ccol, width=1.7, dash="dash")),
+                          row=1, col=1)
+            fig.add_trace(go.Scatter(x=_crp, y=_cp, mode="lines", showlegend=False,
+                          line=dict(color=_ccol, width=1.7, dash="dash")),
+                          row=2, col=1)
         for c in s.get("criticals", []):
             col = "#dc3545" if c.get("kind") == "confirmed" else "#8090a6"
             fig.add_vline(x=c["rpm"], line=dict(color=col, width=1.2, dash="dash"),
@@ -2201,7 +2322,12 @@ elif view == "Bode":
         fig.update_yaxes(title=f"Amplitud ({unit})", row=1, col=1)
         fig.update_yaxes(title="Fase (°)", row=2, col=1)
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
-        st.plotly_chart(_layout(fig, f"Bode · {sw.label}", h=560), use_container_width=True, config=_NOBAR)
+        _figb = _layout(fig, f"Bode · {sw.label}", h=560)
+        if _cmp:
+            _figb.update_layout(showlegend=True,
+                                legend=dict(orientation="h", y=1.07, x=0,
+                                            font=dict(size=10)))
+        st.plotly_chart(_figb, use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Bode {sw.label}"), key="bode")
 
         def _mk_bode(_iid, _op, _lbl, _sw=sw, _u=unit, _a=_ampc, _p=_phc,
@@ -2253,14 +2379,27 @@ elif view == "Polar":
             line=dict(color=_NAVY, width=2.0, shape="spline", smoothing=0.6),
             marker=dict(size=4, color=_rr, colorscale="Blues", showscale=True,
                         colorbar=dict(title="rpm", thickness=12)),
-            customdata=_rr, hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
+            customdata=_rr, name="Actual",
+            hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
+        _cmpp = _saved_sweeps("polar", sw.label, "polar")
+        for _ci, _cs in enumerate(_cmpp):
+            if _cs["rpm"].size < 3:
+                continue
+            _cra, _caa = _smooth_xy(_cs["rpm"], _cs["amp"])
+            _, _cpp = _smooth_xy(_cs["rpm"], _cs["phase"])
+            _ccol = _TREND_PAL[(_ci + 2) % len(_TREND_PAL)]
+            fig.add_trace(go.Scatterpolar(r=_caa, theta=_cpp, mode="lines",
+                          name=_cs["label"],
+                          line=dict(color=_ccol, width=1.7, dash="dash"),
+                          hoverinfo="skip"))
         for c in s.get("criticals", []):
             fig.add_trace(go.Scatterpolar(r=[c["amp_peak"]], theta=[c.get("phase_change_deg", 0)],
                           mode="markers", marker=dict(color="#dc3545", size=10, symbol="x"),
                           hoverinfo="skip", showlegend=False))
         fig.update_layout(template="plotly_white", height=560,
                           title=dict(text=f"Polar · {sw.label}", font=dict(size=15)),
-                          font=dict(family="IBM Plex Sans"),
+                          font=dict(family="IBM Plex Sans"), showlegend=bool(_cmpp),
+                          legend=dict(orientation="h", y=1.08, x=0, font=dict(size=10)),
                           polar=dict(angularaxis=dict(direction="clockwise", rotation=90)),
                           margin=dict(l=40, r=40, t=56, b=40))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
