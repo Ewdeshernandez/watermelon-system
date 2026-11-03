@@ -198,8 +198,19 @@ def parse_sweep(name: str, data: bytes) -> Optional[Sweep]:
                          engine="python")
     except Exception:  # noqa: BLE001
         return None
-    rc = _find_col(df.columns, ["speed", "rpm", "shaftspeed"])
-    ac = _find_col(df.columns, ["amplitude", "magnitude", "direct", "1x", "amp"])
+    # Metadata de System1 (líneas 'clave,valor' antes de la tabla): el export de
+    # Bode/Polar usa columnas GENÉRICAS 'X-Axis Value' / 'Y-Axis Value' y pone la
+    # magnitud real en la cabecera (X-Axis Unit=rpm, Y-Axis Unit=µm pp,
+    # Variable=1X, Point Name=1XD TURBINA DE). Por eso buscar 'speed'/'amplitude'
+    # en los nombres de columna fallaba.
+    meta: Dict[str, str] = {}
+    for ln in lines[:start]:
+        if "," in ln:
+            k, _, val = ln.partition(",")
+            meta[k.strip().lower().replace(" ", "")] = val.strip()
+    rc = _find_col(df.columns, ["x-axisvalue", "speed", "rpm", "shaftspeed"])
+    ac = _find_col(df.columns, ["y-axisvalue", "amplitude", "magnitude",
+                                "direct", "1x", "amp"])
     pc = _find_col(df.columns, ["phase", "angle", "lag"])
     if not (rc and ac and pc):
         return None
@@ -210,8 +221,10 @@ def parse_sweep(name: str, data: bytes) -> Optional[Sweep]:
     if int(m.sum()) < 2:
         return None
     order = np.argsort(rpm[m])
-    return Sweep(label=name.rsplit(".", 1)[0], rpm=rpm[m][order],
-                 amp=amp[m][order], phase=ph[m][order], source=name)
+    unit = meta.get("y-axisunit", "") or ""
+    label = meta.get("pointname", "") or name.rsplit(".", 1)[0]
+    return Sweep(label=label, rpm=rpm[m][order], amp=amp[m][order],
+                 phase=ph[m][order], unit=unit, source=name)
 
 
 def _to_float(s) -> float:

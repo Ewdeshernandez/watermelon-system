@@ -202,93 +202,113 @@ def _latest_in_window(list_fn, instance_id: str, days: int) -> Optional[str]:
     return None
 
 
+def _ids_in_window(list_fn, instance_id: str, days: int) -> List[str]:
+    """snapshot_ids dentro de la ventana, MÁS RECIENTES primero. Permite juntar
+    el último snapshot POR cojinete/sensor cuando se guardan por separado (un
+    cojinete por snapshot)."""
+    try:
+        snaps = list_fn(instance_id) or []
+    except Exception:  # noqa: BLE001
+        return []
+    return [s.get("snapshot_id") for s in snaps
+            if _within(s.get("timestamp", ""), days) and s.get("snapshot_id")]
+
+
 def scl_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
     try:
         import plotly.graph_objects as go
         from core.scl_history import list_scl_snapshots, load_scl_snapshot
     except Exception:  # noqa: BLE001
         return []
-    sid = _latest_in_window(list_scl_snapshots, instance_id, days)
-    if not sid:
+    ids = _ids_in_window(list_scl_snapshots, instance_id, days)
+    if not ids:
         return []
-    snap = load_scl_snapshot(instance_id, sid)
-    if not snap:
-        return []
-    fecha = _fecha_label(snap.get("timestamp", ""))
-    label_run = snap.get("corrida_label", "") or fecha
     out: List[Dict[str, Any]] = []
-    for b in snap.get("bearings", []):
-        try:
-            rad = float(b.get("clearance_radial") or 0.0)
-            gx = float(b.get("x_gap_at_op") or 0.0)
-            gy = float(b.get("y_gap_at_op") or 0.0)
-            ecc = float(b.get("eccentricity_ratio") or 0.0)
-            att = float(b.get("attitude_angle") or 0.0)
-            unit = b.get("gap_unit", "µm") or "µm"
-            bl = b.get("bearing_label", "")
-            tx = np.asarray(b.get("trajectory_x_gap") or [], float)
-            ty = np.asarray(b.get("trajectory_y_gap") or [], float)
-            ts = np.asarray(b.get("trajectory_speed") or [], float)
-            if rad <= 0:
-                rad = max(float(np.nanmax(np.hypot(tx, ty))) if tx.size else gy, 1.0) * 1.3
-            fig = go.Figure()
-            th = np.linspace(0, 2 * np.pi, 180)
-            fig.add_trace(go.Scatter(x=rad * np.cos(th), y=rad * np.sin(th),
-                          mode="lines", line=dict(color="#334155", width=1.6),
-                          hoverinfo="skip"))
-            for frac, c in [(0.95, "#dc3545"), (0.30, "#0ea5e9")]:
-                fig.add_trace(go.Scatter(x=rad * frac * np.cos(th),
-                              y=rad * frac * np.sin(th), mode="lines",
-                              line=dict(color=c, width=1, dash="dot"),
-                              hoverinfo="skip"))
-            if tx.size and ty.size:
-                if ts.size == tx.size and np.isfinite(ts).any():
-                    fig.add_trace(go.Scatter(
-                        x=tx, y=ty, mode="markers",
-                        marker=dict(color=ts, colorscale="Turbo", size=4,
-                                    showscale=True,
-                                    colorbar=dict(title="rpm", thickness=12)),
-                        hoverinfo="skip"))
-                fig.add_trace(go.Scatter(x=tx, y=ty, mode="lines",
-                              line=dict(color="#94a3b8", width=0.9),
-                              hoverinfo="skip"))
-            fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers+text",
-                          marker=dict(color="#64748b", size=8, symbol="cross-thin",
-                                      line=dict(color="#334155", width=2)),
-                          text=["centro"], textposition="top right",
-                          hoverinfo="skip"))
-            fig.add_trace(go.Scatter(x=[0], y=[-rad], mode="markers+text",
-                          marker=dict(color="#64748b", size=9, symbol="circle-open",
-                                      line=dict(color="#334155", width=2)),
-                          text=["reposo"], textposition="bottom center",
-                          hoverinfo="skip"))
-            fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text",
-                          marker=dict(color="#dc3545" if ecc >= 0.9 else "#1f9d55",
-                                      size=15, line=dict(color="#fff", width=1.5)),
-                          text=["operación"], textposition="top center",
-                          hoverinfo="skip"))
-            _axr = rad * 1.4
-            fig.update_xaxes(title=f"Horizontal H ({unit})", scaleanchor="y",
-                             scaleratio=1, zeroline=True, range=[-_axr, _axr])
-            fig.update_yaxes(title=f"Vertical V ({unit}) · arriba +", zeroline=True,
-                             range=[-_axr, _axr])
-            png = _png(_layout(fig, f"Shaft Centerline · {bl}", h=520), height=520)
-            if png:
-                out.append({
-                    "kind": "Shaft Centerline", "label": bl, "date": fecha,
-                    "run": label_run, "png": png,
-                    "analysis": (
-                        f"Posición del muñón a operación: excentricidad "
-                        f"ε={ecc:.2f}, ángulo de actitud {att:.0f}°. "
-                        + ("Excentricidad alta (ε≥0.9): el muñón trabaja cerca "
-                           "del claro — verificar carga, alineación y claro del "
-                           "cojinete." if ecc >= 0.9 else
-                           "Posición dentro del claro esperado para la carga "
-                           "y velocidad; el ascenso del muñón con la velocidad "
-                           "es el comportamiento normal de la película."))})
-        except Exception as e:  # noqa: BLE001
-            log.warning("scl_startup_bundle bearing: %s", e)
+    _seen: set = set()                    # un cojinete = el más reciente
+    for sid in ids:
+        snap = load_scl_snapshot(instance_id, sid)
+        if not snap:
             continue
+        fecha = _fecha_label(snap.get("timestamp", ""))
+        label_run = snap.get("corrida_label", "") or fecha
+        for b in snap.get("bearings", []):
+            _bl0 = b.get("bearing_label", "")
+            if _bl0 in _seen:
+                continue
+            _seen.add(_bl0)
+            try:
+                rad = float(b.get("clearance_radial") or 0.0)
+                gx = float(b.get("x_gap_at_op") or 0.0)
+                gy = float(b.get("y_gap_at_op") or 0.0)
+                ecc = float(b.get("eccentricity_ratio") or 0.0)
+                att = float(b.get("attitude_angle") or 0.0)
+                unit = b.get("gap_unit", "µm") or "µm"
+                bl = b.get("bearing_label", "")
+                tx = np.asarray(b.get("trajectory_x_gap") or [], float)
+                ty = np.asarray(b.get("trajectory_y_gap") or [], float)
+                ts = np.asarray(b.get("trajectory_speed") or [], float)
+                if rad <= 0:
+                    rad = max(float(np.nanmax(np.hypot(tx, ty))) if tx.size else gy, 1.0) * 1.3
+                fig = go.Figure()
+                th = np.linspace(0, 2 * np.pi, 180)
+                fig.add_trace(go.Scatter(x=rad * np.cos(th), y=rad * np.sin(th),
+                              mode="lines", line=dict(color="#334155", width=1.6),
+                              hoverinfo="skip"))
+                for frac, c in [(0.95, "#dc3545"), (0.30, "#0ea5e9")]:
+                    fig.add_trace(go.Scatter(x=rad * frac * np.cos(th),
+                                  y=rad * frac * np.sin(th), mode="lines",
+                                  line=dict(color=c, width=1, dash="dot"),
+                                  hoverinfo="skip"))
+                if tx.size and ty.size:
+                    if ts.size == tx.size and np.isfinite(ts).any():
+                        fig.add_trace(go.Scatter(
+                            x=tx, y=ty, mode="markers",
+                            marker=dict(color=ts, colorscale="Turbo", size=4,
+                                        showscale=True,
+                                        colorbar=dict(title="rpm", thickness=12)),
+                            hoverinfo="skip"))
+                    fig.add_trace(go.Scatter(x=tx, y=ty, mode="lines",
+                                  line=dict(color="#94a3b8", width=0.9),
+                                  hoverinfo="skip"))
+                fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers+text",
+                              marker=dict(color="#64748b", size=8, symbol="cross-thin",
+                                          line=dict(color="#334155", width=2)),
+                              text=["centro"], textposition="top right",
+                              hoverinfo="skip"))
+                fig.add_trace(go.Scatter(x=[0], y=[-rad], mode="markers+text",
+                              marker=dict(color="#64748b", size=9, symbol="circle-open",
+                                          line=dict(color="#334155", width=2)),
+                              text=["reposo"], textposition="bottom center",
+                              hoverinfo="skip"))
+                fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text",
+                              marker=dict(color="#dc3545" if ecc >= 0.9 else "#1f9d55",
+                                          size=15, line=dict(color="#fff", width=1.5)),
+                              text=["operación"], textposition="top center",
+                              hoverinfo="skip"))
+                _axr = rad * 1.4
+                fig.update_xaxes(title=f"Horizontal H ({unit})", scaleanchor="y",
+                                 scaleratio=1, zeroline=True, range=[-_axr, _axr])
+                fig.update_yaxes(title=f"Vertical V ({unit}) · arriba +", zeroline=True,
+                                 range=[-_axr, _axr])
+                png = _png(_layout(fig, f"Shaft Centerline · {bl}", h=520), height=520)
+                if png:
+                    out.append({
+                        "kind": "Shaft Centerline", "label": bl, "date": fecha,
+                        "run": label_run, "png": png,
+                        "analysis": (
+                            f"Posición del muñón a operación: excentricidad "
+                            f"ε={ecc:.2f}, ángulo de actitud {att:.0f}°. "
+                            + ("Excentricidad alta (ε≥0.9): el muñón trabaja cerca "
+                               "del claro — verificar carga, alineación y claro del "
+                               "cojinete." if ecc >= 0.9 else
+                               "Posición dentro del claro esperado para la carga "
+                               "y velocidad; el ascenso del muñón con la velocidad "
+                               "es el comportamiento normal de la película."))})
+            except Exception as e:  # noqa: BLE001
+                log.warning("scl_startup_bundle bearing: %s", e)
+                continue
+    # ordena por número de cojinete
+    out.sort(key=lambda r: (int(_bid(r.get("label", "")) or 99), r.get("label", "")))
     return out
 
 
@@ -302,17 +322,26 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
         from core.bode_history import list_bode_snapshots, load_bode_snapshot
     except Exception:  # noqa: BLE001
         return []
-    sid = _latest_in_window(list_bode_snapshots, instance_id, days)
-    if not sid:
+    ids = _ids_in_window(list_bode_snapshots, instance_id, days)
+    if not ids:
         return []
-    snap = load_bode_snapshot(instance_id, sid)
-    if not snap:
-        return []
-    fecha = _fecha_label(snap.get("timestamp", ""))
-    run = snap.get("corrida_label", "") or fecha
-    op = float(snap.get("operating_speed_rpm") or 0.0)
+    merged: List[tuple] = []
+    _seen: set = set()                    # un sensor = el más reciente
+    for sid in ids:
+        snap = load_bode_snapshot(instance_id, sid)
+        if not snap:
+            continue
+        fecha = _fecha_label(snap.get("timestamp", ""))
+        run = snap.get("corrida_label", "") or fecha
+        op = float(snap.get("operating_speed_rpm") or 0.0)
+        for s in snap.get("sensors", []):
+            sl = s.get("sensor_label", "")
+            if sl in _seen:
+                continue
+            _seen.add(sl)
+            merged.append((s, fecha, run, op))
     out: List[Dict[str, Any]] = []
-    for s in snap.get("sensors", []):
+    for s, fecha, run, op in merged:
         try:
             r = np.asarray(s.get("trajectory_speed") or [], float)
             a = np.asarray(s.get("trajectory_amp") or [], float)
@@ -363,6 +392,7 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
         except Exception as e:  # noqa: BLE001
             log.warning("bode_startup_bundle sensor: %s", e)
             continue
+    out.sort(key=lambda r: (int(_bid(r.get("label", "")) or 99), r.get("label", "")))
     return out
 
 
@@ -375,16 +405,25 @@ def polar_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
         from core.polar_history import list_polar_snapshots, load_polar_snapshot
     except Exception:  # noqa: BLE001
         return []
-    sid = _latest_in_window(list_polar_snapshots, instance_id, days)
-    if not sid:
+    ids = _ids_in_window(list_polar_snapshots, instance_id, days)
+    if not ids:
         return []
-    snap = load_polar_snapshot(instance_id, sid)
-    if not snap:
-        return []
-    fecha = _fecha_label(snap.get("timestamp", ""))
-    run = snap.get("corrida_label", "") or fecha
+    merged: List[tuple] = []
+    _seen: set = set()                    # un sensor = el más reciente
+    for sid in ids:
+        snap = load_polar_snapshot(instance_id, sid)
+        if not snap:
+            continue
+        fecha = _fecha_label(snap.get("timestamp", ""))
+        run = snap.get("corrida_label", "") or fecha
+        for s in snap.get("sensors", []):
+            sl = s.get("sensor_label", "")
+            if sl in _seen:
+                continue
+            _seen.add(sl)
+            merged.append((s, fecha, run))
     out: List[Dict[str, Any]] = []
-    for s in snap.get("sensors", []):
+    for s, fecha, run in merged:
         try:
             r = np.asarray(s.get("trajectory_speed") or [], float)
             a = np.asarray(s.get("trajectory_amp") or [], float)
@@ -428,6 +467,7 @@ def polar_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
         except Exception as e:  # noqa: BLE001
             log.warning("polar_startup_bundle sensor: %s", e)
             continue
+    out.sort(key=lambda r: (int(_bid(r.get("label", "")) or 99), r.get("label", "")))
     return out
 
 
