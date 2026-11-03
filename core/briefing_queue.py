@@ -103,9 +103,22 @@ def update_draft(instance_id: str, period: str = "Semanal", **fields: Any) -> bo
 
 
 def clear_draft(instance_id: str, period: str = "Semanal") -> bool:
+    """Elimina el borrador de ese periodo. Limpia la clave POR-PERIODO (v25) y,
+    si el borrador LEGACY (briefing_draft) es de ese mismo periodo, también lo
+    borra — si no, get_draft caería de nuevo al legacy y el borrador 'revive'."""
     try:
-        from core.instance_state import update_instance_parameter
-        return update_instance_parameter(instance_id, _draft_key(period), None)
+        from core.instance_state import (get_instance_parameters,
+                                          update_instance_parameters_bulk)
+        kills = {_draft_key(period): None}
+        try:
+            params = get_instance_parameters(instance_id) or {}
+            leg = params.get(PARAM_KEY)
+            if (isinstance(leg, dict)
+                    and _draft_key(leg.get("period", "Semanal")) == _draft_key(period)):
+                kills[PARAM_KEY] = None
+        except Exception:  # noqa: BLE001
+            pass
+        return update_instance_parameters_bulk(instance_id, kills)
     except Exception as e:
         log.warning("clear_draft(%s) falló: %s", instance_id, e)
         return False
