@@ -1117,7 +1117,29 @@ def _period_history(instance_id: str, days: int = 7) -> Dict[str, List[Dict[str,
                                 "(RPC trend_bucketed no disponible)")
         except Exception as e:
             log.warning("_period_history fallback falló: %s", e)
-    return out
+    return _drop_dead_buckets(out)
+
+
+def _drop_dead_buckets(series: Dict[str, List[Dict[str, Any]]]
+                       ) -> Dict[str, List[Dict[str, Any]]]:
+    """Quita de la tendencia los baldes con la MÁQUINA DETENIDA (overall ≈ 0).
+    A 0 rpm no hay vibración de condición: el overall se desploma a ~0 y pintar
+    esos ceros como medición hunde la línea y confunde (parece que la vibración
+    colapsó). Proxy de 'parada' = valor ≤ 5% del pico del sensor en el periodo
+    (en una rotatoria monitoreada el overall a velocidad está muy por encima de
+    0, así que no descarta condición operativa real). Opción (b): no necesita
+    rpm por balde. Si tras filtrar quedan <2 puntos, se descarta la serie."""
+    cleaned: Dict[str, List[Dict[str, Any]]] = {}
+    for lbl, pts in (series or {}).items():
+        vals = [float(p["value"]) for p in pts if p.get("value") is not None]
+        if not vals:
+            continue
+        thr = 0.05 * max(vals)
+        keep = [p for p in pts if p.get("value") is not None
+                and float(p["value"]) > thr]
+        if len(keep) >= 2:
+            cleaned[lbl] = keep
+    return cleaned
 
 
 def build_trend_figures(instance_id: str, instance_obj: Any = None,
