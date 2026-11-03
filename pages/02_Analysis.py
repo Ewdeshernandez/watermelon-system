@@ -203,9 +203,12 @@ else:
         st.stop()
     rec = _record_from(payload)
 
-if rec is None or not rec.channels:
-    st.warning("No se pudo cargar ningún canal. ¿Formato / captura correctos?")
+if rec is None or (not rec.channels and not rec.sweeps):
+    st.warning("No se pudo cargar ningún canal ni barrido. ¿Formato / captura correctos?")
     st.stop()
+if not rec.channels and rec.sweeps:
+    st.info(f"Cargaste {len(rec.sweeps)} barrido(s) de Bode/Polar (sin onda cruda). "
+            "Usá las vistas **Bode** y **Polar**; las demás necesitan el CSV de onda.")
 
 _rpm = rec.rpm
 cur_asset = cur_asset or rec.name or "CSV"
