@@ -489,7 +489,11 @@ def generate_briefing_pdf(
         return out
 
     _spec = _parts("spectrum"); _wave = _parts("waveform"); _orb = _parts("orbit")
-    if _trends or _spec or _wave or _orb:
+    _fs_raw = [x for x in ((figures or {}).get("fullspec_pngs") or [])
+               if isinstance(x, dict) and x.get("png")]
+    _startup = [x for x in ((figures or {}).get("startup") or [])
+                if isinstance(x, dict) and x.get("png")]
+    if _trends or _spec or _wave or _orb or _fs_raw or _startup:
         _fecha = _fecha_es(meta.get("report_date"))
         _equipo = f"Unidad {tag}"
         _n = 0
@@ -539,6 +543,10 @@ def generate_briefing_pdf(
         _wv_last = _last_machine_with(_wave)
         _ob_last = _last_machine_with(_orb)
 
+        def _fs_for(ml):
+            return [x for x in _fs_raw
+                    if ml in ((x.get("name") or "")).lower()]
+
         _first = True
         for machine in _MACHINES:
             ml = machine.lower()
@@ -546,7 +554,8 @@ def generate_briefing_pdf(
             m_sp = [(p, n) for (p, n) in _spec if ml in (n or "").lower()]
             m_wv = [(p, n) for (p, n) in _wave if ml in (n or "").lower()]
             m_ob = [(p, n) for (p, n) in _orb if ml in (n or "").lower()]
-            if not (m_tr or m_sp or m_wv or m_ob):
+            m_fs = _fs_for(ml)
+            if not (m_tr or m_sp or m_wv or m_ob or m_fs):
                 continue
             # encabezado: "Figuras y análisis" solo la 1ª vez, luego el nombre de
             # la máquina; viajan con la 1ª figura (KeepTogether) para no quedar
@@ -575,6 +584,33 @@ def generate_briefing_pdf(
                 _an = (figures.get("orbit_analysis") or "") if machine == _ob_last else ""
                 _add_fig(p, f"Órbitas — {machine}", 9.0 * cm,
                          analysis=_an, lead=_lead); _lead = []
+            for x in m_fs:
+                _hb = x.get("bearing") or machine
+                _add_fig(x.get("png"), f"Full Spectrum — {_hb}", 8.6 * cm,
+                         analysis=x.get("analysis") or "", lead=_lead); _lead = []
+
+        # ---- Arranque / Run-up (SCL + Bode + Polar del último run-up) ----
+        if _startup:
+            body.append(Spacer(1, 6))
+            body.append(KeepTogether([
+                _h2("Arranque / Run-up"),
+                Paragraph(
+                    "Transitorio de arranque capturado en campo (export System1). "
+                    "El shaft centerline traza la posición del muñón de reposo a "
+                    "operación; Bode y polar describen la respuesta síncrona 1X y "
+                    "el paso por las velocidades críticas del tren.", st_body),
+            ]))
+            _sh_last = None
+            for _it in _startup:
+                if _it.get("kind") == "Shaft Centerline":
+                    _sh_last = _it
+            for item in _startup:
+                head = f"{item.get('kind', '')} — {item.get('label', '')}".strip(" —")
+                if item.get("run"):
+                    head += f" · {item['run']}"
+                _bh = 9.5 * cm if item.get("kind") == "Shaft Centerline" else 10.4 * cm
+                _add_fig(item.get("png"), head, _bh,
+                         analysis=item.get("analysis") or "")
 
     return render_report_pdf(meta, body)
 

@@ -1526,6 +1526,15 @@ def collect_asset_figures(instance_id: str,
     spec = spectrum_bundle(instance_id)
     wave = waveform_bundle(instance_id)
     orb = orbit_bundle(instance_id)
+    # Full Spectrum (steady, plena carga) + Arranque/Run-up (SCL/Bode/Polar
+    # manuales dentro de la ventana del periodo). core.startup_figures nunca
+    # lanza; si no hay datos devuelve listas vacías y las secciones no aparecen.
+    try:
+        from core.startup_figures import collect_startup_figures
+        _sf = collect_startup_figures(instance_id, period_label)
+    except Exception as e:  # noqa: BLE001
+        log.warning("collect_asset_figures: startup/fullspec falló: %s", e)
+        _sf = {"startup": [], "fullspec_pngs": []}
     return {
         "trend":    (trends[0]["png"] if trends else trend_png(instance_id)),
         "trends":   trends,
@@ -1535,6 +1544,8 @@ def collect_asset_figures(instance_id: str,
         "waveform_pngs": wave.get("pngs") or [],
         "orbit":    orb["png"],  "orbit_analysis": orb["analysis"],
         "orbit_pngs": orb.get("pngs") or [],
+        "fullspec_pngs": _sf.get("fullspec_pngs") or [],
+        "startup": _sf.get("startup") or [],
     }
 
 
