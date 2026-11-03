@@ -373,32 +373,69 @@ def _runout_comp(rpm, amp, phase, sr_thr):
     return amp_c, phase_c, srmag, srang, n
 
 
+def _smooth_xy(x, y, nbins: int = 150):
+    """Suaviza un barrido ruidoso (muchas muestras por rpm): mediana por balde
+    de rpm. Para la línea LIMPIA del Bode (sin la nube de puntos). Solo display —
+    el diagnóstico/criticas usan el dato crudo."""
+    x = np.asarray(x, float); y = np.asarray(y, float)
+    m = np.isfinite(x) & np.isfinite(y)
+    x, y = x[m], y[m]
+    if x.size < 6:
+        return x, y
+    xmin, xmax = float(x.min()), float(x.max())
+    if xmax <= xmin:
+        return x, y
+    edges = np.linspace(xmin, xmax, nbins + 1)
+    idx = np.clip(np.digitize(x, edges) - 1, 0, nbins - 1)
+    xs, ys = [], []
+    for b in range(nbins):
+        sel = idx == b
+        if sel.any():
+            xs.append(float(x[sel].mean()))
+            ys.append(float(np.median(y[sel])))
+    return np.asarray(xs), np.asarray(ys)
+
+
 def _sweep_controls(sw, key):
-    cA, cB, cC = st.columns(3)
-    op = cA.number_input("RPM operación", value=float(round(float(np.nanmax(sw.rpm)))),
-                         step=100.0, key=f"{key}_op")
-    grp = cB.selectbox("Grupo ISO 20816-2", ["group1", "group2"], index=1, key=f"{key}_g")
-    mt = cC.selectbox("Medición", ["Desplazamiento eje (prox)", "Velocidad carcasa (acel/vel)"],
-                      key=f"{key}_m")
-    mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
-    unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
     rpm = np.asarray(sw.rpm, float)
     amp_c = np.asarray(sw.amp, float); phase_c = np.asarray(sw.phase, float)
-    cD, cE = st.columns([1, 2], vertical_alignment="center")
-    comp = cD.toggle("Compensar giro lento (runout)", value=False, key=f"{key}_rc",
-                     help="Resta el vector 1X de giro lento (runout eléctrico + mecánico/"
-                          "arqueo) medido a baja velocidad. Sin esto el Bode/Polar puede "
-                          "mentir: pico de crítica corrido, amplitud y fase falsas (Eisenmann p64).")
-    if comp:
-        _smin, _smax = float(np.nanmin(rpm)), float(np.nanmax(rpm))
-        sr_thr = cE.slider("Velocidad de giro lento (rpm)",
-                           min_value=float(round(_smin)),
-                           max_value=float(round(_smin + 0.20 * (_smax - _smin))),
-                           value=float(round(_smin + 0.05 * (_smax - _smin))), step=10.0,
-                           key=f"{key}_srt")
-        amp_c, phase_c, _sm, _sa, _sn = _runout_comp(rpm, sw.amp, sw.phase, sr_thr)
-        cE.caption(f"⬤ Vector de giro lento restado: {_sm:.2f} {unit} ∠{_sa:.0f}° "
-                   f"({_sn} muestras ≤ {sr_thr:.0f} rpm).")
+    # Botón de ajustes estilo Shaft Centerline (popover flotante, la gráfica manda).
+    st.markdown(
+        "<style>div[data-testid='stPopover'] button{border-radius:9px;"
+        "border:1px solid #cbd5e1;background:#fff;padding:5px 14px;"
+        "font:600 12.5px 'IBM Plex Sans';color:#1e293b}"
+        "div[data-testid='stPopover'] button:hover{border-color:#12305e;"
+        "color:#12305e}</style>", unsafe_allow_html=True)
+    _tb1, _tb2 = st.columns([5, 1], vertical_alignment="center")
+    with _tb2:
+        _pop = st.popover("⚙ Ajustes", use_container_width=True)
+    with _pop:
+        op = st.number_input("RPM operación",
+                             value=float(round(float(np.nanmax(sw.rpm)))),
+                             step=100.0, key=f"{key}_op")
+        grp = st.selectbox("Grupo ISO 20816-2", ["group1", "group2"], index=1,
+                           key=f"{key}_g")
+        mt = st.selectbox("Medición", ["Desplazamiento eje (prox)",
+                                       "Velocidad carcasa (acel/vel)"],
+                          key=f"{key}_m")
+        mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
+        unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
+        comp = st.toggle("Compensar giro lento (runout)", value=False,
+                         key=f"{key}_rc",
+                         help="Resta el vector 1X de giro lento (runout eléctrico + "
+                              "mecánico/arqueo) medido a baja velocidad. Sin esto el "
+                              "Bode/Polar puede mentir: pico de crítica corrido, "
+                              "amplitud y fase falsas (Eisenmann p64).")
+        if comp:
+            _smin, _smax = float(np.nanmin(rpm)), float(np.nanmax(rpm))
+            sr_thr = st.slider("Velocidad de giro lento (rpm)",
+                               min_value=float(round(_smin)),
+                               max_value=float(round(_smin + 0.20 * (_smax - _smin))),
+                               value=float(round(_smin + 0.05 * (_smax - _smin))),
+                               step=10.0, key=f"{key}_srt")
+            amp_c, phase_c, _sm, _sa, _sn = _runout_comp(rpm, sw.amp, sw.phase, sr_thr)
+            st.caption(f"⬤ Vector de giro lento restado: {_sm:.2f} {unit} ∠{_sa:.0f}° "
+                       f"({_sn} muestras ≤ {sr_thr:.0f} rpm).")
     diag = _sweep_diag(tuple(rpm.tolist()), tuple(amp_c.tolist()),
                        tuple(phase_c.tolist()), op, grp, mtype, unit,
                        "Bode" if key == "bode" else "polar")
@@ -2143,12 +2180,14 @@ elif view == "Bode":
                 continue
             fig.add_hrect(y0=lo, y1=hi, line_width=0, fillcolor=_ISO[z],
                           opacity=0.08, row=1, col=1)
-        fig.add_trace(go.Scatter(x=sw.rpm, y=_ampc, mode="lines+markers",
-                                 line=dict(color=_NAVY, width=1.9),
-                                 marker=dict(size=4)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=sw.rpm, y=_phc, mode="lines+markers",
-                                 line=dict(color=_AMBER, width=1.9),
-                                 marker=dict(size=4)), row=2, col=1)
+        _ra, _as = _smooth_xy(sw.rpm, _ampc)
+        _rp, _ps = _smooth_xy(sw.rpm, _phc)
+        fig.add_trace(go.Scatter(x=_ra, y=_as, mode="lines",
+                                 line=dict(color=_NAVY, width=2.4, shape="spline",
+                                           smoothing=0.6)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=_rp, y=_ps, mode="lines",
+                                 line=dict(color=_AMBER, width=2.4, shape="spline",
+                                           smoothing=0.6)), row=2, col=1)
         for c in s.get("criticals", []):
             col = "#dc3545" if c.get("kind") == "confirmed" else "#8090a6"
             fig.add_vline(x=c["rpm"], line=dict(color=col, width=1.2, dash="dash"),
@@ -2207,12 +2246,14 @@ elif view == "Polar":
                 fig.add_trace(go.Scatterpolar(r=[b] * len(th), theta=th, mode="lines",
                               line=dict(color=_ISO[z], width=1, dash="dot"),
                               hoverinfo="skip", showlegend=False))
+        _rr, _ar = _smooth_xy(sw.rpm, _ampc)
+        _rp2, _pr = _smooth_xy(sw.rpm, _phc)
         fig.add_trace(go.Scatterpolar(
-            r=_ampc, theta=_phc, mode="lines+markers",
-            line=dict(color=_NAVY, width=1.8),
-            marker=dict(size=5, color=sw.rpm, colorscale="Blues", showscale=True,
+            r=_ar, theta=_pr, mode="lines+markers",
+            line=dict(color=_NAVY, width=2.0, shape="spline", smoothing=0.6),
+            marker=dict(size=4, color=_rr, colorscale="Blues", showscale=True,
                         colorbar=dict(title="rpm", thickness=12)),
-            customdata=sw.rpm, hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
+            customdata=_rr, hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
         for c in s.get("criticals", []):
             fig.add_trace(go.Scatterpolar(r=[c["amp_peak"]], theta=[c.get("phase_change_deg", 0)],
                           mode="markers", marker=dict(color="#dc3545", size=10, symbol="x"),
