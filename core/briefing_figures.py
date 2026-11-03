@@ -746,7 +746,7 @@ def waveform_png(instance_id: str) -> Optional[bytes]:
 
 
 # ---------------------------------------------------------------------------
-# Órbitas (grilla headless, marco físico 45° como System1)
+# Órbitas (grilla headless, marco físico POR cojinete: gen 45° / turbina 135°)
 # ---------------------------------------------------------------------------
 def orbit_bundle(instance_id: str) -> Dict[str, Any]:
     """{"png": bytes|None, "analysis": str} — grilla de órbitas + análisis
@@ -796,9 +796,18 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
         from plotly.subplots import make_subplots
         try:
             from core.orbit import ProbeGeometry, _solve_global_xy
-            gx, gy = ProbeGeometry(45.0, "Right"), ProbeGeometry(45.0, "Left")
+            _geom_ok = True
         except Exception:
-            gx = gy = None
+            _geom_ok = False
+
+        def _probe_geom(lbl):
+            """(gx, gy) de montaje POR cojinete, misma convención que la web
+            (pages/02_Analysis `_probe_angles`): generador (coj 5/6) sondas ARRIBA
+            45°R/45°L; turbina (coj 1/2) y gearbox sondas ABAJO 135°R/135°L."""
+            mm = _re.search(r"(\d+)", lbl or "")
+            n = int(mm.group(1)) if mm else 0
+            a = 45.0 if n in (5, 6) else 135.0
+            return ProbeGeometry(a, "Right"), ProbeGeometry(a, "Left")
 
         bearings = bearings[:6]          # incluye el gearbox (BRG4), no solo 4
 
@@ -817,12 +826,16 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
         for b in bearings:
             px = np.asarray(b["x_values"], float); py = np.asarray(b["y_values"], float)
             n = min(px.size, py.size); px, py = px[:n], py[:n]
-            if gx is not None:
-                H, V = _solve_global_xy(px, py, gx, gy)
+            lbl = b.get("bearing_label", "")
+            if _geom_ok:
+                _gx, _gy = _probe_geom(lbl)
+                try:
+                    H, V = _solve_global_xy(px, py, _gx, _gy)
+                except Exception:
+                    H, V = px, py
             else:
                 H, V = px, py
             H = np.asarray(H, float); V = np.asarray(V, float)
-            lbl = b.get("bearing_label", "")
             groups.setdefault(_mach(lbl), []).append((lbl, H, V))
             try:
                 pp_h = float(np.max(H) - np.min(H)); pp_v = float(np.max(V) - np.min(V))
