@@ -292,9 +292,21 @@ def generate_briefing_pdf(
         body.append(CondPageBreak(12 * cm))
         body.append(_h2("Tabular List — Overall + 1X / 2X (API 670 / ISO 20816-3)"))
         _asof = (meta or {}).get("tabular_asof", "")
+        _tsrc = (meta or {}).get("tabular_source", "live")
+        _tfs = bool((meta or {}).get("tabular_full_speed", False))
+        _tref = float((meta or {}).get("tabular_ref_rpm", 0.0) or 0.0)
         if _asof:
+            if _tsrc == "full_speed":
+                _rpm_txt = (f" a plena carga (~{_tref:,.0f} rpm)"
+                            if _tfs and _tref > 0 else "")
+                _note = (f"Desplazamiento{_rpm_txt}: de la onda cruda del robot "
+                         f"(misma captura que la órbita/espectro) · {_asof}. "
+                         f"Velocidad y aceleración: Live Monitoring (colector "
+                         f"en línea).")
+            else:
+                _note = f"Datos de Live Monitoring · última lectura: {_asof}"
             body.append(Paragraph(
-                f"Datos de Live Monitoring · última lectura: {_asof}",
+                _note,
                 ParagraphStyle("bfTabAsof", fontName=REGULAR, fontSize=8,
                                textColor=colors.HexColor("#6b7280"),
                                leading=10, spaceAfter=4)))

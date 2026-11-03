@@ -75,26 +75,51 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
     if not latest:
         return None
 
-    # Fecha/hora de los datos de la Tabular List = captured_at de la lectura
-    # MÁS RECIENTE (Live Monitoring). Se muestra bajo el título para que quede
-    # claro de qué momento son los datos.
+    # TABULAR desde la captura FULL-SPEED (misma fuente que órbita/espectro):
+    # reemplaza los valores Direct/1X/2X/0.5X por los de la onda cruda a plena
+    # carga, reusando la estructura de Live (sensor_label/unit/criterio). La
+    # DETECCIÓN de offline/detenida y la velocidad KPI siguen de Live (estado
+    # ACTUAL del colector), no del full-speed. Si no hay captura → cae a Live.
+    tab_latest = latest
+    tab_source = "live"
+    tab_full_speed = False
+    tab_ref_rpm = 0.0
+    tab_slow: List[str] = []
+    fs_asof_iso = ""
+    try:
+        from core.dynraw_snapshots import full_speed_readings
+        _fs = full_speed_readings(instance_id)
+        if _fs.get("rows") and _fs.get("matched", 0) > 0:
+            tab_latest = _fs["rows"]
+            tab_source = "full_speed"
+            tab_full_speed = bool(_fs.get("full_speed"))
+            tab_ref_rpm = float(_fs.get("ref_rpm") or 0.0)
+            tab_slow = list(_fs.get("slow_points") or [])
+            fs_asof_iso = _fs.get("asof") or ""
+    except Exception as e:  # noqa: BLE001
+        log.warning("tabular full-speed falló (%s), uso Live: %s", instance_id, e)
+
+    # Fecha/hora de la Tabular List = captured_at del dato mostrado (full-speed
+    # si aplica; si no, la lectura Live más reciente). Para offline se usa SIEMPRE
+    # la lectura Live más reciente (_asof_dt), que refleja el estado actual.
     _asof_dt = None
     for _r in latest:
         _d = _parse_captured_at(_r.get("captured_at"))
         if _d is not None and (_asof_dt is None or _d > _asof_dt):
             _asof_dt = _d
+    _tab_dt = _parse_captured_at(fs_asof_iso) if fs_asof_iso else _asof_dt
     tabular_asof = ""
-    if _asof_dt is not None:
+    if _tab_dt is not None:
         try:
             from zoneinfo import ZoneInfo
-            tabular_asof = _asof_dt.astimezone(
+            tabular_asof = _tab_dt.astimezone(
                 ZoneInfo("America/Bogota")).strftime("%d/%m/%Y %H:%M")
         except Exception:
-            tabular_asof = _asof_dt.strftime("%d/%m/%Y %H:%M")
+            tabular_asof = _tab_dt.strftime("%d/%m/%Y %H:%M")
 
     sensor_lookup = _build_sensor_lookup(instance_obj)
-    rendered_rows, severity_summary = _compute_rendered_rows(latest, sensor_lookup, instance_obj)
-    score, zone, zcolor = _compute_health_score(severity_summary, latest)
+    rendered_rows, severity_summary = _compute_rendered_rows(tab_latest, sensor_lookup, instance_obj)
+    score, zone, zcolor = _compute_health_score(severity_summary, tab_latest)
 
     speed_row = next((r for r in latest
                       if (r.get("variable") or "").lower().startswith("velocidad")), None)
@@ -104,9 +129,9 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
     n_alarm = severity_summary.get("Alarma", 0)
     status = "Crítica" if n_danger else ("Atención" if n_alarm else "Operación normal")
 
-    # vectores 0.5X/1X/2X
+    # vectores 0.5X/1X/2X (de la misma fuente que la tabular)
     vec: Dict[str, Dict[str, Any]] = {}
-    for r in latest:
+    for r in tab_latest:
         s, m = r.get("sensor_label"), r.get("metric")
         if s and m in ("0.5X_Ampl", "1X_Ampl", "2X_Ampl"):
             vec.setdefault(s, {})[m] = r.get("value")
@@ -117,10 +142,14 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         except Exception:
             return "—"
 
-    # RPM base = velocidad live (keyphasor) o nominal del activo
+    # RPM base de la COLUMNA de la tabular = rpm de la captura full-speed (para
+    # que la rpm mostrada concuerde con los valores); si no hay full-speed, cae
+    # a la velocidad live o la nominal.
     base_rpm = 0.0
+    if tab_source == "full_speed" and tab_ref_rpm > 0:
+        base_rpm = tab_ref_rpm
     try:
-        if speed_row and speed_row.get("value") is not None:
+        if base_rpm <= 0 and speed_row and speed_row.get("value") is not None:
             base_rpm = float(speed_row["value"])
     except Exception:
         base_rpm = 0.0
@@ -252,6 +281,8 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         "severity_summary": severity_summary,
         "n_alarm": n_alarm, "n_danger": n_danger,
         "tabular_asof": tabular_asof,
+        "tabular_source": tab_source, "tabular_full_speed": tab_full_speed,
+        "tabular_ref_rpm": tab_ref_rpm, "tabular_slow_points": tab_slow,
         "offline": _offline, "offline_since": _off_since, "offline_age": _off_age,
         "stopped": _stopped, "stopped_rpm": _stopped_rpm,
         "last_recommendations": _last_recs, "last_recommendations_date": _last_recs_date,
@@ -1202,6 +1233,9 @@ def build_asset_briefing(
         # Fecha/hora de la lectura más reciente (Live Monitoring) para la
         # Tabular List — así el lector sabe de qué momento son esos datos.
         "tabular_asof": data.get("tabular_asof", ""),
+        "tabular_source": data.get("tabular_source", "live"),
+        "tabular_full_speed": data.get("tabular_full_speed", False),
+        "tabular_ref_rpm": data.get("tabular_ref_rpm", 0.0),
     }
     if meta_extra:
         pdf_meta.update({k: v for k, v in meta_extra.items() if v})

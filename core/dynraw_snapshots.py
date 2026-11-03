@@ -252,4 +252,216 @@ def refresh_from_dynamic_raw(instance_id: str, instance_obj: Any = None,
     return out
 
 
-__all__ = ["refresh_from_dynamic_raw"]
+# =========================================================================== #
+# Tabular List desde la captura FULL-SPEED (misma fuente que órbita/espectro)
+# =========================================================================== #
+def _select_full_speed(instance_id: str, points=None, limit: int = 120):
+    """Elige, POR PUNTO, la captura más reciente a ≥95% del máx rpm reciente de
+    ESE punto (cada eje tiene su propia velocidad: turbina ~14000, generador
+    ~1800 — un ref global los marcaría mal). `points` limita a un conjunto de
+    puntos (evita bajar capturas que no se usan). Devuelve (capobj, info)."""
+    from core.dynamic_raw import list_captures, download_capture
+    caps = list_captures(instance_id, limit=limit)
+    if not caps:
+        return {}, {"ref_rpm": 0.0, "full_speed": False, "slow_points": []}
+    want = set(points) if points else None
+    by_point: Dict[str, List[Dict[str, str]]] = {}
+    for c in caps:
+        if want is not None and c["point"] not in want:
+            continue
+        by_point.setdefault(c["point"], []).append(c)
+    _cache: Dict[str, Any] = {}
+
+    def _dl(row):
+        k = row["key"]
+        if k not in _cache:
+            _cache[k] = download_capture(k)
+        return _cache[k]
+
+    def _rpm_of(cp) -> float:
+        try:
+            r = cp.rpm if cp is not None else None
+            return float(r) if r and float(r) > 0 else 0.0
+        except Exception:  # noqa: BLE001
+            return 0.0
+
+    ref_rpm = 0.0
+    capobj: Dict[str, Any] = {}
+    slow: List[str] = []
+    for pt, rows in by_point.items():
+        scan = rows[:10]
+        pt_ref = 0.0
+        for row in scan:                      # ref = máx rpm reciente de ESTE punto
+            pt_ref = max(pt_ref, _rpm_of(_dl(row)))
+        thr = 0.95 * pt_ref if pt_ref > 0 else 0.0
+        chosen = None
+        if thr > 0:
+            for row in scan:
+                cp = _cache.get(row["key"]) or _dl(row)
+                if cp is not None and _rpm_of(cp) >= thr:
+                    chosen = cp
+                    break
+        if chosen is None:
+            chosen = _dl(rows[0])
+            if thr > 0 and chosen is not None and _rpm_of(chosen) < thr:
+                slow.append(pt)
+        if chosen is not None:
+            capobj[pt] = chosen
+        ref_rpm = max(ref_rpm, pt_ref)
+    return capobj, {"ref_rpm": round(ref_rpm, 1),
+                    "full_speed": (bool(capobj) and not slow),
+                    "slow_points": slow}
+
+
+def _mag_spectrum(v: np.ndarray, fs: float):
+    """Espectro de amplitud 0-pk (Hann-corregido) — base para 1X/2X/0.5X."""
+    v = np.asarray(v, float)
+    v = v[np.isfinite(v)]
+    n = v.size
+    if n < 16 or not fs:
+        return None, None
+    w = np.hanning(n)
+    sp = np.abs(np.fft.rfft((v - v.mean()) * w)) * 2.0 / np.sum(w)
+    fr = np.fft.rfftfreq(n, 1.0 / fs)
+    return fr, sp
+
+
+def _order_amp(fr, mag, f1: float, order: float, k: float) -> float:
+    """Amplitud de un orden = pico espectral en [0.8,1.2]·(order·f1), ×k.
+    k=2.0 (0-pk→pp, prox) o 1/√2 (0-pk→rms, vel/accel). Convención `_amp3`
+    del campo (native/watermelon_field.py)."""
+    if fr is None or not f1:
+        return 0.0
+    ft = order * f1
+    b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
+    return float(mag[b].max()) * k if b.any() else 0.0
+
+
+def _overall(v: np.ndarray, is_prox: bool) -> float:
+    """Overall en la norma del sensor: prox → pp (max-min); vel/accel → rms."""
+    v = np.asarray(v, float)
+    v = v[np.isfinite(v)]
+    if v.size < 2:
+        return 0.0
+    if is_prox:
+        return float(v.max() - v.min())
+    return float(np.sqrt(np.mean((v - v.mean()) ** 2)))
+
+
+def full_speed_readings(instance_id: str) -> Dict[str, Any]:
+    """Tabular List desde la captura FULL-SPEED de cada punto (misma fuente que
+    órbita/espectro del reporte), en vez de la última lectura del colector.
+
+    Reusa la ESTRUCTURA de Live (`latest_for_instance`) y REEMPLAZA solo los
+    valores Direct / 1X_Ampl / 2X_Ampl / 0.5X_Ampl de los sensores de
+    PROXIMIDAD (desplazamiento) por los computados de la onda cruda a plena
+    carga, con la convención de norma (pp). Velocidad y aceleración se dejan de
+    Live a propósito: su overall es de BANDA ANCHA y la onda cruda del robot no
+    lo reconstruye (diverge ~50%); el colector es la fuente correcta para
+    ISO 20816. Así las zonas/criterios/orden quedan idénticos a Live — en
+    desplazamiento cambia el instante (último minuto del colector → plena carga)
+    y queda consistente con la órbita/espectro del reporte.
+
+    Devuelve {'rows': [...estilo live_readings...], 'full_speed': bool,
+    'ref_rpm': float, 'slow_points': [...], 'asof': iso|'', 'matched': int}.
+    rows=[] si no hay captura → el caller cae a Live."""
+    out: Dict[str, Any] = {"rows": [], "full_speed": False, "ref_rpm": 0.0,
+                           "slow_points": [], "asof": "", "matched": 0}
+    try:
+        import copy
+
+        from core.dynamic_raw import CH_X, CH_Y
+        from core.live_readings import latest_for_instance
+        latest = latest_for_instance(instance_id) or []
+        if not latest:
+            return out
+
+        # puntos necesarios = SOLO proximidad (desplazamiento). Evita bajar
+        # capturas de los puntos de vel/accel que no se van a usar.
+        prox: List[tuple] = []
+        need: set = set()
+        for r in latest:
+            if r.get("metric") != "Direct":
+                continue
+            var = str(r.get("variable") or "")
+            lbl = r.get("sensor_label")
+            if (var.lower().startswith("velocidad")) or not lbl:
+                continue
+            unit = (r.get("unit") or "").lower()
+            is_prox = ("mil" in unit or "µm" in unit
+                       or "um" in unit.replace("µ", "u"))
+            if not is_prox:
+                continue
+            tok = _token(var) or _token(str(lbl))
+            if not tok:
+                continue
+            pt, ch = _point_channel(tok)
+            prox.append((lbl, pt, ch))
+            need.add(pt)
+        if not need:
+            return out
+
+        capobj, info = _select_full_speed(instance_id, points=need)
+        out.update({"full_speed": info.get("full_speed", False),
+                    "ref_rpm": info.get("ref_rpm", 0.0),
+                    "slow_points": info.get("slow_points", [])})
+        if not capobj:
+            return out
+
+        # valores full-speed por sensor_label (proximidad → pp, k=2.0)
+        vals: Dict[str, Dict[str, float]] = {}
+        asof = ""
+        matched = 0
+        for lbl, pt, ch in prox:
+            cap = capobj.get(pt)
+            if cap is None:
+                continue
+            v = cap.get(ch) if ch in ("X", "Y") else cap.get(CH_X)
+            if v is None or not getattr(v, "size", 0):
+                continue
+            fs = cap.fs_hz or 0.0
+            rpm = float(cap.rpm or 0.0)
+            f1 = rpm / 60.0 if rpm else 0.0
+            kconv = 2.0                       # 0-pk → pp (proximidad)
+            fr, mag = _mag_spectrum(np.asarray(v, float), fs)
+            vals[lbl] = {
+                "Direct": _overall(v, True),
+                "1X_Ampl": _order_amp(fr, mag, f1, 1.0, kconv),
+                "2X_Ampl": _order_amp(fr, mag, f1, 2.0, kconv),
+                "0.5X_Ampl": _order_amp(fr, mag, f1, 0.5, kconv),
+            }
+            matched += 1
+            ts = cap.captured_at or ""
+            if str(ts) > str(asof):
+                asof = str(ts)
+
+        if not vals:
+            return out
+
+        # copia de Live con SOLO los valores reemplazados
+        rows = copy.deepcopy(latest)
+        _spd_rpm = out["ref_rpm"] or 0.0
+        for r in rows:
+            m = r.get("metric")
+            lbl = r.get("sensor_label")
+            var = str(r.get("variable") or "")
+            if var.lower().startswith("velocidad") and _spd_rpm > 0:
+                r["value"] = _spd_rpm
+                if asof:
+                    r["captured_at"] = asof
+                continue
+            if m in ("Direct", "1X_Ampl", "2X_Ampl", "0.5X_Ampl") and lbl in vals:
+                nv = vals[lbl].get(m)
+                if nv is not None:
+                    r["value"] = round(float(nv), 4)
+                    if asof:
+                        r["captured_at"] = asof
+        out["rows"] = rows
+        out["asof"] = asof
+        out["matched"] = matched
+    except Exception as e:  # noqa: BLE001
+        log.warning("full_speed_readings(%s) falló: %s", instance_id, e)
+    return out
+
+
+__all__ = ["refresh_from_dynamic_raw", "full_speed_readings"]
