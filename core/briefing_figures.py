@@ -1522,7 +1522,7 @@ def collect_asset_figures(instance_id: str,
         _sf = collect_startup_figures(instance_id, period_label)
     except Exception as e:  # noqa: BLE001
         log.warning("collect_asset_figures: startup/fullspec falló: %s", e)
-        _sf = {"startup": [], "fullspec_pngs": []}
+        _sf = {"startup": [], "fullspec_pngs": [], "deflection_pngs": []}
     return {
         "trend":    (trends[0]["png"] if trends else trend_png(instance_id)),
         "trends":   trends,
@@ -1534,6 +1534,7 @@ def collect_asset_figures(instance_id: str,
         "orbit_pngs": orb.get("pngs") or [],
         "orbit_rows": orb.get("rows") or [],
         "fullspec_pngs": _sf.get("fullspec_pngs") or [],
+        "deflection_pngs": _sf.get("deflection_pngs") or [],
         "startup": _sf.get("startup") or [],
     }
 

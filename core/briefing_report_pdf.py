@@ -506,7 +506,9 @@ def generate_briefing_pdf(
                if isinstance(x, dict) and x.get("png")]
     _startup = [x for x in ((figures or {}).get("startup") or [])
                 if isinstance(x, dict) and x.get("png")]
-    if _trends or _spec or _wave or _orb or _fs_raw or _startup:
+    _defl = [x for x in ((figures or {}).get("deflection_pngs") or [])
+             if isinstance(x, dict) and x.get("png")]
+    if _trends or _spec or _wave or _orb or _fs_raw or _startup or _defl:
         _fecha = _fecha_es(meta.get("report_date"))
         _equipo = f"Unidad {tag}"
         _n = 0
@@ -630,14 +632,20 @@ def generate_briefing_pdf(
                 _add_fig(t.get("png"), head, 6.2 * cm,
                          analysis=(t.get("analysis") or ""), lead=_lead)
                 _lead = []
-            for (p, _nm) in m_sp:
-                _an = (figures.get("spectrum_analysis") or "") if machine == _sp_last else ""
-                _add_fig(p, f"Espectro — canales apilados — {machine}", 10.6 * cm,
-                         analysis=_an, lead=_lead); _lead = []
+            # Orden alineado a Rotodinámica: Forma de onda → Espectro →
+            # Full Spectrum → Órbita (+ tabla de métricas).
             for (p, _nm) in m_wv:
                 _an = (figures.get("waveform_analysis") or "") if machine == _wv_last else ""
                 _add_fig(p, f"Forma de onda — canales apilados — {machine}", 10.6 * cm,
                          analysis=_an, lead=_lead); _lead = []
+            for (p, _nm) in m_sp:
+                _an = (figures.get("spectrum_analysis") or "") if machine == _sp_last else ""
+                _add_fig(p, f"Espectro — canales apilados — {machine}", 10.6 * cm,
+                         analysis=_an, lead=_lead); _lead = []
+            for x in m_fs:
+                _hb = x.get("bearing") or machine
+                _add_fig(x.get("png"), f"Full Spectrum — {_hb}", 8.6 * cm,
+                         analysis=x.get("analysis") or "", lead=_lead); _lead = []
             for (p, _nm) in m_ob:
                 _an = (figures.get("orbit_analysis") or "") if machine == _ob_last else ""
                 _add_fig(p, f"Órbitas — {machine}", 9.0 * cm,
@@ -650,10 +658,15 @@ def generate_briefing_pdf(
                     body.append(Spacer(1, 2))
                     body.append(_otbl)
                     body.append(Spacer(1, 6))
-            for x in m_fs:
-                _hb = x.get("bearing") or machine
-                _add_fig(x.get("png"), f"Full Spectrum — {_hb}", 8.6 * cm,
-                         analysis=x.get("analysis") or "", lead=_lead); _lead = []
+
+        # ---- Deflexión del eje (nivel tren) ----
+        if _defl:
+            body.append(Spacer(1, 6))
+            _dlead = [_h2("Deflexión del eje")]
+            for x in _defl:
+                _add_fig(x.get("png"), "Forma de deflexión del eje — tren",
+                         9.6 * cm, analysis=x.get("analysis") or "", lead=_dlead)
+                _dlead = []
 
         # ---- Arranque / Run-up (SCL + Bode + Polar del último run-up) ----
         if _startup:
@@ -661,10 +674,11 @@ def generate_briefing_pdf(
             body.append(KeepTogether([
                 _h2("Arranque / Run-up"),
                 Paragraph(
-                    "Transitorio de arranque capturado en campo (export System1). "
-                    "El shaft centerline traza la posición del muñón de reposo a "
-                    "operación; Bode y polar describen la respuesta síncrona 1X y "
-                    "el paso por las velocidades críticas del tren.", st_body),
+                    "Transitorio de arranque capturado en campo con el sistema de "
+                    "adquisición de la planta. El shaft centerline traza la "
+                    "posición del muñón de reposo a operación; Bode y polar "
+                    "describen la respuesta síncrona 1X y el paso por las "
+                    "velocidades críticas del tren.", st_body),
             ]))
             _sh_last = None
             for _it in _startup:

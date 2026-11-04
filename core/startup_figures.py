@@ -116,7 +116,7 @@ def fullspec_bundle(instance_id: str) -> List[Dict[str, Any]]:
     Devuelve [{png, name}] (name = máquina para agrupar en el PDF)."""
     try:
         import plotly.graph_objects as go
-        from core.briefing_figures import _load_merged_snapshot
+        from core.briefing_figures import _load_merged_snapshot, _instance_rpm
     except Exception:  # noqa: BLE001
         return []
     try:
@@ -124,6 +124,8 @@ def fullspec_bundle(instance_id: str) -> List[Dict[str, Any]]:
         if not payload:
             return []
         out: List[Dict[str, Any]] = []
+        rpm0 = float(payload.get("operating_speed_rpm") or 0.0) \
+            or _instance_rpm(instance_id)
         for b in payload.get("bearings", []):
             xv = np.asarray(b.get("x_values") or [], float)
             yv = np.asarray(b.get("y_values") or [], float)
@@ -133,27 +135,49 @@ def fullspec_bundle(instance_id: str) -> List[Dict[str, Any]]:
             xv, yv = xv[:n], yv[:n]
             xv = xv - np.nanmean(xv)
             yv = yv - np.nanmean(yv)
-            fs = float(b.get("sampling_rate_hz") or 0.0)
-            if fs <= 0:
-                continue
             unit = b.get("amp_unit") or "µm pp"
             kind, cpmx = _spk(unit)
             win = np.hanning(n)
             z = (xv * win) + 1j * (yv * win)
             sp = np.fft.fftshift(np.fft.fft(z)) * (2.0 / np.sum(win))
-            fr = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / fs))
-            cpm = fr * 60.0
             amp = np.abs(sp) * (2.0 if kind == "disp" else 1.0 / np.sqrt(2.0))
-            fwd = cpm >= 0
+            # Eje de frecuencia: si el snapshot trae fs → cpm absoluto; si NO
+            # (export de órbita no guarda fs) → auto-calibración al 1X usando la
+            # velocidad de giro: el pico forward dominante = 1X → eje en ÓRDENES.
+            fs = float(b.get("sampling_rate_hz") or 0.0)
+            freq_cyc = np.fft.fftshift(np.fft.fftfreq(n))   # ciclos/muestra
+            if fs > 0:
+                xf = freq_cyc * fs * 60.0                    # cpm
+                xtitle = "Frecuencia (cpm) · − inversa | + directa"
+                xrange = [-cpmx, cpmx]
+                xnote = ""
+            else:
+                if rpm0 <= 0:
+                    continue
+                _fwdm = freq_cyc > 0
+                if not np.any(_fwdm):
+                    continue
+                _idx = np.where(_fwdm)[0]
+                f1 = float(freq_cyc[_idx[int(np.argmax(amp[_idx]))]])
+                if f1 <= 0:
+                    continue
+                xf = freq_cyc / f1                           # órdenes (×1X)
+                xtitle = "Orden (× velocidad de giro, 1X) · − inversa | + directa"
+                xrange = [-10.0, 10.0]
+                xnote = (f" Eje de frecuencia auto-calibrado al 1X "
+                         f"(velocidad de giro ≈ {rpm0:,.0f} rpm); escala en "
+                         f"órdenes porque el export de órbita no guarda la tasa "
+                         f"de muestreo.")
+            fwd = xf >= 0
             bl = b.get("bearing_label") or b.get("x_sensor_label") or ""
             bid = _bid(bl)
             fig = go.Figure()
             fig.add_trace(go.Scatter(
-                x=cpm[fwd], y=amp[fwd], mode="lines",
+                x=xf[fwd], y=amp[fwd], mode="lines",
                 line=dict(color=_NAVY, width=1.3),
                 name="Forward (precesión directa +)"))
             fig.add_trace(go.Scatter(
-                x=cpm[~fwd], y=amp[~fwd], mode="lines",
+                x=xf[~fwd], y=amp[~fwd], mode="lines",
                 line=dict(color=_AMBER, width=1.3),
                 name="Reverse (precesión inversa −)"))
             # energía fwd vs bwd (dominancia de precesión)
@@ -161,8 +185,8 @@ def fullspec_bundle(instance_id: str) -> List[Dict[str, Any]]:
             eb = float(np.sum(amp[~fwd] ** 2))
             tot = ef + eb or 1.0
             dom = "directa (forward)" if ef >= eb else "inversa (reverse)"
-            fig.update_xaxes(title="Frecuencia (cpm) · − inversa | + directa",
-                             range=[-cpmx, cpmx], showgrid=True, gridcolor=_GRID,
+            fig.update_xaxes(title=xtitle,
+                             range=xrange, showgrid=True, gridcolor=_GRID,
                              zeroline=True, zerolinecolor="#cbd5e1")
             fig.update_yaxes(title=f"Amplitud ({unit})", showgrid=True,
                              gridcolor=_GRID, rangemode="tozero")
@@ -180,7 +204,7 @@ def fullspec_bundle(instance_id: str) -> List[Dict[str, Any]]:
                                 f"componentes hacia adelante de las inversas; el "
                                 f"predominio inverso marcado es el patrón que "
                                 f"acompaña al roce y a la inestabilidad de "
-                                f"película (whirl/whip).")})
+                                f"película (whirl/whip)." + xnote)})
         return out
     except Exception as e:  # noqa: BLE001
         log.warning("fullspec_bundle(%s): %s", instance_id, e)
@@ -472,19 +496,113 @@ def polar_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- #
+# Deflexión del eje (nivel tren) — Bently manual 3-8 / 9-4
+# --------------------------------------------------------------------------- #
+def deflection_bundle(instance_id: str) -> List[Dict[str, Any]]:
+    """Forma de deflexión del eje: cada órbita en su posición axial, unidas por
+    el punto Keyphasor (muestra 0) → forma modal aparente del rotor. Nivel TREN
+    (una figura). Del mismo snapshot de órbita (robot full-speed). Replica la
+    vista 'Deflexión del eje' de Rotodinámica (H=(X−Y)/√2, V=(X+Y)/√2)."""
+    try:
+        import plotly.graph_objects as go
+        from core.briefing_figures import _load_merged_snapshot
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        payload = _load_merged_snapshot(instance_id, "orbit")
+        if not payload:
+            return []
+        stations: List[Dict[str, Any]] = []
+        maxr = 1e-9
+        unit = "µm"
+        for b in payload.get("bearings", []):
+            xv = np.asarray(b.get("x_values") or [], float)
+            yv = np.asarray(b.get("y_values") or [], float)
+            n = int(min(xv.size, yv.size))
+            if n < 8:
+                continue
+            xv, yv = xv[:n], yv[:n]
+            bl = b.get("bearing_label") or b.get("x_sensor_label") or ""
+            unit = b.get("amp_unit") or unit
+            H = (xv - yv) / np.sqrt(2.0)
+            V = (xv + yv) / np.sqrt(2.0)
+            H = H - np.nanmean(H)
+            V = V - np.nanmean(V)
+            r = float(np.max(np.hypot(H, V))) if H.size else 0.0
+            maxr = max(maxr, r)
+            stations.append({"label": bl, "bid": _bid(bl), "H": H, "V": V,
+                             "kp": (float(H[0]), float(V[0]))})
+        stations.sort(key=lambda s: int(s["bid"] or 99))
+        if len(stations) < 2:
+            return []
+        dx = 1.0
+        S = (0.40 * dx / maxr) if maxr > 0 else 1.0
+        xs = [i * dx for i in range(len(stations))]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=[xs[0] - 0.5 * dx, xs[-1] + 0.5 * dx], y=[0, 0], mode="lines",
+            line=dict(color="#c0c8d4", width=1, dash="dot"),
+            hoverinfo="skip", showlegend=False))
+        kpts: List[Any] = []
+        for i, s in enumerate(stations):
+            x0 = xs[i]
+            fig.add_trace(go.Scatter(
+                x=x0 + S * s["H"], y=S * s["V"], mode="lines",
+                line=dict(color=_NAVY, width=1.5), showlegend=False))
+            kx, ky = x0 + S * s["kp"][0], S * s["kp"][1]
+            kpts.append((kx, ky))
+            fig.add_trace(go.Scatter(
+                x=[kx], y=[ky], mode="markers",
+                marker=dict(color="#1f9d55", size=10,
+                            line=dict(color="white", width=1.2)),
+                hoverinfo="skip", showlegend=False))
+            fig.add_annotation(x=x0, y=-0.5 * dx, text=s["label"], showarrow=False,
+                               font=dict(size=10, family="IBM Plex Mono",
+                                         color="#5a6b85"))
+        fig.add_trace(go.Scatter(
+            x=[p[0] for p in kpts], y=[p[1] for p in kpts], mode="lines",
+            line=dict(color=_AMBER, width=2.4), showlegend=False))
+        fig.update_xaxes(showticklabels=False, zeroline=False,
+                         title="posición axial del tren →", gridcolor=_GRID)
+        fig.update_yaxes(title=f"{unit}", zeroline=False, gridcolor=_GRID)
+        png = _png(_layout(fig, "Forma de deflexión del eje · tren", h=470),
+                   height=470)
+        if not png:
+            return []
+        return [{"png": png, "name": "Tren", "bearing": "tren",
+                 "analysis": (
+                     "Cada órbita en su posición axial; la curva ámbar une los "
+                     "puntos Keyphasor (posición del eje en el disparo, muestra "
+                     "0) → forma de deflexión aparente del eje = forma modal del "
+                     "rotor (cilíndrico/traslacional, pivotal/cónico…). Base: "
+                     "Bently manual 3-8 / 9-4. Cojinetes ordenados por número "
+                     "(posición axial). Órbita completa del robot a full-speed "
+                     "(dominada por 1X).")}]
+    except Exception as e:  # noqa: BLE001
+        log.warning("deflection_bundle(%s): %s", instance_id, e)
+        return []
+
+
+# --------------------------------------------------------------------------- #
 # API: todo junto
 # --------------------------------------------------------------------------- #
 def collect_startup_figures(instance_id: str,
                             period_label: str = "Semanal") -> Dict[str, Any]:
-    """Devuelve {'startup': [...], 'fullspec_pngs': [...]} para el reporte.
-    'startup' = SCL+Bode+Polar del último run-up en la ventana (puede ir vacío).
-    'fullspec_pngs' = Full Spectrum steady por cojinete (del robot full-speed)."""
+    """Devuelve {'startup': [...], 'fullspec_pngs': [...], 'deflection_pngs': [...]}
+    para el reporte. 'startup' = SCL+Bode+Polar del último run-up en la ventana
+    (puede ir vacío). 'fullspec_pngs' = Full Spectrum steady por cojinete.
+    'deflection_pngs' = forma de deflexión del eje (nivel tren)."""
     days = _days_for(period_label)
-    out: Dict[str, Any] = {"startup": [], "fullspec_pngs": []}
+    out: Dict[str, Any] = {"startup": [], "fullspec_pngs": [],
+                           "deflection_pngs": []}
     try:
         out["fullspec_pngs"] = fullspec_bundle(instance_id)
     except Exception as e:  # noqa: BLE001
         log.warning("collect_startup_figures fullspec: %s", e)
+    try:
+        out["deflection_pngs"] = deflection_bundle(instance_id)
+    except Exception as e:  # noqa: BLE001
+        log.warning("collect_startup_figures deflection: %s", e)
     try:
         startup: List[Dict[str, Any]] = []
         startup += scl_startup_bundle(instance_id, days)
@@ -496,5 +614,5 @@ def collect_startup_figures(instance_id: str,
     return out
 
 
-__all__ = ["collect_startup_figures", "fullspec_bundle",
+__all__ = ["collect_startup_figures", "fullspec_bundle", "deflection_bundle",
            "scl_startup_bundle", "bode_startup_bundle", "polar_startup_bundle"]
