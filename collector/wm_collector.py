@@ -68,7 +68,7 @@ except ImportError:
     sys.exit(1)
 
 
-COLLECTOR_VERSION = "1.0.0"
+COLLECTOR_VERSION = "1.1.0"   # 1.1.0: peak-hold en el borde (lee 1Hz, POST pico/ventana)
 
 
 # =============================================================================
@@ -381,8 +381,15 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
     mb_cfg, regs, raw_map = load_modbus_map(cfg["modbus_map"])
     instance_id = raw_map.get("instance_id") or cfg.get("instance_id") or "unknown"
     poll = int(raw_map.get("poll_interval_seconds") or cfg.get("poll_interval_seconds", 10))
+    # Peak-hold: tasa de LECTURA Modbus dentro de cada ventana de POST. El Bently
+    # 3500 refresca sus escalares ~1/seg → 1.0s es la resolución útil. Captura
+    # transitorios < poll sin inflar storage (seguimos POSTeando 1 batch/ventana).
+    read_interval = float(raw_map.get("read_interval_seconds")
+                          or cfg.get("read_interval_seconds", 1.0))
+    agg_mode = str(raw_map.get("aggregate") or cfg.get("aggregate", "peak")).lower()
 
-    log.info("instance_id=%s registers=%d poll=%ds", instance_id, len(regs), poll)
+    log.info("instance_id=%s registers=%d poll=%ds read=%.1fs agg=%s",
+             instance_id, len(regs), poll, read_interval, agg_mode)
     log.info("Modbus target: %s:%d unit=%d byte_order=%s",
              mb_cfg.server_ip, mb_cfg.port, mb_cfg.unit_id, mb_cfg.byte_order)
 
@@ -407,16 +414,45 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
             time.sleep(poll)
             continue
 
+        # --- PEAK-HOLD en el borde ---------------------------------------
+        # Dentro de la ventana de POST (poll s) leemos el Modbus cada
+        # read_interval y nos quedamos con el PICO (máx) por registro. Así un
+        # transitorio de 1-2s NO se pierde entre POSTs, y el volumen a Supabase
+        # no cambia (1 batch por ventana). agg_mode != "peak" = legacy (1 lectura).
+        #   addr -> [regdef, peak_val, quality, suma, n_good]
+        agg: Dict[int, list] = {}
+        reads = 0
+        win_dur = poll if not dry_run else min(poll, 2 * read_interval)
+        deadline = cycle_start + win_dur
         try:
-            samples = read_all_registers(client, mb_cfg, regs, log)
+            while True:
+                r_start = time.time()
+                for (r, v, q) in read_all_registers(client, mb_cfg, regs, log):
+                    prev = agg.get(r.address)
+                    if v is not None and q == "good":
+                        if prev is None:
+                            agg[r.address] = [r, v, "good", v, 1]
+                        else:
+                            prev[1] = v if (prev[1] is None or v > prev[1]) else prev[1]
+                            prev[2] = "good"
+                            prev[3] += v
+                            prev[4] += 1
+                    elif prev is None:
+                        agg[r.address] = [r, v, q, 0.0, 0]
+                reads += 1
+                if agg_mode != "peak" or time.time() >= deadline:
+                    break
+                time.sleep(max(0.0, read_interval - (time.time() - r_start)))
         finally:
             try:
                 client.close()
             except Exception:
                 pass
 
-        good_count = sum(1 for (_, v, q) in samples if q == "good")
-        log.info("Cycle read: %d/%d good", good_count, len(samples))
+        samples = [(a[0], a[1], a[2]) for a in agg.values()]
+        good_count = sum(1 for a in agg.values() if a[2] == "good")
+        log.info("Window: %d read(s), %d/%d good (agg=%s)",
+                 reads, good_count, len(agg), agg_mode)
 
         payload = build_payload(
             instance_id=instance_id,
@@ -425,6 +461,8 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
             host_label=host_label,
             byte_order=mb_cfg.byte_order,
         )
+        payload["metadata"]["aggregate"] = agg_mode
+        payload["metadata"]["window_reads"] = reads
 
         if dry_run:
             log.info("DRY RUN — payload preview:")
@@ -439,9 +477,10 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
             # Si el post directo anduvo, intentamos flushear backlog
             flush_buffer(api, buf, log)
 
-        elapsed = time.time() - cycle_start
-        sleep_for = max(0.0, poll - elapsed)
-        time.sleep(sleep_for)
+        # En peak-hold la ventana YA consumió ~poll s leyendo → no dormir otra
+        # vez. En legacy (1 lectura) sí completamos el intervalo.
+        if agg_mode != "peak":
+            time.sleep(max(0.0, poll - (time.time() - cycle_start)))
 
 
 def main() -> None:
