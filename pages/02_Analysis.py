@@ -686,48 +686,11 @@ def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray, ang_x: float = 135.0, ang_y: fl
 
 def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with_top=True,
                       row=None, col=None):
-    """Dibuja las sondas de proximidad tipo dibujo técnico (cuerpo + rosca + cara) en su
-    ángulo real, FUERA del radio R, + cono de visión hacia el eje + marca TOPE 0°.
-    ax_deg = grados del TOP hacia el lado R (sonda X); ay_deg = grados del TOP hacia el
-    lado L (sonda Y). Marco: 0°=arriba, +H=derecha, +V=arriba. row/col → celda subplot."""
-    if R <= 0:
-        return
-    _rc = {} if row is None else dict(row=row, col=col)
-    for _lbl, _deg, _s in [(lbl_x, float(ax_deg), 1.0), (lbl_y, float(ay_deg), -1.0)]:
-        _th = np.radians(_deg)
-        _ux, _uy = _s * np.sin(_th), np.cos(_th)
-        if with_cone:
-            _ang = np.arctan2(_uy, _ux)
-            _aa = np.linspace(_ang - np.radians(13), _ang + np.radians(13), 18)
-            fig.add_trace(go.Scatter(
-                x=np.concatenate([[0], R * 0.95 * np.cos(_aa), [0]]),
-                y=np.concatenate([[0], R * 0.95 * np.sin(_aa), [0]]),
-                fill="toself", mode="lines", line=dict(color="rgba(18,48,94,0)"),
-                fillcolor="rgba(18,48,94,0.05)", hoverinfo="skip", showlegend=False), **_rc)
-        _ri, _rb, _ro = R * 1.12, R * 1.20, R * 1.36
-        _perp = np.array([-_uy, _ux])
-        fig.add_trace(go.Scatter(x=[_ux * _rb, _ux * _ro], y=[_uy * _rb, _uy * _ro],
-                      mode="lines", line=dict(color="#12305e", width=10),
-                      hoverinfo="skip", showlegend=False), **_rc)
-        for _t in (0.55, 0.70, 0.85):   # rosca
-            _cx, _cy = _ux * (_rb + (_ro - _rb) * _t), _uy * (_rb + (_ro - _rb) * _t)
-            fig.add_trace(go.Scatter(
-                x=[_cx - _perp[0] * R * 0.045, _cx + _perp[0] * R * 0.045],
-                y=[_cy - _perp[1] * R * 0.045, _cy + _perp[1] * R * 0.045],
-                mode="lines", line=dict(color="#8fa0bf", width=1.5),
-                hoverinfo="skip", showlegend=False), **_rc)
-        fig.add_trace(go.Scatter(x=[_ux * _ri], y=[_uy * _ri], mode="markers",
-                      marker=dict(color="#e8890c", size=12, symbol="circle",
-                                  line=dict(color="#12305e", width=2)),
-                      hoverinfo="skip", showlegend=False), **_rc)
-        _sd = "R" if _s > 0 else "L"
-        fig.add_annotation(x=_ux * _ro, y=_uy * _ro, text=f"{_lbl}<br>{_deg:.0f}°{_sd}",
-                           showarrow=False, yshift=-16,
-                           font=dict(size=10.5, family="IBM Plex Mono", color="#12305e"), **_rc)
-    if with_top:
-        fig.add_trace(go.Scatter(x=[0], y=[R * 1.12], mode="markers",
-                      marker=dict(color="#0f172a", size=7, symbol="triangle-down"),
-                      hoverinfo="skip", showlegend=False), **_rc)
+    """Sondas de proximidad tipo dibujo técnico. FUENTE ÚNICA: core.orbit_render
+    (el MISMO dibujo que usan los reportes diario/semanal/mensual)."""
+    from core.orbit_render import add_probe_glyphs as _apg
+    _apg(fig, R, ax_deg, ay_deg, lbl_x, lbl_y,
+         with_cone=with_cone, with_top=with_top, row=row, col=col)
 
 
 def _fmt_dt(s):
@@ -744,88 +707,24 @@ def _fmt_dt(s):
 
 
 def _orbit_data(b, fmode, ang_x, ang_y):
-    """Calcula la órbita de un cojinete (método Live Monitoring = idéntico a System1):
-    rota a coords de máquina, filtra el orden, arma keyphasor, precesión, forma."""
-    px, py = np.asarray(b.x.v, float), np.asarray(b.y.v, float)
-    _n = min(px.size, py.size); px, py = px[:_n], py[:_n]
-    fs = b.x.fs_hz or b.y.fs_hz; spr = b.x.spr or b.y.spr; rpm = b.x.rpm
-    _ax = np.radians(float(ang_x)); _ay = np.radians(-float(ang_y))
-    _ca, _cb = np.sin(_ax), np.cos(_ax); _cc, _cd = np.sin(_ay), np.cos(_ay)
-    _det = _ca * _cd - _cb * _cc
-    if abs(_det) > 1e-6:
-        H = (_cd * px - _cb * py) / _det; V = (-_cc * px + _ca * py) / _det
-    else:
-        H, V = px, py
-    H = H - np.nanmean(H); V = V - np.nanmean(V)
-
-    def _ofilt(sig, order):
-        if not order or not fs or not rpm or sig.size < 8:
-            return sig
-        spc = np.fft.rfft(sig); frq = np.fft.rfftfreq(sig.size, 1.0 / fs)
-        k = int(np.argmin(np.abs(frq - order * rpm / 60.0)))
-        out = np.zeros_like(spc); out[k] = spc[k]
-        return np.fft.irfft(out, sig.size)
-    _order = {"Direct": 0, "1X": 1, "2X": 2}.get(fmode, 0)
-    Hf, Vf = _ofilt(H, _order), _ofilt(V, _order)
-    sp = None; _kmarks = []
-    if spr and spr > 4 and Hf.size >= 2 * spr:
-        _nr = Hf.size // spr
-        if _order == 0:
-            xv, yv = Hf, Vf
-            _kmarks = [(float(Hf[i * spr]), float(Vf[i * spr])) for i in range(_nr)]
-            sp = _kmarks[0] if _kmarks else None
-        else:
-            Ha = Hf[:_nr * spr].reshape(_nr, spr).mean(0)
-            Va = Vf[:_nr * spr].reshape(_nr, spr).mean(0)
-            _g = max(1, spr // 40)
-            xv = Ha[:max(1, spr - _g)]; yv = Va[:max(1, spr - _g)]
-            sp = (float(Ha[0]), float(Va[0])); _kmarks = [sp]
-    else:
-        xv, yv = Hf, Vf
-        sp = (float(Hf[0]), float(Vf[0])) if Hf.size else None
-        _kmarks = [sp] if sp else []
-    _area = float(np.sum(xv[:-1] * yv[1:] - xv[1:] * yv[:-1])) if xv.size > 2 else 0.0
-    prec = "CCW" if _area > 0 else "CW"
-    if fs and rpm:
-        _z = _ofilt(H, 1) + 1j * _ofilt(V, 1)
-        _Z = np.fft.fftshift(np.fft.fft(_z))
-        _frz = np.fft.fftshift(np.fft.fftfreq(_z.size, 1.0 / fs)); _f1 = rpm / 60.0
-        _kf = int(np.argmin(np.abs(_frz - _f1))); _kr = int(np.argmin(np.abs(_frz + _f1)))
-        prec = "Forward" if abs(_Z[_kf]) >= abs(_Z[_kr]) else "Reverse"
-    _precd = ("Hacia adelante (forward)" if prec == "Forward"
-              else "Inversa (reverse)" if prec == "Reverse" else prec)
-    _lbl_b = (b.x.label or b.name or ""); _bnum = next((int(c) for c in _lbl_b if c.isdigit()), 0)
-    rot_api = "CCW" if _bnum >= 5 else "CW"; _maq = "generador" if _bnum >= 5 else "turbina"
-    cx, cy = float(np.nanmean(xv)), float(np.nanmean(yv))
-    _pc = np.column_stack([xv - cx, yv - cy]); major = minor = ellip = smax = 0.0
-    if _pc.shape[0] > 2:
-        try:
-            _, _, _vt = np.linalg.svd(_pc, full_matrices=False)
-            _pj = _pc @ _vt[0]; _pn = _pc @ _vt[1]
-            major = float(_pj.max() - _pj.min()); minor = float(_pn.max() - _pn.min())
-            ellip = (minor / major) if major else 0.0
-            smax = float(np.max(np.hypot(_pc[:, 0], _pc[:, 1])))
-        except Exception:  # noqa: BLE001
-            pass
-    if ellip >= 0.8:
-        shp, shc = "Circular — desbalance / condición sana", "#1f9d55"
-    elif ellip >= 0.4:
-        shp, shc = "Elíptica — precarga o anisotropía de rigidez", "#e8890c"
-    else:
-        shp, shc = "Muy plana — precarga fuerte / desalineación", "#dc3545"
-    _kpos = ""
-    if sp is not None:
-        _kang = float(np.degrees(np.arctan2(sp[0], sp[1])))
-        _kpos = f"{abs(_kang):.0f}°{'R' if _kang >= 0 else 'L'}"
-    Rp = max(float(smax) if smax else 0.0,
-             float(np.nanmax(np.hypot(xv, yv))) if len(xv) else 0.0)
+    """Órbita de un cojinete (método System1). FUENTE ÚNICA: core.orbit_render
+    (el MISMO cálculo que usan los reportes). Aquí solo se extraen los arrays del
+    bearing `b` y se arma el stamp (máquina + fecha), delegando a compute_orbit."""
+    from core.orbit_render import compute_orbit
     _time = getattr(b.x, "cap_time", "") or getattr(b.y, "cap_time", "")
     _mach = getattr(b.x, "machine", "") or getattr(b.y, "machine", "")
     _stamp = " · ".join(x for x in (_mach, _fmt_dt(_time)) if x)
-    return dict(xv=xv, yv=yv, kmarks=_kmarks, sp=sp, order=_order, smax=smax, Rp=Rp,
-                prec=prec, precd=_precd, rot_api=rot_api, maq=_maq, shp=shp, shc=shc,
-                major=major, minor=minor, ellip=ellip, kpos=_kpos, rpm=rpm,
-                time=_time, stamp=_stamp)
+    d = compute_orbit(
+        b.x.v, b.y.v,
+        fs_hz=float(b.x.fs_hz or b.y.fs_hz or 0),
+        spr=int(b.x.spr or b.y.spr or 0),
+        rpm=float(b.x.rpm or 0),
+        bearing_label=(b.x.label or b.name or ""),
+        x_label=(b.x.label or "X"), y_label=(b.y.label or "Y"),
+        unit=(b.x.unit or "µm"), machine=_mach, stamp=_stamp,
+        fmode=fmode, ang_x=ang_x, ang_y=ang_y)
+    d["time"] = _time
+    return d
 
 
 def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):

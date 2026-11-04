@@ -791,94 +791,45 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
     if not bearings:
         return {"png": None, "analysis": ""}
     try:
-        import numpy as np
-        import plotly.graph_objects as go
-        from plotly.subplots import make_subplots
-        try:
-            from core.orbit import ProbeGeometry, _solve_global_xy
-            _geom_ok = True
-        except Exception:
-            _geom_ok = False
-
-        def _probe_geom(lbl):
-            """(gx, gy) de montaje POR cojinete, misma convención que la web
-            (pages/02_Analysis `_probe_angles`): generador (coj 5/6) sondas ARRIBA
-            45°R/45°L; turbina (coj 1/2) y gearbox sondas ABAJO 135°R/135°L."""
-            mm = _re.search(r"(\d+)", lbl or "")
-            n = int(mm.group(1)) if mm else 0
-            a = 45.0 if n in (5, 6) else 135.0
-            return ProbeGeometry(a, "Right"), ProbeGeometry(a, "Left")
+        # FUENTE ÚNICA de render (core.orbit_render): mismo dibujo que la web de
+        # Rotodinámica — probe glyphs técnicos + trazo navy + keyphasor + texto
+        # CW/CCW (API 670) + elipticidad/Smax. El snapshot dynamic_raw no guarda
+        # fs/spr, así que se dibuja la órbita Direct con keyphasor en la muestra 0
+        # (precesión por área firmada). Las métricas (eje mayor/menor, elipticidad,
+        # Smax, giro) van en 'orbit_rows' para la tabla del reporte.
+        from core.orbit_render import build_orbit_grids
 
         bearings = bearings[:6]          # incluye el gearbox (BRG4), no solo 4
-
-        # Máquina de cada cojinete (regla de analista: misma máquina, misma
-        # escala; y las órbitas se AGRUPAN por máquina en figuras separadas).
-        def _mach(lbl: str) -> str:
-            mm = _re.search(r"(\d+)", lbl or "")
-            n = int(mm.group(1)) if mm else 0
-            return "T" if n in (1, 2) else ("G" if n in (3, 4)
-                   else ("GEN" if n in (5, 6) else "X"))
-        _MACH_NAME = {"T": "Turbina", "G": "Gearbox", "GEN": "Generador"}
-        _MACH_ORDER = ["T", "G", "GEN"]
-
-        groups: Dict[str, list] = {}
-        findings: List[Dict[str, Any]] = []
+        _rpm = float(payload.get("operating_speed_rpm") or 0) or _instance_rpm(instance_id)
+        _unit = str(payload.get("amp_unit", "") or "µm")
+        bnorm: List[Dict[str, Any]] = []
         for b in bearings:
-            px = np.asarray(b["x_values"], float); py = np.asarray(b["y_values"], float)
-            n = min(px.size, py.size); px, py = px[:n], py[:n]
             lbl = b.get("bearing_label", "")
-            if _geom_ok:
-                _gx, _gy = _probe_geom(lbl)
-                try:
-                    H, V = _solve_global_xy(px, py, _gx, _gy)
-                except Exception:
-                    H, V = px, py
-            else:
-                H, V = px, py
-            H = np.asarray(H, float); V = np.asarray(V, float)
-            groups.setdefault(_mach(lbl), []).append((lbl, H, V))
-            try:
-                pp_h = float(np.max(H) - np.min(H)); pp_v = float(np.max(V) - np.min(V))
-                major = max(pp_h, pp_v); minor = min(pp_h, pp_v)
-                findings.append({"label": lbl, "pp": major,
-                                 "ratio": (minor / major) if major > 1e-12 else 1.0})
-            except Exception:
-                pass
+            bnorm.append(dict(
+                label=lbl, x=b.get("x_values"), y=b.get("y_values"),
+                x_label=(b.get("x_sensor_label") or f"{lbl} X"),
+                y_label=(b.get("y_sensor_label") or f"{lbl} Y"),
+                unit=(b.get("amp_unit") or _unit), rpm=_rpm,
+                fs_hz=float(b.get("fs_hz", 0) or 0), spr=int(b.get("spr", 0) or 0)))
 
-        # UNA figura por máquina (escala propia, celdas cuadradas).
+        grids = build_orbit_grids(bnorm, png_fn=_png)
         pngs: List[Dict[str, Any]] = []
-        for mm in _MACH_ORDER:
-            grp = groups.get(mm)
-            if not grp:
-                continue
-            R = max(max(float(np.max(np.abs(H))), float(np.max(np.abs(V))))
-                    for _l, H, V in grp) * 1.15
-            ncol = min(len(grp), 2); nrow = (len(grp) + ncol - 1) // ncol
-            fig = make_subplots(rows=nrow, cols=ncol,
-                                subplot_titles=[l for l, _h2, _v2 in grp],
-                                horizontal_spacing=0.15, vertical_spacing=0.16)
-            for idx, (lbl, H, V) in enumerate(grp):
-                r_ = idx // ncol + 1; c_ = idx % ncol + 1
-                fig.add_trace(go.Scattergl(x=H, y=V, mode="lines",
-                              line=dict(width=1.1, color=_PALETTE[idx % len(_PALETTE)]),
-                              showlegend=False), row=r_, col=c_)
-                fig.update_xaxes(range=[-R, R], scaleanchor=f"y{idx+1 if idx else ''}",
-                                 scaleratio=1, showgrid=True, gridcolor="#eef2f7",
-                                 zeroline=False, row=r_, col=c_)
-                fig.update_yaxes(range=[-R, R], showgrid=True, gridcolor="#eef2f7",
-                                 zeroline=False, row=r_, col=c_)
-            fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
-                              showlegend=False, margin=dict(l=40, r=20, t=34, b=30),
-                              font=dict(size=12, color="#334155"))
-            _hh = int(1600 / max(ncol, 1) * nrow)
-            png = _png(fig, height=_hh)
-            if png:
-                pngs.append({"png": png, "name": _MACH_NAME.get(mm, mm)})
+        rows_all: List[Dict[str, Any]] = []
+        findings: List[Dict[str, Any]] = []
+        for g in grids:
+            if g.get("png"):
+                pngs.append({"png": g["png"], "name": g["name"]})
+            for r in g.get("rows", []):
+                rows_all.append(r)
+                _maj = float(r.get("major") or 0.0)
+                _min = float(r.get("minor") or 0.0)
+                findings.append({"label": r.get("bearing", ""), "pp": _maj,
+                                 "ratio": (_min / _maj) if _maj > 1e-12 else 1.0})
         return {"png": (pngs[0]["png"] if pngs else None), "pngs": pngs,
-                "analysis": _orbit_analysis(findings)}
+                "rows": rows_all, "analysis": _orbit_analysis(findings)}
     except Exception as e:
         log.warning("orbit_bundle: %s", e)
-        return {"png": None, "analysis": ""}
+        return {"png": None, "pngs": [], "rows": [], "analysis": ""}
 
 
 def _orbit_analysis(findings: List[Dict[str, Any]]) -> str:
@@ -1581,6 +1532,7 @@ def collect_asset_figures(instance_id: str,
         "waveform_pngs": wave.get("pngs") or [],
         "orbit":    orb["png"],  "orbit_analysis": orb["analysis"],
         "orbit_pngs": orb.get("pngs") or [],
+        "orbit_rows": orb.get("rows") or [],
         "fullspec_pngs": _sf.get("fullspec_pngs") or [],
         "startup": _sf.get("startup") or [],
     }
