@@ -3866,7 +3866,11 @@ def main() -> None:
     # el id y la versión entran en la clave y cachea por activo correctamente.
     @st.cache_data(ttl=30, show_spinner=False)
     def _cached_list_instances(version: int):
-        return _raw_list_instances()
+        # Solo activos EN SERVICIO: los equipos demo/fuera de servicio se
+        # ocultan de Live Monitoring (quedan solo en el mapa del Home).
+        return [r for r in (_raw_list_instances() or [])
+                if (r.get("in_service", True) if isinstance(r, dict)
+                    else getattr(r, "in_service", True))]
 
     @st.cache_data(ttl=30, show_spinner=False)
     def _cached_get_instance(iid: str, version: int):

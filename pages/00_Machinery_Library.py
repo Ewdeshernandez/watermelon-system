@@ -2959,7 +2959,7 @@ def main() -> None:
         # esté declarado en core/machine_profiles. La Library es universal
         # (toda máquina debe ser configurable acá), así que reusamos el
         # alias 'documents' que ya está aceptado por todos los profiles.
-        state = render_instance_selector(module_name="documents")
+        state = render_instance_selector(module_name="documents", include_all=True)
 
     instance_id = state.get("instance_id")
 

@@ -275,8 +275,8 @@ def _quality_severity(quality: str) -> Tuple[str, str, str]:
 # =====================================================================
 def _instance_options() -> List[Tuple[str, str]]:
     try:
-        from core.instance_state import list_instances
-        insts = list_instances() or []
+        from core.instance_state import list_reportable_instances
+        insts = list_reportable_instances() or []
     except Exception:
         insts = []
     opts: List[Tuple[str, str]] = []

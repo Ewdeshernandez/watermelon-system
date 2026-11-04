@@ -118,7 +118,8 @@ def _ensure_seeded_instances_exist() -> None:
 # SELECTOR PRINCIPAL
 # =============================================================
 
-def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
+def render_instance_selector(module_name: str = "module",
+                             include_all: bool = False) -> Dict[str, Any]:
     """
     Renderiza el selector de instancia activa en la sidebar y devuelve
     el contexto completo para el módulo que lo invoca.
@@ -136,8 +137,14 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
     # 1. Asegurar que existan instances de seed (auto-bootstrap)
     _ensure_seeded_instances_exist()
 
-    # 2. Listar instances disponibles
+    # 2. Listar instances disponibles. Por defecto solo EN SERVICIO (oculta
+    #    equipos demo/fuera de servicio de todas las vistas operativas). El
+    #    admin (Machinery Library) pasa include_all=True para gestionarlos.
     instances = list_instances()
+    if not include_all:
+        instances = [i for i in instances
+                     if (i.get("in_service", True) if isinstance(i, dict)
+                         else getattr(i, "in_service", True))]
 
     st.markdown("### Activo monitoreado")
 
