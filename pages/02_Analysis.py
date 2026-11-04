@@ -629,6 +629,10 @@ _SGT300_CLEARANCE_UM = {
     "1": 152.0,   # Inlet bearing  (compresor/frío, muñón ~100 mm): Ø99.980 − Ø99.828
     "2": 317.0,   # CT bearing     (turbina/caliente, muñón ~150 mm): Ø150.006 − Ø149.689
 }
+# Estimación de INGENIERÍA (no dossier) para muñones de Ø8" (203 mm): claro
+# diametral ≈ 1.5 mils/in ≈ 305 µm (API 670 / regla ~1.5–2.0 mils/in → 305–406 µm).
+# Gearbox (4) y generador (5/6) son Ø8" según el cliente. Ajustar con OEM si se tiene.
+_SGT300_CLEARANCE_EST_UM = {"4": 305.0, "5": 305.0, "6": 305.0}
 
 
 def _ecc_status(eps: float):
@@ -648,6 +652,9 @@ def _ecc_status(eps: float):
 # Bently 0°=arriba). Generador (cojinetes 5 y 6): sondas ARRIBA, X=45°R, Y=45°L.
 # Turbina (cojinetes 1 y 2): sondas ABAJO, X=135°R, Y=135°L. Resto → turbina por default.
 _GEN_BEARINGS = {"5", "6"}
+# Sondas ARRIBA 45°R/45°L: generador (5/6) y gearbox (3/4) — mismo montaje
+# (confirmado cliente SGT300A/B). Turbina (1/2) = ABAJO 135°R/135°L.
+_PROBES_UP_45 = {"3", "4", "5", "6"}
 
 
 def _bearing_id(*vals):
@@ -661,10 +668,10 @@ def _bearing_id(*vals):
 
 
 def _probe_angles(bid):
-    """(ang_x, ang_y, zona) por cojinete (conv. Bently 0°=arriba). Generador (5/6) =
-    sondas ARRIBA 45°R/45°L; turbina (1/2) = sondas ABAJO 135°R/135°L."""
-    if str(bid) in _GEN_BEARINGS:
-        return 45.0, 45.0, "generador"
+    """(ang_x, ang_y, zona) por cojinete (conv. Bently 0°=arriba). Generador (5/6)
+    y gearbox (3/4) = sondas ARRIBA 45°R/45°L; turbina (1/2) = ABAJO 135°R/135°L."""
+    if str(bid) in _PROBES_UP_45:
+        return 45.0, 45.0, ("generador" if str(bid) in _GEN_BEARINGS else "gearbox")
     return 135.0, 135.0, "turbina"
 
 
@@ -2182,6 +2189,7 @@ elif view == "Shaft Centerline":
         _probes_sc = [(b.x.label, float(np.sin(_axr_sc)), float(np.cos(_axr_sc)), _angx_sc, "R"),
                       (b.y.label, float(-np.sin(_ayr_sc)), float(np.cos(_ayr_sc)), _angy_sc, "L")]
         _oem_clr = _SGT300_CLEARANCE_UM.get(_bn)
+        _est_clr = None if _oem_clr is not None else _SGT300_CLEARANCE_EST_UM.get(_bn)
         _ntot = int(_rawx.size)
 
         def _fmt_ts(ts):  # "7/4/2026 10:09:04 PM" → "7/4/2026 10:09 PM"
@@ -2244,13 +2252,19 @@ elif view == "Shaft Centerline":
             # --- claro diametral ---
             _rise0 = float(np.nanmax(np.hypot(_rawx - _ox, _rawy - _oy))) if _rawx.size else 100.0
             _auto_clr = float(round(max(_rise0 * 2.2, 100.0) / 10) * 10)
+            _pre_clr = _oem_clr if _oem_clr is not None else _est_clr
             clr = st.number_input("Claro diametral del cojinete (µm)",
-                                  value=_oem_clr if _oem_clr is not None else _auto_clr, step=10.0,
+                                  value=_pre_clr if _pre_clr is not None else _auto_clr, step=10.0,
                                   help="Del montaje / API 670. Radio del claro = la mitad. "
-                                       "Default OEM SGT-300: cojinete 1 (Inlet)=152, 2 (CT)=317 µm.")
+                                       "OEM SGT-300: coj 1 (Inlet)=152, 2 (CT)=317 µm. "
+                                       "Gearbox/gen (Ø8\") estimado ≈305 µm (1.5 mils/in).")
             if _oem_clr is not None:
                 st.caption(f"⬤ Claro OEM (dossier SGT-300) cojinete {_bn}: {_oem_clr:.0f} µm "
                            f"diametral · radio {_oem_clr / 2:.0f} µm.")
+            elif _est_clr is not None:
+                st.caption(f"⬤ Claro ESTIMADO (Ø8\" ≈ 1.5 mils/in, no dossier) cojinete "
+                           f"{_bn}: {_est_clr:.0f} µm diametral · radio {_est_clr / 2:.0f} µm. "
+                           f"Rango típico 305–406 µm; ajustá con OEM si lo tenés.")
 
         # cambios de gap referidos al giro lento
         _dgx = _rawx - _ox

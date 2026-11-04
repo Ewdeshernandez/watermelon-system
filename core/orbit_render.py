@@ -30,6 +30,10 @@ import numpy as np
 
 _NAVY = "#12305e"
 _GEN_BEARINGS = {5, 6}
+# Cojinetes con sondas de proximidad montadas ARRIBA a 45°R/45°L (conv. Bently
+# 0°=arriba): generador (5/6) Y gearbox (3/4) — mismo montaje, confirmado por
+# el cliente en SGT300A/B. Turbina (1/2) = sondas ABAJO 135°R/135°L.
+_PROBES_UP_45 = {3, 4, 5, 6}
 
 
 # ---------------------------------------------------------------------------
@@ -46,10 +50,10 @@ def bearing_number(*vals) -> int:
 
 
 def probe_angles(bnum: int):
-    """(ang_x, ang_y, zona). Generador (5/6) = sondas ARRIBA 45°R/45°L;
-    turbina/gearbox = sondas ABAJO 135°R/135°L (conv. Bently 0°=arriba)."""
-    if int(bnum) in _GEN_BEARINGS:
-        return 45.0, 45.0, "generador"
+    """(ang_x, ang_y, zona). Generador (5/6) y gearbox (3/4) = sondas ARRIBA
+    45°R/45°L; turbina (1/2) = sondas ABAJO 135°R/135°L (conv. Bently 0°=arriba)."""
+    if int(bnum) in _PROBES_UP_45:
+        return 45.0, 45.0, ("generador" if int(bnum) in _GEN_BEARINGS else "gearbox")
     return 135.0, 135.0, "turbina"
 
 
