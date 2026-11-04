@@ -938,9 +938,6 @@ def _uploaded_trend_block():
     if not sel:
         st.info("Elegí al menos un sensor.")
         return
-    # Rango global de tiempo de los sensores elegidos (para el recorte).
-    g0 = min(tmap[l].times[0] for l in sel if len(tmap[l].times))
-    g1 = max(tmap[l].times[-1] for l in sel if len(tmap[l].times))
     # Prefill de alarma/danger desde setpoint del cojinete, si lo hay.
     _a0 = _d0 = 0.0
     for l in sel:
@@ -948,14 +945,25 @@ def _uploaded_trend_block():
         if _sp:
             _a0, _d0 = float(_sp[0]), float(_sp[1])
             break
+    _raw_day = min(tmap[l].times[0] for l in sel if len(tmap[l].times))
 
     # ---- Controles en popover (la gráfica manda, estilo Shaft Centerline) ----
     _pop = st.popover("⚙ Ajustes", use_container_width=False)
     with _pop:
+        off_h = st.number_input("Corrección de reloj (horas)", value=0.0, step=1.0,
+                                key="utr_off",
+                                help="El archivo trae la fecha/hora del RELOJ de "
+                                     "System1. Si estaba corrido, ajustá aquí "
+                                     "(ej +24 = un día adelante).")
+        _shift = _dt.timedelta(hours=float(off_h))
+        # Tiempos DESPLAZADOS por sensor (el crudo no se toca).
+        stimes = {l: [t + _shift for t in tmap[l].times] for l in sel}
+        g0 = min(stimes[l][0] for l in sel if stimes[l])
+        g1 = max(stimes[l][-1] for l in sel if stimes[l])
         if g1 > g0:
             win = st.slider("Ventana de tiempo (recorte)", min_value=g0, max_value=g1,
                             value=(g0, g1), step=_dt.timedelta(seconds=1),
-                            format="HH:mm:ss", key="utr_win",
+                            format="MM/DD HH:mm:ss", key="utr_win",
                             help="Arrastrá para quedarte con un tramo: quitar la cola "
                                  "detenida, aislar el evento, etc.")
             lo, hi = win
@@ -975,11 +983,15 @@ def _uploaded_trend_block():
         with cD:
             dg = st.number_input("Danger", min_value=0.0, value=round(_d0, 1),
                                  step=1.0, key="utr_dg")
+        if _shift:
+            st.caption(f"Reloj original del archivo: {_raw_day:%d %b %Y %H:%M}. "
+                       f"Mostrando con {off_h:+g} h.")
 
-    def _crop(tr):
-        """(times, values, speed) del sensor dentro de la ventana [lo,hi]
-        (+ sin tramo detenido si aplica)."""
-        t = tr.times
+    def _crop(lab):
+        """(times, values, speed) del sensor en la ventana [lo,hi] (tiempos ya
+        desplazados; + sin tramo detenido si aplica)."""
+        t = stimes[lab]
+        tr = tmap[lab]
         y = tr.values
         s = tr.speed if tr.speed.size == y.size else np.full(y.size, np.nan)
         idx = [i for i in range(len(t)) if lo <= t[i] <= hi]
@@ -993,7 +1005,7 @@ def _uploaded_trend_block():
     units, ends, t_min, t_max = set(), [], None, None
     for i, lab in enumerate(sel):
         tr = tmap[lab]
-        ts, ys, _ = _crop(tr)
+        ts, ys, _ = _crop(lab)
         if not len(ts):
             continue
         units.add(tr.unit or "")
@@ -1030,7 +1042,7 @@ def _uploaded_trend_block():
         for lab in sel:
             tr = tmap[lab]
             key_m = tr.machine or "máquina"
-            rts, _, rsp = _crop(tr)
+            rts, _, rsp = _crop(lab)
             if key_m in _seen or not len(rts) or not np.isfinite(rsp).any():
                 continue
             _seen.add(key_m)
@@ -1051,7 +1063,7 @@ def _uploaded_trend_block():
     fig = _layout(fig, f"Tendencia de alta tasa · {_var}", h=520)
     fig.update_xaxes(title="", showgrid=True, gridcolor="rgba(120,140,170,.12)",
                      showline=True, linecolor="#d9e1ec",
-                     rangeslider=dict(visible=True, thickness=0.06))
+                     rangeslider=dict(visible=False))
     fig.update_layout(
         yaxis=dict(title=f"{_var} ({_unit or 'a.u.'})", showgrid=True,
                    gridcolor="rgba(120,140,170,.12)", zeroline=False),
@@ -1066,14 +1078,15 @@ def _uploaded_trend_block():
                                       rangemode="tozero"))
     st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
     _download_fig_button(fig, _vfile("Tendencia alta tasa"), key="utrend")
-    _npts = sum(len(_crop(tmap[l])[0]) for l in sel)
+    _npts = sum(len(_crop(l)[0]) for l in sel)
     _dur = ((t_max - t_min).total_seconds() / 60.0) if (t_min and t_max) else 0
     _wnote = (" · ventana recortada" if (lo != g0 or hi != g1 or hide_stop) else "")
+    _offn = (f" · reloj {off_h:+g} h" if _shift else "")
     st.caption(f"{len(sel)} sensor(es) · {_npts:,} muestras · {_dur:.0f} min "
-               f"({t_min:%d %b %H:%M:%S} → {t_max:%H:%M:%S}){_wnote} · {_unit}. "
+               f"({t_min:%d %b %H:%M:%S} → {t_max:%H:%M:%S}){_wnote}{_offn} · {_unit}. "
                "Línea SIN suavizar (evento real). Círculo = pico. "
-               "**⚙ Ajustes** para recortar la ventana en tiempo y fijar alarma/danger; "
-               "el rangeslider de abajo hace zoom.")
+               "**⚙ Ajustes**: recortar ventana en tiempo, corregir el reloj y "
+               "fijar alarma/danger.")
 
 
 def _trend_block():
