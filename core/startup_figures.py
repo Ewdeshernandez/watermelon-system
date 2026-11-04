@@ -374,14 +374,21 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
                 continue
             unit = s.get("amp_unit", "") or ""
             lbl = s.get("sensor_label", "")
+            # orden ascendente por rpm + fase DESENROLLADA (unwrap) → curva
+            # continua sin saltos de 360° (como Bently/System1).
+            _o = np.argsort(r)
+            r, a, p = r[_o], a[_o], p[_o]
+            pw = np.degrees(np.unwrap(np.radians(p)))
+            pw = pw - float(np.round(pw[0] / 360.0)) * 360.0
+            # System1: FASE ARRIBA (lag, eje invertido) + AMPLITUD ABAJO.
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                                vertical_spacing=0.07, row_heights=[0.56, 0.44])
-            fig.add_trace(go.Scatter(x=r, y=a, mode="lines+markers",
-                          line=dict(color=_NAVY, width=1.9), marker=dict(size=4)),
-                          row=1, col=1)
-            fig.add_trace(go.Scatter(x=r, y=p, mode="lines+markers",
-                          line=dict(color=_AMBER, width=1.9), marker=dict(size=4)),
-                          row=2, col=1)
+                                vertical_spacing=0.07, row_heights=[0.44, 0.56])
+            fig.add_trace(go.Scatter(x=r, y=pw, mode="lines",
+                          line=dict(color=_NAVY, width=1.9, shape="spline",
+                                    smoothing=0.5)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=r, y=a, mode="lines",
+                          line=dict(color=_AMBER, width=1.9, shape="spline",
+                                    smoothing=0.5)), row=2, col=1)
             cs = s.get("critical_speed_rpm")
             if cs:
                 q = s.get("q_factor") or 0.0
@@ -393,10 +400,16 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
                                    showarrow=False, font=dict(size=11, color="#dc3545"))
             if op > 0:
                 for rr in (1, 2):
-                    fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"),
+                    fig.add_vline(x=op, line=dict(color="#0f172a", width=1, dash="dot"),
                                   row=rr, col=1)
-            fig.update_yaxes(title=f"Amplitud ({unit})", row=1, col=1)
-            fig.update_yaxes(title="Fase (°)", row=2, col=1)
+                fig.add_annotation(x=op, yref="paper", y=1.0, text=f"op {op:.0f}",
+                                   showarrow=False, font=dict(size=10, color="#0f172a"),
+                                   xshift=18)
+            # Fase arriba, eje INVERTIDO (el lag crece hacia abajo), ticks cada 90°.
+            fig.update_yaxes(title="Fase 1X (°) · lag", autorange="reversed",
+                             dtick=90, row=1, col=1)
+            fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero",
+                             row=2, col=1)
             fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
             png = _png(_layout(fig, f"Bode · {lbl}", h=560), height=560)
             if png:

@@ -400,6 +400,22 @@ def _smooth_xy(x, y, nbins: int = 150):
     return np.asarray(xs), np.asarray(ys)
 
 
+def _unwrap_phase(rpm, ph):
+    """Fase DESENROLLADA (unwrap) vs rpm → curva continua sin saltos de 360°
+    (como Bently/System1). Devuelve la fase alineada al orden de `rpm` de entrada;
+    arranca en la vuelta 0-360. Se desenrolla ANTES de suavizar para que el
+    promedio por balde no se rompa al cruzar 360°."""
+    rpm = np.asarray(rpm, float); ph = np.asarray(ph, float)
+    if rpm.size < 2:
+        return ph
+    o = np.argsort(rpm)
+    pw = np.degrees(np.unwrap(np.radians(ph[o])))
+    pw = pw - float(np.round(pw[0] / 360.0)) * 360.0
+    out = np.empty_like(pw)
+    out[o] = pw
+    return out
+
+
 def _saved_sweeps(kind, sensor_label, key):
     """Popover '📊 Comparar guardado': elegir máquina + hasta 3 snapshots
     guardados del MISMO sensor para superponer (ghost dashed). kind='bode'|'polar'.
@@ -2470,33 +2486,36 @@ elif view == "Bode":
         ab, bc, cd = (s.get("iso_boundary_AB"), s.get("iso_boundary_BC"),
                       s.get("iso_boundary_CD"))
         from plotly.subplots import make_subplots
+        # System1: FASE ARRIBA (lag, eje invertido) + AMPLITUD ABAJO.
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.07,
-                            row_heights=[0.56, 0.44])
+                            row_heights=[0.44, 0.56])
         amax = max(float(np.nanmax(_ampc)), cd or 0) * 1.12
+        # zonas ISO en la AMPLITUD (row 2)
         for lo, hi, z in [(0.0, ab, "A"), (ab, bc, "B"), (bc, cd, "C"), (cd, amax, "D")]:
             if lo is None or hi is None:
                 continue
             fig.add_hrect(y0=lo, y1=hi, line_width=0, fillcolor=_ISO[z],
-                          opacity=0.08, row=1, col=1)
+                          opacity=0.08, row=2, col=1)
+        _phu = _unwrap_phase(sw.rpm, _phc)
+        _rp, _ps = _smooth_xy(sw.rpm, _phu)
         _ra, _as = _smooth_xy(sw.rpm, _ampc)
-        _rp, _ps = _smooth_xy(sw.rpm, _phc)
-        fig.add_trace(go.Scatter(x=_ra, y=_as, mode="lines", name="Actual",
+        fig.add_trace(go.Scatter(x=_rp, y=_ps, mode="lines", name="Actual",
                                  line=dict(color=_NAVY, width=2.4, shape="spline",
                                            smoothing=0.6)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=_rp, y=_ps, mode="lines", showlegend=False,
+        fig.add_trace(go.Scatter(x=_ra, y=_as, mode="lines", showlegend=False,
                                  line=dict(color=_AMBER, width=2.4, shape="spline",
                                            smoothing=0.6)), row=2, col=1)
         _cmp = _saved_sweeps("bode", sw.label, "bode")
         for _ci, _cs in enumerate(_cmp):
             if _cs["rpm"].size < 3:
                 continue
+            _crp, _cp = _smooth_xy(_cs["rpm"], _unwrap_phase(_cs["rpm"], _cs["phase"]))
             _cr, _ca = _smooth_xy(_cs["rpm"], _cs["amp"])
-            _crp, _cp = _smooth_xy(_cs["rpm"], _cs["phase"])
             _ccol = _TREND_PAL[(_ci + 2) % len(_TREND_PAL)]
-            fig.add_trace(go.Scatter(x=_cr, y=_ca, mode="lines", name=_cs["label"],
+            fig.add_trace(go.Scatter(x=_crp, y=_cp, mode="lines", name=_cs["label"],
                           line=dict(color=_ccol, width=1.7, dash="dash")),
                           row=1, col=1)
-            fig.add_trace(go.Scatter(x=_crp, y=_cp, mode="lines", showlegend=False,
+            fig.add_trace(go.Scatter(x=_cr, y=_ca, mode="lines", showlegend=False,
                           line=dict(color=_ccol, width=1.7, dash="dash")),
                           row=2, col=1)
         for c in s.get("criticals", []):
@@ -2508,9 +2527,11 @@ elif view == "Bode":
             fig.add_vline(x=c["rpm"], line=dict(color=col, width=1, dash="dash"),
                           row=2, col=1)
         fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"),
-                      annotation_text="op", annotation_position="bottom", row=1, col=1)
-        fig.update_yaxes(title=f"Amplitud ({unit})", row=1, col=1)
-        fig.update_yaxes(title="Fase (°)", row=2, col=1)
+                      annotation_text="op", annotation_position="top", row=1, col=1)
+        fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"), row=2, col=1)
+        fig.update_yaxes(title="Fase 1X (°) · lag", autorange="reversed", dtick=90,
+                         row=1, col=1)
+        fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
         _figb = _layout(fig, f"Bode · {sw.label}", h=560)
         if _cmp:
