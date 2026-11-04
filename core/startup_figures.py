@@ -99,6 +99,75 @@ def _machine_of_bearing(bid: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Helpers rotodinámicos (compartidos Bode/Polar) — convención Bently
+# --------------------------------------------------------------------------- #
+def _slowroll_vector(r, a, p, frac: float = 0.05):
+    """Vector de giro lento (runout) = promedio del vector 1X a baja velocidad
+    (rpm ≤ mínimo + frac·rango). Devuelve (sx, sy, mag, ang_deg, n)."""
+    r = np.asarray(r, float); a = np.asarray(a, float)
+    ph = np.radians(np.asarray(p, float))
+    x = a * np.cos(ph); y = a * np.sin(ph)
+    if r.size == 0:
+        return 0.0, 0.0, 0.0, 0.0, 0
+    thr = float(np.nanmin(r)) + frac * (float(np.nanmax(r)) - float(np.nanmin(r)))
+    m = np.isfinite(r) & (r <= thr)
+    if int(m.sum()) >= 1:
+        sx, sy, n = float(np.nanmean(x[m])), float(np.nanmean(y[m])), int(m.sum())
+    else:
+        i = int(np.nanargmin(r)); sx, sy, n = float(x[i]), float(y[i]), 1
+    return sx, sy, float(np.hypot(sx, sy)), float(np.degrees(np.arctan2(sy, sx)) % 360.0), n
+
+
+def _compensate(r, a, p, frac: float = 0.05):
+    """Resta el vector de giro lento de cada punto (Bently 5-5). Devuelve
+    (amp_comp, phase_comp, slowroll_dict)."""
+    r = np.asarray(r, float); a = np.asarray(a, float)
+    ph = np.radians(np.asarray(p, float))
+    x = a * np.cos(ph); y = a * np.sin(ph)
+    sx, sy, mag, ang, n = _slowroll_vector(r, a, p, frac)
+    xc, yc = x - sx, y - sy
+    return (np.hypot(xc, yc),
+            np.degrees(np.arctan2(yc, xc)) % 360.0,
+            {"mag": mag, "ang": ang, "n": n})
+
+
+def _unwrap_robust(r, p):
+    """Fase desenrollada ROBUSTA (media circular en ventana corta antes de
+    unwrap) → curva continua sin runaway de 360° en bandas ruidosas."""
+    r = np.asarray(r, float); p = np.asarray(p, float)
+    n = int(r.size)
+    if n < 2:
+        return p
+    o = np.argsort(r)
+    z = np.exp(1j * np.radians(p[o]))
+    k = max(3, (n // 100) | 1)
+    if n > k:
+        z = np.convolve(z, np.ones(k) / k, mode="same")
+    pw = np.degrees(np.unwrap(np.angle(z)))
+    pw = pw - float(np.round(pw[0] / 360.0)) * 360.0
+    out = np.empty_like(pw)
+    out[o] = pw
+    return out
+
+
+def _amp_coeff_saf(r, a, rc):
+    """Factor de amplificación síncrona por COEFICIENTE DE AMPLITUD (Bently 5-12):
+    amp del pico de resonancia / amplitud de la asíntota (respuesta forzada lejos
+    de la crítica, bien por encima). Aproximado. Devuelve float o 0."""
+    r = np.asarray(r, float); a = np.asarray(a, float)
+    if r.size < 5 or not rc:
+        return 0.0
+    ipk = int(np.argmin(np.abs(r - rc)))
+    apk = float(a[ipk])
+    # asíntota: mediana de la amplitud bien por encima de la crítica (≥1.5×rc)
+    hi = a[r >= 1.5 * rc]
+    base = float(np.median(hi)) if hi.size >= 3 else float(np.median(a[r > rc])) if (r > rc).any() else 0.0
+    if base <= 1e-9 or apk <= 0:
+        return 0.0
+    return apk / base
+
+
+# --------------------------------------------------------------------------- #
 # Full Spectrum (steady, plena carga) — derivado del snapshot de órbita
 # --------------------------------------------------------------------------- #
 def _spk(unit: str):
@@ -374,12 +443,19 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
                 continue
             unit = s.get("amp_unit", "") or ""
             lbl = s.get("sensor_label", "")
-            # orden ascendente por rpm + fase DESENROLLADA (unwrap) → curva
-            # continua sin saltos de 360° (como Bently/System1).
+            # orden ascendente por rpm
             _o = np.argsort(r)
             r, a, p = r[_o], a[_o], p[_o]
-            pw = np.degrees(np.unwrap(np.radians(p)))
-            pw = pw - float(np.round(pw[0] / 360.0)) * 360.0
+            # COMPENSAR giro lento (Bently 5-5): solo para desplazamiento de eje
+            # (prox, µm). La velocidad/aceleración de carcasa no lleva runout.
+            _is_disp = "mm/s" not in unit.lower() and "g" not in unit.lower().split()
+            _srv = None
+            if _is_disp:
+                a, p, _srv = _compensate(r, a, p)
+            # fase DESENROLLADA ROBUSTA → curva continua sin runaway de 360°.
+            pw = _unwrap_robust(r, p)
+            # AF por coeficiente de amplitud (segundo método, Bently 5-12)
+            _saf_amp = _amp_coeff_saf(r, a, s.get("critical_speed_rpm"))
             # System1: FASE ARRIBA (lag, eje invertido) + AMPLITUD ABAJO.
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                                 vertical_spacing=0.07, row_heights=[0.44, 0.56])
@@ -395,8 +471,11 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
                 for rr in (1, 2):
                     fig.add_vline(x=float(cs), line=dict(color="#dc3545", width=1.2,
                                   dash="dash"), row=rr, col=1)
+                _aflbl = f"fc {float(cs):.0f} · AF {float(q):.1f}"
+                if _saf_amp > 0:
+                    _aflbl += f"/{_saf_amp:.1f}"
                 fig.add_annotation(x=float(cs), yref="paper", y=1.0,
-                                   text=f"fc {float(cs):.0f} · Q={float(q):.1f}",
+                                   text=_aflbl,
                                    showarrow=False, font=dict(size=11, color="#dc3545"))
             if op > 0:
                 for rr in (1, 2):
@@ -413,19 +492,33 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
             fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
             png = _png(_layout(fig, f"Bode · {lbl}", h=560), height=560)
             if png:
-                _amp_op = float(s.get("amp_at_op") or 0.0)
+                _amp_op = (float(np.interp(op, r, a)) if (op > 0 and r.size)
+                           else float(a[-1]) if a.size else 0.0)
+                _comp_txt = (f" Compensado de giro lento (vector restado "
+                             f"{_srv['mag']:.2f} {unit} ∠{_srv['ang']:.0f}°, "
+                             f"Bently 5-5)." if _srv else
+                             " Sin compensación de giro lento (medición de "
+                             "carcasa).")
+                _q = float(s.get("q_factor") or 0)
+                _af_txt = ""
+                if cs:
+                    _af_txt = (f" Crítica en {float(cs):.0f} rpm; factor de "
+                               f"amplificación AF≈{_q:.1f} (media potencia)")
+                    if _saf_amp > 0:
+                        _af_txt += f" / {_saf_amp:.1f} (coef. de amplitud)"
+                    _mg = (op - float(cs)) / op * 100.0 if op else 0.0
+                    _af_txt += (f"; margen de separación a operación {_mg:+.0f}% "
+                                "(se evalúa con API 684).")
+                else:
+                    _af_txt = (" No se resolvió una crítica dentro del rango "
+                               "barrido.")
                 out.append({
                     "kind": "Bode", "label": lbl, "date": fecha, "run": run,
                     "png": png,
                     "analysis": (
                         f"Respuesta síncrona 1X del run-up. Amplitud a operación "
                         f"({op:.0f} rpm) ≈ {_amp_op:.2f} {unit}."
-                        + (f" Crítica detectada en {float(cs):.0f} rpm "
-                           f"(Q={float(s.get('q_factor') or 0):.1f}); el margen "
-                           "a la velocidad de operación se evalúa con API 684."
-                           if cs else
-                           " No se resolvió una crítica dentro del rango "
-                           "barrido."))})
+                        + _comp_txt + _af_txt)})
         except Exception as e:  # noqa: BLE001
             log.warning("bode_startup_bundle sensor: %s", e)
             continue
