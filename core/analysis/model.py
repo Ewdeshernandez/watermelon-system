@@ -74,11 +74,30 @@ class Sweep:
 
 
 @dataclass
+class Trend:
+    """Tendencia de alta tasa exportada por System1: una variable (Direct/1X/…)
+    vs TIEMPO (no rpm), ~1 Hz. Captura eventos que el rollup de Live pierde
+    (ej. falla del generador a las 2 am). X-Axis Value = timestamp, no velocidad."""
+    label: str = ""                 # Point Name, ej "5XD GENERADOR DE"
+    bearing: str = ""               # "5", "6", …
+    axis: str = ""                  # "X" | "Y" | ""
+    machine: str = ""               # Machine Name (SGT300A)
+    variable: str = ""              # Direct / 1X / Gap …
+    unit: str = ""                  # µm pp
+    times: List = field(default_factory=list)       # datetime por muestra
+    values: np.ndarray = field(default_factory=lambda: np.array([]))
+    speed: np.ndarray = field(default_factory=lambda: np.array([]))  # rpm por muestra
+    valid: np.ndarray = field(default_factory=lambda: np.array([]))  # bool status
+    source: str = ""
+
+
+@dataclass
 class AnalysisRecord:
     name: str = ""
     channels: List[Channel] = field(default_factory=list)
     bearings: List[Bearing] = field(default_factory=list)
     sweeps: List[Sweep] = field(default_factory=list)
+    trends: List[Trend] = field(default_factory=list)
 
     @property
     def rpm(self) -> Optional[float]:
@@ -227,6 +246,80 @@ def parse_sweep(name: str, data: bytes) -> Optional[Sweep]:
                  phase=ph[m][order], unit=unit, source=name)
 
 
+def parse_trend(name: str, data: bytes) -> Optional["Trend"]:
+    """Detecta y parsea un CSV de TENDENCIA de System1: cabecera de metadatos +
+    tabla cuyo 'X-Axis Value' es un TIMESTAMP (no rpm). Es lo que distingue una
+    tendencia de un Bode/Polar (ahí X-Axis Value es numérico = velocidad).
+    Columnas: X-Axis Value, Y-Axis Value, Y-Axis Status, Phase, Phase Status,
+    Speed, Speed Status. Devuelve Trend o None."""
+    try:
+        text = data.decode("utf-8-sig", "replace")
+    except Exception:  # noqa: BLE001
+        return None
+    lines = text.splitlines()
+    meta: Dict[str, str] = {}
+    hdr_idx = None
+    for i, ln in enumerate(lines):
+        low = ln.strip().lower().replace(" ", "")
+        if low.startswith("x-axisvalue,") or low.startswith("x-axisvalue\t"):
+            hdr_idx = i
+            break
+        if "," in ln:
+            k, _, v = ln.partition(",")
+            meta[k.strip()] = v.strip()
+    if hdr_idx is None:
+        return None
+    header = [c.strip().lower() for c in lines[hdr_idx].split(",")]
+
+    def col(*names):
+        for nm in names:
+            if nm in header:
+                return header.index(nm)
+        return None
+    i_x = col("x-axis value", "timestamp")
+    i_y = col("y-axis value")
+    i_st = col("y-axis status")
+    i_sp = col("speed")
+    if i_x is None or i_y is None:
+        return None
+    xs, ys, sps, oks = [], [], [], []
+    for ln in lines[hdr_idx + 1:]:
+        parts = ln.split(",")
+        if len(parts) <= max(i_x, i_y):
+            continue
+        xraw = parts[i_x].strip()
+        if not xraw:
+            continue
+        xs.append(xraw)
+        ys.append(_to_float(parts[i_y]))
+        sps.append(_to_float(parts[i_sp]) if i_sp is not None
+                   and len(parts) > i_sp else float("nan"))
+        oks.append((parts[i_st].strip().lower() == "valid") if i_st is not None
+                   and len(parts) > i_st else True)
+    if len(xs) < 2:
+        return None
+    # X-Axis = tiempo. Si parsea como datetime, es tendencia; si todo es numérico
+    # (rpm), NO es tendencia (es un Bode/Polar) → None para que lo tome parse_sweep.
+    ts = pd.to_datetime(pd.Series(xs), errors="coerce",
+                        format="%m/%d/%Y %I:%M:%S %p")
+    if ts.isna().all():
+        ts = pd.to_datetime(pd.Series(xs), errors="coerce")  # formato genérico
+    good = ts.notna().to_numpy()
+    if int(good.sum()) < 2:
+        return None  # X no es tiempo → lo maneja parse_sweep
+    tv = [v.to_pydatetime() for v in ts[good]]
+    yv = np.asarray(ys, float)[good]
+    sp = np.asarray(sps, float)[good]
+    ok = np.asarray(oks, bool)[good]
+    label = meta.get("Point Name", "").strip() or name.rsplit(".", 1)[0]
+    bn, ax = _bearing_axis(label)
+    return Trend(label=label, bearing=bn, axis=ax,
+                 machine=meta.get("Machine Name", "").strip(),
+                 variable=meta.get("Variable", "").strip(),
+                 unit=meta.get("Y-Axis Unit", "").strip(),
+                 times=tv, values=yv, speed=sp, valid=ok, source=name)
+
+
 def _to_float(s) -> float:
     try:
         return float(str(s).strip())
@@ -319,7 +412,12 @@ def build_record(files) -> AnalysisRecord:
     en un solo archivo). Empareja X/Y por cojinete."""
     chans: List[Channel] = []
     sweeps: List[Sweep] = []
+    trends: List[Trend] = []
     for f in files or []:
+        tr = parse_trend(f.name, f.getvalue())
+        if tr is not None and tr.values.size:
+            trends.append(tr)
+            continue
         sw = parse_sweep(f.name, f.getvalue())
         if sw is not None:
             sweeps.append(sw)
@@ -345,7 +443,8 @@ def build_record(files) -> AnalysisRecord:
     if files and len(files) > 1:
         name = f"{len(files)} archivos"
     return AnalysisRecord(name=name, channels=chans,
-                          bearings=list(by_brg.values()), sweeps=sweeps)
+                          bearings=list(by_brg.values()), sweeps=sweeps,
+                          trends=trends)
 
 
 # -------------------------------------------------------------------------

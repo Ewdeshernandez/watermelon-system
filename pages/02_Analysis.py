@@ -203,12 +203,16 @@ else:
         st.stop()
     rec = _record_from(payload)
 
-if rec is None or (not rec.channels and not rec.sweeps):
-    st.warning("No se pudo cargar ningún canal ni barrido. ¿Formato / captura correctos?")
+if rec is None or (not rec.channels and not rec.sweeps and not rec.trends):
+    st.warning("No se pudo cargar ningún canal, barrido ni tendencia. "
+               "¿Formato / captura correctos?")
     st.stop()
 if not rec.channels and rec.sweeps:
     st.info(f"Cargaste {len(rec.sweeps)} barrido(s) de Bode/Polar (sin onda cruda). "
             "Usá las vistas **Bode** y **Polar**; las demás necesitan el CSV de onda.")
+if not rec.channels and not rec.sweeps and rec.trends:
+    st.info(f"Cargaste {len(rec.trends)} tendencia(s) de alta tasa de System1. "
+            "Andá a la vista **Tendencias** para verlas con eje de tiempo.")
 
 _rpm = rec.rpm
 cur_asset = cur_asset or rec.name or "CSV"
@@ -909,7 +913,130 @@ def _orbit_add_cell(fig, bb, d, R, ang_x, ang_y, row, col):
                        bgcolor="rgba(255,255,255,0.65)", **_rc)
 
 
+def _trend_setpoint(tr):
+    """(alarma, danger, unidad) de una Trend por token coj/eje/letra."""
+    if tr.axis in ("X", "Y", "Z"):
+        for _l in ("D", "A", "V", ""):
+            if (tr.bearing, tr.axis, _l) in _SP_LUT:
+                return _SP_LUT[(tr.bearing, tr.axis, _l)]
+    k = _sp_tok(tr.label or "")
+    if k and k in _SP_LUT:
+        return _SP_LUT[k]
+    return None
+
+
+def _uploaded_trend_block():
+    """Tendencias de alta tasa subidas como CSV de System1 (eje de tiempo, ~1 Hz).
+    SIN suavizado: la gracia es ver el evento (spike/caída) que el rollup de Live
+    promedia y pierde. Zoom en tiempo con el rangeslider."""
+    trs = rec.trends
+    labels = [t.label for t in trs]
+    tmap = {t.label: t for t in trs}
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        sel = st.multiselect("Sensores (uno o varios)", labels, default=labels,
+                             key="utr_chs")
+    with c2:
+        spd_on = st.checkbox("RPM (eje der.)", key="utr_rpm",
+                             help="Superpone la velocidad para ver vibración vs rpm "
+                                  "durante el evento.")
+    if not sel:
+        st.info("Elegí al menos un sensor.")
+        return
+    fig = go.Figure()
+    units, ends, t_min, t_max, lim_lines = set(), [], None, None, {}
+    for i, lab in enumerate(sel):
+        tr = tmap[lab]
+        ts, ys = tr.times, tr.values
+        if not len(ts):
+            continue
+        units.add(tr.unit or "")
+        col = _TREND_PAL[i % len(_TREND_PAL)]
+        fig.add_trace(go.Scatter(
+            x=ts, y=ys, mode="lines", name=lab,
+            line=dict(color=col, width=1.2),      # sin spline: el evento es real
+            hovertemplate=f"<b>{lab}</b><br>%{{x|%d %b %H:%M:%S}}<br>"
+                          f"%{{y:.1f}} {tr.unit or ''}<extra></extra>"))
+        # pico del evento (máximo) marcado
+        _ok = np.isfinite(ys)
+        if _ok.any():
+            _im = int(np.nanargmax(np.where(_ok, ys, -np.inf)))
+            fig.add_trace(go.Scatter(x=[ts[_im]], y=[ys[_im]], mode="markers",
+                          marker=dict(color=col, size=8, symbol="circle-open",
+                                      line=dict(width=2)), showlegend=False,
+                          hovertemplate=f"<b>pico {lab}</b><br>%{{x|%d %b %H:%M:%S}}<br>"
+                                        f"%{{y:.1f}} {tr.unit or ''}<extra></extra>"))
+            ends.append((ts[_im], ys[_im], col))
+        t_min = ts[0] if t_min is None else min(t_min, ts[0])
+        t_max = ts[-1] if t_max is None else max(t_max, ts[-1])
+        sp = _trend_setpoint(tr)
+        if sp:
+            a, d, _ = sp
+            lim_lines.setdefault(round(a, 2), "#e8890c")
+            lim_lines.setdefault(round(d, 2), "#dc3545")
+    if not fig.data:
+        st.warning("Sin datos en los sensores elegidos.")
+        return
+    for xt, yv, col in ends:
+        fig.add_annotation(x=xt, y=yv, text=f"<b>{yv:.0f}</b>", showarrow=False,
+                           yanchor="bottom", yshift=6, font=dict(color=col, size=11.5,
+                           family="IBM Plex Mono"), bgcolor="rgba(255,255,255,0.72)")
+    spd_axis = False
+    if spd_on:
+        _seen = set()
+        for lab in sel:
+            tr = tmap[lab]
+            key_m = tr.machine or "máquina"
+            if key_m in _seen or not len(tr.speed):
+                continue
+            if not np.isfinite(tr.speed).any():
+                continue
+            _seen.add(key_m)
+            fig.add_trace(go.Scatter(
+                x=tr.times, y=tr.speed, mode="lines", name=f"RPM {key_m}",
+                yaxis="y2", line=dict(color="#8090a6", width=1.2, dash="dot"),
+                hovertemplate=f"<b>RPM {key_m}</b><br>%{{x|%d %b %H:%M:%S}}<br>"
+                              f"%{{y:,.0f}} rpm<extra></extra>"))
+            spd_axis = True
+    for val, col in lim_lines.items():
+        _lbl = f"{'Danger' if col == '#dc3545' else 'Alarma'} {val:g}"
+        fig.add_hline(y=val, line=dict(color=col, width=1.4, dash="dash"),
+                      annotation_text=_lbl, annotation_position="top left",
+                      annotation_font=dict(size=10.5, color=col, family="IBM Plex Mono"),
+                      annotation_bgcolor="rgba(255,255,255,0.75)")
+    _unit = next(iter(units)) if len(units) == 1 else "mixto"
+    _var = trs[0].variable or "Direct"
+    fig = _layout(fig, f"Tendencia de alta tasa · {_var}", h=520)
+    fig.update_xaxes(title="", showgrid=True, gridcolor="rgba(120,140,170,.12)",
+                     showline=True, linecolor="#d9e1ec",
+                     rangeslider=dict(visible=True, thickness=0.06))
+    fig.update_layout(
+        yaxis=dict(title=f"{_var} ({_unit or 'a.u.'})", showgrid=True,
+                   gridcolor="rgba(120,140,170,.12)", zeroline=False),
+        showlegend=True, hovermode="x unified",
+        legend=dict(orientation="h", yanchor="top", y=-0.22, xanchor="center", x=0.5,
+                    font=dict(size=12), bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=64, r=78 if spd_axis else 52, t=52, b=64),
+        plot_bgcolor="white", paper_bgcolor="white")
+    if spd_axis:
+        fig.update_layout(yaxis2=dict(title="RPM", overlaying="y", side="right",
+                                      showgrid=False, color="#5a6b85",
+                                      rangemode="tozero"))
+    st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+    _download_fig_button(fig, _vfile("Tendencia alta tasa"), key="utrend")
+    _npts = sum(len(tmap[l].values) for l in sel)
+    _dur = ((t_max - t_min).total_seconds() / 60.0) if (t_min and t_max) else 0
+    st.caption(f"{len(sel)} sensor(es) · {_npts:,} muestras · ventana {_dur:.0f} min "
+               f"({t_min:%d %b %H:%M} → {t_max:%H:%M}) · unidades {_unit}. "
+               "Línea SIN suavizar (muestra el evento real). Círculo = pico. "
+               "Arrastrá el rangeslider de abajo para hacer zoom en el evento. "
+               "Punteadas = alarma (ámbar) / danger (rojo) de la máquina.")
+
+
 def _trend_block():
+    if rec.trends:
+        _uploaded_trend_block()
+        return
     if not hist_caps:
         st.info("**Tendencias** — overall vs tiempo. Requiere varias capturas en el "
                 "tiempo (modo **Histórico del activo**).")
