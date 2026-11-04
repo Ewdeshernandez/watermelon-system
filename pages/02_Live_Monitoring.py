@@ -4460,27 +4460,13 @@ def main() -> None:
         import logging
         logging.warning("render_api670_table (overview) failed: %s", e)
 
-    # Análisis avanzado — onda CRUDA con keyphasor (agente en sitio → bucket
-    # dynamic_raw, cada 2 h). Órbita · Espectro · Forma de onda por cojinete.
-    # Render lazy: solo carga al abrir (evita costo en cada rerun).
-    try:
-        _tag_dyn = getattr(instance_obj, "tag", None) or instance_id
-        with st.expander("Advanced analysis — Waveform · Spectrum · Orbit",
-                         expanded=False):
-            _dyn_key = f"_dyn_open_{instance_id}"
-            if not st.session_state.get(_dyn_key):
-                if st.button("Open advanced analysis", key=f"wm_dyn_open_{instance_id}",
-                             use_container_width=True):
-                    st.session_state[_dyn_key] = True
-                    st.rerun()
-                st.caption("Raw waveform + keyphasor · orbit, spectrum and waveform "
-                           "per bearing (Turbine 1·2 / Generator 5·6).")
-            else:
-                from core.dynamic_raw_view import render_dynamic_raw
-                render_dynamic_raw(instance_id, _tag_dyn)
-    except Exception as e:  # noqa: BLE001
-        import logging
-        logging.warning("advanced analysis expander failed: %s", e)
+    # Ciclo 23.180 — "Advanced analysis — Waveform · Spectrum · Orbit"
+    # ELIMINADO de Live Monitoring (pedido del usuario): TODO el análisis de
+    # órbita / espectro / forma de onda / full-spectrum vive ahora en
+    # **Rotodinámica** (pages/02_Analysis), que es el fuerte de gráficos.
+    # La ingesta de snapshots dynamic_raw (core/dynraw_snapshots) NO se toca:
+    # sigue alimentando los snapshots que usa el REPORTE (briefing_figures) y
+    # el módulo de Rotodinámica. Esto solo quita el VISOR de Live Monitoring.
 
     # Ciclo 23.171 — "Detailed analysis — by sensor" ELIMINADO por redundante:
     # · Overall trend (multi-canal overlay + Tiles + botonera de rango) ya cubre
