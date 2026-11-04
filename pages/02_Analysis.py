@@ -628,11 +628,17 @@ _TREND_PAL = ["#12305e", "#e8890c", "#1f9d55", "#8b5cf6", "#0ea5e9", "#dc3545",
 _SGT300_CLEARANCE_UM = {
     "1": 152.0,   # Inlet bearing  (compresor/frío, muñón ~100 mm): Ø99.980 − Ø99.828
     "2": 317.0,   # CT bearing     (turbina/caliente, muñón ~150 mm): Ø150.006 − Ø149.689
+    # Coj 4 = cojinete L.S. del gearbox (Sketch 'Y', journal Ø228.6 = 9", viewed
+    # from L.S. end). Del PLANO del gearbox: CROWN clearance 0.254/0.305 mm
+    # DIAMETRAL (vertical) → uso el máximo de armado 305 µm. (Joint/split
+    # 0.173/0.249 mm es el claro horizontal, no gobierna la caída vertical.)
+    "4": 305.0,
 }
-# Estimación de INGENIERÍA (no dossier) para muñones de Ø8" (203 mm): claro
-# diametral ≈ 1.5 mils/in ≈ 305 µm (API 670 / regla ~1.5–2.0 mils/in → 305–406 µm).
-# Gearbox (4) y generador (5/6) son Ø8" según el cliente. Ajustar con OEM si se tiene.
-_SGT300_CLEARANCE_EST_UM = {"4": 305.0, "5": 305.0, "6": 305.0}
+# Estimación de INGENIERÍA (no plano) para el generador Ø8" (203 mm): claro
+# diametral ≈ 2.0 mils/in ≈ 406 µm. Con 1.5 mils/in (305) daba ε≥1 (imposible),
+# así que 2.0 mils/in es el valor físico/típico de bearing de generador 8".
+# Ajustar con el plano del generador cuando aparezca.
+_SGT300_CLEARANCE_EST_UM = {"5": 406.0, "6": 406.0}
 
 
 def _ecc_status(eps: float):
@@ -2256,15 +2262,18 @@ elif view == "Shaft Centerline":
             clr = st.number_input("Claro diametral del cojinete (µm)",
                                   value=_pre_clr if _pre_clr is not None else _auto_clr, step=10.0,
                                   help="Del montaje / API 670. Radio del claro = la mitad. "
-                                       "OEM SGT-300: coj 1 (Inlet)=152, 2 (CT)=317 µm. "
-                                       "Gearbox/gen (Ø8\") estimado ≈305 µm (1.5 mils/in).")
+                                       "OEM SGT-300: coj 1 (Inlet)=152, 2 (CT)=317, "
+                                       "4 (gearbox L.S. Ø9\" crown)=305 µm. "
+                                       "Gen (Ø8\") estimado ≈406 µm (2.0 mils/in).")
             if _oem_clr is not None:
-                st.caption(f"⬤ Claro OEM (dossier SGT-300) cojinete {_bn}: {_oem_clr:.0f} µm "
+                _src = ("plano gearbox, crown diametral" if _bn == "4"
+                        else "dossier SGT-300")
+                st.caption(f"⬤ Claro OEM ({_src}) cojinete {_bn}: {_oem_clr:.0f} µm "
                            f"diametral · radio {_oem_clr / 2:.0f} µm.")
             elif _est_clr is not None:
-                st.caption(f"⬤ Claro ESTIMADO (Ø8\" ≈ 1.5 mils/in, no dossier) cojinete "
+                st.caption(f"⬤ Claro ESTIMADO (gen Ø8\" ≈ 2.0 mils/in, no plano) cojinete "
                            f"{_bn}: {_est_clr:.0f} µm diametral · radio {_est_clr / 2:.0f} µm. "
-                           f"Rango típico 305–406 µm; ajustá con OEM si lo tenés.")
+                           f"Ajustá con el plano del generador si lo tenés.")
 
         # cambios de gap referidos al giro lento
         _dgx = _rawx - _ox
