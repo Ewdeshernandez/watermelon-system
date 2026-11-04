@@ -928,26 +928,72 @@ def _trend_setpoint(tr):
 def _uploaded_trend_block():
     """Tendencias de alta tasa subidas como CSV de System1 (eje de tiempo, ~1 Hz).
     SIN suavizado: la gracia es ver el evento (spike/caída) que el rollup de Live
-    promedia y pierde. Zoom en tiempo con el rangeslider."""
+    promedia y pierde. Recorte de ventana en tiempo + alarma/danger como en SCL."""
+    import datetime as _dt
     trs = rec.trends
     labels = [t.label for t in trs]
     tmap = {t.label: t for t in trs}
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        sel = st.multiselect("Sensores (uno o varios)", labels, default=labels,
-                             key="utr_chs")
-    with c2:
-        spd_on = st.checkbox("RPM (eje der.)", key="utr_rpm",
-                             help="Superpone la velocidad para ver vibración vs rpm "
-                                  "durante el evento.")
+    sel = st.multiselect("Sensores (uno o varios)", labels, default=labels,
+                         key="utr_chs")
     if not sel:
         st.info("Elegí al menos un sensor.")
         return
+    # Rango global de tiempo de los sensores elegidos (para el recorte).
+    g0 = min(tmap[l].times[0] for l in sel if len(tmap[l].times))
+    g1 = max(tmap[l].times[-1] for l in sel if len(tmap[l].times))
+    # Prefill de alarma/danger desde setpoint del cojinete, si lo hay.
+    _a0 = _d0 = 0.0
+    for l in sel:
+        _sp = _trend_setpoint(tmap[l])
+        if _sp:
+            _a0, _d0 = float(_sp[0]), float(_sp[1])
+            break
+
+    # ---- Controles en popover (la gráfica manda, estilo Shaft Centerline) ----
+    _pop = st.popover("⚙ Ajustes", use_container_width=False)
+    with _pop:
+        if g1 > g0:
+            win = st.slider("Ventana de tiempo (recorte)", min_value=g0, max_value=g1,
+                            value=(g0, g1), step=_dt.timedelta(seconds=1),
+                            format="HH:mm:ss", key="utr_win",
+                            help="Arrastrá para quedarte con un tramo: quitar la cola "
+                                 "detenida, aislar el evento, etc.")
+            lo, hi = win
+        else:
+            lo, hi = g0, g1
+        hide_stop = st.checkbox("Ocultar tramo detenido (rpm≈0 / sin velocidad)",
+                                value=False, key="utr_hidestop",
+                                help="Quita las muestras sin velocidad válida "
+                                     "(la rampa del gap tras la parada).")
+        spd_on = st.checkbox("Superponer RPM (eje derecho)", key="utr_rpm",
+                             help="Vibración vs velocidad durante el evento.")
+        cA, cD = st.columns(2)
+        with cA:
+            al = st.number_input("Alarma", min_value=0.0, value=round(_a0, 1),
+                                 step=1.0, key="utr_al",
+                                 help="0 = sin línea. Prefill del setpoint del cojinete.")
+        with cD:
+            dg = st.number_input("Danger", min_value=0.0, value=round(_d0, 1),
+                                 step=1.0, key="utr_dg")
+
+    def _crop(tr):
+        """(times, values, speed) del sensor dentro de la ventana [lo,hi]
+        (+ sin tramo detenido si aplica)."""
+        t = tr.times
+        y = tr.values
+        s = tr.speed if tr.speed.size == y.size else np.full(y.size, np.nan)
+        idx = [i for i in range(len(t)) if lo <= t[i] <= hi]
+        if hide_stop:
+            idx = [i for i in idx if np.isfinite(s[i]) and s[i] > 50]
+        if not idx:
+            return [], np.array([]), np.array([])
+        return [t[i] for i in idx], y[np.asarray(idx)], s[np.asarray(idx)]
+
     fig = go.Figure()
-    units, ends, t_min, t_max, lim_lines = set(), [], None, None, {}
+    units, ends, t_min, t_max = set(), [], None, None
     for i, lab in enumerate(sel):
         tr = tmap[lab]
-        ts, ys = tr.times, tr.values
+        ts, ys, _ = _crop(tr)
         if not len(ts):
             continue
         units.add(tr.unit or "")
@@ -957,53 +1003,49 @@ def _uploaded_trend_block():
             line=dict(color=col, width=1.2),      # sin spline: el evento es real
             hovertemplate=f"<b>{lab}</b><br>%{{x|%d %b %H:%M:%S}}<br>"
                           f"%{{y:.1f}} {tr.unit or ''}<extra></extra>"))
-        # pico del evento (máximo) marcado
         _ok = np.isfinite(ys)
         if _ok.any():
             _im = int(np.nanargmax(np.where(_ok, ys, -np.inf)))
             fig.add_trace(go.Scatter(x=[ts[_im]], y=[ys[_im]], mode="markers",
-                          marker=dict(color=col, size=8, symbol="circle-open",
-                                      line=dict(width=2)), showlegend=False,
+                          marker=dict(color=col, size=7, symbol="circle-open",
+                                      line=dict(width=1.6)), showlegend=False,
                           hovertemplate=f"<b>pico {lab}</b><br>%{{x|%d %b %H:%M:%S}}<br>"
                                         f"%{{y:.1f}} {tr.unit or ''}<extra></extra>"))
             ends.append((ts[_im], ys[_im], col))
         t_min = ts[0] if t_min is None else min(t_min, ts[0])
         t_max = ts[-1] if t_max is None else max(t_max, ts[-1])
-        sp = _trend_setpoint(tr)
-        if sp:
-            a, d, _ = sp
-            lim_lines.setdefault(round(a, 2), "#e8890c")
-            lim_lines.setdefault(round(d, 2), "#dc3545")
     if not fig.data:
-        st.warning("Sin datos en los sensores elegidos.")
+        st.warning("Sin datos en la ventana elegida.")
         return
+    # Etiqueta del pico: a la DERECHA del marcador (no lo tapa), chica y legible.
     for xt, yv, col in ends:
-        fig.add_annotation(x=xt, y=yv, text=f"<b>{yv:.0f}</b>", showarrow=False,
-                           yanchor="bottom", yshift=6, font=dict(color=col, size=11.5,
-                           family="IBM Plex Mono"), bgcolor="rgba(255,255,255,0.72)")
+        fig.add_annotation(x=xt, y=yv, text=f"{yv:.0f}", showarrow=False,
+                           xanchor="left", xshift=8, yanchor="middle",
+                           font=dict(color=col, size=10, family="IBM Plex Mono"),
+                           bgcolor="rgba(255,255,255,0.78)",
+                           bordercolor=col, borderwidth=0.6, borderpad=1)
     spd_axis = False
     if spd_on:
         _seen = set()
         for lab in sel:
             tr = tmap[lab]
             key_m = tr.machine or "máquina"
-            if key_m in _seen or not len(tr.speed):
-                continue
-            if not np.isfinite(tr.speed).any():
+            rts, _, rsp = _crop(tr)
+            if key_m in _seen or not len(rts) or not np.isfinite(rsp).any():
                 continue
             _seen.add(key_m)
             fig.add_trace(go.Scatter(
-                x=tr.times, y=tr.speed, mode="lines", name=f"RPM {key_m}",
+                x=rts, y=rsp, mode="lines", name=f"RPM {key_m}",
                 yaxis="y2", line=dict(color="#8090a6", width=1.2, dash="dot"),
                 hovertemplate=f"<b>RPM {key_m}</b><br>%{{x|%d %b %H:%M:%S}}<br>"
                               f"%{{y:,.0f}} rpm<extra></extra>"))
             spd_axis = True
-    for val, col in lim_lines.items():
-        _lbl = f"{'Danger' if col == '#dc3545' else 'Alarma'} {val:g}"
-        fig.add_hline(y=val, line=dict(color=col, width=1.4, dash="dash"),
-                      annotation_text=_lbl, annotation_position="top left",
-                      annotation_font=dict(size=10.5, color=col, family="IBM Plex Mono"),
-                      annotation_bgcolor="rgba(255,255,255,0.75)")
+    for val, col, nm in ((al, "#e8890c", "Alarma"), (dg, "#dc3545", "Danger")):
+        if val and val > 0:
+            fig.add_hline(y=val, line=dict(color=col, width=1.4, dash="dash"),
+                          annotation_text=f"{nm} {val:g}", annotation_position="top left",
+                          annotation_font=dict(size=10, color=col, family="IBM Plex Mono"),
+                          annotation_bgcolor="rgba(255,255,255,0.8)")
     _unit = next(iter(units)) if len(units) == 1 else "mixto"
     _var = trs[0].variable or "Direct"
     fig = _layout(fig, f"Tendencia de alta tasa · {_var}", h=520)
@@ -1024,13 +1066,14 @@ def _uploaded_trend_block():
                                       rangemode="tozero"))
     st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
     _download_fig_button(fig, _vfile("Tendencia alta tasa"), key="utrend")
-    _npts = sum(len(tmap[l].values) for l in sel)
+    _npts = sum(len(_crop(tmap[l])[0]) for l in sel)
     _dur = ((t_max - t_min).total_seconds() / 60.0) if (t_min and t_max) else 0
-    st.caption(f"{len(sel)} sensor(es) · {_npts:,} muestras · ventana {_dur:.0f} min "
-               f"({t_min:%d %b %H:%M} → {t_max:%H:%M}) · unidades {_unit}. "
-               "Línea SIN suavizar (muestra el evento real). Círculo = pico. "
-               "Arrastrá el rangeslider de abajo para hacer zoom en el evento. "
-               "Punteadas = alarma (ámbar) / danger (rojo) de la máquina.")
+    _wnote = (" · ventana recortada" if (lo != g0 or hi != g1 or hide_stop) else "")
+    st.caption(f"{len(sel)} sensor(es) · {_npts:,} muestras · {_dur:.0f} min "
+               f"({t_min:%d %b %H:%M:%S} → {t_max:%H:%M:%S}){_wnote} · {_unit}. "
+               "Línea SIN suavizar (evento real). Círculo = pico. "
+               "**⚙ Ajustes** para recortar la ventana en tiempo y fijar alarma/danger; "
+               "el rangeslider de abajo hace zoom.")
 
 
 def _trend_block():
