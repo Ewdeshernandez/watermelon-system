@@ -1281,8 +1281,23 @@ def _trend_analysis(section: str, series: List[Dict[str, Any]],
                   if v is not None]
             if len(ys) < 2:
                 continue
-            chans.append({"label": s.get("label", ""), "v0": ys[0],
-                          "v1": ys[-1], "vmax": max(ys)})
+            vmax = max(ys)
+            # v0/v1 al nivel de RÉGIMEN: excluye el arranque/paro de la ventana.
+            # Antes v0 = primer punto (máquina parada) → variaciones falsas de
+            # +500% que disparaban "seguimiento prioritario". Se usa la MEDIANA
+            # (robusta a spikes de arranque, a diferencia del pico) como piso:
+            # se descartan los baldes por debajo del 40% de la mediana (paro),
+            # y v0/v1 = mediana del primer/último tercio de lo que queda.
+            def _med(a):
+                a = sorted(a)
+                return a[len(a) // 2] if a else 0.0
+            _floor = _med(ys) * 0.4
+            op = [v for v in ys if v >= _floor] or ys
+            _third = max(1, len(op) // 3)
+            v0 = _med(op[:_third])
+            v1 = _med(op[-_third:])
+            chans.append({"label": s.get("label", ""), "v0": v0,
+                          "v1": v1, "vmax": vmax})
             if xs:
                 if not t0 or str(xs[0]) < t0:
                     t0 = str(xs[0])

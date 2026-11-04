@@ -889,7 +889,10 @@ def _overall_history_matrix(instance_id: str,
     try:
         from datetime import datetime, timedelta, timezone
 
-        from core.live_readings import history_bucketed, latest_for_instance
+        # history_rollup (tabla horaria PERSISTENTE) en vez de history_bucketed
+        # (crudo, que se purga >24h → faltaban días). Así los 10 días completos
+        # salen del rollup aunque el crudo ya no esté.
+        from core.live_readings import history_rollup, latest_for_instance
         latest = latest_for_instance(instance_id) or []
         var_by_label = {r.get("sensor_label"): r.get("variable")
                         for r in latest if r.get("metric") == "Direct"}
@@ -902,8 +905,8 @@ def _overall_history_matrix(instance_id: str,
             var = var_by_label.get(lbl)
             if not lbl or not var:
                 continue
-            buckets = history_bucketed(instance_id, var, "Direct",
-                                       from_iso, "1 day") or []
+            buckets = history_rollup(instance_id, var, "Direct",
+                                     from_iso, "1 day") or []
             vals: Dict[str, float] = {}
             for b in buckets:
                 v = b.get("max_val", b.get("avg_val"))
@@ -914,13 +917,21 @@ def _overall_history_matrix(instance_id: str,
                 vals[key] = float(v)
                 all_dates.add(d)
             if vals:
-                rows.append({"label": (c.get("plane_label")
-                                       if c.get("plane_label") not in (None, "", "—")
-                                       else lbl),
-                             "unit": c.get("unit", ""),
-                             "alarm": float(c.get("alarm", 0) or 0),
-                             "danger": float(c.get("danger", 0) or 0),
-                             "values": vals})
+                # Días con la máquina DETENIDA aparecían como "0.00" (lectura
+                # falsa). Los que están por debajo del 5 % del pico del punto
+                # se vacían → el reporte muestra "—" (paro / sin dato), no 0.
+                _rmax = max(vals.values())
+                if _rmax > 0:
+                    _floor = _rmax * 0.05
+                    vals = {k: v for k, v in vals.items() if v >= _floor}
+                if vals:
+                    rows.append({"label": (c.get("plane_label")
+                                           if c.get("plane_label") not in (None, "", "—")
+                                           else lbl),
+                                 "unit": c.get("unit", ""),
+                                 "alarm": float(c.get("alarm", 0) or 0),
+                                 "danger": float(c.get("danger", 0) or 0),
+                                 "values": vals})
         if not rows:
             return {}
         dates = [f"{d[8:10]}/{d[5:7]}" for d in sorted(all_dates)][-days:]
