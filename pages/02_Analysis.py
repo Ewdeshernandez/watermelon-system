@@ -600,6 +600,10 @@ def _view_saved_scl(key="scl_hist"):
 def _sweep_controls(sw, key):
     rpm = np.asarray(sw.rpm, float)
     amp_c = np.asarray(sw.amp, float); phase_c = np.asarray(sw.phase, float)
+    # Keys POR SENSOR: así op/comp/slow-roll NO se "pegan" entre sensores (antes
+    # al ver el turbina y luego el generador, la rpm de operación se arrastraba).
+    import re as _rk
+    _sk = f"{key}_{_rk.sub(r'[^0-9A-Za-z]', '', str(sw.label or ''))[:16]}"
     # Botón de ajustes estilo Shaft Centerline (popover flotante, la gráfica manda).
     st.markdown(
         "<style>div[data-testid='stPopover'] button{border-radius:9px;"
@@ -613,12 +617,12 @@ def _sweep_controls(sw, key):
     with _pop:
         op = st.number_input("RPM operación",
                              value=float(round(float(np.nanmax(sw.rpm)))),
-                             step=100.0, key=f"{key}_op")
+                             step=100.0, key=f"{_sk}_op")
         grp = st.selectbox("Grupo ISO 20816-2", ["group1", "group2"], index=1,
-                           key=f"{key}_g")
+                           key=f"{_sk}_g")
         mt = st.selectbox("Medición", ["Desplazamiento eje (prox)",
                                        "Velocidad carcasa (acel/vel)"],
-                          key=f"{key}_m")
+                          key=f"{_sk}_m")
         mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
         unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
         # Bently 5-5: el Bode de desplazamiento SIN compensar "miente" (el runout
@@ -626,7 +630,7 @@ def _sweep_controls(sw, key):
         # compensación de giro lento viene ACTIVADA por defecto.
         comp = st.toggle("Compensar giro lento (runout)",
                          value=(mtype == "shaft_displacement"),
-                         key=f"{key}_rc",
+                         key=f"{_sk}_rc",
                          help="Resta el vector 1X de giro lento (runout eléctrico + "
                               "mecánico/arqueo) medido a baja velocidad. Sin esto el "
                               "Bode/Polar puede MENTIR: pico de crítica corrido, "
@@ -639,7 +643,7 @@ def _sweep_controls(sw, key):
                                min_value=float(round(_smin)),
                                max_value=float(round(_smin + 0.20 * (_smax - _smin))),
                                value=float(round(_smin + 0.05 * (_smax - _smin))),
-                               step=10.0, key=f"{key}_srt")
+                               step=10.0, key=f"{_sk}_srt")
             amp_c, phase_c, _sm, _sa, _sn = _runout_comp(rpm, sw.amp, sw.phase, sr_thr)
             _srvec = {"mag": _sm, "ang": _sa, "n": _sn, "thr": float(sr_thr),
                       "unit": unit}
@@ -2541,6 +2545,28 @@ elif view == "Bode":
         # (1) sanity Q finito y ≤25; (2) preferir confirmadas (Δfase≥90°);
         # (3) AGRUPAR las cercanas (dentro de ~6% de op) y quedarse con la de
         # mayor amplitud por grupo; (4) tope 3. Etiquetas escalonadas.
+        _rpm_arr = np.asarray(sw.rpm, float)
+        _oo = np.argsort(_rpm_arr)
+        _sa = np.asarray(_ampc, float)[_oo]; _sr = _rpm_arr[_oo]
+        _puf = _unwrap_phase(sw.rpm, _phc)[_oo]   # fase desenrollada, ordenada
+
+        def _enrich(c):
+            """Completa AF por coef. de amplitud + Δφ del modo + confianza."""
+            c = dict(c); _rc = float(c.get("rpm", 0))
+            _i = int(np.argmin(np.abs(_sr - _rc))) if _sr.size else 0
+            _apk = float(_sa[_i]) if _sa.size else float(c.get("amp_peak", 0))
+            _hi = _sa[_sr >= 1.5 * _rc]
+            _base = float(np.median(_hi)) if _hi.size >= 3 else 0.0
+            c["af_ac"] = (_apk / _base) if (_base > 1e-9 and _apk > 0) else 0.0
+            _dphi = float(c.get("phase_change_deg", 0))
+            if _dphi <= 0 and _puf.size:
+                _w = max(3, int(0.08 * _sr.size))
+                _lo = max(0, _i - _w); _hiX = min(_sr.size - 1, _i + _w)
+                _dphi = abs(float(_puf[_hiX] - _puf[_lo]))
+            c["phase_change_deg"] = _dphi
+            c["confirmed"] = bool(c.get("kind") == "confirmed" or _dphi >= 90)
+            return c
+
         _allc = s.get("criticals", []) or []
         _clean = [c for c in _allc
                   if np.isfinite(c.get("q_factor", np.nan))
@@ -2558,17 +2584,46 @@ elif view == "Bode":
                 _clusters.append([c])
         _showc = [max(cl, key=lambda c: c.get("amp_peak", 0))
                   for cl in _clusters][:3]
+        # Fallback: si el detector NO resolvió ninguna crítica pero hay un pico
+        # interior prominente (caída ≥30% después), lo mostramos como CANDIDATO
+        # (baja confianza). Así "cuando el sistema no está seguro, igual indica".
+        if not _showc and _sa.size >= 9:
+            _k = max(3, (_sa.size // 60) | 1)
+            _sm2 = np.convolve(_sa, np.ones(_k) / _k, mode="same")
+            _mx = float(_sm2.max()); _best = None; _bdrop = 0.0
+            _wn = max(5, int(0.30 * _sm2.size))
+            for _i in range(2, _sm2.size - 2):
+                # una RESONANCIA es un pico seguido de un valle: rankeamos por la
+                # PROFUNDIDAD de la caída, no por la altura (así no gana el dwell
+                # a op, que es alto pero no cae después).
+                # descartar picos pegados a la velocidad de operación: son el
+                # "dwell" (la máquina estabilizando a op con scatter), no una crítica.
+                if _sr[_i] >= 0.92 * op:
+                    continue
+                if (_sm2[_i] >= _sm2[_i - 1] and _sm2[_i] >= _sm2[_i + 1]
+                        and _sm2[_i] > 0.3 * _mx):
+                    _valley = float(_sm2[_i:min(_sm2.size, _i + _wn)].min())
+                    _drop = (_sm2[_i] - _valley) / _sm2[_i] if _sm2[_i] > 0 else 0.0
+                    if _drop >= 0.30 and _drop > _bdrop:
+                        _best = _i; _bdrop = _drop
+            if _best is not None:
+                _showc = [{"rpm": float(_sr[_best]), "amp_peak": float(_sm2[_best]),
+                           "q_factor": 0.0, "phase_change_deg": 0.0,
+                           "kind": "candidate"}]
+        _showc = [_enrich(c) for c in _showc]
         for _j, c in enumerate(_showc):
-            col = "#dc3545" if (c.get("kind") == "confirmed"
-                                or c.get("phase_change_deg", 0) >= 90) else "#8090a6"
+            col = "#dc3545" if c["confirmed"] else "#8090a6"
             fig.add_vline(x=c["rpm"], line=dict(color=col, width=1.2, dash="dash"),
                           row=1, col=1)
             fig.add_vline(x=c["rpm"], line=dict(color=col, width=1, dash="dash"),
                           row=2, col=1)
+            _aflab = (f"{c['q_factor']:.1f}" if c["q_factor"] > 0 else "~") + \
+                     (f"/{c['af_ac']:.1f}" if c["af_ac"] > 0 else "")
+            _tag = "" if c["confirmed"] else " (cand)"
             fig.add_annotation(x=c["rpm"], yref="paper", y=1.0, yshift=-14 * _j,
                                xshift=4, xanchor="left",
-                               text=f"fc {c['rpm']:.0f} · AF {c.get('q_factor', 0):.1f} "
-                                    f"· Δφ {c.get('phase_change_deg', 0):.0f}°",
+                               text=f"fc {c['rpm']:.0f}{_tag} · AF {_aflab} "
+                                    f"· Δφ {c['phase_change_deg']:.0f}°",
                                showarrow=False, font=dict(size=9.5, color=col),
                                row=1, col=1)
         fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"),
@@ -2579,29 +2634,22 @@ elif view == "Bode":
         fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
         # --- Caja de lectura automática (clase mundial, Bently 5-4) ---
-        _rpm_arr = np.asarray(sw.rpm, float)
-        _oo = np.argsort(_rpm_arr)
-        _amp_op = (float(np.interp(op, _rpm_arr[_oo], np.asarray(_ampc, float)[_oo]))
-                   if _rpm_arr.size else 0.0)
+        _amp_op = (float(np.interp(op, _sr, _sa)) if _sr.size else 0.0)
         _srv = st.session_state.get("_srvec_bode")
         _box = [f"<b>Amp @op</b> {_amp_op:.1f} {unit}",
                 f"<b>Zona ISO</b> {zone}"]
         if _showc:
             _c0 = _showc[0]
             _mg = (op - _c0["rpm"]) / op * 100.0 if op else 0.0
-            # AF por DOBLE método (Bently 5-12): media potencia (Q) + coef. de
-            # amplitud (pico de resonancia / asíntota forzada bien sobre la crítica).
-            _af_hp = float(_c0.get("q_factor", 0))
-            _sa = np.asarray(_ampc, float)[_oo]; _sr = _rpm_arr[_oo]
-            _ipk = int(np.argmin(np.abs(_sr - _c0["rpm"])))
-            _apk = float(_sa[_ipk]) if _sa.size else 0.0
-            _hi = _sa[_sr >= 1.5 * _c0["rpm"]]
-            _base = float(np.median(_hi)) if _hi.size >= 3 else 0.0
-            _af_ac = (_apk / _base) if (_base > 1e-9 and _apk > 0) else 0.0
-            _afs = f"{_af_hp:.1f}" + (f"/{_af_ac:.1f}" if _af_ac > 0 else "")
-            _box.append(f"<b>Ncrit</b> {_c0['rpm']:.0f} rpm · AF {_afs}")
-            _box.append(f"<b>Δφ modo</b> {_c0.get('phase_change_deg',0):.0f}°")
+            _afs = (f"{_c0['q_factor']:.1f}" if _c0["q_factor"] > 0 else "~") + \
+                   (f"/{_c0['af_ac']:.1f}" if _c0["af_ac"] > 0 else "")
+            _ct = "" if _c0["confirmed"] else " (candidata, baja confianza)"
+            _box.append(f"<b>Ncrit</b>{_ct} {_c0['rpm']:.0f} rpm · AF {_afs}")
+            _box.append(f"<b>Δφ modo</b> {_c0['phase_change_deg']:.0f}°")
             _box.append(f"<b>Margen a op</b> {_mg:+.0f}%")
+        else:
+            _box.append("<b>Ncrit</b> no resuelta en el rango barrido")
+        _box.append("<b>Forma modal</b> → vista Deflexión del eje")
         if _srv:
             _box.append(f"<b>Giro lento</b> {_srv['mag']:.1f} {_srv['unit']} ∠{_srv['ang']:.0f}°")
         else:
