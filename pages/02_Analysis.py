@@ -402,14 +402,23 @@ def _smooth_xy(x, y, nbins: int = 150):
 
 def _unwrap_phase(rpm, ph):
     """Fase DESENROLLADA (unwrap) vs rpm → curva continua sin saltos de 360°
-    (como Bently/System1). Devuelve la fase alineada al orden de `rpm` de entrada;
-    arranca en la vuelta 0-360. Se desenrolla ANTES de suavizar para que el
-    promedio por balde no se rompa al cruzar 360°."""
+    (como Bently/System1). Alineada al orden de `rpm` de entrada; arranca en la
+    vuelta 0-360. ROBUSTA: suaviza con MEDIA CIRCULAR (promedio del vector
+    complejo e^{iθ} en ventana corta) ANTES de desenrollar, para que el scatter
+    punto a punto de la fase no acumule saltos espurios (ej el runaway a 720° en
+    bandas ruidosas). El giro real de ~180° de un modo (monótono, muchos puntos)
+    se preserva; solo se mata el ruido."""
     rpm = np.asarray(rpm, float); ph = np.asarray(ph, float)
-    if rpm.size < 2:
+    n = int(rpm.size)
+    if n < 2:
         return ph
     o = np.argsort(rpm)
-    pw = np.degrees(np.unwrap(np.radians(ph[o])))
+    z = np.exp(1j * np.radians(ph[o]))
+    k = max(3, (n // 100) | 1)          # ventana impar ~1% de los puntos
+    if k >= 3 and n > k:
+        ker = np.ones(k) / k
+        z = np.convolve(z, ker, mode="same")
+    pw = np.degrees(np.unwrap(np.angle(z)))
     pw = pw - float(np.round(pw[0] / 360.0)) * 360.0
     out = np.empty_like(pw)
     out[o] = pw
@@ -612,12 +621,18 @@ def _sweep_controls(sw, key):
                           key=f"{key}_m")
         mtype = "casing_velocity" if mt.startswith("Velocidad") else "shaft_displacement"
         unit = "mm/s rms" if mtype == "casing_velocity" else "µm pp"
-        comp = st.toggle("Compensar giro lento (runout)", value=False,
+        # Bently 5-5: el Bode de desplazamiento SIN compensar "miente" (el runout
+        # distorsiona y oculta la vibración dinámica). Por eso para proximidad la
+        # compensación de giro lento viene ACTIVADA por defecto.
+        comp = st.toggle("Compensar giro lento (runout)",
+                         value=(mtype == "shaft_displacement"),
                          key=f"{key}_rc",
                          help="Resta el vector 1X de giro lento (runout eléctrico + "
                               "mecánico/arqueo) medido a baja velocidad. Sin esto el "
-                              "Bode/Polar puede mentir: pico de crítica corrido, "
-                              "amplitud y fase falsas (Eisenmann p64).")
+                              "Bode/Polar puede MENTIR: pico de crítica corrido, "
+                              "amplitud y fase falsas (Bently 5-5 / Eisenmann p64). "
+                              "ON por defecto para desplazamiento de eje (prox).")
+        _srvec = None
         if comp:
             _smin, _smax = float(np.nanmin(rpm)), float(np.nanmax(rpm))
             sr_thr = st.slider("Velocidad de giro lento (rpm)",
@@ -626,8 +641,11 @@ def _sweep_controls(sw, key):
                                value=float(round(_smin + 0.05 * (_smax - _smin))),
                                step=10.0, key=f"{key}_srt")
             amp_c, phase_c, _sm, _sa, _sn = _runout_comp(rpm, sw.amp, sw.phase, sr_thr)
+            _srvec = {"mag": _sm, "ang": _sa, "n": _sn, "thr": float(sr_thr),
+                      "unit": unit}
             st.caption(f"⬤ Vector de giro lento restado: {_sm:.2f} {unit} ∠{_sa:.0f}° "
                        f"({_sn} muestras ≤ {sr_thr:.0f} rpm).")
+    st.session_state[f"_srvec_{key}"] = _srvec
     diag = _sweep_diag(tuple(rpm.tolist()), tuple(amp_c.tolist()),
                        tuple(phase_c.tolist()), op, grp, mtype, unit,
                        "Bode" if key == "bode" else "polar")
@@ -2518,14 +2536,41 @@ elif view == "Bode":
             fig.add_trace(go.Scatter(x=_cr, y=_ca, mode="lines", showlegend=False,
                           line=dict(color=_ccol, width=1.7, dash="dash")),
                           row=2, col=1)
-        for c in s.get("criticals", []):
-            col = "#dc3545" if c.get("kind") == "confirmed" else "#8090a6"
+        # Críticas: en bandas ruidosas (ej la banda de resonancias estructurales
+        # de la turbina) el detector marca decenas de picos. Para no ensuciar:
+        # (1) sanity Q finito y ≤25; (2) preferir confirmadas (Δfase≥90°);
+        # (3) AGRUPAR las cercanas (dentro de ~6% de op) y quedarse con la de
+        # mayor amplitud por grupo; (4) tope 3. Etiquetas escalonadas.
+        _allc = s.get("criticals", []) or []
+        _clean = [c for c in _allc
+                  if np.isfinite(c.get("q_factor", np.nan))
+                  and 0 < float(c.get("q_factor", 0)) <= 25]
+        _cf = [c for c in _clean
+               if c.get("kind") == "confirmed"
+               or c.get("phase_change_deg", 0) >= 90] or _clean
+        _cf = sorted(_cf, key=lambda c: c["rpm"])
+        _win = max(400.0, 0.06 * op)
+        _clusters = []
+        for c in _cf:
+            if _clusters and (c["rpm"] - _clusters[-1][-1]["rpm"]) <= _win:
+                _clusters[-1].append(c)
+            else:
+                _clusters.append([c])
+        _showc = [max(cl, key=lambda c: c.get("amp_peak", 0))
+                  for cl in _clusters][:3]
+        for _j, c in enumerate(_showc):
+            col = "#dc3545" if (c.get("kind") == "confirmed"
+                                or c.get("phase_change_deg", 0) >= 90) else "#8090a6"
             fig.add_vline(x=c["rpm"], line=dict(color=col, width=1.2, dash="dash"),
-                          annotation_text=f"fc {c['rpm']:.0f} · Q={c.get('q_factor',0):.1f}",
-                          annotation_position="top", annotation_font_size=10,
                           row=1, col=1)
             fig.add_vline(x=c["rpm"], line=dict(color=col, width=1, dash="dash"),
                           row=2, col=1)
+            fig.add_annotation(x=c["rpm"], yref="paper", y=1.0, yshift=-14 * _j,
+                               xshift=4, xanchor="left",
+                               text=f"fc {c['rpm']:.0f} · AF {c.get('q_factor', 0):.1f} "
+                                    f"· Δφ {c.get('phase_change_deg', 0):.0f}°",
+                               showarrow=False, font=dict(size=9.5, color=col),
+                               row=1, col=1)
         fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"),
                       annotation_text="op", annotation_position="top", row=1, col=1)
         fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"), row=2, col=1)
@@ -2533,6 +2578,30 @@ elif view == "Bode":
                          row=1, col=1)
         fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
         fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
+        # --- Caja de lectura automática (clase mundial, Bently 5-4) ---
+        _rpm_arr = np.asarray(sw.rpm, float)
+        _oo = np.argsort(_rpm_arr)
+        _amp_op = (float(np.interp(op, _rpm_arr[_oo], np.asarray(_ampc, float)[_oo]))
+                   if _rpm_arr.size else 0.0)
+        _srv = st.session_state.get("_srvec_bode")
+        _box = [f"<b>Amp @op</b> {_amp_op:.1f} {unit}",
+                f"<b>Zona ISO</b> {zone}"]
+        if _showc:
+            _c0 = _showc[0]
+            _mg = (op - _c0["rpm"]) / op * 100.0 if op else 0.0
+            _box.append(f"<b>Ncrit</b> {_c0['rpm']:.0f} rpm · AF {_c0.get('q_factor',0):.1f}")
+            _box.append(f"<b>Δφ modo</b> {_c0.get('phase_change_deg',0):.0f}°")
+            _box.append(f"<b>Margen a op</b> {_mg:+.0f}%")
+        if _srv:
+            _box.append(f"<b>Giro lento</b> {_srv['mag']:.1f} {_srv['unit']} ∠{_srv['ang']:.0f}°")
+        else:
+            _box.append("<b>Giro lento</b> SIN compensar ⚠")
+        fig.add_annotation(xref="x2 domain", yref="y2 domain", x=0.99, y=0.97,
+                           xanchor="right", yanchor="top", align="left",
+                           showarrow=False, text="<br>".join(_box),
+                           font=dict(size=10, color="#1e293b"),
+                           bgcolor="rgba(244,249,255,0.94)",
+                           bordercolor="#2f6fb0", borderwidth=1.2, borderpad=6)
         _figb = _layout(fig, f"Bode · {sw.label}", h=560)
         if _cmp:
             _figb.update_layout(showlegend=True,
