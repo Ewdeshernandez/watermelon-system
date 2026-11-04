@@ -501,6 +501,7 @@ def generate_briefing_pdf(
         return out
 
     _spec = _parts("spectrum"); _wave = _parts("waveform"); _orb = _parts("orbit")
+    _orb_rows = (figures or {}).get("orbit_rows") or []
     _fs_raw = [x for x in ((figures or {}).get("fullspec_pngs") or [])
                if isinstance(x, dict) and x.get("png")]
     _startup = [x for x in ((figures or {}).get("startup") or [])
@@ -559,6 +560,51 @@ def generate_briefing_pdf(
             return [x for x in _fs_raw
                     if ml in ((x.get("name") or "")).lower()]
 
+        # Tabla de métricas de órbita por cojinete (Cojinete · RPM · Precesión ·
+        # Giro · Eje mayor · Eje menor · Elipticidad · Smax) — mismos datos que
+        # muestra la web de Rotodinámica debajo de la órbita.
+        _st_oh = ParagraphStyle("bfOrbH", parent=styles["WMBody"], fontSize=7.4,
+                                alignment=TA_CENTER, textColor=colors.white, leading=9)
+        _st_oc = ParagraphStyle("bfOrbC", parent=styles["WMBody"], fontSize=7.8,
+                                alignment=TA_CENTER,
+                                textColor=colors.HexColor("#111827"), leading=9)
+        _st_ocl = ParagraphStyle("bfOrbCL", parent=_st_oc, alignment=TA_LEFT)
+
+        def _orbit_table(rows):
+            if not rows:
+                return None
+            _u = (rows[0].get("unit") or "µm")
+            hdr = ["Cojinete", "RPM", "Precesión", "Giro (API 670)",
+                   f"Eje mayor ({_u})", f"Eje menor ({_u})", "Elipticidad",
+                   f"Smax ({_u})"]
+            data = [[Paragraph(h, _st_oh) for h in hdr]]
+            for r in rows:
+                _rpm = r.get("rpm") or 0
+                data.append([
+                    Paragraph(str(r.get("bearing", "—")), _st_ocl),
+                    Paragraph(f"{_rpm:,.0f}" if _rpm else "—", _st_oc),
+                    Paragraph(str(r.get("precesion", "—")), _st_oc),
+                    Paragraph(f"{r.get('giro', '—')} ({r.get('maq', '')})", _st_oc),
+                    Paragraph(f"{float(r.get('major', 0)):.1f}", _st_oc),
+                    Paragraph(f"{float(r.get('minor', 0)):.1f}", _st_oc),
+                    Paragraph(f"{float(r.get('ellip', 0)):.2f}", _st_oc),
+                    Paragraph(f"{float(r.get('smax', 0)):.1f}", _st_oc),
+                ])
+            tbl = Table(data, colWidths=[2.2 * cm, 1.7 * cm, 2.5 * cm, 3.0 * cm,
+                                         2.0 * cm, 2.0 * cm, 1.8 * cm, 1.6 * cm],
+                        repeatRows=1)
+            tbl.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+                ("TOPPADDING", (0, 0), (-1, 0), 5), ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                 [colors.white, colors.HexColor("#f7f9fc")]),
+                ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 1), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 1), (-1, -1), 3.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            return tbl
+
         _first = True
         for machine in _MACHINES:
             ml = machine.lower()
@@ -596,6 +642,14 @@ def generate_briefing_pdf(
                 _an = (figures.get("orbit_analysis") or "") if machine == _ob_last else ""
                 _add_fig(p, f"Órbitas — {machine}", 9.0 * cm,
                          analysis=_an, lead=_lead); _lead = []
+            if m_ob:
+                _mrows = [r for r in _orb_rows
+                          if (r.get("maq") or "").lower() == ml]
+                _otbl = _orbit_table(_mrows)
+                if _otbl is not None:
+                    body.append(Spacer(1, 2))
+                    body.append(_otbl)
+                    body.append(Spacer(1, 6))
             for x in m_fs:
                 _hb = x.get("bearing") or machine
                 _add_fig(x.get("png"), f"Full Spectrum — {_hb}", 8.6 * cm,
