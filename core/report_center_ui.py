@@ -181,7 +181,12 @@ def render_approval(me_name: str = "") -> None:
         if _scope == "Un activo":
             st.markdown('<div class="bf-label" style="margin-top:14px;">Asset</div>',
                         unsafe_allow_html=True)
-            _rows = _cached_instances()
+            # Picker de generación: solo activos EN SERVICIO (no se generan
+            # reportes de equipos demo). La gestión del toggle in_service, más
+            # abajo, sí lista todos.
+            _rows = [r for r in _cached_instances()
+                     if (r.get("in_service", True) if isinstance(r, dict)
+                         else getattr(r, "in_service", True))]
             _opts = []
             for r in _rows:
                 iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
