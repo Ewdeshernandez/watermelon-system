@@ -3602,7 +3602,11 @@ def render_history_chart(
         try:
             if _use_rollup:
                 _r = _hru(instance_id, _var, "Direct", _from_iso, _bucket)
-                if _r and _rollup_covers(_r):
+                # Usar el rollup si tiene CUALQUIER dato: aunque no cubra todo el
+                # rango pedido (histórico aún en construcción), 20 días de rollup
+                # son infinitamente mejores que caer a 3 h de crudo. La cobertura
+                # parcial se avisa honestamente abajo con el lapso REAL.
+                if _r:
                     return chosen, _r
             return chosen, _hbk(instance_id, _var, "Direct", _from_iso, _bucket)
         except Exception:  # noqa: BLE001
@@ -3673,6 +3677,19 @@ def render_history_chart(
             f"⚠ Rango largo en modo reducido: mostrando **{_real}**, no «{range_choice}». "
             "La agregación de largo plazo está temporalmente no disponible."
         )
+    elif _use_rollup:
+        # Rollup usado pero quizá NO cubre todo el rango pedido (histórico en
+        # construcción). Avisar desde cuándo hay datos, sin caer a crudo.
+        try:
+            _earliest = pd.concat([sd["df"]["captured_at"] for sd in sensor_data]).min()
+            if (_earliest - _from_ts.tz_convert(_earliest.tz)) > pd.Timedelta(days=1):
+                st.info(
+                    f"Histórico disponible desde **{_earliest:%Y-%m-%d}**. El rango "
+                    f"«{range_choice}» empieza antes — se muestra lo acumulado hasta "
+                    "ahora (se completa a medida que pasa el tiempo)."
+                )
+        except Exception:  # noqa: BLE001
+            pass
 
     # y_max del gráfico usa el pico REAL de cada balde (no se pierde al promediar).
     # Los KPIs Min/Max/Avg/Σ se quitaron: en vibración no aportan (el analista lee
