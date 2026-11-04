@@ -15,6 +15,9 @@
     ]
   },
   "poll_interval_seconds": 10,
+  "read_interval_seconds": 1.0,
+  "aggregate": "peak",
+  "_peak_hold_note": "collector v1.1+: lee el Modbus cada read_interval_seconds (1s, = refresh del 3500) y POSTea el PICO por sensor cada poll_interval_seconds (10s). Captura transitorios <10s sin inflar storage. aggregate='last' = comportamiento viejo (1 lectura instantánea).",
   "_units_note": "Parex SGT300: proximidad µm pp, velocidad mm/s rms, aceleración g rms. Si dry-run da absurdos, probar byte_order CDAB.",
   "registers": {
     "6001": {
