@@ -508,8 +508,17 @@ def render_delivery() -> None:
         st.info("No assets registered. Create one in Machinery Library first.")
         return
 
+    def _is_in_service(r):
+        return (r.get("in_service", True) if isinstance(r, dict)
+                else getattr(r, "in_service", True))
+
+    # En servicio = lista principal. Fuera de servicio (demo/baja) → expander
+    # colapsado al final (ahí queda el toggle para re-activarlos si hace falta).
+    _in_rows = [r for r in _rows if _is_in_service(r)]
+    _out_rows = [r for r in _rows if not _is_in_service(r)]
+
     groups: dict = {}
-    for r in _rows:
+    for r in _in_rows:
         iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
         if not iid:
             continue
@@ -569,6 +578,22 @@ def render_delivery() -> None:
                                    get_signers, save_schedules, save_signers,
                                    update_instance_header)
             st.markdown("")
+
+    # ---- Equipos fuera de servicio (demo/baja): ocultos, re-activables ----
+    if _out_rows:
+        _out = []
+        for r in _out_rows:
+            iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
+            tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
+            if iid:
+                _out.append((iid, tag))
+        with st.expander(f"⚙ Equipos fuera de servicio ({len(_out)}) — ocultos de las "
+                         "vistas operativas; activá el toggle para volverlos a incluir"):
+            for iid, tag in sorted(_out, key=lambda x: x[1]):
+                _render_delivery_asset(iid, tag, _client_opts, get_instance, get_schedules,
+                                       get_signers, save_schedules, save_signers,
+                                       update_instance_header)
+                st.markdown("")
 
 
 def _split_items(raw: str):
