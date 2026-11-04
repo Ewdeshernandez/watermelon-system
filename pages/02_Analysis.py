@@ -2672,10 +2672,62 @@ elif view == "Polar":
                           name=_cs["label"],
                           line=dict(color=_ccol, width=1.7, dash="dash"),
                           hoverinfo="skip"))
-        for c in s.get("criticals", []):
-            fig.add_trace(go.Scatterpolar(r=[c["amp_peak"]], theta=[c.get("phase_change_deg", 0)],
-                          mode="markers", marker=dict(color="#dc3545", size=10, symbol="x"),
-                          hoverinfo="skip", showlegend=False))
+        # --- Punto pesado · punto alto · dirección de contrapeso (Bently 5-7/5-8) ---
+        # El polar YA está compensado (origen trasladado al vector de giro lento).
+        # Bajo la resonancia de equilibrado, el punto ALTO ≈ punto PESADO; el
+        # contrapeso va ~180° opuesto al punto pesado.
+        _pcrit = s.get("criticals", []) or []
+        _hs_ph = _bal_ph = _hp_ph = None
+        if _pcrit:
+            _ncr = float(_pcrit[0].get("rpm", 0))
+            _ra2 = np.asarray(sw.rpm, float); _oo = np.argsort(_ra2); _rs2 = _ra2[_oo]
+            _zc = (np.asarray(_ampc, float)[_oo]
+                   * np.exp(1j * np.radians(np.asarray(_phc, float)[_oo])))
+
+            def _vec_at(rp):
+                if _rs2.size < 2 or not (_rs2.min() <= rp <= _rs2.max()):
+                    return None
+                return complex(float(np.interp(rp, _rs2, _zc.real)),
+                               float(np.interp(rp, _rs2, _zc.imag)))
+
+            _rmax = float(np.nanmax(np.abs(_zc))) * 1.06 if _zc.size else 1.0
+            # velocidad para el punto pesado: bien bajo la resonancia pero dentro
+            # del rango barrido (clamp, por si la data arranca cerca de Ncrit).
+            _rlow = (min(max(0.65 * _ncr, _rs2.min()), 0.95 * _ncr)
+                     if (_ncr > 0 and _rs2.size) else 0.0)
+            _zhs = _vec_at(_rlow) if _rlow > 0 else None
+            _zhp = _vec_at(_ncr) if _ncr > 0 else None
+            if _zhs is not None and abs(_zhs) > 0:
+                _hs_ph = float(np.degrees(np.angle(_zhs)) % 360.0)
+                _bal_ph = (_hs_ph + 180.0) % 360.0
+                fig.add_trace(go.Scatterpolar(
+                    r=[0, _rmax], theta=[_hs_ph, _hs_ph], mode="lines",
+                    line=dict(color="#dc3545", width=2.4), hoverinfo="skip",
+                    name="punto pesado"))
+                fig.add_trace(go.Scatterpolar(
+                    r=[_rmax], theta=[_hs_ph], mode="markers+text",
+                    marker=dict(color="#dc3545", size=11, symbol="circle"),
+                    text=["pesado"], textposition="top center",
+                    textfont=dict(size=10, color="#dc3545"), hoverinfo="skip",
+                    showlegend=False))
+                fig.add_trace(go.Scatterpolar(
+                    r=[0, _rmax], theta=[_bal_ph, _bal_ph], mode="lines",
+                    line=dict(color="#1f9d55", width=2.2, dash="dot"),
+                    hoverinfo="skip", name="contrapeso"))
+                fig.add_trace(go.Scatterpolar(
+                    r=[_rmax], theta=[_bal_ph], mode="markers+text",
+                    marker=dict(color="#1f9d55", size=11, symbol="triangle-up"),
+                    text=["contrapeso"], textposition="bottom center",
+                    textfont=dict(size=10, color="#1f9d55"), hoverinfo="skip",
+                    showlegend=False))
+            if _zhp is not None and abs(_zhp) > 0:
+                _hp_ph = float(np.degrees(np.angle(_zhp)) % 360.0)
+                fig.add_trace(go.Scatterpolar(
+                    r=[abs(_zhp)], theta=[_hp_ph], mode="markers+text",
+                    marker=dict(color="#e8890c", size=13, symbol="x"),
+                    text=["alto (Ncrit)"], textposition="middle right",
+                    textfont=dict(size=10, color="#e8890c"), hoverinfo="skip",
+                    showlegend=False))
         fig.update_layout(template="plotly_white", height=560,
                           title=dict(text=f"Polar · {sw.label}", font=dict(size=15)),
                           font=dict(family="IBM Plex Sans"), showlegend=bool(_cmpp),
@@ -2683,6 +2735,11 @@ elif view == "Polar":
                           polar=dict(angularaxis=dict(direction="clockwise", rotation=90)),
                           margin=dict(l=40, r=40, t=56, b=40))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+        if _hs_ph is not None:
+            st.success(f"**Punto pesado ≈ {_hs_ph:.0f}°** (respuesta bajo la "
+                       f"resonancia, punto alto≈pesado) · **punto alto en Ncrit "
+                       f"≈ {_hp_ph:.0f}°** · **contrapeso de prueba ~{_bal_ph:.0f}°** "
+                       f"(opuesto al pesado). Base: Bently 5-7/5-8 · polar compensado.")
         _download_fig_button(fig, _vfile(f"Polar {sw.label}"), key="polar")
 
         def _mk_polar(_iid, _op, _lbl, _sw=sw, _u=unit, _a=_ampc, _p=_phc,
