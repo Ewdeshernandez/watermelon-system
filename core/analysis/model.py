@@ -300,6 +300,12 @@ def parse_trend(name: str, data: bytes) -> Optional["Trend"]:
         return None
     # X-Axis = tiempo. Si parsea como datetime, es tendencia; si todo es numérico
     # (rpm), NO es tendencia (es un Bode/Polar) → None para que lo tome parse_sweep.
+    # OJO: pd.to_datetime() sobre strings numéricos los interpreta como epoch en
+    # nanosegundos (ej "639"→1970-...), así que primero descartamos el caso rpm:
+    # si TODOS los X son numéricos, es un barrido Bode/Polar, no una tendencia.
+    _xnum = pd.to_numeric(pd.Series(xs), errors="coerce")
+    if bool(_xnum.notna().all()):
+        return None  # X numérico (rpm) → lo maneja parse_sweep
     ts = pd.to_datetime(pd.Series(xs), errors="coerce",
                         format="%m/%d/%Y %I:%M:%S %p")
     if ts.isna().all():
