@@ -2589,7 +2589,17 @@ elif view == "Bode":
         if _showc:
             _c0 = _showc[0]
             _mg = (op - _c0["rpm"]) / op * 100.0 if op else 0.0
-            _box.append(f"<b>Ncrit</b> {_c0['rpm']:.0f} rpm · AF {_c0.get('q_factor',0):.1f}")
+            # AF por DOBLE método (Bently 5-12): media potencia (Q) + coef. de
+            # amplitud (pico de resonancia / asíntota forzada bien sobre la crítica).
+            _af_hp = float(_c0.get("q_factor", 0))
+            _sa = np.asarray(_ampc, float)[_oo]; _sr = _rpm_arr[_oo]
+            _ipk = int(np.argmin(np.abs(_sr - _c0["rpm"])))
+            _apk = float(_sa[_ipk]) if _sa.size else 0.0
+            _hi = _sa[_sr >= 1.5 * _c0["rpm"]]
+            _base = float(np.median(_hi)) if _hi.size >= 3 else 0.0
+            _af_ac = (_apk / _base) if (_base > 1e-9 and _apk > 0) else 0.0
+            _afs = f"{_af_hp:.1f}" + (f"/{_af_ac:.1f}" if _af_ac > 0 else "")
+            _box.append(f"<b>Ncrit</b> {_c0['rpm']:.0f} rpm · AF {_afs}")
             _box.append(f"<b>Δφ modo</b> {_c0.get('phase_change_deg',0):.0f}°")
             _box.append(f"<b>Margen a op</b> {_mg:+.0f}%")
         if _srv:
@@ -2609,6 +2619,55 @@ elif view == "Bode":
                                             font=dict(size=10)))
         st.plotly_chart(_figb, use_container_width=True, config=_NOBAR)
         _download_fig_button(fig, _vfile(f"Bode {sw.label}"), key="bode")
+
+        # --- Split crítico (plano V vs H) + forma modal / precarga (Bently 5-10) ---
+        import re as _re2
+        _mm = _re2.match(r"\s*(\d+)\s*([XY])", (sw.label or "").upper())
+        if _mm and _showc:
+            _bn2, _pl = _mm.group(1), _mm.group(2)
+            _oth = "Y" if _pl == "X" else "X"
+            _plane = {"X": "horizontal", "Y": "vertical"}
+            _sib = next((w for w in getattr(rec, "sweeps", [])
+                         if _re2.match(rf"\s*{_bn2}\s*{_oth}", (w.label or "").upper())),
+                        None)
+            _sib_ncr = 0.0
+            if _sib is not None:
+                try:
+                    from core.rotordynamics import detect_critical_speeds as _dcs
+                    _sr3 = np.asarray(_sib.rpm, float)
+                    _thr3 = float(_sr3.min() + 0.05 * (_sr3.max() - _sr3.min()))
+                    _ac3, _pc3, *_ = _runout_comp(_sr3, _sib.amp, _sib.phase, _thr3)
+                    _sc = _dcs(rpm=_sr3, amp=_ac3, phase=_pc3)
+                    # la crítica más PROMINENTE (mayor amplitud), no la más baja
+                    # (que suele ser un pico espurio de ruido).
+                    _sc = [c for c in _sc if np.isfinite(getattr(c, "q_factor", np.nan))
+                           and 0 < getattr(c, "q_factor", 0) <= 25]
+                    _sib_ncr = float(max(_sc, key=lambda c: getattr(c, "amp_peak", 0)).rpm) if _sc else 0.0
+                except Exception:  # noqa: BLE001
+                    _sib_ncr = 0.0
+            _this_ncr = float(_showc[0]["rpm"])
+            if _sib_ncr > 0 and _this_ncr > 0:
+                _d = abs(_this_ncr - _sib_ncr) / max(_this_ncr, _sib_ncr) * 100.0
+                if _d >= 5.0:
+                    _stiff = _pl if _this_ncr > _sib_ncr else _oth
+                    st.info(f"**Split crítico** (Bently 5-10): plano {_plane[_pl]} "
+                            f"{_this_ncr:.0f} rpm vs {_plane[_oth]} {_sib_ncr:.0f} rpm "
+                            f"(Δ {_d:.0f}%). El plano **{_plane[_stiff]}** es más RÍGIDO "
+                            f"(crítica más alta) → anisotropía de soporte / precarga.")
+                else:
+                    st.caption(f"Crítica V≈H ({_this_ncr:.0f}/{_sib_ncr:.0f} rpm, "
+                               f"Δ {_d:.0f}%) → soporte ~isotrópico, sin split marcado.")
+            elif _sib is None:
+                st.caption(f"Split crítico: sube también el plano {_oth} del cojinete "
+                           f"{_bn2} ({_bn2}{_oth}D) para comparar rigidez V vs H.")
+            # Forma modal / precarga
+            _dphi = float(_showc[0].get("phase_change_deg", 0))
+            if _dphi and _dphi < 130:
+                st.caption(f"Δφ del modo {_dphi:.0f}° (< 180° ideal) → amortiguamiento "
+                           "alto o **precarga** (gravedad / desalineación / fluido). "
+                           "Forma modal del rotor → vista **Deflexión del eje**.")
+            else:
+                st.caption("Forma modal del rotor → vista **Deflexión del eje**.")
 
         def _mk_bode(_iid, _op, _lbl, _sw=sw, _u=unit, _a=_ampc, _p=_phc,
                      _crit=s.get("criticals") or []):
