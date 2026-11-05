@@ -2761,6 +2761,7 @@ elif view == "Polar":
                               hoverinfo="skip", showlegend=False))
         _rr, _ar = _smooth_xy(sw.rpm, _ampc)
         _rp2, _pr = _smooth_xy(sw.rpm, _phc)
+        _rad_hi = float(np.nanmax(_ar)) if len(_ar) else 1.0
         fig.add_trace(go.Scatterpolar(
             r=_ar, theta=_pr, mode="lines+markers",
             line=dict(color=_NAVY, width=2.0, shape="spline", smoothing=0.6),
@@ -2774,6 +2775,8 @@ elif view == "Polar":
                 continue
             _cra, _caa = _smooth_xy(_cs["rpm"], _cs["amp"])
             _, _cpp = _smooth_xy(_cs["rpm"], _cs["phase"])
+            if len(_caa):
+                _rad_hi = max(_rad_hi, float(np.nanmax(_caa)))
             _ccol = _TREND_PAL[(_ci + 2) % len(_TREND_PAL)]
             fig.add_trace(go.Scatterpolar(r=_caa, theta=_cpp, mode="lines",
                           name=_cs["label"],
@@ -2839,9 +2842,19 @@ elif view == "Polar":
                           title=dict(text=f"Polar · {sw.label}", font=dict(size=15)),
                           font=dict(family="IBM Plex Sans"), showlegend=bool(_cmpp),
                           legend=dict(orientation="h", y=1.08, x=0, font=dict(size=10)),
-                          polar=dict(angularaxis=dict(direction="clockwise", rotation=90)),
+                          polar=dict(
+                              angularaxis=dict(direction="clockwise", rotation=90),
+                              radialaxis=dict(range=[0, _rad_hi * 1.15],
+                                              angle=90, tickangle=90)),
                           margin=dict(l=40, r=40, t=56, b=40))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+        _rings_off = [z for z, b in [("A/B", s.get("iso_boundary_AB")),
+                      ("B/C", s.get("iso_boundary_BC")), ("C/D", s.get("iso_boundary_CD"))]
+                      if b and float(b) > _rad_hi * 1.15]
+        if _rings_off:
+            st.caption(f"Escala radial ajustada a la data (máx ≈ {_rad_hi:.0f} "
+                       f"{unit}). Anillos ISO {', '.join(_rings_off)} quedan fuera de "
+                       "escala (la vibración está muy por debajo del límite).")
         if _hs_ph is not None:
             st.success(f"**Punto pesado ≈ {_hs_ph:.0f}°** (respuesta bajo la "
                        f"resonancia, punto alto≈pesado) · **punto alto en Ncrit "
