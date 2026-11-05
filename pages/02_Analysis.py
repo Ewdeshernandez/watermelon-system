@@ -649,6 +649,19 @@ def _sweep_controls(sw, key):
                       "unit": unit}
             st.caption(f"⬤ Vector de giro lento restado: {_sm:.2f} {unit} ∠{_sa:.0f}° "
                        f"({_sn} muestras ≤ {sr_thr:.0f} rpm).")
+        # Sentido de giro: la FASE DE ATRASO se cuenta OPUESTA al giro (Bently 5-6).
+        # El polar se orienta con 0° de fase en la sonda y el ángulo creciendo
+        # contra el giro → el vector apunta a la posición física del punto alto.
+        _rot_opt = st.selectbox(
+            "Sentido de giro (visto desde este extremo)",
+            ["Antihorario (CCW)", "Horario (CW)"],
+            index=(0 if st.session_state.get(f"_rotsense_{key}", True) else 1),
+            key=f"{_sk}_rotsense",
+            help="Bently: la fase de ATRASO se cuenta OPUESTA al sentido de giro. "
+                 "El polar se orienta con 0° de fase en el ángulo físico de la "
+                 "sonda (TDC=0°, R horario, L antihorario) y el ángulo creciendo "
+                 "contra el giro. Ajústalo al giro real de la máquina.")
+        st.session_state[f"_rotsense_{key}"] = _rot_opt.startswith("Anti")
     st.session_state[f"_srvec_{key}"] = _srvec
     diag = _sweep_diag(tuple(rpm.tolist()), tuple(amp_c.tolist()),
                        tuple(phase_c.tolist()), op, grp, mtype, unit,
@@ -2751,6 +2764,24 @@ elif view == "Polar":
     else:
         op, unit, diag, s, zone, _ampc, _phc = _sweep_controls(sw, "polar")
         zc = _ISO.get(zone, "#8090a6")
+        # --- Orientación física estilo System1/Bently ---
+        # 0° de fase en el ÁNGULO FÍSICO de la sonda (TDC=0°, R horario +, L
+        # antihorario −) y la fase de ATRASO creciendo OPUESTA al giro. Así el
+        # vector 1X apunta a la posición física del punto alto en el cojinete.
+        import re as _rq
+        _bid = _bearing_id(sw.label)
+        _mg = _rq.search(r"\d+\s*([XYxy])", str(sw.label or ""))
+        _axis = (_mg.group(1).upper() if _mg else "X")
+        _angx, _angy, _zona = _probe_angles(_bid)
+        # Ángulo físico de la sonda, horario desde el tope (R=+, L=−).
+        _pang = (float(_angx) if _axis == "X" else -float(_angy))
+        # Plotly: 0 math al este, CCW+. Horario-desde-tope φ → math = 90−φ.
+        _rot0 = (90.0 - _pang) % 360.0
+        _ccw_mach = bool(st.session_state.get("_rotsense_polar", True))
+        # Fase de atraso crece OPUESTA al giro: máquina CCW → theta horario.
+        _pdir = "clockwise" if _ccw_mach else "counterclockwise"
+        _rsense_txt = "antihorario (CCW)" if _ccw_mach else "horario (CW)"
+        _side_txt = "lado R" if _axis == "X" else "lado L"
         fig = go.Figure()
         th = list(range(0, 365, 5))
         for z, b in [("A", s.get("iso_boundary_AB")), ("B", s.get("iso_boundary_BC")),
@@ -2843,11 +2874,17 @@ elif view == "Polar":
                           font=dict(family="IBM Plex Sans"), showlegend=bool(_cmpp),
                           legend=dict(orientation="h", y=1.08, x=0, font=dict(size=10)),
                           polar=dict(
-                              angularaxis=dict(direction="clockwise", rotation=90),
+                              angularaxis=dict(direction=_pdir, rotation=_rot0,
+                                               dtick=30),
                               radialaxis=dict(range=[0, _rad_hi * 1.15],
-                                              angle=90, tickangle=90)),
+                                              angle=_rot0, tickangle=_rot0)),
                           margin=dict(l=40, r=40, t=56, b=40))
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+        st.caption(
+            f"Orientación física: **0° de fase en la sonda {_axis} ({_side_txt}, "
+            f"{abs(_pang):.0f}° del tope)**; fase de atraso creciendo **opuesta al "
+            f"giro {_rsense_txt}** (Bently 5-6). El vector 1X apunta a la posición "
+            f"física del punto alto en el cojinete. Giro ajustable en ⚙ Ajustes.")
         _rings_off = [z for z, b in [("A/B", s.get("iso_boundary_AB")),
                       ("B/C", s.get("iso_boundary_BC")), ("C/D", s.get("iso_boundary_CD"))]
                       if b and float(b) > _rad_hi * 1.15]
