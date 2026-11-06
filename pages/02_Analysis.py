@@ -2924,6 +2924,29 @@ elif view == "Polar":
         # Bajo la resonancia de equilibrado, el punto ALTO ≈ punto PESADO; el
         # contrapeso va ~180° opuesto al punto pesado.
         _pcrit = s.get("criticals", []) or []
+        _cand = False
+        # Fallback candidato (igual que el Bode): si el detector no resuelve una
+        # crítica pero hay un pico interior con caída ≥30% (ej. 5X/5Y ~1010),
+        # lo usamos para marcar pesado/alto como CANDIDATO (baja confianza).
+        if not _pcrit:
+            _ra3 = np.asarray(sw.rpm, float); _o3 = np.argsort(_ra3)
+            _sr3 = _ra3[_o3]; _sa3 = np.asarray(_ampc, float)[_o3]
+            if _sa3.size >= 9 and op > 0:
+                _k3 = max(3, (_sa3.size // 60) | 1)
+                _sm3 = np.convolve(_sa3, np.ones(_k3) / _k3, mode="same")
+                _mx3 = float(_sm3.max()); _bst = None; _bd = 0.0
+                _wn3 = max(5, int(0.30 * _sm3.size))
+                for _i in range(2, _sm3.size - 2):
+                    if _sr3[_i] >= 0.92 * op:
+                        continue
+                    if (_sm3[_i] >= _sm3[_i - 1] and _sm3[_i] >= _sm3[_i + 1]
+                            and _sm3[_i] > 0.3 * _mx3):
+                        _vy = float(_sm3[_i:min(_sm3.size, _i + _wn3)].min())
+                        _dr = (_sm3[_i] - _vy) / _sm3[_i] if _sm3[_i] > 0 else 0.0
+                        if _dr >= 0.30 and _dr > _bd:
+                            _bst = _i; _bd = _dr
+                if _bst is not None:
+                    _pcrit = [{"rpm": float(_sr3[_bst])}]; _cand = True
         _hs_ph = _bal_ph = _hp_ph = None
         if _pcrit:
             _ncr = float(_pcrit[0].get("rpm", 0))
@@ -2999,10 +3022,25 @@ elif view == "Polar":
                        f"{unit}). Anillos ISO {', '.join(_rings_off)} quedan fuera de "
                        "escala (la vibración está muy por debajo del límite).")
         if _hs_ph is not None:
-            st.success(f"**Punto pesado ≈ {_hs_ph:.0f}°** (respuesta bajo la "
+            _ncr_txt = f" (Ncrit ≈ {float(_pcrit[0].get('rpm', 0)):.0f} rpm)"
+            _cand_txt = (" · ⚠ Ncrit CANDIDATA (baja confianza): el detector no la "
+                         "resolvió, estimada por la caída del pico — verificar."
+                         if _cand else "")
+            st.success(f"**Punto pesado ≈ {_hs_ph:.0f}°**{_ncr_txt} (respuesta bajo la "
                        f"resonancia, punto alto≈pesado) · **punto alto en Ncrit "
                        f"≈ {_hp_ph:.0f}°** · **contrapeso de prueba ~{_bal_ph:.0f}°** "
-                       f"(opuesto al pesado). Base: Bently 5-7/5-8 · polar compensado.")
+                       f"(opuesto al pesado). Base: Bently 5-7/5-8 · polar compensado."
+                       + _cand_txt)
+        else:
+            st.info(
+                "**Sin punto pesado/alto/contrapeso en este plano.** El detector no "
+                "resolvió una resonancia de equilibrado: la amplitud **sigue subiendo "
+                "hasta operación** sin caer tras un pico (no hay el 'lazo cerrado' "
+                "clásico). El punto alto/pesado se define *en* la resonancia; si en "
+                "este plano el pico está en/por encima de operación, no se puede fijar. "
+                "Suele indicar **desbalance dominante** o un modo por encima del rango "
+                "barrido. (En 6X/6Y la crítica ~1015 rpm sí cae y por eso ahí sí se "
+                "marcan.)")
         _download_fig_button(fig, _vfile(f"Polar {sw.label}"), key="polar")
 
         def _mk_polar(_iid, _op, _lbl, _sw=sw, _u=unit, _a=_ampc, _p=_phc,
