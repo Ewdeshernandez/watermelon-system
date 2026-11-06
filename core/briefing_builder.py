@@ -1075,10 +1075,18 @@ def build_asset_briefing(
     # Figuras PRIMERO: la IA necesita saber qué análisis ya trae el reporte
     # (espectro/forma de onda/tendencia/órbita) para no afirmar que faltan.
     # period_label define la ventana de la tendencia (7d Semanal / 30d Mensual).
-    # FUERA DE LÍNEA → reporte COMPACTO: sin figuras ni análisis por-figura (serían
-    # de datos viejos, presentados como actuales → deshonesto). Solo portada +
-    # aviso + tabular fechada + alarmas + recomendaciones.
-    if data.get("offline"):
+    # FUERA DE LÍNEA:
+    #  • Semanal/Diario → reporte COMPACTO: sin figuras (serían datos viejos
+    #    presentados como actuales). Solo portada + aviso + tabular fechada.
+    #  • MENSUAL → SÍ mostramos la ÚLTIMA DATA disponible (espectros, ondas,
+    #    órbitas, full spectrum del último snapshot a plena carga del robot),
+    #    porque el mensual es balance de condición y conviene dejar ver el
+    #    último estado real. Cada figura queda ESTAMPADA con su fecha de
+    #    medición (ver estampado más abajo) para que sea explícito que NO es
+    #    el dato de hoy. Pedido del usuario 2026-11-06.
+    _is_monthly = str(period_label or "").lower().startswith("mensual")
+    _offline_figs = bool(data.get("offline")) and _is_monthly
+    if data.get("offline") and not _is_monthly:
         figures = {}
     else:
         try:
@@ -1121,8 +1129,11 @@ def build_asset_briefing(
                     if _fs_rpm and _fs_rpm > 0:
                         _rpm_note = (f" a {_fs_rpm:,.0f} rpm (plena carga)"
                                      if _fs_ok else f" a {_fs_rpm:,.0f} rpm")
+                    _off_note = (" — ÚLTIMA DATA DISPONIBLE (activo fuera de "
+                                 "línea; no es la condición actual)"
+                                 if _offline_figs else "")
                     if _md and not _cur.lstrip().startswith("Medición:"):
-                        figures[_ak] = f"Medición: {_md}{_rpm_note}. " + _cur
+                        figures[_ak] = f"Medición: {_md}{_rpm_note}{_off_note}. " + _cur
         except Exception as e:  # noqa: BLE001
             log.warning("estampar fecha de figura falló: %s", e)
 
