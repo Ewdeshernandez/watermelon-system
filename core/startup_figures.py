@@ -429,9 +429,15 @@ def bode_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
         op = float(snap.get("operating_speed_rpm") or 0.0)
         for s in snap.get("sensors", []):
             sl = s.get("sensor_label", "")
-            if sl in _seen:
+            # Dedup por (cojinete, eje) normalizado, NO por etiqueta cruda: el
+            # mismo sensor puede venir con labels distintos ("2XD" vs
+            # "2XD TURBINA NDE") y duplicaría figuras. ids vienen más-reciente
+            # primero → el primero visto (más reciente) gana.
+            _m = re.search(r"(\d+)\s*([XYxy])", sl)
+            _k = (_m.group(1), _m.group(2).upper()) if _m else sl
+            if _k in _seen:
                 continue
-            _seen.add(sl)
+            _seen.add(_k)
             merged.append((s, fecha, run, op))
     out: List[Dict[str, Any]] = []
     for s, fecha, run, op in merged:
