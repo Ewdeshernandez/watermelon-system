@@ -645,10 +645,11 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
             if kind == "polar":
                 _, pr = _smooth_xy(r, p)
                 fig = go.Figure(go.Scatterpolar(
-                    r=ar, theta=pr, mode="lines+markers",
-                    line=dict(color=_NAVY, width=2),
-                    marker=dict(size=4, color=rr, colorscale="Blues", showscale=True,
-                                colorbar=dict(title="rpm", thickness=12))))
+                    r=ar, theta=pr, mode="lines",
+                    line=dict(color=_NAVY, width=2.2, shape="spline", smoothing=1.0),
+                    customdata=rr,
+                    hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}"
+                                  "<br>fase %{theta:.0f}°"))
                 fig.update_layout(
                     template="plotly_white", height=500,
                     title=dict(text=f"Polar · {slab} · {lbl}", font=dict(size=14)),
@@ -750,7 +751,10 @@ def _sweep_controls(sw, key):
         # 1→2); la CAJA DE ENGRANAJES INVIERTE el giro → gearbox+generador
         # (coj 3/4/5/6) giran CCW. (Confirmado por el usuario 2026-11-05.)
         _bsec = _bearing_id(sw.label)
-        _def_ccw = _bsec not in {"1", "2"}       # turbina CW → False; resto CCW
+        # Planos 1,2,3 = CW (turbina + eje de ALTA del gearbox); 4,5,6 = CCW
+        # (eje de BAJA del gearbox + generador, tras la inversión). Confirmado
+        # usuario 2026-11-05. (Coj 3 no tiene instrumentación.)
+        _def_ccw = _bsec not in {"1", "2", "3"}  # CW → False; 4/5/6 → CCW
         _rot_opt = st.selectbox(
             "Sentido de giro (visto desde este extremo)",
             ["Antihorario (CCW)", "Horario (CW)"],
@@ -759,8 +763,8 @@ def _sweep_controls(sw, key):
             help="Bently 5-6: la fase de ATRASO se cuenta OPUESTA al sentido de "
                  "giro. El polar se orienta con 0° de fase en el ángulo físico de "
                  "la sonda (TDC=0°, R horario, L antihorario) y el ángulo creciendo "
-                 "contra el giro. SGT300: turbina (1/2) CW; la caja de engranajes "
-                 "invierte → gearbox/generador (3/4/5/6) CCW. Ajústalo si difiere.")
+                 "contra el giro. SGT300: planos 1/2/3 CW (turbina + alta gearbox); "
+                 "4/5/6 CCW (baja gearbox + generador). Ajústalo si difiere.")
         st.session_state[f"_rotsense_{key}"] = _rot_opt.startswith("Anti")
     st.session_state[f"_srvec_{key}"] = _srvec
     diag = _sweep_diag(tuple(rpm.tolist()), tuple(amp_c.tolist()),
@@ -2898,10 +2902,8 @@ elif view == "Polar":
         _rp2, _pr = _smooth_xy(sw.rpm, _phc)
         _rad_hi = float(np.nanmax(_ar)) if len(_ar) else 1.0
         fig.add_trace(go.Scatterpolar(
-            r=_ar, theta=_pr, mode="lines+markers",
-            line=dict(color=_NAVY, width=2.0, shape="spline", smoothing=0.6),
-            marker=dict(size=4, color=_rr, colorscale="Blues", showscale=True,
-                        colorbar=dict(title="rpm", thickness=12)),
+            r=_ar, theta=_pr, mode="lines",
+            line=dict(color=_NAVY, width=2.2, shape="spline", smoothing=1.0),
             customdata=_rr, name="Actual",
             hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
         _cmpp = _saved_sweeps("polar", sw.label, "polar")

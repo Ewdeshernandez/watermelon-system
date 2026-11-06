@@ -570,10 +570,8 @@ def polar_startup_bundle(instance_id: str, days: int) -> List[Dict[str, Any]]:
             lbl = s.get("sensor_label", "")
             fig = go.Figure()
             fig.add_trace(go.Scatterpolar(
-                r=a, theta=p, mode="lines+markers",
-                line=dict(color=_NAVY, width=1.8),
-                marker=dict(size=5, color=r, colorscale="Blues", showscale=True,
-                            colorbar=dict(title="rpm", thickness=12))))
+                r=a, theta=p, mode="lines",
+                line=dict(color=_NAVY, width=2.0, shape="spline", smoothing=1.0)))
             cs = s.get("critical_speed_rpm")
             if cs:
                 fig.add_trace(go.Scatterpolar(
