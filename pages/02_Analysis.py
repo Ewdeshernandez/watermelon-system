@@ -751,10 +751,22 @@ def _sweep_controls(sw, key):
         # 1→2); la CAJA DE ENGRANAJES INVIERTE el giro → gearbox+generador
         # (coj 3/4/5/6) giran CCW. (Confirmado por el usuario 2026-11-05.)
         _bsec = _bearing_id(sw.label)
-        # Planos 1,2,3 = CW (turbina + eje de ALTA del gearbox); 4,5,6 = CCW
-        # (eje de BAJA del gearbox + generador, tras la inversión). Confirmado
-        # usuario 2026-11-05. (Coj 3 no tiene instrumentación.)
-        _def_ccw = _bsec not in {"1", "2", "3"}  # CW → False; 4/5/6 → CCW
+        # Giro por SECCIÓN. Fuente única = config del activo (rotation_driver /
+        # rotation_driven); planos 1,2,3 = driver (turbina + alta gearbox),
+        # 4,5,6 = driven (baja gearbox + generador, tras la inversión). Si el
+        # activo no tiene giro configurado → fallback SGT300 (1/2/3 CW, 4/5/6 CCW).
+        _def_ccw = _bsec not in {"1", "2", "3"}      # fallback
+        try:
+            if cur_iid:
+                from core.instance_state import get_instance  # noqa: PLC0415
+                _ci = get_instance(cur_iid)
+                _rd = (getattr(_ci, "rotation_driver", "") or "").upper().strip()
+                _rv = (getattr(_ci, "rotation_driven", "") or "").upper().strip()
+                _sec_rot = _rd if _bsec in {"1", "2", "3"} else _rv
+                if _sec_rot in ("CW", "CCW"):
+                    _def_ccw = (_sec_rot == "CCW")
+        except Exception:  # noqa: BLE001
+            pass
         _rot_opt = st.selectbox(
             "Sentido de giro (visto desde este extremo)",
             ["Antihorario (CCW)", "Horario (CW)"],
