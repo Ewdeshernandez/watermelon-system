@@ -746,15 +746,21 @@ def _sweep_controls(sw, key):
         # Sentido de giro: la FASE DE ATRASO se cuenta OPUESTA al giro (Bently 5-6).
         # El polar se orienta con 0° de fase en la sonda y el ángulo creciendo
         # contra el giro → el vector apunta a la posición física del punto alto.
+        # Default POR SECCIÓN del tren SGT300: la turbina (coj 1/2) gira CW (visto
+        # 1→2); la CAJA DE ENGRANAJES INVIERTE el giro → gearbox+generador
+        # (coj 3/4/5/6) giran CCW. (Confirmado por el usuario 2026-11-05.)
+        _bsec = _bearing_id(sw.label)
+        _def_ccw = _bsec not in {"1", "2"}       # turbina CW → False; resto CCW
         _rot_opt = st.selectbox(
             "Sentido de giro (visto desde este extremo)",
             ["Antihorario (CCW)", "Horario (CW)"],
-            index=(0 if st.session_state.get(f"_rotsense_{key}", True) else 1),
+            index=(0 if _def_ccw else 1),
             key=f"{_sk}_rotsense",
-            help="Bently: la fase de ATRASO se cuenta OPUESTA al sentido de giro. "
-                 "El polar se orienta con 0° de fase en el ángulo físico de la "
-                 "sonda (TDC=0°, R horario, L antihorario) y el ángulo creciendo "
-                 "contra el giro. Ajústalo al giro real de la máquina.")
+            help="Bently 5-6: la fase de ATRASO se cuenta OPUESTA al sentido de "
+                 "giro. El polar se orienta con 0° de fase en el ángulo físico de "
+                 "la sonda (TDC=0°, R horario, L antihorario) y el ángulo creciendo "
+                 "contra el giro. SGT300: turbina (1/2) CW; la caja de engranajes "
+                 "invierte → gearbox/generador (3/4/5/6) CCW. Ajústalo si difiere.")
         st.session_state[f"_rotsense_{key}"] = _rot_opt.startswith("Anti")
     st.session_state[f"_srvec_{key}"] = _srvec
     diag = _sweep_diag(tuple(rpm.tolist()), tuple(amp_c.tolist()),
