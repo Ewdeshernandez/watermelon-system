@@ -275,6 +275,7 @@ def approve_and_send(instance_id: str, *,
                 "status": meta.get("status", "—"),
                 "score": meta.get("score"),
                 "alarms": meta.get("alarms", 0),
+                "period": period,
             })
             out["delivery"] = delivery
         except Exception as e:

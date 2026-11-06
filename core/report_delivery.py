@@ -79,6 +79,7 @@ def deliver_report(
     status = meta.get("status", "—")
     score = meta.get("score")
     alarms = int(meta.get("alarms", 0) or 0)
+    period_label = meta.get("period", "") or meta.get("period_label", "")
     tag = (getattr(instance_obj, "tag", "") or instance_id or "activo").strip()
 
     result: Dict[str, Any] = {"any_ok": False}
@@ -97,7 +98,8 @@ def deliver_report(
         return result
 
     filename = _pdf_filename(tag)
-    short_msg = build_short_message(instance_obj, instance_id, status, score, alarms)
+    short_msg = build_short_message(instance_obj, instance_id, status, score, alarms,
+                                    period_label)
     if alert:
         short_msg = ("⚠ *AVISO AUTOMÁTICO POR CONDICIÓN* — se detectó un cruce de "
                      "umbral en el activo.\n\n") + short_msg
@@ -110,10 +112,12 @@ def deliver_report(
         else:
             try:
                 from core.email_sender import send_email
-                subject = build_email_subject(instance_obj, instance_id, status)
+                subject = build_email_subject(instance_obj, instance_id, status,
+                                              period_label)
                 if alert:
                     subject = "⚠ ALERTA — " + subject
-                html = build_email_html(instance_obj, instance_id, status, score, alarms)
+                html = build_email_html(instance_obj, instance_id, status, score, alarms,
+                                        period_label)
                 if alert:
                     html = ("<p style='margin:0 0 8px;color:#b91c1c;font-weight:700;'>"
                             "⚠ Aviso automático por condición — cruce de umbral detectado.</p>") + html

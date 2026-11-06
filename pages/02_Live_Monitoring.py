@@ -4410,6 +4410,8 @@ def main() -> None:
                     st.error("Could not generate the report. Check that there are active readings.")
                 else:
                     from core.report_delivery import deliver_report
+                    if isinstance(_meta, dict):
+                        _meta.setdefault("period", "Diario")
                     res = deliver_report(instance_obj, pdf_bytes, _meta)
                     _em = res.get("email")
                     _wa = res.get("whatsapp")
