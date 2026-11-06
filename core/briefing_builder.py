@@ -225,8 +225,16 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         if _asof_dt is not None:
             if (_dt.now(_tz.utc) - _asof_dt).total_seconds() > _thr_h * 3600.0:
                 _offline = True
+                # since Y age de la MISMA lectura (_asof_dt, la que decide offline).
+                # Antes _off_since usaba la tabular full-speed (otra fecha) y el
+                # texto quedaba incoherente ("30/10 ... hace 1 d").
                 _off_age = _format_age(_asof_dt)
-                _off_since = tabular_asof
+                try:
+                    from zoneinfo import ZoneInfo as _ZI
+                    _off_since = _asof_dt.astimezone(
+                        _ZI("America/Bogota")).strftime("%d/%m/%Y %H:%M")
+                except Exception:  # noqa: BLE001
+                    _off_since = _asof_dt.strftime("%d/%m/%Y %H:%M")
     except Exception:  # noqa: BLE001
         pass
     if _offline:
