@@ -597,6 +597,100 @@ def _view_saved_scl(key="scl_hist"):
                        f"· claro {float(bd.get('clearance_radial') or 0)*2:.0f} µm diametral")
 
 
+def _view_saved_bode(kind="bode", key="bode_hist"):
+    """Visor de histórico: ver snapshots de Bode/Polar guardados SIN subir CSV.
+    Espejo de _view_saved_scl (SCL ya lo tenía; Bode/Polar no → el usuario no
+    veía los Bode guardados al entrar sin CSV)."""
+    from plotly.subplots import make_subplots  # noqa: PLC0415
+    if kind == "polar":
+        from core.polar_history import (list_polar_snapshots as _lst,  # noqa: PLC0415
+                                         load_polar_snapshot as _load)
+        _nm = "Polar"
+    else:
+        from core.bode_history import (list_bode_snapshots as _lst,  # noqa: PLC0415
+                                        load_bode_snapshot as _load)
+        _nm = "Bode"
+    assets = _list_assets()
+    if not assets:
+        st.info("No hay máquinas registradas.")
+        return
+    tags = [t for _i, t in assets]
+    _def = tags.index(cur_asset) if cur_asset in tags else 0
+    c0, c1 = st.columns([1, 2])
+    tsel = c0.selectbox("Máquina", tags, index=_def, key=f"{key}_as")
+    iid = assets[tags.index(tsel)][0]
+    snaps = _lst(iid) or []
+    if not snaps:
+        st.info(f"Sin snapshots de {_nm} guardados en **{tsel}**.")
+        return
+    opts = {f"{(s.get('corrida_label') or '—')} · {s.get('timestamp','')[:16]} · "
+            f"{s.get('n_sensors', 0)} sensor(es)": s["snapshot_id"] for s in snaps}
+    sel = c1.multiselect(f"Snapshot(s) de {_nm} guardados", list(opts),
+                         default=list(opts)[:1], key=f"{key}_sel")
+    for lbl in sel:
+        snap = _load(iid, opts[lbl])
+        if not snap:
+            continue
+        op = float(snap.get("operating_speed_rpm") or 0.0)
+        for se in snap.get("sensors", []):
+            r = np.asarray(se.get("trajectory_speed") or [], float)
+            a = np.asarray(se.get("trajectory_amp") or [], float)
+            p = np.asarray(se.get("trajectory_phase") or [], float)
+            if r.size < 3 or a.size != r.size:
+                continue
+            slab = se.get("sensor_label", "")
+            unit = se.get("amp_unit", "µm pp")
+            rr, ar = _smooth_xy(r, a)
+            cs = se.get("critical_speed_rpm")
+            if kind == "polar":
+                _, pr = _smooth_xy(r, p)
+                fig = go.Figure(go.Scatterpolar(
+                    r=ar, theta=pr, mode="lines+markers",
+                    line=dict(color=_NAVY, width=2),
+                    marker=dict(size=4, color=rr, colorscale="Blues", showscale=True,
+                                colorbar=dict(title="rpm", thickness=12))))
+                fig.update_layout(
+                    template="plotly_white", height=500,
+                    title=dict(text=f"Polar · {slab} · {lbl}", font=dict(size=14)),
+                    polar=dict(angularaxis=dict(direction="clockwise", rotation=90),
+                               radialaxis=dict(range=[0, float(np.nanmax(ar)) * 1.15])),
+                    margin=dict(l=40, r=40, t=56, b=40))
+            else:
+                _, pwr = _smooth_xy(r, _unwrap_phase(r, p))
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                                    row_heights=[0.42, 0.58], vertical_spacing=0.06)
+                fig.add_trace(go.Scatter(x=rr, y=pwr, mode="lines",
+                              line=dict(color="#e8890c", width=2)), row=1, col=1)
+                fig.add_trace(go.Scatter(x=rr, y=ar, mode="lines",
+                              line=dict(color=_NAVY, width=2)), row=2, col=1)
+                for _rw in (1, 2):
+                    if op > 0:
+                        fig.add_vline(x=op, line=dict(color="#64748b", width=1,
+                                      dash="dot"), row=_rw, col=1)
+                    if cs:
+                        fig.add_vline(x=float(cs), line=dict(color="#dc3545",
+                                      width=1.2, dash="dash"), row=_rw, col=1)
+                fig.update_yaxes(autorange="reversed", title_text="fase atraso (°)",
+                                 dtick=90, row=1, col=1)
+                fig.update_yaxes(title_text=f"amp ({unit})", row=2, col=1)
+                fig.update_xaxes(title_text="rpm", row=2, col=1)
+                fig.update_layout(
+                    template="plotly_white", height=460, showlegend=False,
+                    title=dict(text=f"Bode · {slab} · {lbl}", font=dict(size=14)),
+                    font=dict(family="IBM Plex Sans"), margin=dict(l=56, r=30, t=54, b=44))
+            st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+            _a_op = se.get("amp_at_op"); _p_op = se.get("phase_at_op")
+            _q = se.get("q_factor")
+            _bits = []
+            if _a_op:
+                _bits.append(f"amp@op {float(_a_op):.1f} {unit} ∠{float(_p_op or 0):.0f}°")
+            if cs:
+                _bits.append(f"Ncrit {float(cs):.0f} rpm"
+                             + (f" · Q {float(_q):.1f}" if _q else ""))
+            _bits.append(f"op {op:.0f} rpm")
+            st.caption(" · ".join(_bits))
+
+
 def _sweep_controls(sw, key):
     rpm = np.asarray(sw.rpm, float)
     amp_c = np.asarray(sw.amp, float); phase_c = np.asarray(sw.phase, float)
@@ -2514,7 +2608,9 @@ elif view == "Bode":
     sw = _pick_sweep("bode_sw")
     if sw is None:
         st.warning("Bode: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
-                   "amplitude + phase).")
+                   "amplitude + phase) — o mira los guardados abajo.")
+        st.markdown("#### 📂 Ver Bode guardados")
+        _view_saved_bode("bode", "bode_hist_nodata")
     else:
         op, unit, diag, s, zone, _ampc, _phc = _sweep_controls(sw, "bode")
         zc = _ISO.get(zone, "#8090a6")
@@ -2759,6 +2855,8 @@ elif view == "Bode":
 elif view == "Polar":
     sw = _pick_sweep("polar_sw")
     if sw is None:
+        st.markdown("#### 📂 Ver Polar guardados")
+        _view_saved_bode("polar", "polar_hist_nodata")
         st.warning("Polar: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
                    "amplitude + phase).")
     else:
