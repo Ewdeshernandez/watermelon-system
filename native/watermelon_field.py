@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.93"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.94"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1769,11 +1769,13 @@ def main() -> int:
             # Nº de cojinetes → layout recomendado (KPH + X/Y por cojinete). El usuario edita.
             nb = int(sp_nbrg.value())
             m = SimMachine.plantilla_prox_train(n_bearings=nb, name=(ed_name.text() or "Machine"))
-            # Preservar lo que el usuario YA eligió (la plantilla trae rotation=CCW
-            # fija → antes pisaba el sentido de giro al autogenerar). Bug corregido.
+            # Preservar TODO lo que el usuario YA llenó (la plantilla viene en blanco →
+            # antes Auto-generate borraba rotación Y TAMBIÉN tipo/tag/cliente/location).
             m.rotation = cb_rot.currentText()
             m.bearing_type = cb_brg.currentText()
             m.rpm = float(sp_rpm.value())
+            m.tag = ed_tag.text(); m.client = ed_client.text()
+            m.location = ed_loc.text(); m.machine_type = ed_type.text()
             fill_form(m)
             cfg_tabs.setCurrentWidget(pg_sensors)          # mostrar el resultado
             _refresh_acq_info()
