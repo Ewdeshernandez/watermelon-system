@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.82"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.83"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -315,7 +315,7 @@ def main() -> int:
         _mode_labels = [MODE_LABELS.get(m, m) for m in MODES]
         tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
         win = QtWidgets.QMainWindow()
-        win.setWindowTitle(f"Watermelon Rotordynamics — {args.machine}")
+        win.setWindowTitle(f"Watermelon Rotordynamics  ·  v{__version__}")
         win.resize(1360, 860)
         rec_state = {"rec": None}
 
@@ -473,16 +473,17 @@ def main() -> int:
         # ---------------- Toolbar ----------------
         tb = win.addToolBar("Main")
         tb.setMovable(False)
+        _sep_tb = []                          # separadores del grupo de adquisición
+        tb.addAction(act_hw)                  # "Detect hardware" SIEMPRE primero/visible
+        _sep_tb.append(tb.addSeparator())
         tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_save)
-        tb.addSeparator()
+        _sep_tb.append(tb.addSeparator())
         tb.addAction(act_sync); tb.addAction(act_clear)
-        tb.addSeparator()
-        tb.addAction(act_hw)                 # Detectar hardware NI (siempre visible)
-        tb.addSeparator()
+        _sep_tb.append(tb.addSeparator())
         lbl_modo = QtWidgets.QLabel(" Mode: "); lbl_modo.setStyleSheet("color:white;")
         tb.addWidget(lbl_modo)
         cb_run = QtWidgets.QComboBox(); cb_run.addItems(_mode_labels); tb.addWidget(cb_run)
-        tb.addSeparator()
+        _sep_tb.append(tb.addSeparator())
         _lbl_dest = QtWidgets.QLabel(" Destino: "); _lbl_dest.setStyleSheet("color:white;")
         tb.addWidget(_lbl_dest)
         cb_dest = QtWidgets.QComboBox(); cb_dest.addItems(["Captura local", "Monitoreo en línea"])
@@ -493,22 +494,24 @@ def main() -> int:
                                                            QtWidgets.QSizePolicy.Preferred)
         spacer.setStyleSheet("background:transparent;")   # sin esto se ve un recuadro blanco feo
         tb.addWidget(spacer)
-        lbl_machine = QtWidgets.QLabel(f"  {args.machine}   ")
-        lbl_machine.setStyleSheet("color:white; font-weight:700; font-size:14px;")
+        # Derecha = la CARA del software: marca + versión (no el nombre de máquina).
+        lbl_machine = QtWidgets.QLabel(
+            "<span style='color:#eafff2;font-weight:800;letter-spacing:1px;'>WATERMELON</span>"
+            "<span style='color:#86efac;font-weight:800;letter-spacing:1px;'>&nbsp;ROTORDYNAMICS</span>"
+            f"<span style='color:#bfe8cf;font-weight:600;'>&nbsp;&nbsp;v{__version__}&nbsp;</span>")
+        lbl_machine.setTextFormat(QtCore.Qt.RichText)
+        lbl_machine.setStyleSheet("font-size:13px;")
         tb.addWidget(lbl_machine)
 
-        # Toolbar contextual (opción a): las acciones de DATOS (Start/Stop/Save/Upload/
-        # Delete) y los ajustes de adquisición (Mode/Destino) sólo se ven FUERA de
-        # Configuration (en Monitoring/datos). En Configuration arriba queda limpio:
-        # sólo "Detect NI hardware". Lo conduce _on_tab según la pestaña.
+        # Toolbar contextual (opción a): acciones de DATOS (Start/Stop/Save/Upload/Delete)
+        # + ajustes de adquisición (Mode/Destino) + sus separadores sólo se ven FUERA de
+        # Configuration. En Configuration arriba queda limpio: sólo "Detect hardware" y la
+        # versión. Lo conduce _on_tab según la pestaña; el estado inicial lo fija _on_tab().
         def _reveal_data_actions(on: bool):
-            for _a in (act_start, act_stop, act_save, act_sync, act_clear):
+            for _a in (act_start, act_stop, act_save, act_sync, act_clear, *_sep_tb):
                 _a.setVisible(bool(on))
-            try:   # Mode/Destino aún no existen en la primera llamada → se ignora
-                for _wd in (lbl_modo, cb_run, _lbl_dest, cb_dest):
-                    _wd.setVisible(bool(on))
-            except Exception:  # noqa: BLE001
-                pass
+            for _wd in (lbl_modo, cb_run, _lbl_dest, cb_dest):
+                _wd.setVisible(bool(on))
         _reveal_data_actions(False)
 
         # ---------------- Pestañas ----------------
@@ -668,7 +671,10 @@ def main() -> int:
         ml.addWidget(_subhdr("Load an existing machine (library + cloud ☁)"))
         r_lib = QtWidgets.QHBoxLayout()
         cb_lib = QtWidgets.QComboBox(); cb_lib.setMinimumWidth(280); r_lib.addWidget(cb_lib, 1)
-        btn_load = QtWidgets.QPushButton("Load"); r_lib.addWidget(btn_load); r_lib.addStretch(1)
+        btn_load = QtWidgets.QPushButton("Load"); r_lib.addWidget(btn_load)
+        btn_browse = QtWidgets.QPushButton("📁 Open file…")   # explorar un .wmmachine del disco
+        btn_browse.setToolTip("Buscar una configuración/máquina guardada en el disco (.wmmachine).")
+        r_lib.addWidget(btn_browse); r_lib.addStretch(1)
         ml.addLayout(r_lib)
 
         # Ficha del activo (homólogo a la web)
@@ -1858,6 +1864,7 @@ def main() -> int:
 
         act_export.triggered.connect(_export_config)
         act_import.triggered.connect(_import_config)
+        btn_browse.clicked.connect(_import_config)   # "📁 Open file…" junto a Load
 
         # Estado inicial del gating (se corre tras el fill_form de arranque, más abajo).
         def _init_gate():
