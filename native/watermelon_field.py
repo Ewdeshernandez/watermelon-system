@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.84"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.85"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -795,14 +795,22 @@ def main() -> int:
                              "ideal órbita/Bode).  asynchronous = por tiempo (sin keyphasor).")
         ra.addWidget(cb_wfmode)
         ra.addWidget(QtWidgets.QLabel("Samples/rev:"))
-        sp_sprev = QtWidgets.QSpinBox(); sp_sprev.setRange(0, 4096); sp_sprev.setValue(0)
-        sp_sprev.setToolTip("Muestras por revolución (order tracking). 0 = automático.\nTípico 64, 128, 256 (potencias de 2).")
+        sp_sprev = QtWidgets.QSpinBox(); sp_sprev.setRange(0, 4096); sp_sprev.setValue(128)
+        sp_sprev.setToolTip("Muestras por revolución (order tracking, estándar Bently para órbitas).\n"
+                            "128 = órbita limpia + hasta ~50×. 256 = hasta ~100×. 0 = automático.")
         ra.addWidget(sp_sprev)
         ra.addWidget(QtWidgets.QLabel("Averages:"))
         sp_avg = QtWidgets.QSpinBox(); sp_avg.setRange(1, 64); sp_avg.setValue(4)
         sp_avg.setToolTip("Promedios espectrales. Más promedios = espectro más limpio pero más lento.\n"
-                          "Estable: 4–8.  Transitorio (arranque/parada): 1–2.")
+                          "Estable: 4–8.  Transitorio (arranque/parada): 1 (no se promedia en rampa).")
         ra.addWidget(sp_avg)
+
+        # Regla del libro: en transitorio (arranque/parada) NO se promedia (la velocidad
+        # cambia) → Averages = 1 automático; en estable vuelve a 4. Sigue al modo.
+        def _avg_for_mode(*_):
+            steady = (cb_mode.currentText() == MODE_LABELS["estable"])
+            sp_avg.setValue(4 if steady else 1)
+        cb_mode.currentTextChanged.connect(_avg_for_mode)
         ra.addWidget(QtWidgets.QLabel("Window:"))
         cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"])
         cb_win.setToolTip("Ventana FFT.\nhanning = general (buena resolución).  "
