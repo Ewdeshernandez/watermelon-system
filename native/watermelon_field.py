@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.92"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.93"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1944,7 +1944,16 @@ def main() -> int:
                                    (_COL_FS, (f"{getattr(c, 'full_scale', 0):g}"
                                               if getattr(c, "full_scale", 0) else ""))):
                     _t(lambda col=_col, val=_val: tblc.setItem(r, col, QtWidgets.QTableWidgetItem(str(val))))
+            # Machine: set EXPLÍCITO (no depender solo de fill_form) — nombre, rotación,
+            # rpm, modo, bearing. Así la pestaña Machine siempre refleja lo cargado.
+            if (getattr(mc, "name", "") or "") not in _GENERIC_MACHINE:
+                _t(lambda: ed_name.setText(mc.name))
+            _t(lambda: cb_rot.setCurrentText(getattr(mc, "rotation", "CCW")))
+            _t(lambda: sp_rpm.setValue(float(getattr(mc, "rpm_nominal", 0) or 0) or sp_rpm.value()))
+            # Refrescar el Channel editor (campos propios) para que muestre lo cargado.
             _t(draw_bearing); _t(_ched_refresh_selector)
+            if tblc.rowCount():
+                _t(lambda: _ched_load_row(0))
 
         def _export_config():
             import json as _json
@@ -2016,6 +2025,14 @@ def main() -> int:
                 _unlock_all_tabs()
                 tabs.setCurrentIndex(0); cfg_tabs.setCurrentWidget(pg_sensors)
                 _rows = tblc.rowCount()
+                # Lo que REALMENTE quedó en el formulario (para confirmar que aplicó):
+                _ui_name = ""
+                try: _ui_name = ed_name.text()
+                except Exception: pass
+                _ui_coup = ""
+                try:
+                    _it = tblc.item(0, _COL_COUP); _ui_coup = _it.text() if _it else ""
+                except Exception: pass
                 win.statusBar().showMessage(
                     f"✓ Cargado: {name or '(sin nombre)'} · {nch} canal(es) → {path}", 7000)
                 QtWidgets.QMessageBox.information(
@@ -2023,7 +2040,8 @@ def main() -> int:
                     f"<b>{name or '(sin nombre)'}</b> (config completa)<br>Canales: <b>{nch}</b> · "
                     f"filas en tabla: <b>{_rows}</b><br>Tag: {tagv or '—'} · Cliente: {clientv or '—'} · "
                     f"Location: {locv or '—'}<br>Rotación: {rot} · RPM: {rpm:g}"
-                    "<br><br>Se restauró Machine + Sensors + Channel editor + Acquisition."
+                    f"<br><br><b>En el formulario quedó</b> → Machine name: <b>{_ui_name or '(vacío)'}</b> · "
+                    f"coupling canal 1: <b>{_ui_coup or '(vacío)'}</b>"
                     + ("<br><b style='color:#b45309'>⚠ 0 canales: archivo vacío o versión vieja.</b>"
                        if nch == 0 else ""))
             except Exception as e:  # noqa: BLE001
