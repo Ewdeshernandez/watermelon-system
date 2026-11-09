@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.73"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.74"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -495,6 +495,24 @@ def main() -> int:
             "QTableWidget::item { padding:3px 6px; }")
 
         _is_sim = type(agent.source).__name__ == "SimulatedStreamSource"
+
+        # Badge REAL/SIM inequívoco en el header (regla de oro: nunca simular en
+        # silencio). Rojo = simulación/sin tarjeta; verde = adquisición NI real.
+        hdr_mode = QtWidgets.QLabel()
+        if _is_sim:
+            hdr_mode.setText("● MODO SIMULACIÓN — SIN TARJETA")
+            hdr_mode.setStyleSheet(
+                "color:#ffffff; background:#b91c1c; border:1px solid #ef4444;"
+                "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
+        else:
+            hdr_mode.setText(f"● 9229 REAL · {args.chassis}")
+            hdr_mode.setStyleSheet(
+                "color:#052e16; background:#4ade80; border:1px solid #16a34a;"
+                "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
+        try:
+            _hb.insertWidget(_hb.indexOf(hdr_status), hdr_mode)
+        except Exception:  # noqa: BLE001
+            _hb.addWidget(hdr_mode)
 
         def _dsp(mn, mx, val, step=100.0):
             s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s

@@ -45,11 +45,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourcePath}..\..\out\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{group}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--prox --sens 200 --fs 5120 --chans 1,2 --names 1Y,1X --kph-bnc 1 --machine Rotor_Kit_Field"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\Watermelon Rotordynamics (DEMO)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--sim"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\Banco de Pruebas"; Filename: "{app}\Banco_de_Pruebas"
 Name: "{group}\{cm:UninstallProgram,Watermelon Rotordynamics}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--prox --sens 200 --fs 5120 --chans 1,2 --names 1Y,1X --kph-bnc 1 --machine Rotor_Kit_Field"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; Description: "{cm:LaunchProgram,Watermelon Rotordynamics}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--prox --sens 200 --fs 5120 --chans 1,2 --names 1Y,1X --kph-bnc 1 --machine Rotor_Kit_Field"; Description: "{cm:LaunchProgram,Watermelon Rotordynamics}"; Flags: nowait postinstall skipifsilent
