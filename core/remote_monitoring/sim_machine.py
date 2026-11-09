@@ -98,6 +98,11 @@ class SimMachine:
     n_balls: int = 8
     bd_pd: float = 0.34
     gear_teeth: int = 22
+    # ficha del activo (asset record) — se guarda/carga con la máquina
+    tag: str = ""
+    client: str = ""
+    location: str = ""
+    machine_type: str = ""
 
     # --- canales / stream ---------------------------------------------------
     def channels(self) -> List[ChannelConfig]:

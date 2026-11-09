@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.86"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.87"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1450,6 +1450,11 @@ def main() -> int:
             # para que el usuario nombre su máquina — no se fuerza 'Rotor_Kit_Field'.
             _nm0 = "" if (m.name or "") in _GENERIC_MACHINE else m.name
             _sw(lambda: ed_name.setText(_nm0)); _sw(lambda: sp_fs.setValue(int(m.fs)))
+            # Ficha del activo (tag/cliente/location/tipo) — ahora viaja con la máquina.
+            _sw(lambda: ed_tag.setText(getattr(m, "tag", "") or ""))
+            _sw(lambda: ed_client.setText(getattr(m, "client", "") or ""))
+            _sw(lambda: ed_loc.setText(getattr(m, "location", "") or ""))
+            _sw(lambda: ed_type.setText(getattr(m, "machine_type", "") or ""))
             _sw(lambda: cb_rot.setCurrentText(getattr(m, "rotation", "CCW")))
             _sw(lambda: cb_brg.setCurrentText(getattr(m, "bearing_type", "plain")))
             _sw(lambda: cb_mode.setCurrentText(MODE_LABELS.get(m.mode, MODE_LABELS["estable"])))
@@ -1518,6 +1523,10 @@ def main() -> int:
                               crit1=_w(lambda: sp_c1.value(), 0.0),
                               crit2=_w(lambda: sp_c2.value(), 0.0),
                               severity=_w(lambda: sp_sev.value(), 1.0),
+                              tag=_w(lambda: ed_tag.text(), ""),
+                              client=_w(lambda: ed_client.text(), ""),
+                              location=_w(lambda: ed_loc.text(), ""),
+                              machine_type=_w(lambda: ed_type.text(), ""),
                               phenomena={k: v for k, v in ph.items() if v != "none"})
 
         def _setup_to_sim(setup) -> SimMachine:
