@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.89"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.90"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1924,6 +1924,11 @@ def main() -> int:
             try:
                 m.save(path)
                 win.statusBar().showMessage(f"✓ Guardado: {_base} · {nch} canal(es) → {path}", 6000)
+                QtWidgets.QMessageBox.information(
+                    win, "Guardado",
+                    f"<b>{_base}</b> guardada.<br>Canales: <b>{nch}</b><br>"
+                    f"Tag: {m.tag or '—'} · Cliente: {m.client or '—'} · "
+                    f"Location: {m.location or '—'}<br><br><small>{path}</small>")
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, "Save to file", f"No se pudo guardar:\n{e}")
 
@@ -1945,13 +1950,16 @@ def main() -> int:
                 tabs.setCurrentIndex(0)                       # ir a Configuration
                 cfg_tabs.setCurrentWidget(pg_machine)         # mostrar Machine
                 nch = len(m.sensors)
+                _chs = ", ".join(s.name for s in m.sensors[:6]) + (" …" if nch > 6 else "")
                 win.statusBar().showMessage(
                     f"✓ Cargado: {m.name or '(sin nombre)'} · {nch} canal(es) → {path}", 7000)
-                if nch == 0:
-                    QtWidgets.QMessageBox.information(win, "Open file",
-                        f"El archivo '{os.path.basename(path)}' se abrió pero NO tiene canales "
-                        "guardados (se guardó vacío, o con una versión vieja). Configura la "
-                        "máquina y vuelve a guardarla con 💾 Save to file.")
+                QtWidgets.QMessageBox.information(
+                    win, "Cargado",
+                    f"<b>{m.name or '(sin nombre)'}</b><br>Canales: <b>{nch}</b> "
+                    f"({_chs or '—'})<br>Tag: {m.tag or '—'} · Cliente: {m.client or '—'} · "
+                    f"Location: {m.location or '—'}<br>Rotación: {m.rotation} · RPM: {m.rpm:g}"
+                    + ("<br><br><b style='color:#b45309'>⚠ 0 canales: el archivo se guardó vacío "
+                       "o con versión vieja. Configura y vuelve a guardar.</b>" if nch == 0 else ""))
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, "Open file",
                     f"Se leyó el archivo pero no se pudo aplicar al formulario:\n{e}")
