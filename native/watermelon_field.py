@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.81"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.82"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,8 +36,8 @@ PANEL2 = "#e7edf6"   # hover / panel elevado
 LINE = "#d6deea"     # bordes / grid
 INK = "#1f2937"      # texto principal
 MUTE = "#64748b"     # texto secundario
-ACC = "#2f6fb0"      # acento azul (web)
-NAVY = "#0F1E3D"     # chrome (menú/toolbar/status) + títulos
+ACC = "#2fa65a"      # acento VERDE sandía (marca Watermelon de campo)
+NAVY = "#17512f"     # chrome (menú/toolbar/status) = verde cáscara profundo
 BLUE = "#2f6fb0"
 CORN = "#4f8fd0"     # traza primaria (cornflower)
 AMBER = "#e08a1e"    # traza secundaria (ámbar) para fase/espectro
@@ -140,9 +140,9 @@ def _stylesheet(scale: float = 1.0) -> str:
     QMenu {{ background: {PANEL}; border: 1px solid {LINE}; color: {INK}; }}
     QMenu::item:selected {{ background: {ACC}; color: white; }}
     QToolBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-        stop:0 #16294a, stop:1 #0d1a30); spacing: 7px; padding: 8px 12px;
-        border-bottom: 1px solid #24406e; }}
-    QToolBar::separator {{ background: #2b3d5f; width: 1px; margin: 5px 7px; }}
+        stop:0 #1f7a43, stop:1 #14532d); spacing: 7px; padding: 8px 12px;
+        border-bottom: 1px solid #0f3d22; }}
+    QToolBar::separator {{ background: rgba(255,255,255,0.18); width: 1px; margin: 5px 7px; }}
     /* Cada acción como CHIP visible (estilo estación de análisis) — el nombre
        nunca se pierde sobre el fondo oscuro. */
     QToolBar QToolButton {{ color: #eaf1fb; background: rgba(255,255,255,0.06);
@@ -165,15 +165,15 @@ def _stylesheet(scale: float = 1.0) -> str:
     QStatusBar QLabel {{ color: #b7c6de; padding: 2px 8px; }}
     QPushButton {{ background: {PANEL2}; color: {INK}; border: 1px solid {LINE};
         padding: 7px 15px; border-radius: 7px; font-weight: 600; }}
-    QPushButton:hover {{ background: {ACC}; color: {NAVY}; border-color: {ACC}; }}
+    QPushButton:hover {{ background: {ACC}; color: white; border-color: {ACC}; }}
     QPushButton:disabled {{ background: {PANEL}; color: {MUTE}; }}
     QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{ background: {PANEL};
         color: {INK}; border: 1px solid {LINE}; border-radius: 6px; padding: 5px 8px;
-        selection-background-color: {ACC}; selection-color: {NAVY}; }}
+        selection-background-color: {ACC}; selection-color: white; }}
     QComboBox:hover, QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
         border-color: {ACC}; }}
     QComboBox QAbstractItemView {{ background: {PANEL}; color: {INK};
-        selection-background-color: {ACC}; selection-color: {NAVY};
+        selection-background-color: {ACC}; selection-color: white;
         border: 1px solid {LINE}; }}
     QComboBox::drop-down {{ border: none; width: 20px; }}
     /* Flechas ▲▼ de los spinbox: al estilar el QSpinBox por hoja de estilo, Qt deja
@@ -195,8 +195,8 @@ def _stylesheet(scale: float = 1.0) -> str:
         alternate-background-color: #f6f9fd; }}
     QTableWidget::item {{ padding: 6px 8px; }}
     QTableWidget::item:selected {{ background: #dbe8f7; color: {INK}; }}
-    QHeaderView::section {{ background: {NAVY}; color: #8ec3ef; padding: 9px 8px;
-        border: none; border-right: 1px solid #24344f; font-weight: 700; font-size: {fh}px;
+    QHeaderView::section {{ background: {NAVY}; color: #bfe8cf; padding: 9px 8px;
+        border: none; border-right: 1px solid #1c5e38; font-weight: 700; font-size: {fh}px;
         text-transform: uppercase; letter-spacing: .04em; }}
     QHeaderView::section:first {{ border-top-left-radius: 9px; }}
     QHeaderView::section:last {{ border-top-right-radius: 9px; border-right: none; }}
@@ -259,7 +259,7 @@ def main() -> int:
     try:
         from license_gate import run_license_gate
         _brand = ("<span style='color:#fff;font-weight:800;letter-spacing:3px;font-size:22px;'>WATERMELON</span>"
-                  "<span style='color:#1AAEE5;font-weight:800;letter-spacing:3px;font-size:22px;'>&nbsp;ROTORDYNAMICS</span>")
+                  "<span style='color:#86efac;font-weight:800;letter-spacing:3px;font-size:22px;'>&nbsp;ROTORDYNAMICS</span>")
         if not run_license_gate(app, t=lambda en, es: en, navy=NAVY, acc=ACC,
                                 brand_html=_brand, app_title="Watermelon Rotordynamics"):
             return 0                        # el usuario cerró la activación → salir limpio
@@ -518,12 +518,12 @@ def main() -> int:
         _hdr = QtWidgets.QFrame(); _hdr.setObjectName("wmBrandBar")
         _hdr.setStyleSheet(
             "QFrame#wmBrandBar{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #0b1730, stop:0.6 #0F1E3D, stop:1 #16294d);"
-            "border-bottom:1px solid #23345c;}")
+            "stop:0 #14532d, stop:0.6 #1f7a43, stop:1 #166534);"
+            "border-bottom:2px solid #e23b55;}")   # franja roja = rebanada de sandía
         _hb = QtWidgets.QHBoxLayout(_hdr); _hb.setContentsMargins(16, 8, 14, 8); _hb.setSpacing(12)
         _brand = QtWidgets.QLabel(
-            "<span style='color:#eaf1fb;font-weight:800;letter-spacing:2px;'>WATERMELON</span>"
-            "<span style='color:#1AAEE5;font-weight:800;letter-spacing:2px;'>&nbsp;ROTORDYNAMICS</span>")
+            "<span style='color:#eafff2;font-weight:800;letter-spacing:2px;'>WATERMELON</span>"
+            "<span style='color:#86efac;font-weight:800;letter-spacing:2px;'>&nbsp;ROTORDYNAMICS</span>")
         _brand.setTextFormat(QtCore.Qt.RichText)
         _brand.setStyleSheet("font-size:15px;")
         _hb.addWidget(_brand)
@@ -533,7 +533,7 @@ def main() -> int:
         _hb.addStretch(1)
         hdr_status = QtWidgets.QLabel("● Standby")
         hdr_status.setStyleSheet(
-            "color:#9fb4d8; background:#12233f; border:1px solid #2a3a5c;"
+            "color:#bfe8cf; background:#14402a; border:1px solid #1c5e38;"
             "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
         _hb.addWidget(hdr_status)
 
@@ -3038,7 +3038,7 @@ def main() -> int:
             act_start.setEnabled(acq_state.get("validated", True)); act_stop.setEnabled(False)
             _set_step("Guardar" if rec else "Listo")
             hdr_status.setText("● Standby"); hdr_status.setStyleSheet(
-                "color:#9fb4d8; background:#12233f; border:1px solid #2a3a5c;"
+                "color:#bfe8cf; background:#14402a; border:1px solid #1c5e38;"
                 "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
             lbl_rec.setText("")
             if rec:
