@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.79"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.80"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -479,17 +479,24 @@ def main() -> int:
         tb.addWidget(cb_dest)
         spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                                            QtWidgets.QSizePolicy.Preferred)
+        spacer.setStyleSheet("background:transparent;")   # sin esto se ve un recuadro blanco feo
         tb.addWidget(spacer)
         lbl_machine = QtWidgets.QLabel(f"  {args.machine}   ")
         lbl_machine.setStyleSheet("color:white; font-weight:700; font-size:14px;")
         tb.addWidget(lbl_machine)
 
-        # Toolbar contextual (Fase 1): las acciones de DATOS (Start/Stop/Save/Upload/
-        # Delete) sólo aparecen tras validar la máquina. Antes de eso el usuario está
-        # configurando → no debe ver controles de adquisición. Mode/Destino sí quedan.
+        # Toolbar contextual (opción a): las acciones de DATOS (Start/Stop/Save/Upload/
+        # Delete) y los ajustes de adquisición (Mode/Destino) sólo se ven FUERA de
+        # Configuration (en Monitoring/datos). En Configuration arriba queda limpio:
+        # sólo "Detect NI hardware". Lo conduce _on_tab según la pestaña.
         def _reveal_data_actions(on: bool):
             for _a in (act_start, act_stop, act_save, act_sync, act_clear):
                 _a.setVisible(bool(on))
+            try:   # Mode/Destino aún no existen en la primera llamada → se ignora
+                for _wd in (lbl_modo, cb_run, _lbl_dest, cb_dest):
+                    _wd.setVisible(bool(on))
+            except Exception:  # noqa: BLE001
+                pass
         _reveal_data_actions(False)
 
         # ---------------- Pestañas ----------------
@@ -1196,6 +1203,13 @@ def main() -> int:
         sml.addStretch(1)
         if _is_sim:
             cfg_tabs.addTab(pg_sim, "Simulator")
+        else:
+            # En modo REAL el tab Simulator no se agrega → sin esto, pg_sim queda
+            # sin padre y Qt BORRA sus spinbox/combos (crash 'QDoubleSpinBox already
+            # deleted' en fill_form/read_form). Le damos padre oculto para mantenerlos
+            # vivos; así read_form/fill_form siguen leyendo/escribiendo sin romper.
+            pg_sim.setParent(win)
+            pg_sim.hide()
 
         # ---------- Botones de acción (siempre visibles, debajo de las pestañas) ----------
         rb = QtWidgets.QHBoxLayout()
@@ -1371,16 +1385,24 @@ def main() -> int:
             _color_name_cell(r)
 
         def fill_form(m: SimMachine):
-            ed_name.setText(m.name); sp_fs.setValue(int(m.fs))
-            cb_rot.setCurrentText(getattr(m, "rotation", "CCW"))
-            cb_brg.setCurrentText(getattr(m, "bearing_type", "plain"))
-            cb_mode.setCurrentText(MODE_LABELS.get(m.mode, MODE_LABELS["estable"]))
-            sp_rpm.setValue(m.rpm); sp_r0.setValue(m.rpm_start); sp_r1.setValue(m.rpm_end)
-            sp_ramp.setValue(m.ramp_s); sp_c1.setValue(m.crit1); sp_c2.setValue(m.crit2)
-            sp_sev.setValue(m.severity)
-            cb_ph_p.setCurrentText(m.phenomena.get("prox", "none"))
-            cb_ph_v.setCurrentText(m.phenomena.get("vel", "none"))
-            cb_ph_a.setCurrentText(m.phenomena.get("accel", "none"))
+            # Robusto ante widgets borrados por Qt (igual que read_form): si un widget
+            # del Simulador ya no existe en modo real, no revienta la carga completa.
+            def _sw(fn):
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001
+                    pass
+            _sw(lambda: ed_name.setText(m.name)); _sw(lambda: sp_fs.setValue(int(m.fs)))
+            _sw(lambda: cb_rot.setCurrentText(getattr(m, "rotation", "CCW")))
+            _sw(lambda: cb_brg.setCurrentText(getattr(m, "bearing_type", "plain")))
+            _sw(lambda: cb_mode.setCurrentText(MODE_LABELS.get(m.mode, MODE_LABELS["estable"])))
+            _sw(lambda: sp_rpm.setValue(m.rpm)); _sw(lambda: sp_r0.setValue(m.rpm_start))
+            _sw(lambda: sp_r1.setValue(m.rpm_end)); _sw(lambda: sp_ramp.setValue(m.ramp_s))
+            _sw(lambda: sp_c1.setValue(m.crit1)); _sw(lambda: sp_c2.setValue(m.crit2))
+            _sw(lambda: sp_sev.setValue(m.severity))
+            _sw(lambda: cb_ph_p.setCurrentText(m.phenomena.get("prox", "none")))
+            _sw(lambda: cb_ph_v.setCurrentText(m.phenomena.get("vel", "none")))
+            _sw(lambda: cb_ph_a.setCurrentText(m.phenomena.get("accel", "none")))
             tblc.setRowCount(0)
             for s in m.sensors: _add_sensor_row(s)
             draw_bearing()

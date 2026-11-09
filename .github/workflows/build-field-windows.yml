@@ -75,6 +75,11 @@ jobs:
             --add-data "assets/watermelon_logo.png;assets" \
             --icon "assets/watermelon.ico" \
             --collect-all nidaqmx \
+            --collect-all nitypes \
+            --collect-all hightime \
+            --copy-metadata nidaqmx \
+            --copy-metadata nitypes \
+            --copy-metadata hightime \
             --collect-all supabase \
             --copy-metadata supabase \
             --exclude-module streamlit \
