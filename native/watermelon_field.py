@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.77"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.78"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -360,12 +360,88 @@ def main() -> int:
             _a.triggered.connect(_mk_scale(_sc))
             m_scale.addAction(_a)
 
+        # ---------- Detección de hardware NI (prueba que el .exe ve la tarjeta) ----------
+        def _show_hw_dialog(*_):
+            dlg = QtWidgets.QDialog(win)
+            dlg.setWindowTitle("Hardware NI — detección")
+            dlg.resize(640, 440)
+            lay = QtWidgets.QVBoxLayout(dlg)
+            hdr = QtWidgets.QLabel(); hdr.setTextFormat(QtCore.Qt.RichText); lay.addWidget(hdr)
+            tbl = QtWidgets.QTableWidget(0, 5)
+            tbl.setHorizontalHeaderLabels(["Slot", "Módulo", "Modelo", "Serial", "BNC"])
+            tbl.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+            tbl.verticalHeader().setVisible(False)
+            tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+            lay.addWidget(tbl, 1)
+            note = QtWidgets.QLabel(); note.setWordWrap(True); note.setTextFormat(QtCore.Qt.RichText)
+            lay.addWidget(note)
+            rowb = QtWidgets.QHBoxLayout()
+            btn_re = QtWidgets.QPushButton("↻ Detectar de nuevo")
+            btn_close = QtWidgets.QPushButton("Cerrar")
+            rowb.addWidget(btn_re); rowb.addStretch(1); rowb.addWidget(btn_close); lay.addLayout(rowb)
+
+            def _slot_of(name):
+                import re as _re
+                mm = _re.search(r"Mod(\d+)", name or "")
+                return int(mm.group(1)) if mm else 0
+
+            def _refresh():
+                tbl.setRowCount(0)
+                try:
+                    from core.modal.acq_backend import list_available_devices
+                    devs = list_available_devices()
+                except Exception as e:  # noqa: BLE001
+                    hdr.setText("<b style='color:#b91c1c;font-size:14px'>● NI-DAQmx no disponible</b>")
+                    note.setText("No se detectó driver/hardware NI en este equipo (modo "
+                                 f"simulación).<br><i>{html.escape(str(e))}</i>")
+                    return
+                mods = sorted([d for d in devs if _slot_of(d.get("name", "")) > 0],
+                              key=lambda d: _slot_of(d["name"]))
+                chassis = [d for d in devs if _slot_of(d.get("name", "")) == 0]
+                ch_txt = ", ".join(f"{d['name']} ({d['product_type']})" for d in chassis) or "—"
+                hdr.setText("<b style='color:#166534;font-size:14px'>● Hardware NI detectado</b>"
+                            f"<div style='color:#334155;margin-top:4px'>Chasis: {html.escape(ch_txt)} · "
+                            f"{len(mods)} módulo(s)</div>")
+                nine = None
+                for d in mods:
+                    s = _slot_of(d["name"]); r = tbl.rowCount(); tbl.insertRow(r)
+                    is9229 = "9229" in (d.get("product_type", "").upper())
+                    if is9229:
+                        nine = (s, d["name"])
+                    vals = [str(s), d["name"], d.get("product_type", ""), d.get("serial", ""),
+                            f"{(s-1)*4+1}–{s*4}"]
+                    for c, v in enumerate(vals):
+                        it = QtWidgets.QTableWidgetItem(v)
+                        if is9229:
+                            it.setBackground(QtGui.QColor("#dcfce7"))
+                            it.setForeground(QtGui.QColor("#065f46"))
+                        tbl.setItem(r, c, it)
+                if nine:
+                    s, nm = nine; b0 = (s - 1) * 4 + 1
+                    note.setText(f"<b style='color:#065f46'>✓ NI-9229 (proximidad DC) en slot {s} "
+                                 f"= {nm}</b> → BNC {b0}–{s*4}.<br>Para keyphasor + 2 radiales: "
+                                 f"<b>KPH=BNC {b0}, 1Y=BNC {b0+1}, 1X=BNC {b0+2}</b>.")
+                else:
+                    note.setText("<b style='color:#b45309'>⚠ No se encontró NI-9229.</b> Las sondas "
+                                 "de proximidad (DC + gap) la requieren; los 9234 son AC (accel) y no "
+                                 "dan gap/keyphasor DC.")
+            btn_re.clicked.connect(_refresh)
+            btn_close.clicked.connect(dlg.accept)
+            _refresh()
+            dlg.exec()
+
+        act_hw = QtGui.QAction("Detect NI hardware…", win)
+        act_hw.triggered.connect(_show_hw_dialog)
+        m_view.addSeparator(); m_view.addAction(act_hw)
+
         # ---------------- Toolbar ----------------
         tb = win.addToolBar("Main")
         tb.setMovable(False)
         tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_save)
         tb.addSeparator()
         tb.addAction(act_sync); tb.addAction(act_clear)
+        tb.addSeparator()
+        tb.addAction(act_hw)                 # Detectar hardware NI (siempre visible)
         tb.addSeparator()
         lbl_modo = QtWidgets.QLabel(" Mode: "); lbl_modo.setStyleSheet("color:white;")
         tb.addWidget(lbl_modo)
