@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.76"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.77"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1288,12 +1288,21 @@ def main() -> int:
                 _ched_load_row(0)
 
         def read_form() -> SimMachine:
+            # Accesor robusto ante widgets borrados por Qt (RuntimeError de shiboken,
+            # "Internal C++ object already deleted"): p.ej. los combos del Simulador
+            # cuando ese tab NO existe (modo real), o cellWidgets durante un rebuild.
+            def _w(getter, default):
+                try:
+                    return getter()
+                except Exception:  # noqa: BLE001  (incluye el RuntimeError de shiboken)
+                    return default
             sens = []
             for r in range(tblc.rowCount()):
-                nm = tblc.item(r, 0).text() if tblc.item(r, 0) else f"CH{r}"
-                lbl = tblc.cellWidget(r, 1).currentText() if tblc.cellWidget(r, 1) else "Accelerometer"
+                it0 = tblc.item(r, 0)
+                nm = it0.text() if it0 else f"CH{r}"
+                lbl = _w(lambda: tblc.cellWidget(r, 1).currentText(), "Accelerometer")
                 kd = _KIND_BY_LABEL.get(lbl, "accel")
-                sd = tblc.cellWidget(r, 5).currentText() if tblc.cellWidget(r, 5) else "—"
+                sd = _w(lambda: tblc.cellWidget(r, 5).currentText(), "—")
 
                 def _num(col, dv):
                     try:
@@ -1303,12 +1312,23 @@ def main() -> int:
                 sens.append(SensorSpec(nm, kd, int(_num(2, r + 1)), _num(3, 100.0), _num(4, 0.0),
                                        side=("" if sd == "—" else sd),
                                        gap=_num(6, 0.0), alarm=_num(7, 0.0), danger=_num(8, 0.0)))
-            ph = {"prox": cb_ph_p.currentText(), "vel": cb_ph_v.currentText(), "accel": cb_ph_a.currentText()}
-            return SimMachine(name=ed_name.text() or "Machine", fs=float(sp_fs.value()), sensors=sens,
-                              rotation=cb_rot.currentText(), bearing_type=cb_brg.currentText(),
-                              mode=LABEL_TO_MODE.get(cb_mode.currentText(), "estable"), rpm=sp_rpm.value(),
-                              rpm_start=sp_r0.value(), rpm_end=sp_r1.value(), ramp_s=sp_ramp.value(),
-                              crit1=sp_c1.value(), crit2=sp_c2.value(), severity=sp_sev.value(),
+            # Parámetros SOLO-simulador: en modo real su tab no existe → _w devuelve
+            # el default sin romper (antes esto crasheaba toda la lectura de config).
+            ph = {"prox": _w(lambda: cb_ph_p.currentText(), "none"),
+                  "vel": _w(lambda: cb_ph_v.currentText(), "none"),
+                  "accel": _w(lambda: cb_ph_a.currentText(), "none")}
+            return SimMachine(name=(_w(lambda: ed_name.text(), "") or "Machine"),
+                              fs=float(_w(lambda: sp_fs.value(), 5120.0)), sensors=sens,
+                              rotation=_w(lambda: cb_rot.currentText(), "CCW"),
+                              bearing_type=_w(lambda: cb_brg.currentText(), "plain"),
+                              mode=LABEL_TO_MODE.get(_w(lambda: cb_mode.currentText(), ""), "estable"),
+                              rpm=_w(lambda: sp_rpm.value(), 3000.0),
+                              rpm_start=_w(lambda: sp_r0.value(), 0.0),
+                              rpm_end=_w(lambda: sp_r1.value(), 0.0),
+                              ramp_s=_w(lambda: sp_ramp.value(), 90.0),
+                              crit1=_w(lambda: sp_c1.value(), 0.0),
+                              crit2=_w(lambda: sp_c2.value(), 0.0),
+                              severity=_w(lambda: sp_sev.value(), 1.0),
                               phenomena={k: v for k, v in ph.items() if v != "none"})
 
         def _setup_to_sim(setup) -> SimMachine:
