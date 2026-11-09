@@ -65,8 +65,11 @@ def default_unit(sensor_type: str) -> str:
 # Unidad nativa por defecto según tipo de sensor
 _DEFAULT_UNIT = {t: (lst[0] if lst else "") for t, lst in UNITS_BY_TYPE.items()}
 # Coupling por defecto según tipo
+# Proximidad = DC: el gap (voltaje DC, API 670) ES el dato → conserva shaft
+# centerline y el pulso keyphasor. Requiere tarjeta DC-capaz (NI-9229). El AC
+# era un parche para el 9234 (AC-only); si se usa 9234, cambiar a AC a mano.
 _DEFAULT_COUPLING = {
-    "proximity": "AC",
+    "proximity": "DC",
     "velometer": "AC",
     "accelerometer": "IEPE",
     "keyphasor": "DC",
@@ -245,13 +248,13 @@ def auto_layout(machine: MachineConfig, with_keyphasor: bool = True) -> List[Cha
         # Y a 45° izquierda, X a 45° derecha → 90° entre sí.
         rows.append(ChannelRow(bnc_port=bnc, point_label=f"{brg}Y", plane=brg,
                                sensor_type="proximity", sensitivity_mv_per_eu=200.0,
-                               unit_native="mil pp", coupling="AC",
+                               unit_native="mil pp", coupling="DC",
                                angle_deg=45.0, side="L", alarm=2.5, danger=4.0,
                                full_scale=10.0, gap_bias_v=-9.5, active=True))
         bnc += 1
         rows.append(ChannelRow(bnc_port=bnc, point_label=f"{brg}X", plane=brg,
                                sensor_type="proximity", sensitivity_mv_per_eu=200.0,
-                               unit_native="mil pp", coupling="AC",
+                               unit_native="mil pp", coupling="DC",
                                angle_deg=45.0, side="R", alarm=2.5, danger=4.0,
                                full_scale=10.0, gap_bias_v=-9.5, active=True))
         bnc += 1
@@ -432,12 +435,20 @@ def setup_to_channel_configs(setup: AcqSetup) -> List:
     out = []
     for ch in setup.channels:
         coup = ch.coupling if ch.coupling in COUPLINGS else "AC"
+        # Rango de voltaje. En DC el bias suma al rango: sonda de proximidad
+        # (gap_bias ~ -9.5 V) o trigger keyphasor (~ -7 V) → ±5 V default SATURA.
+        # Cubrir |bias|*1.5 + margen de swing. El driver coacciona al rango HW
+        # válido más cercano (p.ej. NI-9229 = ±60 V único). AC/IEPE quedan en 5 V.
+        bias = max(abs(float(getattr(ch, "gap_bias_v", 0.0) or 0.0)),
+                   abs(float(getattr(ch, "trigger_v", 0.0) or 0.0)))
+        vrange = max(5.0, bias * 1.5 + 2.0) if coup == "DC" else 5.0
         out.append(ChannelConfig(
             name=ch.point_label,
             coupling=coup,
             sensitivity_mv_per_eu=float(ch.sensitivity_mv_per_eu or 1.0),
             bnc_port=int(ch.bnc_port),
             units=ch.unit_native or "",
+            voltage_range=vrange,
         ))
     return out
 
