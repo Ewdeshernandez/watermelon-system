@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.87"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.88"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -331,13 +331,26 @@ def main() -> int:
         act_clear = QtGui.QAction("Delete data", win)
         act_export = QtGui.QAction("Export configuration to file…", win)
         act_import = QtGui.QAction("Import configuration from file…", win)
+        act_folder = QtGui.QAction("Open data folder…", win)
         act_unlock = QtGui.QAction("Unlock all configuration steps", win)
         act_quit = QtGui.QAction("Quit", win)
         for a in (act_start, act_stop, act_save, act_sync, act_clear):
             m_file.addAction(a)
         m_file.addSeparator(); m_file.addAction(act_export); m_file.addAction(act_import)
+        m_file.addAction(act_folder)
         m_file.addAction(act_unlock)
         m_file.addSeparator(); m_file.addAction(act_quit)
+
+        def _open_data_folder(*_):
+            try:
+                from core.remote_monitoring.sim_machine import wm_data_root
+                root = wm_data_root()
+                os.makedirs(os.path.join(root, "Configuraciones"), exist_ok=True)
+                os.makedirs(os.path.join(root, "Capturas"), exist_ok=True)
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(root))
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "Carpeta de datos", f"No se pudo abrir:\n{e}")
+        act_folder.triggered.connect(_open_data_folder)
         act_about = QtGui.QAction("About Watermelon Rotordynamics", win)
         act_update = QtGui.QAction("Check for updates…", win)
         m_help.addAction(act_update)
@@ -1882,10 +1895,18 @@ def main() -> int:
         btn_autolay.clicked.connect(_unlock_all_tabs)  # Auto-generar ⇒ config completa
 
         # ---- Export / Import de configuración a ARCHIVO (disco local portátil) ----
+        def _cfg_dir():
+            try:
+                from core.remote_monitoring.sim_machine import library_dir
+                return library_dir()        # ~/Documents/Watermelon Rotordynamics/Configuraciones
+            except Exception:  # noqa: BLE001
+                return os.path.expanduser("~")
+
         def _export_config():
             m = read_form()
+            _start = os.path.join(_cfg_dir(), f"{(m.name or 'machine')}.wmmachine")
             path, _f = QtWidgets.QFileDialog.getSaveFileName(
-                win, "Export configuration", f"{(m.name or 'machine')}.wmmachine",
+                win, "Export configuration", _start,
                 "Watermelon machine (*.wmmachine *.json)")
             if not path:
                 return
@@ -1897,7 +1918,7 @@ def main() -> int:
 
         def _import_config():
             path, _f = QtWidgets.QFileDialog.getOpenFileName(
-                win, "Import configuration", "",
+                win, "Import configuration", _cfg_dir(),
                 "Watermelon machine (*.wmmachine *.json);;All files (*)")
             if not path:
                 return

@@ -25,8 +25,18 @@ import numpy as np
 
 
 def _persist_root() -> str:
-    root = os.environ.get("WM_PERSIST_DIR") or os.path.join(os.path.expanduser("~"), ".watermelon")
-    return os.path.join(root, "remote_monitoring", "transients")
+    # Capturas locales en carpeta VISIBLE (~/Documents/Watermelon Rotordynamics/
+    # Capturas). Override: WM_PERSIST_DIR. Legacy ~/.watermelon se sigue leyendo si
+    # WM_PERSIST_DIR apunta ahí.
+    base = os.environ.get("WM_PERSIST_DIR")
+    if base:
+        return os.path.join(base, "remote_monitoring", "transients")
+    try:
+        from core.remote_monitoring.sim_machine import wm_data_root
+        return os.path.join(wm_data_root(), "Capturas")
+    except Exception:  # noqa: BLE001
+        return os.path.join(os.path.expanduser("~"), "Documents",
+                            "Watermelon Rotordynamics", "Capturas")
 
 
 # Retención de grabaciones transitorias locales. Por defecto 60 días; se puede

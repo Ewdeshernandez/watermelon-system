@@ -180,12 +180,41 @@ class SimMachine:
                           phenomena={"accel": "bearing_bpfo", "prox": "oil_whirl"})
 
 
-# --- biblioteca local -------------------------------------------------------
-def library_dir() -> str:
-    d = os.environ.get("WM_MACHINES_DIR") or os.path.join(
-        os.path.expanduser("~"), ".watermelon", "machines")
+# --- carpeta de datos (VISIBLE en Documentos; creada sola al primer uso) ------
+def wm_data_root() -> str:
+    """Raíz visible de datos del software: ~/Documents/Watermelon Rotordynamics.
+    Override con WM_DATA_ROOT. Dentro: Configuraciones/ y Capturas/."""
+    d = os.environ.get("WM_DATA_ROOT") or os.path.join(
+        os.path.expanduser("~"), "Documents", "Watermelon Rotordynamics")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+# --- biblioteca local -------------------------------------------------------
+def library_dir() -> str:
+    # Configuraciones de máquinas (.json). Legacy ~/.watermelon/machines se migra
+    # de forma transparente la primera vez (abajo).
+    d = os.environ.get("WM_MACHINES_DIR") or os.path.join(wm_data_root(), "Configuraciones")
+    os.makedirs(d, exist_ok=True)
+    _migrate_legacy_machines(d)
+    return d
+
+
+def _migrate_legacy_machines(dest: str) -> None:
+    """Copia .json de la carpeta oculta antigua (~/.watermelon/machines) a la
+    nueva visible, una sola vez, sin pisar lo existente."""
+    try:
+        old = os.path.join(os.path.expanduser("~"), ".watermelon", "machines")
+        if not os.path.isdir(old) or os.path.abspath(old) == os.path.abspath(dest):
+            return
+        import shutil
+        for fn in os.listdir(old):
+            if fn.endswith(".json"):
+                dst = os.path.join(dest, fn)
+                if not os.path.exists(dst):
+                    shutil.copy2(os.path.join(old, fn), dst)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _slug(name: str) -> str:
