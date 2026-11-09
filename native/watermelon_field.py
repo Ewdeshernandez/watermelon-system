@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.85"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.86"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -782,9 +782,26 @@ def main() -> int:
         ra = QtWidgets.QHBoxLayout()
         ra.addWidget(QtWidgets.QLabel("Sampling (Hz):"))
         sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280)
-        sp_fs.setToolTip("Muestreo del DAQ (S/s por canal). Debe ser ≥ 2.56 × Fmax.\n"
-                         "Proximidad/eje: 2560–5120.  Rodamientos/acel.: 25600–51200.")
+        sp_fs.setToolTip("Muestreo del DAQ (S/s por canal). Se auto-ajusta a las RPM (Fmax = fs/2.56,\n"
+                         "cubre ~1X..12X). Puedes sobre-escribirlo. Tope NI-9229 = 50000 S/s.")
         ra.addWidget(sp_fs)
+
+        # Auto-fs por RPM (regla Bently Fmax = fs/2.56): elige el fs estándar más chico
+        # cuyo Fmax cubra ~12X del giro. El usuario puede sobre-escribirlo después.
+        def _auto_fs_for_rpm(*_):
+            try:
+                rpm = float(sp_rpm.value())
+            except Exception:  # noqa: BLE001
+                return
+            if rpm <= 0:
+                return
+            f1x = rpm / 60.0
+            fmax_need = 12.0 * f1x                      # cubrir hasta ~12× (órbita/espectro)
+            STD = [2560, 5120, 12800, 25600]           # fs estándar (dentro del tope 9229)
+            chosen = next((s for s in STD if s / 2.56 >= fmax_need), STD[-1])
+            if int(sp_fs.value()) != chosen:
+                sp_fs.setValue(chosen)
+        sp_rpm.valueChanged.connect(_auto_fs_for_rpm)
         ra.addWidget(QtWidgets.QLabel("Frequency:"))
         cb_frequ = QtWidgets.QComboBox(); cb_frequ.addItems(["CPM", "Hz"])
         cb_frequ.setToolTip("Unidad de frecuencia en los gráficos.\nCPM = ciclos/min (turbomáquinas).  Hz = ciclos/s.")
