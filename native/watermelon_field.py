@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.90"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.91"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1948,18 +1948,21 @@ def main() -> int:
                 fill_form(m)
                 _unlock_all_tabs()
                 tabs.setCurrentIndex(0)                       # ir a Configuration
-                cfg_tabs.setCurrentWidget(pg_machine)         # mostrar Machine
+                cfg_tabs.setCurrentWidget(pg_sensors)         # mostrar Sensors (donde se ven canales)
                 nch = len(m.sensors)
+                _rows = tblc.rowCount()                       # filas REALES pintadas en la tabla
                 _chs = ", ".join(s.name for s in m.sensors[:6]) + (" …" if nch > 6 else "")
                 win.statusBar().showMessage(
                     f"✓ Cargado: {m.name or '(sin nombre)'} · {nch} canal(es) → {path}", 7000)
                 QtWidgets.QMessageBox.information(
                     win, "Cargado",
-                    f"<b>{m.name or '(sin nombre)'}</b><br>Canales: <b>{nch}</b> "
-                    f"({_chs or '—'})<br>Tag: {m.tag or '—'} · Cliente: {m.client or '—'} · "
+                    f"<b>{m.name or '(sin nombre)'}</b><br>Canales en archivo: <b>{nch}</b> "
+                    f"({_chs or '—'})<br>Filas pintadas en la tabla: <b>{_rows}</b><br>"
+                    f"Tag: {m.tag or '—'} · Cliente: {m.client or '—'} · "
                     f"Location: {m.location or '—'}<br>Rotación: {m.rotation} · RPM: {m.rpm:g}"
-                    + ("<br><br><b style='color:#b45309'>⚠ 0 canales: el archivo se guardó vacío "
-                       "o con versión vieja. Configura y vuelve a guardar.</b>" if nch == 0 else ""))
+                    "<br><br>Revisa la pestaña <b>Sensors layout</b> (acá) y <b>Channel editor</b>."
+                    + ("<br><b style='color:#b45309'>⚠ 0 canales: archivo vacío o versión vieja.</b>"
+                       if nch == 0 else ""))
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, "Open file",
                     f"Se leyó el archivo pero no se pudo aplicar al formulario:\n{e}")
