@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.74"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.75"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -378,6 +378,14 @@ def main() -> int:
         lbl_machine = QtWidgets.QLabel(f"  {args.machine}   ")
         lbl_machine.setStyleSheet("color:white; font-weight:700; font-size:14px;")
         tb.addWidget(lbl_machine)
+
+        # Toolbar contextual (Fase 1): las acciones de DATOS (Start/Stop/Save/Upload/
+        # Delete) sólo aparecen tras validar la máquina. Antes de eso el usuario está
+        # configurando → no debe ver controles de adquisición. Mode/Destino sí quedan.
+        def _reveal_data_actions(on: bool):
+            for _a in (act_start, act_stop, act_save, act_sync, act_clear):
+                _a.setVisible(bool(on))
+        _reveal_data_actions(False)
 
         # ---------------- Pestañas ----------------
         tabs = QtWidgets.QTabWidget()
@@ -984,6 +992,8 @@ def main() -> int:
                 act_start.setToolTip("" if ne == 0 else
                                      "Corrige los errores de Validation antes de iniciar.")
                 _set_step("Listo" if ne == 0 else ("Validar" if (ne or nw) else "Configurar"))
+                # Toolbar contextual: revela/oculta las acciones de datos según validación.
+                _reveal_data_actions(ne == 0)
             _ic = {"error": ("🔴", "#b91c1c"), "warn": ("🟡", "#b45309"), "ok": ("🟢", "#166534")}
             rows = []
             for f in findings:
@@ -1517,7 +1527,13 @@ def main() -> int:
         def _do_autolayout():
             # Nº de cojinetes → layout recomendado (KPH + X/Y por cojinete). El usuario edita.
             nb = int(sp_nbrg.value())
-            fill_form(SimMachine.plantilla_prox_train(n_bearings=nb, name=(ed_name.text() or "Machine")))
+            m = SimMachine.plantilla_prox_train(n_bearings=nb, name=(ed_name.text() or "Machine"))
+            # Preservar lo que el usuario YA eligió (la plantilla trae rotation=CCW
+            # fija → antes pisaba el sentido de giro al autogenerar). Bug corregido.
+            m.rotation = cb_rot.currentText()
+            m.bearing_type = cb_brg.currentText()
+            m.rpm = float(sp_rpm.value())
+            fill_form(m)
             cfg_tabs.setCurrentWidget(pg_sensors)          # mostrar el resultado
             _refresh_acq_info()
             _nice("Layout ready",
