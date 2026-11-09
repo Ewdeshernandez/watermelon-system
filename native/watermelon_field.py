@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.88"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.89"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1904,30 +1904,57 @@ def main() -> int:
 
         def _export_config():
             m = read_form()
-            _start = os.path.join(_cfg_dir(), f"{(m.name or 'machine')}.wmmachine")
+            nch = len(m.sensors)
+            if nch == 0:
+                _r = QtWidgets.QMessageBox.question(
+                    win, "Save to file",
+                    "No hay canales/sensores configurados todavía. ¿Guardar igual (archivo vacío)?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+                if _r != QtWidgets.QMessageBox.Yes:
+                    return
+            _base = (m.name or "machine").strip() or "machine"
+            _start = os.path.join(_cfg_dir(), f"{_base}.wmmachine")
             path, _f = QtWidgets.QFileDialog.getSaveFileName(
-                win, "Export configuration", _start,
+                win, "Save configuration to file", _start,
                 "Watermelon machine (*.wmmachine *.json)")
             if not path:
                 return
+            if not path.lower().endswith((".wmmachine", ".json")):
+                path += ".wmmachine"
             try:
                 m.save(path)
-                win.statusBar().showMessage(f"✓ Configuración exportada: {path}", 5000)
+                win.statusBar().showMessage(f"✓ Guardado: {_base} · {nch} canal(es) → {path}", 6000)
             except Exception as e:  # noqa: BLE001
-                QtWidgets.QMessageBox.warning(win, "Export", f"No se pudo exportar:\n{e}")
+                QtWidgets.QMessageBox.warning(win, "Save to file", f"No se pudo guardar:\n{e}")
 
         def _import_config():
             path, _f = QtWidgets.QFileDialog.getOpenFileName(
-                win, "Import configuration", _cfg_dir(),
+                win, "Open configuration from file", _cfg_dir(),
                 "Watermelon machine (*.wmmachine *.json);;All files (*)")
             if not path:
                 return
-            try:
-                fill_form(SimMachine.load(path))
-                _unlock_all_tabs()
-                win.statusBar().showMessage(f"✓ Configuración importada: {path}", 5000)
+            try:                                   # 1) leer el archivo
+                m = SimMachine.load(path)
             except Exception as e:  # noqa: BLE001
-                QtWidgets.QMessageBox.warning(win, "Import", f"No se pudo importar:\n{e}")
+                QtWidgets.QMessageBox.critical(win, "Open file",
+                    f"No se pudo leer el archivo:\n{e}")
+                return
+            try:                                   # 2) aplicarlo al formulario
+                fill_form(m)
+                _unlock_all_tabs()
+                tabs.setCurrentIndex(0)                       # ir a Configuration
+                cfg_tabs.setCurrentWidget(pg_machine)         # mostrar Machine
+                nch = len(m.sensors)
+                win.statusBar().showMessage(
+                    f"✓ Cargado: {m.name or '(sin nombre)'} · {nch} canal(es) → {path}", 7000)
+                if nch == 0:
+                    QtWidgets.QMessageBox.information(win, "Open file",
+                        f"El archivo '{os.path.basename(path)}' se abrió pero NO tiene canales "
+                        "guardados (se guardó vacío, o con una versión vieja). Configura la "
+                        "máquina y vuelve a guardarla con 💾 Save to file.")
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "Open file",
+                    f"Se leyó el archivo pero no se pudo aplicar al formulario:\n{e}")
 
         act_export.triggered.connect(_export_config)
         act_import.triggered.connect(_import_config)
