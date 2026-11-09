@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.80"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.81"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -360,10 +360,22 @@ def main() -> int:
             _a.triggered.connect(_mk_scale(_sc))
             m_scale.addAction(_a)
 
-        # ---------- Detección de hardware NI (prueba que el .exe ve la tarjeta) ----------
+        # ---------- Detección de hardware (prueba que el .exe ve la tarjeta) ----------
+        # WHITE-LABEL: el cliente NO debe ver la marca del fabricante (NI). Se muestra
+        # como hardware "Watermelon". La detección interna sí usa el product_type real.
+        def _wm_label(pt):
+            p = (pt or "").upper()
+            if "9229" in p:
+                return "Watermelon WM-PX4 · proximidad DC (4ch)"
+            if "9234" in p:
+                return "Watermelon WM-VB4 · vibración AC (4ch)"
+            if "CDAQ" in p or "9178" in p or "9174" in p or "9185" in p or "9189" in p:
+                return "Watermelon DAQ · chasis"
+            return "Watermelon · módulo"
+
         def _show_hw_dialog(*_):
             dlg = QtWidgets.QDialog(win)
-            dlg.setWindowTitle("Hardware NI — detección")
+            dlg.setWindowTitle("Hardware Watermelon — detección")
             dlg.resize(640, 440)
             lay = QtWidgets.QVBoxLayout(dlg)
             hdr = QtWidgets.QLabel(); hdr.setTextFormat(QtCore.Qt.RichText); lay.addWidget(hdr)
@@ -408,17 +420,17 @@ def main() -> int:
                     tbl.setRowCount(0)
                     devs, err = _fetch_devices()
                     if not devs:
-                        hdr.setText("<b style='color:#b91c1c;font-size:14px'>● Sin dispositivos NI</b>")
-                        note.setText("No se detectaron tarjetas NI (driver NI-DAQmx ausente/detenido "
-                                     "o sin chasis — modo simulación)."
+                        hdr.setText("<b style='color:#b91c1c;font-size:14px'>● Sin hardware detectado</b>")
+                        note.setText("No se detectó hardware de adquisición Watermelon (driver ausente/"
+                                     "detenido o sin chasis conectado)."
                                      + (f"<br><i>{html.escape(err)}</i>" if err else ""))
                         return
                     mods = sorted([d for d in devs if _slot_of(d.get("name", "")) > 0],
                                   key=lambda d: _slot_of(d.get("name", "")))
                     chassis = [d for d in devs if _slot_of(d.get("name", "")) == 0]
-                    ch_txt = ", ".join(f"{d.get('name','')} ({d.get('product_type','')})"
+                    ch_txt = ", ".join(f"{d.get('name','')} ({_wm_label(d.get('product_type',''))})"
                                        for d in chassis) or "—"
-                    hdr.setText("<b style='color:#166534;font-size:14px'>● Hardware NI detectado</b>"
+                    hdr.setText("<b style='color:#166534;font-size:14px'>● Hardware Watermelon detectado</b>"
                                 f"<div style='color:#334155;margin-top:4px'>Chasis: {html.escape(ch_txt)} "
                                 f"· {len(mods)} módulo(s) · {len(devs)} dispositivo(s)</div>")
                     show = mods if mods else devs   # si no hay 'Mod' en el nombre, muestra TODO
@@ -429,8 +441,8 @@ def main() -> int:
                         if is9229 and s > 0:
                             nine = (s, d.get("name", ""))
                         bnc = f"{(s-1)*4+1}–{s*4}" if s > 0 else "—"
-                        vals = [str(s) if s > 0 else "—", d.get("name", ""), d.get("product_type", ""),
-                                d.get("serial", ""), bnc]
+                        vals = [str(s) if s > 0 else "—", d.get("name", ""),
+                                _wm_label(d.get("product_type", "")), d.get("serial", ""), bnc]
                         for c, v in enumerate(vals):
                             it = QtWidgets.QTableWidgetItem(str(v))
                             if is9229:
@@ -439,13 +451,13 @@ def main() -> int:
                             tbl.setItem(r, c, it)
                     if nine:
                         s, nm = nine; b0 = (s - 1) * 4 + 1
-                        note.setText(f"<b style='color:#065f46'>✓ NI-9229 (proximidad DC) en slot {s} "
-                                     f"= {nm}</b> → BNC {b0}–{s*4}.<br>Keyphasor + 2 radiales: "
+                        note.setText(f"<b style='color:#065f46'>✓ Módulo de proximidad DC (Watermelon) en "
+                                     f"slot {s}</b> → BNC {b0}–{s*4}.<br>Keyphasor + 2 radiales: "
                                      f"<b>KPH=BNC {b0}, 1Y=BNC {b0+1}, 1X=BNC {b0+2}</b>.")
                     else:
-                        note.setText("<b style='color:#b45309'>⚠ No se ubicó una NI-9229 por slot.</b> "
-                                     "Mira la lista; las sondas de proximidad (DC+gap) la requieren "
-                                     "(los 9234 son AC/accel).")
+                        note.setText("<b style='color:#b45309'>⚠ No se ubicó el módulo de proximidad DC.</b> "
+                                     "Las sondas de proximidad (DC+gap) lo requieren (los módulos de "
+                                     "vibración AC no dan gap/keyphasor DC).")
                 except Exception as e:  # noqa: BLE001  — el panel NUNCA queda en blanco
                     hdr.setText("<b style='color:#b91c1c;font-size:14px'>● Error leyendo hardware</b>")
                     note.setText(f"<i>{html.escape(type(e).__name__ + ': ' + str(e))}</i>")
@@ -454,7 +466,7 @@ def main() -> int:
             _refresh()
             dlg.exec()
 
-        act_hw = QtGui.QAction("Detect NI hardware…", win)
+        act_hw = QtGui.QAction("Detect hardware…", win)
         act_hw.triggered.connect(_show_hw_dialog)
         m_view.addSeparator(); m_view.addAction(act_hw)
 
@@ -616,16 +628,17 @@ def main() -> int:
 
         _is_sim = type(agent.source).__name__ == "SimulatedStreamSource"
 
-        # Badge REAL/SIM inequívoco en el header (regla de oro: nunca simular en
-        # silencio). Rojo = simulación/sin tarjeta; verde = adquisición NI real.
+        # Badge REAL/SIN-HARDWARE inequívoco en el header (regla de oro: nunca simular
+        # en silencio). White-label: sin marca del fabricante. Rojo = sin hardware;
+        # verde = adquisición real con hardware Watermelon.
         hdr_mode = QtWidgets.QLabel()
         if _is_sim:
-            hdr_mode.setText("● MODO SIMULACIÓN — SIN TARJETA")
+            hdr_mode.setText("● SIN HARDWARE — MODO PRUEBA")
             hdr_mode.setStyleSheet(
                 "color:#ffffff; background:#b91c1c; border:1px solid #ef4444;"
                 "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
         else:
-            hdr_mode.setText(f"● 9229 REAL · {args.chassis}")
+            hdr_mode.setText("● HARDWARE REAL")
             hdr_mode.setStyleSheet(
                 "color:#052e16; background:#4ade80; border:1px solid #16a34a;"
                 "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
@@ -1201,13 +1214,14 @@ def main() -> int:
             "<i style='color:#64748b'>Test-bench only: injects faults/criticals to validate the "
             "software without hardware. Not shown in field mode.</i>"))
         sml.addStretch(1)
-        if _is_sim:
+        # El tab Simulator SOLO aparece en modo dev (WM_DEV=1). El producto de campo
+        # es SOLO datos reales — nada de simulado visible para el usuario/cliente.
+        if _is_sim and os.environ.get("WM_DEV"):
             cfg_tabs.addTab(pg_sim, "Simulator")
         else:
-            # En modo REAL el tab Simulator no se agrega → sin esto, pg_sim queda
-            # sin padre y Qt BORRA sus spinbox/combos (crash 'QDoubleSpinBox already
-            # deleted' en fill_form/read_form). Le damos padre oculto para mantenerlos
-            # vivos; así read_form/fill_form siguen leyendo/escribiendo sin romper.
+            # pg_sim no se agrega como tab → sin padre, Qt BORRA sus spinbox/combos
+            # (crash 'QDoubleSpinBox already deleted'). Padre oculto los mantiene vivos
+            # para que read_form/fill_form no rompan.
             pg_sim.setParent(win)
             pg_sim.hide()
 
@@ -1404,7 +1418,16 @@ def main() -> int:
             _sw(lambda: cb_ph_v.setCurrentText(m.phenomena.get("vel", "none")))
             _sw(lambda: cb_ph_a.setCurrentText(m.phenomena.get("accel", "none")))
             tblc.setRowCount(0)
-            for s in m.sensors: _add_sensor_row(s)
+            # Orden canónico SIEMPRE: keyphasor(s) primero, luego por cojinete, y dentro
+            # de cada cojinete Y antes que X (convención del analista). Aplica a máquinas
+            # cargadas o derivadas del agente real (que traían el KPH al final).
+            def _canon_key(s):
+                nm = (s.name or "").upper()
+                is_kph = 0 if s.kind == "keyphasor" else 1
+                brg = _bearing_no(s.name) or 99
+                axord = 0 if nm.endswith("Y") else (1 if nm.endswith("X") else 2)
+                return (is_kph, brg, axord, nm)
+            for s in sorted(m.sensors, key=_canon_key): _add_sensor_row(s)
             draw_bearing()
             _ched_refresh_selector()
             if tblc.rowCount():

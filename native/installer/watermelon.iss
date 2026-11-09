@@ -46,8 +46,6 @@ Source: "{#SourcePath}..\..\out\*"; DestDir: "{app}"; Flags: recursesubdirs crea
 
 [Icons]
 Name: "{group}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--prox --sens 200 --fs 5120 --chans 22,23 --names 1Y,1X --kph-bnc 21 --machine Rotor_Kit_Field"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
-Name: "{group}\Watermelon Rotordynamics (DEMO)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--sim"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
-Name: "{group}\Banco de Pruebas"; Filename: "{app}\Banco_de_Pruebas"
 Name: "{group}\{cm:UninstallProgram,Watermelon Rotordynamics}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--prox --sens 200 --fs 5120 --chans 22,23 --names 1Y,1X --kph-bnc 21 --machine Rotor_Kit_Field"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
