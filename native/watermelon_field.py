@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.83"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.84"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -530,8 +530,9 @@ def main() -> int:
         _brand.setTextFormat(QtCore.Qt.RichText)
         _brand.setStyleSheet("font-size:15px;")
         _hb.addWidget(_brand)
-        _mach = QtWidgets.QLabel(f"·  {args.machine}")
-        _mach.setStyleSheet("color:#9fb4d8; font-family:'Consolas',monospace; font-size:12px;")
+        _mach = QtWidgets.QLabel("·  nueva máquina")   # se actualiza en vivo con el nombre
+        _mach.setStyleSheet("color:#bfe8cf; font-family:'Consolas',monospace; font-size:12px;")
+        _GENERIC_MACHINE = {"Rotor_Kit_Field", "Rotor_Kit", "Machine", "Rotor Kit", ""}
         _hb.addWidget(_mach)
         _hb.addStretch(1)
         hdr_status = QtWidgets.QLabel("● Standby")
@@ -680,7 +681,12 @@ def main() -> int:
         # Ficha del activo (homólogo a la web)
         ml.addWidget(_subhdr("Asset record"))
         fr = QtWidgets.QFormLayout(); fr.setHorizontalSpacing(14); fr.setVerticalSpacing(7)
-        ed_name = QtWidgets.QLineEdit(); ed_name.setPlaceholderText("e.g. TG-1, Compressor K-101")
+        ed_name = QtWidgets.QLineEdit(); ed_name.setPlaceholderText("Nombra tu máquina (ej. SGT-300A, TG-1)")
+
+        def _sync_brand_machine(*_):
+            nm = (ed_name.text() or "").strip()
+            _mach.setText("·  nueva máquina" if nm in _GENERIC_MACHINE else f"·  {nm}")
+        ed_name.textChanged.connect(_sync_brand_machine)
         ed_type = QtWidgets.QLineEdit(); ed_type.setPlaceholderText("e.g. Turbogenerator, Motor+Pump")
         ed_tag = QtWidgets.QLineEdit(); ed_tag.setPlaceholderText("asset tag / nameplate")
         ed_client = QtWidgets.QLineEdit(); ed_client.setPlaceholderText("client")
@@ -1254,7 +1260,10 @@ def main() -> int:
         btn_cloud.setStyleSheet(
             "QPushButton{background:#10b981;color:white;border:none;font-weight:700;"
             "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#0e9f6e;}")
-        rb.addWidget(btn_cloud); rb.addWidget(btn_save); rb.addWidget(btn_apply)
+        btn_savefile = QtWidgets.QPushButton("💾 Save to file…")   # guarda un .wmmachine a disco
+        btn_savefile.setToolTip("Guarda la configuración/máquina a un archivo .wmmachine en el disco "
+                                "(luego la abres con '📁 Open file…').")
+        rb.addWidget(btn_cloud); rb.addWidget(btn_savefile); rb.addWidget(btn_save); rb.addWidget(btn_apply)
         cfg_ol.addLayout(rb)
         tabs.addTab(cfg_outer, "Configuration")
 
@@ -1412,7 +1421,10 @@ def main() -> int:
                     fn()
                 except Exception:  # noqa: BLE001
                     pass
-            _sw(lambda: ed_name.setText(m.name)); _sw(lambda: sp_fs.setValue(int(m.fs)))
+            # Si el nombre es el default genérico del lanzador, arranca VACÍO (placeholder)
+            # para que el usuario nombre su máquina — no se fuerza 'Rotor_Kit_Field'.
+            _nm0 = "" if (m.name or "") in _GENERIC_MACHINE else m.name
+            _sw(lambda: ed_name.setText(_nm0)); _sw(lambda: sp_fs.setValue(int(m.fs)))
             _sw(lambda: cb_rot.setCurrentText(getattr(m, "rotation", "CCW")))
             _sw(lambda: cb_brg.setCurrentText(getattr(m, "bearing_type", "plain")))
             _sw(lambda: cb_mode.setCurrentText(MODE_LABELS.get(m.mode, MODE_LABELS["estable"])))
@@ -1864,7 +1876,8 @@ def main() -> int:
 
         act_export.triggered.connect(_export_config)
         act_import.triggered.connect(_import_config)
-        btn_browse.clicked.connect(_import_config)   # "📁 Open file…" junto a Load
+        btn_browse.clicked.connect(_import_config)     # "📁 Open file…" junto a Load
+        btn_savefile.clicked.connect(_export_config)   # "💾 Save to file…" en el footer
 
         # Estado inicial del gating (se corre tras el fill_form de arranque, más abajo).
         def _init_gate():
