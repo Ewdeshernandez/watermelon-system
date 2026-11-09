@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.75"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.76"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -329,9 +329,14 @@ def main() -> int:
         act_save = QtGui.QAction("Save data", win)
         act_sync = QtGui.QAction("Upload to cloud", win)
         act_clear = QtGui.QAction("Delete data", win)
+        act_export = QtGui.QAction("Export configuration to file…", win)
+        act_import = QtGui.QAction("Import configuration from file…", win)
+        act_unlock = QtGui.QAction("Unlock all configuration steps", win)
         act_quit = QtGui.QAction("Quit", win)
         for a in (act_start, act_stop, act_save, act_sync, act_clear):
             m_file.addAction(a)
+        m_file.addSeparator(); m_file.addAction(act_export); m_file.addAction(act_import)
+        m_file.addAction(act_unlock)
         m_file.addSeparator(); m_file.addAction(act_quit)
         act_about = QtGui.QAction("About Watermelon Rotordynamics", win)
         act_update = QtGui.QAction("Check for updates…", win)
@@ -1099,7 +1104,12 @@ def main() -> int:
         btn_refresh.setStyleSheet(                          # MISMO estilo verde que Channel editor
             "QPushButton{background:#10b981;color:white;border:none;font-weight:800;"
             "padding:9px 18px;border-radius:8px;} QPushButton:hover{background:#0e9f6e;}")
-        rb.addWidget(btn_refresh); rb.addStretch(1)
+        btn_next = QtWidgets.QPushButton("Continuar →")
+        btn_next.setToolTip("Valida este paso y avanza al siguiente.")
+        btn_next.setStyleSheet(
+            "QPushButton{background:#1AAEE5;color:white;border:none;font-weight:800;"
+            "padding:9px 20px;border-radius:8px;} QPushButton:hover{background:#1593c4;}")
+        rb.addWidget(btn_refresh); rb.addWidget(btn_next); rb.addStretch(1)
         btn_save = QtWidgets.QPushButton("Save configuration")
         btn_apply = QtWidgets.QPushButton("Apply & measure")
         _redbtn = ("QPushButton{background:#f5484a;color:white;border:none;font-weight:700;"
@@ -1590,6 +1600,110 @@ def main() -> int:
         # (ej. cambiabas rotación a CW en Machine y el diagrama seguía mostrando CCW).
         cfg_tabs.currentChanged.connect(
             lambda *_: draw_bearing() if cfg_tabs.currentWidget() is pg_sensors else None)
+
+        # ====== Flujo guiado (Ola B #1): gating de sub-pestañas + "Continuar →" ======
+        # Hard-gating con ANTI-LOCKOUT: se desbloquea TODO al Cargar/Importar/Auto-
+        # generar y hay escape manual (File → Unlock all configuration steps). Si la
+        # máquina de arranque ya trae sensores (lanzada real con canales) → todo abierto.
+        _GATE_TABS = [cfg_tabs.indexOf(w) for w in
+                      (pg_machine, pg_sensors, pg_ched, pg_acq, pg_val, pg_sum)]
+        _GATE_TABS = [i for i in _GATE_TABS if i >= 0]
+        _gmin = min(_GATE_TABS) if _GATE_TABS else 0
+        _gmax = max(_GATE_TABS) if _GATE_TABS else 0
+        _gate = {"unlocked": {_gmin}}
+
+        def _apply_gate():
+            for i in _GATE_TABS:
+                cfg_tabs.setTabEnabled(i, i in _gate["unlocked"])
+
+        def _unlock_upto(i, switch=False):
+            for j in _GATE_TABS:
+                if j <= i:
+                    _gate["unlocked"].add(j)
+            _apply_gate()
+            if switch and 0 <= i < cfg_tabs.count() and cfg_tabs.isTabEnabled(i):
+                cfg_tabs.setCurrentIndex(i)
+
+        def _unlock_all_tabs(*_):
+            _unlock_upto(_gmax)
+
+        def _sync_next_btn(*_):
+            i = cfg_tabs.currentIndex()
+            btn_next.setVisible(i in _GATE_TABS and i < _gmax)
+
+        def _gate_check(i):
+            m = read_form()
+            if i == cfg_tabs.indexOf(pg_machine) and not (m.name or "").strip():
+                return "Ponle nombre a la máquina antes de continuar."
+            if i == cfg_tabs.indexOf(pg_sensors) and len(m.sensors) < 1:
+                return "Agrega sensores (usá 'Auto-generate sensor layout')."
+            return ""
+
+        def _do_continue():
+            i = cfg_tabs.currentIndex()
+            if i not in _GATE_TABS or i >= _gmax:
+                return
+            if i == cfg_tabs.indexOf(pg_val):          # Validation → usa su propio chequeo
+                _run_validation()
+                if acq_state.get("validated"):
+                    _unlock_upto(i + 1, switch=True)
+                else:
+                    QtWidgets.QMessageBox.information(
+                        win, "Validation", "Corrige los errores de Validation antes de continuar.")
+                return
+            err = _gate_check(i)
+            if err:
+                QtWidgets.QMessageBox.information(win, "Falta un paso", err)
+                return
+            _unlock_upto(i + 1, switch=True)
+
+        btn_next.clicked.connect(_do_continue)
+        cfg_tabs.currentChanged.connect(_sync_next_btn)
+        act_unlock.triggered.connect(_unlock_all_tabs)
+        btn_load.clicked.connect(_unlock_all_tabs)     # Cargar ⇒ config completa
+        btn_autolay.clicked.connect(_unlock_all_tabs)  # Auto-generar ⇒ config completa
+
+        # ---- Export / Import de configuración a ARCHIVO (disco local portátil) ----
+        def _export_config():
+            m = read_form()
+            path, _f = QtWidgets.QFileDialog.getSaveFileName(
+                win, "Export configuration", f"{(m.name or 'machine')}.wmmachine",
+                "Watermelon machine (*.wmmachine *.json)")
+            if not path:
+                return
+            try:
+                m.save(path)
+                win.statusBar().showMessage(f"✓ Configuración exportada: {path}", 5000)
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "Export", f"No se pudo exportar:\n{e}")
+
+        def _import_config():
+            path, _f = QtWidgets.QFileDialog.getOpenFileName(
+                win, "Import configuration", "",
+                "Watermelon machine (*.wmmachine *.json);;All files (*)")
+            if not path:
+                return
+            try:
+                fill_form(SimMachine.load(path))
+                _unlock_all_tabs()
+                win.statusBar().showMessage(f"✓ Configuración importada: {path}", 5000)
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "Import", f"No se pudo importar:\n{e}")
+
+        act_export.triggered.connect(_export_config)
+        act_import.triggered.connect(_import_config)
+
+        # Estado inicial del gating (se corre tras el fill_form de arranque, más abajo).
+        def _init_gate():
+            try:
+                if len(read_form().sensors) >= 1:
+                    _unlock_all_tabs()
+                else:
+                    _apply_gate()
+            except Exception:  # noqa: BLE001
+                _unlock_all_tabs()
+            _sync_next_btn()
+        _init_gate()
 
         # --- Monitoreo (adquisición + estado + tabular rápido, estilo web) ---
         from core.remote_monitoring.stream_source import channel_kind as _ckind
