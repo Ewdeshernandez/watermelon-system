@@ -67,6 +67,9 @@ jobs:
             --hidden-import core.modal.licensing \
             --hidden-import core.field.updater \
             --hidden-import core.live_readings \
+            --hidden-import core.modal.acq_backend \
+            --hidden-import nidaqmx \
+            --hidden-import nidaqmx.system \
             --hidden-import cryptography \
             --hidden-import certifi \
             --add-data "assets/watermelon_logo.png;assets" \

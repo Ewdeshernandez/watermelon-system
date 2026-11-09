@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.78"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.79"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -385,46 +385,70 @@ def main() -> int:
                 mm = _re.search(r"Mod(\d+)", name or "")
                 return int(mm.group(1)) if mm else 0
 
-            def _refresh():
-                tbl.setRowCount(0)
+            def _fetch_devices():
+                # nidaqmx DIRECTO (lo más robusto; el badge REAL ya probó que corre).
+                errs = []
                 try:
+                    from nidaqmx.system import System as _Sys
+                    return [{"name": d.name,
+                             "product_type": getattr(d, "product_type", ""),
+                             "serial": str(getattr(d, "serial_num", ""))}
+                            for d in _Sys.local().devices], ""
+                except Exception as e1:  # noqa: BLE001
+                    errs.append(f"{type(e1).__name__}: {e1}")
+                try:                                    # fallback vía helper del core
                     from core.modal.acq_backend import list_available_devices
-                    devs = list_available_devices()
-                except Exception as e:  # noqa: BLE001
-                    hdr.setText("<b style='color:#b91c1c;font-size:14px'>● NI-DAQmx no disponible</b>")
-                    note.setText("No se detectó driver/hardware NI en este equipo (modo "
-                                 f"simulación).<br><i>{html.escape(str(e))}</i>")
-                    return
-                mods = sorted([d for d in devs if _slot_of(d.get("name", "")) > 0],
-                              key=lambda d: _slot_of(d["name"]))
-                chassis = [d for d in devs if _slot_of(d.get("name", "")) == 0]
-                ch_txt = ", ".join(f"{d['name']} ({d['product_type']})" for d in chassis) or "—"
-                hdr.setText("<b style='color:#166534;font-size:14px'>● Hardware NI detectado</b>"
-                            f"<div style='color:#334155;margin-top:4px'>Chasis: {html.escape(ch_txt)} · "
-                            f"{len(mods)} módulo(s)</div>")
-                nine = None
-                for d in mods:
-                    s = _slot_of(d["name"]); r = tbl.rowCount(); tbl.insertRow(r)
-                    is9229 = "9229" in (d.get("product_type", "").upper())
-                    if is9229:
-                        nine = (s, d["name"])
-                    vals = [str(s), d["name"], d.get("product_type", ""), d.get("serial", ""),
-                            f"{(s-1)*4+1}–{s*4}"]
-                    for c, v in enumerate(vals):
-                        it = QtWidgets.QTableWidgetItem(v)
-                        if is9229:
-                            it.setBackground(QtGui.QColor("#dcfce7"))
-                            it.setForeground(QtGui.QColor("#065f46"))
-                        tbl.setItem(r, c, it)
-                if nine:
-                    s, nm = nine; b0 = (s - 1) * 4 + 1
-                    note.setText(f"<b style='color:#065f46'>✓ NI-9229 (proximidad DC) en slot {s} "
-                                 f"= {nm}</b> → BNC {b0}–{s*4}.<br>Para keyphasor + 2 radiales: "
-                                 f"<b>KPH=BNC {b0}, 1Y=BNC {b0+1}, 1X=BNC {b0+2}</b>.")
-                else:
-                    note.setText("<b style='color:#b45309'>⚠ No se encontró NI-9229.</b> Las sondas "
-                                 "de proximidad (DC + gap) la requieren; los 9234 son AC (accel) y no "
-                                 "dan gap/keyphasor DC.")
+                    return list_available_devices(), ""
+                except Exception as e2:  # noqa: BLE001
+                    errs.append(f"{type(e2).__name__}: {e2}")
+                return [], " | ".join(errs)
+
+            def _refresh():
+                try:
+                    tbl.setRowCount(0)
+                    devs, err = _fetch_devices()
+                    if not devs:
+                        hdr.setText("<b style='color:#b91c1c;font-size:14px'>● Sin dispositivos NI</b>")
+                        note.setText("No se detectaron tarjetas NI (driver NI-DAQmx ausente/detenido "
+                                     "o sin chasis — modo simulación)."
+                                     + (f"<br><i>{html.escape(err)}</i>" if err else ""))
+                        return
+                    mods = sorted([d for d in devs if _slot_of(d.get("name", "")) > 0],
+                                  key=lambda d: _slot_of(d.get("name", "")))
+                    chassis = [d for d in devs if _slot_of(d.get("name", "")) == 0]
+                    ch_txt = ", ".join(f"{d.get('name','')} ({d.get('product_type','')})"
+                                       for d in chassis) or "—"
+                    hdr.setText("<b style='color:#166534;font-size:14px'>● Hardware NI detectado</b>"
+                                f"<div style='color:#334155;margin-top:4px'>Chasis: {html.escape(ch_txt)} "
+                                f"· {len(mods)} módulo(s) · {len(devs)} dispositivo(s)</div>")
+                    show = mods if mods else devs   # si no hay 'Mod' en el nombre, muestra TODO
+                    nine = None
+                    for d in show:
+                        s = _slot_of(d.get("name", "")); r = tbl.rowCount(); tbl.insertRow(r)
+                        is9229 = "9229" in (d.get("product_type", "").upper())
+                        if is9229 and s > 0:
+                            nine = (s, d.get("name", ""))
+                        bnc = f"{(s-1)*4+1}–{s*4}" if s > 0 else "—"
+                        vals = [str(s) if s > 0 else "—", d.get("name", ""), d.get("product_type", ""),
+                                d.get("serial", ""), bnc]
+                        for c, v in enumerate(vals):
+                            it = QtWidgets.QTableWidgetItem(str(v))
+                            if is9229:
+                                it.setBackground(QtGui.QColor("#dcfce7"))
+                                it.setForeground(QtGui.QColor("#065f46"))
+                            tbl.setItem(r, c, it)
+                    if nine:
+                        s, nm = nine; b0 = (s - 1) * 4 + 1
+                        note.setText(f"<b style='color:#065f46'>✓ NI-9229 (proximidad DC) en slot {s} "
+                                     f"= {nm}</b> → BNC {b0}–{s*4}.<br>Keyphasor + 2 radiales: "
+                                     f"<b>KPH=BNC {b0}, 1Y=BNC {b0+1}, 1X=BNC {b0+2}</b>.")
+                    else:
+                        note.setText("<b style='color:#b45309'>⚠ No se ubicó una NI-9229 por slot.</b> "
+                                     "Mira la lista; las sondas de proximidad (DC+gap) la requieren "
+                                     "(los 9234 son AC/accel).")
+                except Exception as e:  # noqa: BLE001  — el panel NUNCA queda en blanco
+                    hdr.setText("<b style='color:#b91c1c;font-size:14px'>● Error leyendo hardware</b>")
+                    note.setText(f"<i>{html.escape(type(e).__name__ + ': ' + str(e))}</i>")
             btn_re.clicked.connect(_refresh)
             btn_close.clicked.connect(dlg.accept)
             _refresh()
@@ -1073,8 +1097,9 @@ def main() -> int:
                 act_start.setToolTip("" if ne == 0 else
                                      "Corrige los errores de Validation antes de iniciar.")
                 _set_step("Listo" if ne == 0 else ("Validar" if (ne or nw) else "Configurar"))
-                # Toolbar contextual: revela/oculta las acciones de datos según validación.
-                _reveal_data_actions(ne == 0)
+                # Nota: la VISIBILIDAD de las acciones de datos ya NO depende de validar;
+                # ahora es contextual por pestaña (solo en Monitoring/datos). La validación
+                # solo controla si Start está HABILITADO (arriba).
             _ic = {"error": ("🔴", "#b91c1c"), "warn": ("🟡", "#b45309"), "ok": ("🟢", "#166534")}
             rows = []
             for f in findings:
@@ -3398,6 +3423,11 @@ def main() -> int:
                 pass
         def _on_tab(*_):
             _t = tabs.tabText(tabs.currentIndex())
+            # Toolbar contextual (opción a): Start/Stop/Save/Upload/Delete SOLO fuera de
+            # Configuration (Monitoring + vistas de datos). Durante una adquisición se
+            # mantienen visibles aunque vuelvas a Configuration (para poder dar Stop).
+            _acquiring = act_stop.isEnabled()
+            _reveal_data_actions(_acquiring or _t != "Configuration")
             if _t == "Monitoring":
                 _revalidate()
             elif _t == "Sessions":
