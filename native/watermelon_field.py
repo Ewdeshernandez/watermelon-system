@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.91"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.92"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1902,9 +1902,55 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 return os.path.expanduser("~")
 
+        def _apply_setup(setup):
+            """Aplica un AcqSetup COMPLETO al formulario: Machine + ficha + Acquisition
+            + Channel editor (todas las columnas) + canales. 'Todo es todo'."""
+            fill_form(_setup_to_sim(setup))            # base: canales, nombre, rotación, rpm...
+            mc = setup.machine
+
+            def _t(fn):
+                try: fn()
+                except Exception: pass  # noqa: E722
+            _t(lambda: ed_type.setText(getattr(mc, "machine_type", "") or ""))
+            _t(lambda: ed_tag.setText(getattr(mc, "tag", "") or ""))
+            _t(lambda: ed_client.setText(getattr(mc, "client", "") or ""))
+            _t(lambda: ed_loc.setText(getattr(mc, "location", "") or ""))
+            _t(lambda: cb_brg.setCurrentText(getattr(mc, "bearing_type", "plain")))
+            if getattr(mc, "n_bearings", 0):
+                _t(lambda: sp_nbrg.setValue(int(mc.n_bearings)))
+            # Acquisition
+            aq = setup.acquisition
+            _t(lambda: cb_win.setCurrentText(aq.window))
+            _t(lambda: sp_avg.setValue(int(aq.averages)))
+            _t(lambda: sp_sprev.setValue(int(getattr(aq, "samples_per_rev", 0) or 0)))
+            _t(lambda: cb_wfmode.setCurrentText(getattr(aq, "waveform_mode", "synchronous")))
+            _t(lambda: cb_frequ.setCurrentText("CPM" if getattr(aq, "freq_unit", "cpm") == "cpm" else "Hz"))
+            _ords = set(getattr(aq, "orders", []) or [])
+            for _cbx, _v in ((o_half, 0.5), (o_1x, 1.0), (o_2x, 2.0), (o_3x, 3.0)):
+                _t(lambda c=_cbx, v=_v: c.setChecked(v in _ords))
+            # Channel editor: overlay de columnas por nombre de canal (coupling/unit/
+            # plane/keyphasor_ref/pair/full_scale) que SimMachine no conserva.
+            _byn = {c.point_label: c for c in setup.channels}
+            for r in range(tblc.rowCount()):
+                it0 = tblc.item(r, 0); nm = it0.text() if it0 else ""
+                c = _byn.get(nm)
+                if not c:
+                    continue
+                for _col, _val in ((_COL_COUP, getattr(c, "coupling", "") or ""),
+                                   (_COL_UNIT, getattr(c, "unit_native", "") or ""),
+                                   (_COL_PLANE, str(getattr(c, "plane", 1) or 1)),
+                                   (_COL_KPH, getattr(c, "keyphasor_ref", "") or ""),
+                                   (_COL_PAIR, getattr(c, "pair_ref", "") or ""),
+                                   (_COL_FS, (f"{getattr(c, 'full_scale', 0):g}"
+                                              if getattr(c, "full_scale", 0) else ""))):
+                    _t(lambda col=_col, val=_val: tblc.setItem(r, col, QtWidgets.QTableWidgetItem(str(val))))
+            _t(draw_bearing); _t(_ched_refresh_selector)
+
         def _export_config():
-            m = read_form()
-            nch = len(m.sensors)
+            import json as _json
+            from dataclasses import asdict as _asdict
+            setup = _form_to_setup()                   # captura TODO el formulario (AcqSetup)
+            nch = len(setup.channels)
             if nch == 0:
                 _r = QtWidgets.QMessageBox.question(
                     win, "Save to file",
@@ -1912,7 +1958,7 @@ def main() -> int:
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
                 if _r != QtWidgets.QMessageBox.Yes:
                     return
-            _base = (m.name or "machine").strip() or "machine"
+            _base = (setup.machine.name or "machine").strip() or "machine"
             _start = os.path.join(_cfg_dir(), f"{_base}.wmmachine")
             path, _f = QtWidgets.QFileDialog.getSaveFileName(
                 win, "Save configuration to file", _start,
@@ -1921,51 +1967,69 @@ def main() -> int:
                 return
             if not path.lower().endswith((".wmmachine", ".json")):
                 path += ".wmmachine"
+            payload = {"wm_format": "acqsetup",
+                       "machine": _asdict(setup.machine),
+                       "channels": [_asdict(c) for c in setup.channels],
+                       "acquisition": _asdict(setup.acquisition),
+                       "acquisition_by_type": {t: _asdict(p) for t, p in
+                                               (getattr(setup, "acquisition_by_type", {}) or {}).items()}}
             try:
-                m.save(path)
+                with open(path, "w", encoding="utf-8") as f:
+                    _json.dump(payload, f, ensure_ascii=False, indent=2)
+                mc = setup.machine
                 win.statusBar().showMessage(f"✓ Guardado: {_base} · {nch} canal(es) → {path}", 6000)
                 QtWidgets.QMessageBox.information(
                     win, "Guardado",
-                    f"<b>{_base}</b> guardada.<br>Canales: <b>{nch}</b><br>"
-                    f"Tag: {m.tag or '—'} · Cliente: {m.client or '—'} · "
-                    f"Location: {m.location or '—'}<br><br><small>{path}</small>")
+                    f"<b>{_base}</b> guardada (config completa).<br>Canales: <b>{nch}</b><br>"
+                    f"Tag: {mc.tag or '—'} · Cliente: {mc.client or '—'} · "
+                    f"Location: {mc.location or '—'}<br>Ventana: {setup.acquisition.window} · "
+                    f"Avg: {setup.acquisition.averages} · Samples/rev: "
+                    f"{getattr(setup.acquisition,'samples_per_rev',0)}<br><br><small>{path}</small>")
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, "Save to file", f"No se pudo guardar:\n{e}")
 
         def _import_config():
+            import json as _json
             path, _f = QtWidgets.QFileDialog.getOpenFileName(
                 win, "Open configuration from file", _cfg_dir(),
                 "Watermelon machine (*.wmmachine *.json);;All files (*)")
             if not path:
                 return
             try:                                   # 1) leer el archivo
-                m = SimMachine.load(path)
+                with open(path, encoding="utf-8") as f:
+                    data = _json.load(f)
             except Exception as e:  # noqa: BLE001
-                QtWidgets.QMessageBox.critical(win, "Open file",
-                    f"No se pudo leer el archivo:\n{e}")
+                QtWidgets.QMessageBox.critical(win, "Open file", f"No se pudo leer el archivo:\n{e}")
                 return
-            try:                                   # 2) aplicarlo al formulario
-                fill_form(m)
+            try:                                   # 2) aplicarlo COMPLETO al formulario
+                if isinstance(data, dict) and "channels" in data and "machine" in data:
+                    from core.remote_monitoring.config import setup_from_dict
+                    setup = setup_from_dict(data)
+                    _apply_setup(setup)
+                    nch = len(setup.channels); mc = setup.machine
+                    name, tagv, clientv, locv = mc.name, mc.tag, mc.client, mc.location
+                    rot, rpm = mc.rotation, mc.rpm_nominal
+                else:                              # formato viejo (SimMachine) — compat
+                    m = SimMachine.load(path); fill_form(m)
+                    nch = len(m.sensors); name, tagv, clientv, locv = m.name, m.tag, m.client, m.location
+                    rot, rpm = m.rotation, m.rpm
                 _unlock_all_tabs()
-                tabs.setCurrentIndex(0)                       # ir a Configuration
-                cfg_tabs.setCurrentWidget(pg_sensors)         # mostrar Sensors (donde se ven canales)
-                nch = len(m.sensors)
-                _rows = tblc.rowCount()                       # filas REALES pintadas en la tabla
-                _chs = ", ".join(s.name for s in m.sensors[:6]) + (" …" if nch > 6 else "")
+                tabs.setCurrentIndex(0); cfg_tabs.setCurrentWidget(pg_sensors)
+                _rows = tblc.rowCount()
                 win.statusBar().showMessage(
-                    f"✓ Cargado: {m.name or '(sin nombre)'} · {nch} canal(es) → {path}", 7000)
+                    f"✓ Cargado: {name or '(sin nombre)'} · {nch} canal(es) → {path}", 7000)
                 QtWidgets.QMessageBox.information(
                     win, "Cargado",
-                    f"<b>{m.name or '(sin nombre)'}</b><br>Canales en archivo: <b>{nch}</b> "
-                    f"({_chs or '—'})<br>Filas pintadas en la tabla: <b>{_rows}</b><br>"
-                    f"Tag: {m.tag or '—'} · Cliente: {m.client or '—'} · "
-                    f"Location: {m.location or '—'}<br>Rotación: {m.rotation} · RPM: {m.rpm:g}"
-                    "<br><br>Revisa la pestaña <b>Sensors layout</b> (acá) y <b>Channel editor</b>."
+                    f"<b>{name or '(sin nombre)'}</b> (config completa)<br>Canales: <b>{nch}</b> · "
+                    f"filas en tabla: <b>{_rows}</b><br>Tag: {tagv or '—'} · Cliente: {clientv or '—'} · "
+                    f"Location: {locv or '—'}<br>Rotación: {rot} · RPM: {rpm:g}"
+                    "<br><br>Se restauró Machine + Sensors + Channel editor + Acquisition."
                     + ("<br><b style='color:#b45309'>⚠ 0 canales: archivo vacío o versión vieja.</b>"
                        if nch == 0 else ""))
             except Exception as e:  # noqa: BLE001
+                import traceback as _tb
                 QtWidgets.QMessageBox.warning(win, "Open file",
-                    f"Se leyó el archivo pero no se pudo aplicar al formulario:\n{e}")
+                    f"Se leyó el archivo pero no se pudo aplicar:\n{e}\n\n{_tb.format_exc()[-400:]}")
 
         act_export.triggered.connect(_export_config)
         act_import.triggered.connect(_import_config)
