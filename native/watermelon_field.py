@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.9"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -3031,31 +3031,42 @@ def main() -> int:
             _sess = rec_state.get("session")
             if _sess is not None and getattr(_sess, "open", False):
                 lbl_rec.setText(f"● capturing · {_sess.status.duration_s:.0f}s · {_sess.status.size_mb:.1f} MB")
-            snap = agent.snapshot(2.0)
-            if snap.shape[1] < 16:
-                return
-            fs = agent.sample_rate_hz
-            rpm = agent.estimate_rpm(snap)
-            # Fallback por pico de vibración SOLO si NO hay canal keyphasor. Con
-            # keyphasor presente y sin pulsos = rotor DETENIDO → rpm None → fase en
-            # blanco (antes el fallback inventaba una rpm del ruido y la fase bailaba
-            # con la máquina apagada).
-            if not rpm and kph_glob is None:
-                fr0, mag0 = _spectrum(snap[vib[0][0]], fs)
-                band = (fr0 > 3) & (fr0 < 300)
-                if band.any() and float(mag0[band].max()) > 1e-9:
-                    rpm = float(fr0[band][np.argmax(mag0[band])] * 60.0)
-            lbl_rpm.setText(f"RPM: {rpm:.0f}" if rpm else "RPM: —")
+            # REVISIÓN de sesión guardada (replay): usa la ventana cargada en vez del vivo y
+            # NO re-alimenta el transitorio (tc/SCL ya quedaron reprocesados al abrir).
+            _rp = rec_state.get("replay")
+            if _rp is not None:
+                snap = _rp["snap"]; fs = float(_rp["fs"])
+                if snap.shape[1] < 16:
+                    return
+                from core.remote_monitoring.keyphasor import detect_keyphasor as _dkRP
+                rpm = (_dkRP(snap[kph_glob], fs).rpm if kph_glob is not None else None)
+            else:
+                snap = agent.snapshot(2.0)
+                if snap.shape[1] < 16:
+                    return
+                fs = agent.sample_rate_hz
+                rpm = agent.estimate_rpm(snap)
+                # Fallback por pico de vibración SOLO si NO hay canal keyphasor. Con
+                # keyphasor presente y sin pulsos = rotor DETENIDO → rpm None → fase en
+                # blanco (antes el fallback inventaba una rpm del ruido y la fase bailaba
+                # con la máquina apagada).
+                if not rpm and kph_glob is None:
+                    fr0, mag0 = _spectrum(snap[vib[0][0]], fs)
+                    band = (fr0 > 3) & (fr0 < 300)
+                    if band.any() and float(mag0[band].max()) > 1e-9:
+                        rpm = float(fr0[band][np.argmax(mag0[band])] * 60.0)
+            lbl_rpm.setText((f"RPM: {rpm:.0f}" + (" (revisión)" if _rp is not None else ""))
+                            if rpm else ("RPM: — (revisión)" if _rp is not None else "RPM: —"))
             f1 = (rpm / 60.0) if rpm else None
             # Monitoreo en línea (Fase 2): publica lecturas ~cada 5 s, corra cual corra la pestaña
-            if rec_state.get("online") and act_stop.isEnabled():
+            if _rp is None and rec_state.get("online") and act_stop.isEnabled():
                 rec_state["pub_n"] = rec_state.get("pub_n", 0) + 1
                 if rec_state["pub_n"] % 55 == 1:      # ~5 s a 11 fps
                     _publish_online(snap, fs, f1)
             # Alimentar el capturador de transitorio para Bode/Polar/Cascada. Con el sim
             # ya a tiempo real, cada ~4 refrescos (~0.36 s) da muchos puntos en el arranque.
             rec_state["fn"] = rec_state.get("fn", 0) + 1
-            if rpm and rec_state["fn"] % 4 == 0:
+            if _rp is None and rpm and rec_state["fn"] % 4 == 0:
                 try:
                     tc.feed(snap, rpm, fs, vib, kph_idx=kph_glob)
                 except Exception:  # noqa: BLE001
@@ -4083,8 +4094,14 @@ def main() -> int:
         _ssh.addWidget(QtWidgets.QLabel("<b>Sessions</b> <i style='color:#64748b'>— capturas "
                                         "locales y su estado en la nube</i>"))
         _ssh.addStretch(1)
+        btn_sess_open = QtWidgets.QPushButton("▶ Abrir (revisar)")
+        btn_sess_open.setStyleSheet("QPushButton{background:#10b981;color:white;border:none;"
+                                    "font-weight:800;padding:6px 14px;border-radius:7px;}"
+                                    " QPushButton:hover{background:#0e9f6e;}")
+        btn_sess_live = QtWidgets.QPushButton("● Volver a vivo"); btn_sess_live.setVisible(False)
         btn_sess_ref = QtWidgets.QPushButton("↻ Refrescar")
         btn_sess_up = QtWidgets.QPushButton("↑ Subir todas")
+        _ssh.addWidget(btn_sess_open); _ssh.addWidget(btn_sess_live)
         _ssh.addWidget(btn_sess_ref); _ssh.addWidget(btn_sess_up)
         sess_l.addLayout(_ssh)
         sess_tbl = QtWidgets.QTableWidget(0, 4)
@@ -4092,9 +4109,11 @@ def main() -> int:
         sess_tbl.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
         sess_tbl.verticalHeader().setVisible(False)
         sess_tbl.setAlternatingRowColors(True); sess_tbl.setShowGrid(False)
-        sess_tbl.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        sess_tbl.setFocusPolicy(QtCore.Qt.NoFocus)
+        sess_tbl.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        sess_tbl.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        sess_tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         sess_l.addWidget(sess_tbl, 1)
+        _sess_dirs = {}      # fila → rec_dir (para abrir)
         sess_l.addWidget(QtWidgets.QLabel(
             "<i style='color:#64748b'>● Local = en disco (sin subir) · ● En la nube = subida ✓ · "
             "● En línea = streaming. Auto-sube los pendientes al haber red.</i>"))
@@ -4110,12 +4129,13 @@ def main() -> int:
                 recs = list_recordings(agent.instance_id)
             except Exception:  # noqa: BLE001
                 recs = []
-            rows = []
+            rows = []; _sess_dirs.clear()
             if rec_state.get("online") and act_stop.isEnabled():
                 rows.append(("(streaming)", "ahora", "—", "ONLINE"))
             import datetime as _dd
             for m in recs:
                 _d = m.get("_dir", "")
+                _sess_dirs[len(rows)] = _d       # fila actual → carpeta de la grabación
                 try:
                     _sz = _dir_size(_d) / 1e6
                 except Exception:  # noqa: BLE001
@@ -4147,6 +4167,98 @@ def main() -> int:
                             _f = _it.font(); _f.setBold(True); _it.setFont(_f)
                     sess_tbl.setItem(_r, _cc, _it)
 
+        def _load_full_recording(rec_dir):
+            """Reconstruye la cruda (canales, muestras) desde data.f32 + index.jsonl.
+            Los bloques se escriben canal-major; index.jsonl da el tamaño de cada uno."""
+            import json as _json
+            man = _json.load(open(os.path.join(rec_dir, "manifest.json")))
+            fsR = float(man.get("sample_rate_hz") or man.get("fs") or agent.sample_rate_hz)
+            nch = int(man.get("n_channels") or (len(vib) + (1 if kph_glob is not None else 0)))
+            raw = np.fromfile(os.path.join(rec_dir, "data.f32"), dtype=np.float32)
+            idxp = os.path.join(rec_dir, "index.jsonl")
+            parts = []
+            if os.path.isfile(idxp):
+                for ln in open(idxp):
+                    try:
+                        r = _json.loads(ln)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    off = int(r["off"]); n = int(r["n"])
+                    chunk = raw[off * nch: off * nch + nch * n]
+                    if chunk.size == nch * n:
+                        parts.append(chunk.reshape(nch, n))
+            full = (np.concatenate(parts, axis=1) if parts
+                    else raw[:raw.size - (raw.size % nch)].reshape(-1, nch).T)
+            return full, fsR, man
+
+        def _open_recording(rec_dir):
+            try:
+                full, fsR, man = _load_full_recording(rec_dir)
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "Abrir sesión", f"No se pudo leer: {e}")
+                return
+            if full.ndim != 2 or full.shape[1] < 16:
+                QtWidgets.QMessageBox.warning(win, "Abrir sesión", "Grabación vacía o corta.")
+                return
+            # Reprocesar transitorio (Bode/Polar/Cascada) a máxima resolución
+            tc.reset()
+            try:
+                tc.process_full(full, fsR, vib, kph_idx=kph_glob)
+            except Exception:  # noqa: BLE001
+                pass
+            # Re-acumular Shaft Centerline + elegir ventana de review = la de MAYOR rpm
+            scl_rest.clear()
+            for _b in scl_track:
+                scl_track[_b].clear()
+            from core.remote_monitoring.keyphasor import detect_keyphasor as _dk3
+            wlen = min(int(2.0 * fsR), full.shape[1]); hop = max(int(0.25 * fsR), 1)
+            best_rpm, best_start = -1.0, max(0, full.shape[1] - wlen)
+            p0 = 0
+            while p0 + wlen <= full.shape[1]:
+                seg = full[:, p0:p0 + wlen]
+                _rpm = None
+                if kph_glob is not None:
+                    _kr = _dk3(seg[kph_glob], fsR); _rpm = _kr.rpm
+                if _rpm:
+                    if _rpm > best_rpm:
+                        best_rpm, best_start = _rpm, p0
+                    if scl_items:
+                        bk = int(_rpm // 100) * 100
+                        for it in scl_items:
+                            mX = float((seg[it["xi"]] * 1000.0 / (it["xc"].sensitivity_mv_per_eu or 1.0)).mean())
+                            mY = float((seg[it["yi"]] * 1000.0 / (it["yc"].sensitivity_mv_per_eu or 1.0)).mean())
+                            brg = it["brg"]; r = scl_rest.get(brg)
+                            if r is None or _rpm < r[2]:
+                                scl_rest[brg] = (mX, mY, _rpm); r = scl_rest[brg]
+                            dX = mX - r[0]; dY = mY - r[1]; clr = it.get("clr", 8.0)
+                            cx = dX * _mo.sin(it["aX"]) + dY * _mo.sin(it["aY"])
+                            cy = dX * _mo.cos(it["aX"]) + dY * _mo.cos(it["aY"]) - clr * 0.9
+                            scl_track[brg][bk] = (cx, cy)
+                p0 += hop
+            rec_state["replay"] = {"snap": full[:, best_start:best_start + wlen].copy(),
+                                   "fs": fsR, "rec_id": man.get("rec_id", "")}
+            btn_sess_live.setVisible(True)
+            lbl_rec.setText(f"▶ REVISIÓN: {man.get('rec_id','')} · {full.shape[1]/fsR:.0f}s")
+            QtWidgets.QMessageBox.information(win, "Abrir sesión",
+                f"Reproduciendo «{man.get('rec_id','')}» ({full.shape[1]/fsR:.0f} s).\n"
+                "Bode / Polar / Cascada / Shaft Centerline reprocesados; Orbit/Waveform en la "
+                f"ventana de mayor rpm (~{best_rpm:.0f} rpm).\n«Volver a vivo» para salir.")
+
+        def _open_selected():
+            r = sess_tbl.currentRow()
+            d = _sess_dirs.get(r)
+            if not d:
+                QtWidgets.QMessageBox.information(win, "Abrir sesión",
+                    "Elegí una grabación de la lista (fila LOCAL/EN LA NUBE).")
+                return
+            _open_recording(d)
+
+        def _back_to_live():
+            rec_state["replay"] = None
+            btn_sess_live.setVisible(False); lbl_rec.setText("")
+
+        btn_sess_open.clicked.connect(_open_selected)
+        btn_sess_live.clicked.connect(_back_to_live)
         btn_sess_ref.clicked.connect(_refresh_sessions)
         btn_sess_up.clicked.connect(lambda: (do_sync(), _refresh_sessions()))
         tabs.addTab(sess_w, "Sessions")
