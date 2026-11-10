@@ -55,10 +55,36 @@ def detect_keyphasor(
     if peak <= 1e-9:
         return KeyphasorResult(None, None, 0, np.zeros(0, dtype=int), None)
 
-    thr = threshold_frac * peak
-    active = dev > thr
-    # flancos de entrada: pasa de inactivo a activo
+    # Detección con HISTÉRESIS (Schmitt): activa en thr_hi, no se suelta hasta
+    # thr_lo. Mata el "chatter" en la cima del pulso que generaba DOBLES flancos
+    # por vuelta → rpm fantasma (p.ej. 12000) y fase/order-tracking corrupto.
+    thr_hi = threshold_frac * peak
+    thr_lo = 0.5 * thr_hi
+    hi = dev > thr_hi
+    lo = dev < thr_lo
+    forced = np.flatnonzero(hi | lo)
+    if forced.size == 0:
+        return KeyphasorResult(None, None, 0, np.zeros(0, dtype=int), None)
+    val = hi[forced]                                   # estado en cada punto forzado
+    pos = np.searchsorted(forced, np.arange(n), side="right") - 1
+    pos[pos < 0] = 0
+    active = val[pos]
+    active[:forced[0]] = False
     rising = np.flatnonzero((~active[:-1]) & (active[1:])) + 1
+    if rising.size < 2:
+        return KeyphasorResult(None, None, rising.size,
+                               rising.astype(int), int(rising[0]) if rising.size else None)
+
+    # TIEMPO MUERTO (refractario): no puede haber 2 pulsos en < 0.5 vuelta.
+    # Deja fuera cualquier flanco demasiado cerca del anterior aceptado.
+    med_gap = float(np.median(np.diff(rising)))
+    if med_gap > 0:
+        min_gap = 0.5 * med_gap
+        kept = [int(rising[0])]
+        for r in rising[1:]:
+            if r - kept[-1] >= min_gap:
+                kept.append(int(r))
+        rising = np.asarray(kept, dtype=int)
     if rising.size < 2:
         return KeyphasorResult(None, None, rising.size,
                                rising.astype(int), int(rising[0]) if rising.size else None)
@@ -70,6 +96,17 @@ def detect_keyphasor(
     good = intervals[(intervals >= lo) & (intervals <= hi)]
     if good.size == 0:
         return KeyphasorResult(None, None, rising.size, rising.astype(int), int(rising[0]))
+
+    # GATE ANTI-RUIDO: un keyphasor real da un tren REGULAR (casi todos los
+    # intervalos cerca de la mediana) y pulsos PROMINENTES sobre el piso de ruido.
+    # Con la máquina apagada el canal es ruido → cruces irregulares; antes esto
+    # inventaba ~12000 rpm y la fase bailaba sin girar. Si no hay lock → "sin
+    # pulsos" (rpm None + pulsos vacíos) → la fase queda en blanco.
+    _m = float(np.median(good))
+    _frac = float(np.mean(np.abs(good - _m) <= 0.30 * _m)) if _m > 0 else 0.0
+    _prom = peak / (float(np.median(dev)) + 1e-12)
+    if good.size < 3 or _frac < 0.6 or _prom < 4.0:
+        return KeyphasorResult(None, None, 0, np.zeros(0, dtype=int), None)
 
     rev_period = float(np.median(good))
     rpm = 60.0 / rev_period

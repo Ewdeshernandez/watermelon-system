@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.96"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.97"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -123,6 +123,31 @@ def _spectrum(x, fs):
     w = np.hanning(len(x))
     mag = np.abs(np.fft.rfft(x * w)) / (np.sum(w) / 2)
     return np.fft.rfftfreq(len(x), 1.0 / fs), mag
+
+
+def _bode_clean(rr, am, ph):
+    """Limpia una curva de Bode (rpm, amp, fase): ordena por rpm, descarta
+    no-finitos, amplitud nula (vectores que 'vuelven a 0') y rpm FANTASMA muy
+    por encima del grueso (keyphasor que alguna vez contó de más)."""
+    rr = np.asarray(rr, float); am = np.asarray(am, float); ph = np.asarray(ph, float)
+    if rr.size == 0:
+        return rr, am, ph
+    o = np.argsort(rr); rr, am, ph = rr[o], am[o], ph[o]
+    good = np.isfinite(rr) & np.isfinite(am) & np.isfinite(ph) & (am > 1e-6)
+    rr, am, ph = rr[good], am[good], ph[good]
+    if rr.size >= 4:
+        hi = float(np.percentile(rr, 95)) * 1.25 + 50.0     # tope anti-fantasma
+        m = rr <= hi
+        rr, am, ph = rr[m], am[m], ph[m]
+    return rr, am, ph
+
+
+def _phase_unwrap(ph):
+    """Fase en grados desenrollada (continua) → línea sin saltos 0/360."""
+    ph = np.asarray(ph, float)
+    if ph.size == 0:
+        return ph
+    return np.degrees(np.unwrap(np.radians(ph)))
 
 
 def _stylesheet(scale: float = 1.0) -> str:
@@ -2208,13 +2233,19 @@ def main() -> int:
         top.addStretch(1); ond_l.addLayout(top)
         gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
         gl.ci.setContentsMargins(2, 2, 2, 2); gl.ci.setSpacing(2)
-        wave_curves = []; wave_plots = []; wave_stats = []; wave_pills = []
+        wave_curves = []; wave_plots = []; wave_stats = []; wave_pills = []; wave_kph = []
         for r, (i, c) in enumerate(vib):
             p = gl.addPlot(row=r, col=0); p.showGrid(x=False, y=True, alpha=0.06)  # limpio, casi blanco
             col = SENSOR_COLORS.get(_ckind(c), CORN)
             p.setLabel("left", c.name, color=col)
             p.getAxis("bottom").setStyle(showValues=(r == len(vib) - 1))
             wave_curves.append(p.plot(pen=pg.mkPen(col, width=1.5)))
+            # Marcador de KEYPHASOR: punto ámbar sobre la onda en cada pulso once-per-rev
+            # (la referencia de fase, como el "Keyphasor dot" de Bently).
+            kphm = pg.ScatterPlotItem(size=9, symbol="t",
+                                      brush=pg.mkBrush(SENSOR_COLORS["keyphasor"]),
+                                      pen=pg.mkPen("w", width=1))
+            p.addItem(kphm); wave_kph.append(kphm)
             pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col))
             p.addItem(pill); wave_pills.append(pill)
             stt = pg.TextItem("", color=MUTE, anchor=(1, 0)); p.addItem(stt); wave_stats.append(stt)
@@ -2379,25 +2410,24 @@ def main() -> int:
         for k, (i, c) in enumerate(vib):
             rr_, cc_ = k // _ncb, k % _ncb
             col = SENSOR_COLORS.get(_ckind(c), CORN)
-            # Amplitud 1X (arriba) — eje X compartido con la fase de abajo
-            p = gl_bode.addPlot(row=2 * rr_, col=cc_)
-            p.showGrid(x=True, y=True, alpha=0.12); p.setLabel("left", f"1X {c.units}")
-            p.getAxis("bottom").setStyle(showValues=False)
-            pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
+            # FASE arriba (System1/web: fase-lag CRECE hacia arriba = eje invertido)
+            php = gl_bode.addPlot(row=2 * rr_, col=cc_)
+            php.showGrid(x=True, y=True, alpha=0.12); php.setLabel("left", "Phase °")
+            php.getAxis("bottom").setStyle(showValues=False)
+            php.invertY(True)                     # fase-lag hacia arriba; rango auto (unwrap)
+            php.setMaximumHeight(170)
+            pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); php.addItem(pill)
+            curp = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); php.addItem(curp); curp.hide()
+            # AMPLITUD abajo — eje X compartido con la fase de arriba
+            p = gl_bode.addPlot(row=2 * rr_ + 1, col=cc_)
+            p.showGrid(x=True, y=True, alpha=0.12); p.setLabel("left", f"1X {c.units}"); p.setLabel("bottom", "RPM")
+            p.setXLink(php)
             cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); p.addItem(cur); cur.hide()
             txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1)); p.addItem(txt)
-            # Fase 1X (abajo) — convención System1: fase-lag CRECE hacia arriba (eje invertido)
-            php = gl_bode.addPlot(row=2 * rr_ + 1, col=cc_)
-            php.showGrid(x=True, y=True, alpha=0.12)
-            php.setLabel("bottom", "RPM"); php.setLabel("left", "Phase °")
-            php.setXLink(p); php.setYRange(0, 360); php.invertY(True)
-            php.getAxis("left").setTicks([[(v, str(v)) for v in (0, 90, 180, 270, 360)]])
-            php.setMaximumHeight(170)
-            curp = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); php.addItem(curp); curp.hide()
             bode_cells.append(dict(
                 p=p, php=php, name=c.name, unit=c.units, cur=cur, curp=curp, txt=txt, data={},
-                amp=p.plot(pen=pg.mkPen(col, width=1.6), symbol="o", symbolSize=3, symbolBrush=col, symbolPen=None),
-                pha=php.plot(pen=pg.mkPen(col, width=1.4), symbol="o", symbolSize=3, symbolBrush=col, symbolPen=None),
+                amp=p.plot(pen=pg.mkPen(col, width=1.8)),      # línea limpia, sin puntos
+                pha=php.plot(pen=pg.mkPen(col, width=1.8)),     # fase unwrap = línea continua
                 pill=pill))
         tabs.addTab(bode_w, "Bode")
 
@@ -2639,7 +2669,11 @@ def main() -> int:
                 return
             fs = agent.sample_rate_hz
             rpm = agent.estimate_rpm(snap)
-            if not rpm:      # sin keyphasor → rpm del pico dominante de vibración (1X)
+            # Fallback por pico de vibración SOLO si NO hay canal keyphasor. Con
+            # keyphasor presente y sin pulsos = rotor DETENIDO → rpm None → fase en
+            # blanco (antes el fallback inventaba una rpm del ruido y la fase bailaba
+            # con la máquina apagada).
+            if not rpm and kph_glob is None:
                 fr0, mag0 = _spectrum(snap[vib[0][0]], fs)
                 band = (fr0 > 3) & (fr0 < 300)
                 if band.any() and float(mag0[band].max()) > 1e-9:
@@ -2739,8 +2773,10 @@ def main() -> int:
                     _ag["gap"] = gapv
                     if a1 >= _ag["amp"]:
                         _ag["amp"] = a1; _ag["ph"] = p1; _ag["unit"] = c.units
-                    vals = [c.name, f"{gapv:.2f} V", f"{ov:.3g} {c.units}", f"{a1:.3g}",
-                            f"{p1:.0f}°", f"{a2:.3g}", f"{p2:.0f}°",
+                    _ph = (lambda v: f"{v:.0f}°") if f1 else (lambda v: "—")  # sin giro → sin fase
+                    vals = [c.name, f"{gapv:.2f} V", f"{ov:.3g} {c.units}",
+                            f"{a1:.3g}" if f1 else "—", _ph(p1),
+                            f"{a2:.3g}" if f1 else "—", _ph(p2),
                             f"{al:g}", f"{dg:g}", estado]
                     for cc, v in enumerate(vals):
                         it = QtWidgets.QTableWidgetItem(v)
@@ -2765,7 +2801,8 @@ def main() -> int:
                     if not _ag:
                         continue
                     _z, _bgc, _fgc, _brc = _ZC[_ag["sev"]]
-                    _cd["v1"].setText(f"1X  {_ag['amp']:.3g} {_ag['unit']} ∠ {_ag['ph']:.0f}°")
+                    _cd["v1"].setText(f"1X  {_ag['amp']:.3g} {_ag['unit']} ∠ {_ag['ph']:.0f}°"
+                                      if f1 else f"1X  {_ag['amp']:.3g} {_ag['unit']} ∠ —")
                     _cd["v2"].setText(f"Gap  {_ag['gap']:.2f} V")
                     _cd["zone"].setText(_z)
                     _cd["zone"].setStyleSheet(
@@ -2799,12 +2836,25 @@ def main() -> int:
                 fi = onda_focus["i"]
                 nshow = min(snap.shape[1], int(0.6 * fs))          # 600 ms (estándar)
                 tms = np.arange(nshow) / fs * 1000.0
+                # Pulsos del keyphasor en la MISMA ventana → marcador de fase por onda
+                _kpul = None
+                if kph_glob is not None and f1:
+                    try:
+                        from core.remote_monitoring.keyphasor import detect_keyphasor as _dk
+                        _kpul = _dk(snap[kph_glob, -nshow:], fs).pulse_sample_indices
+                    except Exception:  # noqa: BLE001
+                        _kpul = None
                 for idx, ((i, c), curve) in enumerate(zip(vib, wave_curves)):
                     if fi is not None and idx != fi:
                         continue                                   # foco: solo la elegida
                     eu = snap[i, -nshow:] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
                     eu0 = eu - eu.mean()
                     curve.setData(tms, eu0)
+                    if _kpul is not None and len(_kpul):
+                        pk = _kpul[_kpul < nshow]
+                        wave_kph[idx].setData(tms[pk], eu0[pk])    # punto en la onda en cada pulso
+                    else:
+                        wave_kph[idx].setData([], [])
                     pp = float(eu0.max() - eu0.min()); rms = float(np.sqrt(np.mean(eu0 ** 2)))
                     cf = (float(np.max(np.abs(eu0))) / rms) if rms > 1e-9 else 0.0
                     wave_stats[idx].setText(f"pp  {pp:.2f} {c.units}\nrms {rms:.2f}\nCF  {cf:.2f}")
@@ -2880,31 +2930,31 @@ def main() -> int:
                 for k, cl in enumerate(bode_cells):
                     if fk is not None and k != fk:
                         continue
-                    rr, am, ph = tc.bode(cl["name"])
+                    rr, am, ph = _bode_clean(*tc.bode(cl["name"]))
                     if len(rr) >= 2:
-                        amp = np.asarray(am, float) * 2.0
-                        phd = np.asarray(ph, float)
+                        amp = am * 2.0
+                        phu = _phase_unwrap(ph)
                         cl["amp"].setData(rr, amp)
-                        cl["pha"].setData(rr, phd)
-                        cl["data"] = {"rr": np.asarray(rr, float), "am": amp, "ph": phd}
-                        cl["pill"].setPos(float(rr[0]), float(amp.max()))
+                        cl["pha"].setData(rr, phu)
+                        cl["data"] = {"rr": rr, "am": amp, "ph": np.asarray(ph, float)}
+                        cl["pill"].setPos(float(rr[0]), float(np.nanmax(phu)))
             elif cur == "Polar":
                 fk = pol_focus["k"]
                 for k, cl in enumerate(pol_cells):
                     if fk is not None and k != fk:
                         continue
                     rich = (fk is not None and k == fk)
-                    rr, am, ph = tc.bode(cl["name"])
+                    rr, am, ph = _bode_clean(*tc.bode(cl["name"]))
                     if len(rr) >= 3:
-                        rrn = np.asarray(rr, float)
-                        a = np.asarray(am, float) * 2.0
+                        rrn = rr
+                        a = am * 2.0
                         # ángulo FÍSICO = sonda + fase contra el giro (CW → signo negativo)
                         sign = -1.0 if cb_giro.currentText() == "CW" else 1.0
-                        phys = np.radians(cl["pa"] + sign * np.asarray(ph, float))
+                        phys = np.radians(cl["pa"] + sign * ph)
                         amax = float(a.max()) or 1.0
                         rn = a / amax
                         x = rn * np.sin(phys); y = rn * np.cos(phys)
-                        cl["curve"].setData(x, y); cl["pts"].setData(x, y)
+                        cl["curve"].setData(x, y); cl["pts"].setData([], [])   # línea limpia, sin puntos crudos
                         jc = int(np.argmax(a))                        # Ncrit = máx amplitud
                         if rich:
                             cl["ncrit"].setData([x[jc]], [y[jc]]); cl["op"].setData([x[-1]], [y[-1]])
