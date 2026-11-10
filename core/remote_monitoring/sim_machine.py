@@ -44,6 +44,21 @@ PHENOMENA = {
 _UNITS = {"prox": "mil pp", "vel": "mm/s rms", "accel": "g rms", "keyphasor": "pulses/rev"}
 _COUP = {"prox": "DC", "vel": "AC", "accel": "IEPE", "keyphasor": "DC"}
 
+# Banda de medición del Direct/overall por tipo de sensor, según norma:
+#  · prox (desplazamiento): API 670 / ISO 7919 — HP saca deriva DC/runout térmico.
+#  · accel / vel (velocidad RMS): ISO 20816 — banda clásica de severidad 10–1000 Hz.
+BAND_DEFAULTS = {
+    "prox": (1.0, 1000.0),
+    "vel": (10.0, 1000.0),
+    "accel": (10.0, 1000.0),
+    "keyphasor": (0.0, 0.0),
+}
+
+
+def default_band(kind: str) -> tuple:
+    """(f_min, f_max) de medición por tipo de sensor, según norma."""
+    return BAND_DEFAULTS.get(kind, (0.0, 0.0))
+
 
 @dataclass
 class SensorSpec:
@@ -56,6 +71,8 @@ class SensorSpec:
     gap: float = 0.0     # voltaje gap/bias (V) — sondas de proximidad DC
     alarm: float = 0.0   # nivel de alarma (unid. del canal, ISO 20816)
     danger: float = 0.0  # nivel de peligro
+    f_min: float = 0.0   # banda de medición Direct (Hz); 0/0 = default por tipo (norma)
+    f_max: float = 0.0
 
     def units(self) -> str:
         return _UNITS.get(self.kind, "EU")
@@ -69,10 +86,17 @@ class SensorSpec:
         a = float(self.angle) % 360.0
         return (-a) % 360.0 if (self.side or "").upper() == "L" else a
 
+    def band(self) -> tuple:
+        """(f_min, f_max) efectivos: lo configurado, o el default de norma por tipo."""
+        if self.f_min == 0.0 and self.f_max == 0.0:
+            return default_band(self.kind)
+        return (float(self.f_min), float(self.f_max))
+
     def to_channel(self) -> ChannelConfig:
+        fmn, fmx = self.band()
         return ChannelConfig(name=self.name, coupling=self.coupling(),
                              sensitivity_mv_per_eu=self.sensitivity, bnc_port=self.bnc,
-                             units=self.units())
+                             units=self.units(), f_min=fmn, f_max=fmx)
 
 
 @dataclass

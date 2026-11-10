@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -176,19 +176,21 @@ def _orbit_sync_avg(X, Y, pulses, n=256):
     return np.append(ax, ax[0]), np.append(ay, ay[0])      # cerrar el lazo
 
 
-def _bandlimited_pp(x, fs, fcut):
-    """pp de desplazamiento DENTRO de la banda del rotor (hasta fcut): quita el
-    'grass' de alta frecuencia del delta-sigma que infla el max-min crudo ~15%.
-    Una sonda de proximidad real no ve movimiento de eje a esas frecuencias → es
-    ruido. Así el Direct coincide con System1 (que también limita banda)."""
+def _band_filter(x, fs, fmin, fmax):
+    """Filtra la señal a la banda de medición [fmin, fmax] (Hz) por FFT: HP saca
+    deriva DC/runout térmico, LP saca el 'grass' de alta frecuencia que una sonda
+    no ve como movimiento real. fmin/fmax = 0 → sin ese extremo. El Direct/overall
+    se mide sobre esta señal filtrada (convención API 670 / ISO 20816 = System1)."""
     x = np.asarray(x, float)
-    if x.size < 8 or fcut <= 0:
-        return float(x.max() - x.min()) if x.size else 0.0
+    if x.size < 8 or (fmin <= 0 and fmax <= 0):
+        return x
     X = np.fft.rfft(x)
     fr = np.fft.rfftfreq(x.size, 1.0 / fs)
-    X[fr > fcut] = 0.0
-    y = np.fft.irfft(X, n=x.size)
-    return float(y.max() - y.min())
+    if fmin > 0:
+        X[fr < fmin] = 0.0
+    if fmax > 0:
+        X[fr > fmax] = 0.0
+    return np.fft.irfft(X, n=x.size)
 
 
 def _despike(y, win=3):
@@ -994,6 +996,28 @@ def main() -> int:
         al.addWidget(QtWidgets.QLabel(
             "<i style='color:#94a3b8'>El resumen completo por canal (pareo, keyphasor, banda) "
             "está en la pestaña <b>Summary</b>.</i>"))
+
+        # Banda de MEDICIÓN del Direct/overall por tipo de sensor (distinta del Fmax del
+        # espectro). Default por norma; editable. El Direct se filtra a esta banda → quita
+        # deriva DC/runout térmico (HP) y grass HF (LP). 1X/2X no se afectan (vector síncrono).
+        al.addWidget(_subhdr("Measurement band — Direct/overall (API 670 / ISO 20816)"))
+        from core.remote_monitoring.sim_machine import BAND_DEFAULTS as _BD
+        meas_band = {}
+        _mb_lab = {"prox": "Proximity (displacement)", "vel": "Velocity",
+                   "accel": "Accelerometer (velocity)"}
+        for _k in ("prox", "vel", "accel"):
+            _mn, _mx = _BD[_k]
+            rb = QtWidgets.QHBoxLayout()
+            _dot = SENSOR_COLORS.get(_k, "#8b5cf6")
+            _l = QtWidgets.QLabel(f"<span style='color:{_dot}'>●</span> {_mb_lab[_k]}")
+            _l.setMinimumWidth(200); rb.addWidget(_l)
+            rb.addWidget(QtWidgets.QLabel("Fmin (Hz):")); _wmn = _dsp(0, 2000, _mn, 1); rb.addWidget(_wmn)
+            rb.addWidget(QtWidgets.QLabel("Fmax (Hz):")); _wmx = _dsp(50, 40000, _mx, 50); rb.addWidget(_wmx)
+            rb.addStretch(1); al.addLayout(rb)
+            meas_band[_k] = (_wmn, _wmx)
+        al.addWidget(QtWidgets.QLabel(
+            "<i style='color:#94a3b8'>Proximidad 1–1000 Hz (API 670/ISO 7919) · "
+            "velocidad/acelerómetro 10–1000 Hz (ISO 20816). Solo afecta el Direct.</i>"))
         al.addStretch(1)
         cfg_tabs.addTab(pg_acq, "Acquisition")
 
@@ -2192,7 +2216,7 @@ def main() -> int:
                 return args.alarm, args.danger
             return ALARM_DEF.get(_ckind(c), (0.0, 0.0))
 
-        def _amp3(eu0, fs, f1, kind, kph0=None, runout=None):
+        def _amp3(eu0, fs, f1, kind, kph0=None, runout=None, band=(0.0, 0.0)):
             """Overall + 1X + 2X en la convención de la NORMA del sensor:
             proximidad → pp (API 670/ISO 7919); velocidad/acel → RMS (ISO 20816).
             Amplitudes 1X/2X del pico del espectro (no colapsan). FASE por order
@@ -2203,13 +2227,13 @@ def main() -> int:
             se COMPENSA por resta vectorial sobre el vector síncrono (API 670). El Direct
             (overall) NUNCA se compensa — es el movimiento total por definición."""
             from core.remote_monitoring.keyphasor import one_x_sync, one_x_vector
+            # Direct/overall sobre la señal filtrada a la banda de medición del canal
+            # (f_min..f_max por norma; editable en Config). prox→pp, vel/accel→rms.
+            _bf = _band_filter(eu0, fs, band[0], band[1])
             if kind == "prox":
-                # Direct = pp band-limitado al rango del rotor (quita grass HF que infla
-                # el max-min crudo; = convención System1). Cubre >=12× la velocidad.
-                _fc = min(fs * 0.45, max(1000.0, 12.0 * (f1 or 0.0)))
-                ov = _bandlimited_pp(eu0, fs, _fc); k = 2.0           # 0-pk → pp
+                ov = float(_bf.max() - _bf.min()); k = 2.0            # 0-pk → pp
             else:
-                ov = float(np.sqrt(np.mean(eu0 ** 2))); k = 1.0 / np.sqrt(2.0)  # 0-pk → rms
+                ov = float(np.sqrt(np.mean(_bf ** 2))); k = 1.0 / np.sqrt(2.0)  # 0-pk → rms
             fr, mag = _spectrum(eu0, fs)
             def _order(o):
                 if not f1:
@@ -2735,6 +2759,20 @@ def main() -> int:
             """Vector de runout slow-roll de un canal si la compensación está activa."""
             return (rec_state.get("runout") or {}).get(name) if act_runout.isChecked() else None
 
+        def _band_for(c):
+            """Banda de medición del Direct (f_min, f_max): prioridad = banda explícita del
+            canal → banda por tipo editable en Config (meas_band) → default de norma."""
+            from core.remote_monitoring.sim_machine import default_band
+            fmn = float(getattr(c, "f_min", 0.0) or 0.0)
+            fmx = float(getattr(c, "f_max", 0.0) or 0.0)
+            if fmn == 0.0 and fmx == 0.0:
+                w = meas_band.get(_ckind(c))
+                if w is not None:
+                    fmn, fmx = float(w[0].value()), float(w[1].value())
+                else:
+                    fmn, fmx = default_band(_ckind(c))
+            return (fmn, fmx)
+
         def _capture_slowroll():
             """Captura el vector 1X/2X de RUNOUT a la velocidad actual (slow-roll) → ref
             para compensación (API 670). Debe hacerse con el rotor girando LENTO."""
@@ -2784,7 +2822,7 @@ def main() -> int:
                     _e0 = _e0 - _e0.mean()
                     _kp0 = snap[kph_glob] if kph_glob is not None else None
                     _ov, _a1, _p1, _a2, _p2 = _amp3(_e0, fs, f1, _ckind(_pc), kph0=_kp0,
-                                                    runout=_ro_for(_pc.name))
+                                                    runout=_ro_for(_pc.name), band=_band_for(_pc))
                     _base = dict(instance_id=agent.instance_id, variable=_pc.name,
                                  sensor_label=_pc.name, unit=_pc.units, captured_at=now)
                     rds.append(_lr.LiveReading(metric="Direct", value=float(_ov), **_base))
@@ -2900,7 +2938,7 @@ def main() -> int:
                     gapv = float(snap[i].mean())            # V (prox real ~-9.5; sim ~0)
                     _kp0 = snap[kph_glob] if kph_glob is not None else None
                     ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0,
-                                               runout=_ro_for(c.name))
+                                               runout=_ro_for(c.name), band=_band_for(c))
                     al, dg = _alarm_for(c)
                     if dg and ov >= dg:
                         estado, bgc, fgc = "DANGER", "#fde2e2", "#991b1b"
@@ -3250,7 +3288,7 @@ def main() -> int:
                 eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0); eu0 = eu - eu.mean()
                 _kp0 = snap[kph_glob] if kph_glob is not None else None
                 ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0,
-                                           runout=_ro_for(c.name))
+                                           runout=_ro_for(c.name), band=_band_for(c))
                 al, dg = _alarm_for(c)
                 if dg and ov >= dg:
                     st, scol = T["st"][2], "#b91c1c"; worst = max(worst, 2)

@@ -138,6 +138,8 @@ class ChannelConfig:
 
     units: str = "g"    # "g", "mil", "N"
     voltage_range: float = 5.0  # ±V
+    f_min: float = 0.0  # banda de medición del Direct/overall (Hz); 0 = default por tipo
+    f_max: float = 0.0  # 0 = default por tipo (ver sim_machine.default_band)
 
     def __post_init__(self) -> None:
         """Normaliza bnc_port ↔ (module_slot, channel_index) post-init."""
