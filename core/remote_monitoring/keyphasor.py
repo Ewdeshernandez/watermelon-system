@@ -161,7 +161,9 @@ def one_x_sync(
         return None
     c = np.sum(seg * w * np.exp(-1j * order * ang)) / len(seg) / gain
     amp = 2.0 * float(np.abs(c))
-    phase = float(np.degrees(np.angle(c)) % 360.0)
+    # PHASE LAG (convención API 670 / System1): grados DESPUÉS del keyphasor, contra el
+    # giro → signo negativo del ángulo del fasor. Sin esto la fase sale invertida vs 3500.
+    phase = float((-np.degrees(np.angle(c))) % 360.0)
     return amp, phase, (kr.rpm if kr.rpm else 0.0)
 
 
@@ -190,7 +192,6 @@ def one_x_vector(
     ref = np.exp(-1j * 2.0 * np.pi * f1_hz * t)
     c = np.sum(x * w * ref) / n / win_gain
     amp = 2.0 * np.abs(c)
-    phase = np.degrees(np.angle(c))
-    # normaliza a [0, 360)
-    phase = float(phase % 360.0)
+    # PHASE LAG (API 670 / System1): grados después del keyphasor, contra el giro.
+    phase = float((-np.degrees(np.angle(c))) % 360.0)
     return float(amp), phase

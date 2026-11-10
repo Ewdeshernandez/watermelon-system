@@ -45,7 +45,8 @@ def _sync_1x(eu, pulses, order=1):
     if gain <= 0:
         return None
     c = np.sum(seg * w * np.exp(-1j * order * ang)) / len(seg) / gain
-    return 2.0 * float(np.abs(c)), float(np.degrees(np.angle(c)) % 360.0)
+    # PHASE LAG (API 670 / System1): signo negativo del ángulo del fasor.
+    return 2.0 * float(np.abs(c)), float((-np.degrees(np.angle(c))) % 360.0)
 
 
 def _order_vector(eu, fs, f_target, freqs, mag, ref_sample=0, tol_frac=0.04):

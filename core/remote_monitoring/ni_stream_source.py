@@ -88,8 +88,18 @@ class NIStreamSource(StreamSource):
             raise
 
         self._task = task
-        # fs real puede diferir del pedido (rate válido más cercano)
-        self.config.sample_rate_hz = float(fs)
+        # fs REAL del hardware: el módulo delta-sigma (9229/9234) coerce el rate pedido
+        # al que realmente puede generar (fM/256/n); en un chasis con módulos mezclados
+        # 5120 puede caer en 51200/9≈5689. Si no lo leemos de vuelta, rpm/Bode/frecuencias
+        # quedan ~10% corridas. samp_clk_rate = la tasa efectiva del reloj de muestreo.
+        _fs_real = float(fs)
+        try:
+            _r = float(task.timing.samp_clk_rate)
+            if _r > 0:
+                _fs_real = _r
+        except Exception:  # noqa: BLE001
+            pass
+        self.config.sample_rate_hz = _fs_real
         self._running = True
 
     def read_block(self) -> np.ndarray:

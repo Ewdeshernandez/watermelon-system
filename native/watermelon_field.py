@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -187,6 +187,18 @@ def _despike(y, win=3):
     for i in range(h, n - h):
         out[i] = np.median(y[i - h:i + h + 1])
     return out
+
+
+def _vsmooth(am, ph_deg, win=5):
+    """Suaviza el vector 1X en el plano COMPLEJO (promedio móvil de parte real/imag)
+    → espiral de polar limpia tipo System1, sin romper la fase por el wrap 0/360."""
+    am = np.asarray(am, float); ph = np.radians(np.asarray(ph_deg, float))
+    c = am * np.exp(1j * ph)
+    if c.size < win or win < 2:
+        return am, np.asarray(ph_deg, float)
+    kern = np.ones(win) / win
+    cs = np.convolve(c.real, kern, mode="same") + 1j * np.convolve(c.imag, kern, mode="same")
+    return np.abs(cs), np.degrees(np.angle(cs)) % 360.0
 
 
 def _vsub_arr(amp, ph_deg, ramp, rph_deg):
@@ -3079,8 +3091,9 @@ def main() -> int:
                         am, ph = _vsub_arr(am, ph, _ro["1"][0], _ro["1"][1])   # runout comp
                     if len(rr) >= 3:
                         rrn = rr
-                        a = _despike(am) * 2.0
-                        phu = _despike(_phase_unwrap(ph))        # fase continua, sin picos
+                        am_s, ph_s = _vsmooth(am, ph, 5)         # suaviza en complejo → espiral limpia
+                        a = am_s * 2.0
+                        phu = _phase_unwrap(ph_s)
                         # ángulo FÍSICO = sonda + fase contra el giro (CW → signo negativo)
                         sign = -1.0 if cb_giro.currentText() == "CW" else 1.0
                         phys = np.radians(cl["pa"] + sign * phu)
