@@ -82,6 +82,52 @@ def detect_keyphasor(
     )
 
 
+def one_x_sync(
+    vib: np.ndarray,
+    kph: np.ndarray,
+    fs: float,
+    order: float = 1.0,
+    min_rpm: float = 60.0,
+    max_rpm: float = 60000.0,
+) -> Optional[Tuple[float, float, float]]:
+    """Vector de `order` por ORDER TRACKING anclado al keyphasor.
+
+    Detecta los pulsos once-per-rev, mapea cada pulso a un múltiplo exacto de
+    2π (interpolación lineal del ángulo entre pulsos) y proyecta la vibración
+    contra exp(-j·order·θ) sobre un número ENTERO de revoluciones. La fase
+    queda REFERIDA al keyphasor (θ=0 en cada pulso) → estable aunque la rpm
+    varíe o la f1 estimada no sea exacta (a diferencia de one_x_vector, que
+    demodula a una frecuencia fija y camina si esa frecuencia no es exacta).
+
+    Devuelve (amp 0-pk en EU, fase deg [0,360), rpm) o None si no hay pulsos
+    útiles — el llamador cae entonces a one_x_vector.
+    """
+    kr = detect_keyphasor(kph, fs, min_rpm=min_rpm, max_rpm=max_rpm)
+    pulses = kr.pulse_sample_indices
+    if pulses is None or len(pulses) < 2:
+        return None
+    i0, i1 = int(pulses[0]), int(pulses[-1])
+    if i1 - i0 < 8:
+        return None
+    vib = np.asarray(vib, dtype=float)
+    if i1 + 1 > vib.size:
+        return None
+    idx = np.arange(i0, i1 + 1)
+    # ángulo acumulado: 2π por pulso detectado, interpolado linealmente en el tiempo
+    ang = np.interp(idx, np.asarray(pulses, dtype=float),
+                    2.0 * np.pi * np.arange(len(pulses)))
+    seg = vib[i0:i1 + 1]
+    seg = seg - np.mean(seg)
+    w = np.hanning(len(seg))
+    gain = np.sum(w) / len(seg)
+    if gain <= 0:
+        return None
+    c = np.sum(seg * w * np.exp(-1j * order * ang)) / len(seg) / gain
+    amp = 2.0 * float(np.abs(c))
+    phase = float(np.degrees(np.angle(c)) % 360.0)
+    return amp, phase, (kr.rpm if kr.rpm else 0.0)
+
+
 def one_x_vector(
     vib: np.ndarray,
     fs: float,

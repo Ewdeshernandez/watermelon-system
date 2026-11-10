@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.95"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.96"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2082,10 +2082,13 @@ def main() -> int:
                 return args.alarm, args.danger
             return ALARM_DEF.get(_ckind(c), (0.0, 0.0))
 
-        def _amp3(eu0, fs, f1, kind):
+        def _amp3(eu0, fs, f1, kind, kph0=None):
             """Overall + 1X + 2X en la convención de la NORMA del sensor:
             proximidad → pp (API 670/ISO 7919); velocidad/acel → RMS (ISO 20816).
-            Amplitudes 1X/2X del pico del espectro (no colapsan); fase por proyección."""
+            Amplitudes 1X/2X del pico del espectro (no colapsan). FASE por order
+            tracking anclado al keyphasor (kph0) → estable; si no hay keyphasor
+            cae a demodulación síncrona (puede caminar)."""
+            from core.remote_monitoring.keyphasor import one_x_sync, one_x_vector
             if kind == "prox":
                 ov = float(eu0.max() - eu0.min()); k = 2.0            # 0-pk → pp
             else:
@@ -2096,7 +2099,15 @@ def main() -> int:
                     return 0.0, 0.0
                 ft = o * f1; b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
                 amp = float(mag[b].max()) * k if b.any() else 0.0
-                _, ph = one_x_vector(eu0, fs, ft)
+                ph = 0.0
+                if kph0 is not None:
+                    s = one_x_sync(eu0, kph0, fs, order=o)   # fase REFERIDA al keyphasor
+                    if s is not None:
+                        ph = s[1]
+                    else:
+                        _, ph = one_x_vector(eu0, fs, ft)
+                else:
+                    _, ph = one_x_vector(eu0, fs, ft)
                 return amp, ph
             a1, p1 = _order(1.0); a2, p2 = _order(2.0)
             return ov, a1, p1, a2, p2
@@ -2366,18 +2377,49 @@ def main() -> int:
         gl_bode.ci.setContentsMargins(2, 2, 2, 2); gl_bode.ci.setSpacing(2)
         bode_cells = []; bode_focus = {"k": None}; _ncb = 2 if len(vib) > 1 else 1
         for k, (i, c) in enumerate(vib):
-            p = gl_bode.addPlot(row=k // _ncb, col=k % _ncb)
-            p.showGrid(x=True, y=True, alpha=0.12); p.setLabel("bottom", "RPM"); p.setLabel("left", f"1X {c.units}")
+            rr_, cc_ = k // _ncb, k % _ncb
             col = SENSOR_COLORS.get(_ckind(c), CORN)
+            # Amplitud 1X (arriba) — eje X compartido con la fase de abajo
+            p = gl_bode.addPlot(row=2 * rr_, col=cc_)
+            p.showGrid(x=True, y=True, alpha=0.12); p.setLabel("left", f"1X {c.units}")
+            p.getAxis("bottom").setStyle(showValues=False)
             pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
             cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); p.addItem(cur); cur.hide()
             txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1)); p.addItem(txt)
+            # Fase 1X (abajo) — convención System1: fase-lag CRECE hacia arriba (eje invertido)
+            php = gl_bode.addPlot(row=2 * rr_ + 1, col=cc_)
+            php.showGrid(x=True, y=True, alpha=0.12)
+            php.setLabel("bottom", "RPM"); php.setLabel("left", "Phase °")
+            php.setXLink(p); php.setYRange(0, 360); php.invertY(True)
+            php.getAxis("left").setTicks([[(v, str(v)) for v in (0, 90, 180, 270, 360)]])
+            php.setMaximumHeight(170)
+            curp = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); php.addItem(curp); curp.hide()
             bode_cells.append(dict(
-                p=p, name=c.name, unit=c.units, cur=cur, txt=txt, data={},
+                p=p, php=php, name=c.name, unit=c.units, cur=cur, curp=curp, txt=txt, data={},
                 amp=p.plot(pen=pg.mkPen(col, width=1.6), symbol="o", symbolSize=3, symbolBrush=col, symbolPen=None),
+                pha=php.plot(pen=pg.mkPen(col, width=1.4), symbol="o", symbolSize=3, symbolBrush=col, symbolPen=None),
                 pill=pill))
         tabs.addTab(bode_w, "Bode")
-        _grid_focus(bode_cells, bode_focus, gl_bode)
+
+        def _bode_apply():
+            fk = bode_focus["k"]
+            for _k, _cl in enumerate(bode_cells):
+                _vis = (fk is None or _k == fk)
+                _cl["p"].setVisible(_vis); _cl["php"].setVisible(_vis)
+
+        def _bode_dbl(ev):
+            try:
+                if not ev.double():
+                    return
+                pos = ev.scenePos()
+                for _k, _cl in enumerate(bode_cells):
+                    if _cl["p"].isVisible() and _cl["p"].vb.sceneBoundingRect().contains(pos):
+                        bode_focus["k"] = None if bode_focus["k"] == _k else _k
+                        _bode_apply(); return
+                bode_focus["k"] = None; _bode_apply()
+            except Exception:  # noqa: BLE001
+                pass
+        gl_bode.scene().sigMouseClicked.connect(_bode_dbl)
 
         def _bode_mouse(pos):
             try:
@@ -2385,11 +2427,15 @@ def main() -> int:
                 if fk is None:
                     return
                 cl = bode_cells[fk]; rr = cl["data"].get("rr")
-                if rr is None or not len(rr) or not cl["p"].vb.sceneBoundingRect().contains(pos):
-                    cl["cur"].hide(); cl["txt"].setText(""); return
-                vx = float(cl["p"].vb.mapSceneToView(pos).x())
+                _in = (cl["p"].vb.sceneBoundingRect().contains(pos)
+                       or cl["php"].vb.sceneBoundingRect().contains(pos))
+                if rr is None or not len(rr) or not _in:
+                    cl["cur"].hide(); cl["curp"].hide(); cl["txt"].setText(""); return
+                _vb = cl["p"].vb if cl["p"].vb.sceneBoundingRect().contains(pos) else cl["php"].vb
+                vx = float(_vb.mapSceneToView(pos).x())
                 j = int(np.abs(rr - vx).argmin())
                 cl["cur"].setPos(float(rr[j])); cl["cur"].show()
+                cl["curp"].setPos(float(rr[j])); cl["curp"].show()
                 cl["txt"].setText(f"1X {cl['data']['am'][j]:.2f} {cl['unit']} @ "
                                   f"{cl['data']['ph'][j]:.0f}° @ {rr[j]:.0f} rpm")
                 cl["txt"].setPos(float(rr[j]), float(cl['data']['am'][j]))
@@ -2485,6 +2531,7 @@ def main() -> int:
         # --- Shaft Centerline (posición del muñón en el cojinete vs rpm) — estilo web ---
         scl_items = []
         scl_track = {}          # brg -> {rpm_bucket: (x, y)}
+        scl_rest = {}           # brg -> (restX_mil, restY_mil, rpm_reposo) — referencia slow-roll
         try:
             _scl_cmap = pg.colormap.get("turbo")
         except Exception:  # noqa: BLE001
@@ -2516,7 +2563,7 @@ def main() -> int:
                 p.addItem(pill); pill.setPos(-Cclr * 1.04, Cclr * 1.06)
                 p.setXRange(-Cclr * 1.12, Cclr * 1.12); p.setYRange(-Cclr * 1.12, Cclr * 1.12)
                 scl_items.append(dict(
-                    p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg,
+                    p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg, clr=Cclr,
                     aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
                     line=line, trk=trk, cur=cur))
                 scl_track[brg] = {}
@@ -2563,7 +2610,8 @@ def main() -> int:
                 for _pi, _pc in vib:
                     _e0 = snap[_pi] * 1000.0 / (_pc.sensitivity_mv_per_eu or 1.0)
                     _e0 = _e0 - _e0.mean()
-                    _ov, _a1, _p1, _a2, _p2 = _amp3(_e0, fs, f1, _ckind(_pc))
+                    _kp0 = snap[kph_glob] if kph_glob is not None else None
+                    _ov, _a1, _p1, _a2, _p2 = _amp3(_e0, fs, f1, _ckind(_pc), kph0=_kp0)
                     _base = dict(instance_id=agent.instance_id, variable=_pc.name,
                                  sensor_label=_pc.name, unit=_pc.units, captured_at=now)
                     rds.append(_lr.LiveReading(metric="Direct", value=float(_ov), **_base))
@@ -2616,11 +2664,22 @@ def main() -> int:
                 if scl_items:
                     bk = int(rpm // 100) * 100
                     for it in scl_items:
+                        # gap absoluto por sonda (mil) — incluye el bias DC del muñón
                         mX = float((snap[it["xi"]] * 1000.0 / (it["xc"].sensitivity_mv_per_eu or 1.0)).mean())
                         mY = float((snap[it["yi"]] * 1000.0 / (it["yc"].sensitivity_mv_per_eu or 1.0)).mean())
-                        cx = mX * _mo.sin(it["aX"]) + mY * _mo.sin(it["aY"])
-                        cy = mX * _mo.cos(it["aX"]) + mY * _mo.cos(it["aY"])
-                        scl_track[it["brg"]][bk] = (cx, cy)
+                        brg = it["brg"]
+                        # Referencia de REPOSO = la rpm MÁS BAJA vista (slow-roll). El shaft
+                        # centerline plotea el CAMBIO de gap vs reposo (no el absoluto, que es
+                        # ~-48 mil y cae fuera del claro). Reposo = fondo del círculo de juego.
+                        r = scl_rest.get(brg)
+                        if r is None or rpm < r[2]:
+                            scl_rest[brg] = (mX, mY, rpm)
+                            r = scl_rest[brg]
+                        dX = mX - r[0]; dY = mY - r[1]
+                        clr = it.get("clr", 8.0)
+                        cx = dX * _mo.sin(it["aX"]) + dY * _mo.sin(it["aY"])
+                        cy = dX * _mo.cos(it["aX"]) + dY * _mo.cos(it["aY"]) - clr * 0.9
+                        scl_track[brg][bk] = (cx, cy)
             cur = tabs.tabText(tabs.currentIndex())
             if cur == "Monitoring":
                 # global state (steady/run-up/coast-down) from rpm variation
@@ -2662,7 +2721,8 @@ def main() -> int:
                     eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
                     eu0 = eu - eu.mean()
                     gapv = float(snap[i].mean())            # V (prox real ~-9.5; sim ~0)
-                    ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c))
+                    _kp0 = snap[kph_glob] if kph_glob is not None else None
+                    ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0)
                     al, dg = _alarm_for(c)
                     if dg and ov >= dg:
                         estado, bgc, fgc = "DANGER", "#fde2e2", "#991b1b"
@@ -2823,8 +2883,10 @@ def main() -> int:
                     rr, am, ph = tc.bode(cl["name"])
                     if len(rr) >= 2:
                         amp = np.asarray(am, float) * 2.0
+                        phd = np.asarray(ph, float)
                         cl["amp"].setData(rr, amp)
-                        cl["data"] = {"rr": np.asarray(rr, float), "am": amp, "ph": np.asarray(ph, float)}
+                        cl["pha"].setData(rr, phd)
+                        cl["data"] = {"rr": np.asarray(rr, float), "am": amp, "ph": phd}
                         cl["pill"].setPos(float(rr[0]), float(amp.max()))
             elif cur == "Polar":
                 fk = pol_focus["k"]
@@ -2963,7 +3025,8 @@ def main() -> int:
             rows = []; worst = 0
             for i, c in vib:
                 eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0); eu0 = eu - eu.mean()
-                ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c))
+                _kp0 = snap[kph_glob] if kph_glob is not None else None
+                ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0)
                 al, dg = _alarm_for(c)
                 if dg and ov >= dg:
                     st, scol = T["st"][2], "#b91c1c"; worst = max(worst, 2)
@@ -3404,7 +3467,8 @@ def main() -> int:
                 for cv in cl["curves"]:
                     cv.setData([], [])
             for cl in bode_cells:
-                cl["amp"].setData([], []); cl["data"] = {}; cl["cur"].hide(); cl["txt"].setText("")
+                cl["amp"].setData([], []); cl["pha"].setData([], []); cl["data"] = {}
+                cl["cur"].hide(); cl["curp"].hide(); cl["txt"].setText("")
             for cl in pol_cells:
                 cl["curve"].setData([], []); cl["pts"].setData([], [])
                 cl["ncrit"].setData([], []); cl["op"].setData([], [])
@@ -3413,6 +3477,7 @@ def main() -> int:
                     _t.setText("")
             for _b in scl_track:                 # reiniciar la traza del shaft centerline
                 scl_track[_b].clear()
+            scl_rest.clear()                     # y la referencia de reposo (slow-roll)
             lbl_state.setText(f"● {label}" if agent.source.is_running() else f"mode: {label}")
 
         _prof0 = getattr(agent.source.config, "speed_profile", "constant")
