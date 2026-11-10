@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.97"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.98"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -148,6 +148,32 @@ def _phase_unwrap(ph):
     if ph.size == 0:
         return ph
     return np.degrees(np.unwrap(np.radians(ph)))
+
+
+def _orbit_sync_avg(X, Y, pulses, n=256):
+    """Órbita síncrona PROMEDIADA al keyphasor: parte el buffer en vueltas (pulso a
+    pulso), remuestrea cada una a n puntos angulares y las PROMEDIA → un lazo limpio.
+    Quita el ruido y todo lo NO síncrono (whirl, banda ancha); preserva 1X/2X/3X.
+    Es la órbita 'compensada/sampleada' de Bently — igual a la que dibuja la web, en
+    vez del spaghetti de 8 vueltas crudas superpuestas. Devuelve (Xavg, Yavg) con el
+    lazo cerrado, o None si no hay pulsos útiles."""
+    if pulses is None or len(pulses) < 3:
+        return None
+    pulses = np.asarray(pulses, int)
+    X = np.asarray(X, float); Y = np.asarray(Y, float)
+    base = np.linspace(0.0, 1.0, n, endpoint=False)
+    accX = np.zeros(n); accY = np.zeros(n); k = 0
+    for a, b in zip(pulses[:-1], pulses[1:]):
+        if b - a < 8 or b > X.size:
+            continue
+        t = np.linspace(0.0, 1.0, b - a, endpoint=False)
+        accX += np.interp(base, t, X[a:b])
+        accY += np.interp(base, t, Y[a:b])
+        k += 1
+    if k == 0:
+        return None
+    ax = accX / k; ay = accY / k
+    return np.append(ax, ax[0]), np.append(ay, ay[0])      # cerrar el lazo
 
 
 def _stylesheet(scale: float = 1.0) -> str:
@@ -2586,9 +2612,9 @@ def main() -> int:
                 p.addItem(pg.ScatterPlotItem([0], [0], symbol="+", size=14, pen=pg.mkPen(NAVY, width=2)))  # centro
                 rest = pg.TextItem("REST", color=REDL, anchor=(0.5, 0)); rest.setPos(0, -Cclr * 0.99)
                 p.addItem(rest)
-                line = p.plot(pen=pg.mkPen("#8aa0bd", width=1))
-                trk = pg.ScatterPlotItem(size=7, pen=None); p.addItem(trk)
-                cur = pg.ScatterPlotItem(size=14, brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=2)); p.addItem(cur)
+                line = p.plot(pen=pg.mkPen("#aab8cc", width=0.6))     # traza fina
+                trk = pg.ScatterPlotItem(size=4, pen=None); p.addItem(trk)     # puntos por rpm (color)
+                cur = pg.ScatterPlotItem(size=9, brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=1.2)); p.addItem(cur)
                 pill = pg.TextItem(f"Bearing {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY))
                 p.addItem(pill); pill.setPos(-Cclr * 1.04, Cclr * 1.06)
                 p.setXRange(-Cclr * 1.12, Cclr * 1.12); p.setYRange(-Cclr * 1.12, Cclr * 1.12)
@@ -2902,14 +2928,25 @@ def main() -> int:
                         spec_info.setText("")
             elif orb_ok and cur == "Orbit":
                 fk = orb_focus["k"]
-                nrev = min(snap.shape[1], int((8 * fs / max(rpm, 1)) * 60) if rpm else int(0.4 * fs))
+                # Pulsos del keyphasor sobre la ventana → órbita PROMEDIADA síncrona
+                # (lazo limpio, igual a la web) en vez del spaghetti crudo.
+                _opul = None
+                if kph_glob is not None:
+                    from core.remote_monitoring.keyphasor import detect_keyphasor as _dk2
+                    _opul = _dk2(snap[kph_glob], fs).pulse_sample_indices
                 for idx, it in enumerate(orb_items):
                     if fk is not None and idx != fk:
                         continue
                     yc, xc = it["yc"], it["xc"]
-                    Y = snap[it["yi"], -nrev:] * 1000.0 / (yc.sensitivity_mv_per_eu or 1.0)
-                    X = snap[it["xi"], -nrev:] * 1000.0 / (xc.sensitivity_mv_per_eu or 1.0)
-                    Y = Y - Y.mean(); X = X - X.mean()
+                    Yf = snap[it["yi"]] * 1000.0 / (yc.sensitivity_mv_per_eu or 1.0)
+                    Xf = snap[it["xi"]] * 1000.0 / (xc.sensitivity_mv_per_eu or 1.0)
+                    avg = _orbit_sync_avg(Xf, Yf, _opul)
+                    if avg is not None:
+                        X, Y = avg; synced = True
+                    else:
+                        nrev = min(snap.shape[1], int((4 * fs / max(rpm, 1)) * 60) if rpm else int(0.4 * fs))
+                        X = Xf[-nrev:]; Y = Yf[-nrev:]; synced = False
+                    X = X - X.mean(); Y = Y - Y.mean()
                     # orientar al marco físico: proyectar cada sonda a su ángulo (desde TDC)
                     px = X * _mo.sin(it["aX"]) + Y * _mo.sin(it["aY"])
                     py = X * _mo.cos(it["aX"]) + Y * _mo.cos(it["aY"])
@@ -2920,11 +2957,15 @@ def main() -> int:
                         it["smax_txt"].setText(f"Smax {rad[j]:.2f} {xc.units}")
                         it["smax_txt"].setPos(px[j], py[j])
                         it["pill"].setPos(float(px.min()), float(py.max()))
-                    if f1 and len(px):
+                    if synced and len(px):
+                        it["kph"].setData([px[0]], [py[0]])      # keyphasor = inicio del lazo (ref)
+                        it["kph1"].setData([px[0]], [py[0]])
+                    elif f1 and len(px):
                         spr = max(1, int(fs / f1))
-                        kx, ky = px[::spr], py[::spr]
-                        it["kph"].setData(kx, ky)
-                        it["kph1"].setData(kx[:1], ky[:1])   # 1er pulso = referencia (rojo grande)
+                        it["kph"].setData(px[::spr], py[::spr])
+                        it["kph1"].setData(px[:1], py[:1])       # 1er pulso = referencia (rojo grande)
+                    else:
+                        it["kph"].setData([], []); it["kph1"].setData([], [])
             elif cur == "Bode":
                 fk = bode_focus["k"]
                 for k, cl in enumerate(bode_cells):

@@ -75,7 +75,7 @@ def _order_vector(eu, fs, f_target, freqs, mag, ref_sample=0, tol_frac=0.04):
 
 @dataclass
 class TransientConfig:
-    delta_rpm: float = 10.0        # espaciado objetivo entre puntos (rpm) — denso, supera System1
+    delta_rpm: float = 5.0         # espaciado objetivo entre puntos (rpm) — denso, supera System1
     min_rpm: float = 100.0         # no capturar por debajo (ruido de arranque)
     capture_samples: int = 4096    # ventana FFT por punto (líneas consistentes)
     fmax_hz: float = 500.0         # tope de frecuencia guardado (acota RAM)
