@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.94"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.95"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -99,8 +99,11 @@ def build_agent(args) -> AcqAgent:
     units = "mil pp" if args.prox else "g rms"
     chans = []
     for k, i in enumerate(idxs):
+        # --chans = número de BNC (1..32), MISMA convención que --kph-bnc.
+        # (Antes sumaba +1 asumiendo 0-based → corría los radiales un BNC: 1Y
+        #  caía en la sonda de 1X y 1X en un BNC vacío → "solo lee 1Y".)
         chans.append(ChannelConfig(name=names[k] if k < len(names) else f"CH{i}", coupling=coup,
-                                   sensitivity_mv_per_eu=args.sens, bnc_port=(i + 1), units=units))
+                                   sensitivity_mv_per_eu=args.sens, bnc_port=i, units=units))
     if args.kph_bnc:
         chans.append(ChannelConfig(name="KPH", coupling="DC", sensitivity_mv_per_eu=1.0,
                                    bnc_port=args.kph_bnc, units="pulses/rev"))
@@ -222,7 +225,7 @@ def main() -> int:
                     help="corre una máquina simulada guardada (JSON de la biblioteca) — v0.4")
     ap.add_argument("--machine", default="Rotor_Kit_Field")
     ap.add_argument("--chassis", default="cDAQ1")
-    ap.add_argument("--chans", default="0,1")
+    ap.add_argument("--chans", default="1,2", help="números de BNC (1..32), igual que --kph-bnc")
     ap.add_argument("--names", default="1YA,1XA")
     ap.add_argument("--sens", type=float, default=100.0)
     ap.add_argument("--fs", type=float, default=5120.0)
