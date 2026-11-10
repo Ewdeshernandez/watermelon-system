@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -174,6 +174,21 @@ def _orbit_sync_avg(X, Y, pulses, n=256):
         return None
     ax = accX / k; ay = accY / k
     return np.append(ax, ax[0]), np.append(ay, ay[0])      # cerrar el lazo
+
+
+def _bandlimited_pp(x, fs, fcut):
+    """pp de desplazamiento DENTRO de la banda del rotor (hasta fcut): quita el
+    'grass' de alta frecuencia del delta-sigma que infla el max-min crudo ~15%.
+    Una sonda de proximidad real no ve movimiento de eje a esas frecuencias → es
+    ruido. Así el Direct coincide con System1 (que también limita banda)."""
+    x = np.asarray(x, float)
+    if x.size < 8 or fcut <= 0:
+        return float(x.max() - x.min()) if x.size else 0.0
+    X = np.fft.rfft(x)
+    fr = np.fft.rfftfreq(x.size, 1.0 / fs)
+    X[fr > fcut] = 0.0
+    y = np.fft.irfft(X, n=x.size)
+    return float(y.max() - y.min())
 
 
 def _despike(y, win=3):
@@ -2189,7 +2204,10 @@ def main() -> int:
             (overall) NUNCA se compensa — es el movimiento total por definición."""
             from core.remote_monitoring.keyphasor import one_x_sync, one_x_vector
             if kind == "prox":
-                ov = float(eu0.max() - eu0.min()); k = 2.0            # 0-pk → pp
+                # Direct = pp band-limitado al rango del rotor (quita grass HF que infla
+                # el max-min crudo; = convención System1). Cubre >=12× la velocidad.
+                _fc = min(fs * 0.45, max(1000.0, 12.0 * (f1 or 0.0)))
+                ov = _bandlimited_pp(eu0, fs, _fc); k = 2.0           # 0-pk → pp
             else:
                 ov = float(np.sqrt(np.mean(eu0 ** 2))); k = 1.0 / np.sqrt(2.0)  # 0-pk → rms
             fr, mag = _spectrum(eu0, fs)
@@ -2559,11 +2577,13 @@ def main() -> int:
         pol_w = QtWidgets.QWidget(); pol_l = QtWidgets.QVBoxLayout(pol_w)
         ptop = QtWidgets.QHBoxLayout()
         ptop.addWidget(QtWidgets.QLabel("<b>Polar</b>"))
-        ptop.addWidget(QtWidgets.QLabel("Rotation:"))
-        cb_giro = QtWidgets.QComboBox(); cb_giro.addItems(["CCW", "CW"]); ptop.addWidget(cb_giro)
+        # El sentido de giro NO se cambia acá: viene de la config de la máquina (cb_rot).
+        lbl_pol_rot = QtWidgets.QLabel("Rotation: —")
+        lbl_pol_rot.setStyleSheet("color:#166534; font-weight:700;")
+        ptop.addWidget(lbl_pol_rot)
         ptop.addWidget(QtWidgets.QLabel(
             "<i style='color:#64748b'>0° = probe angle · phase AGAINST rotation · "
-            "double-click = full polar (rpm, Ncrit, data)</i>"))
+            "sentido de giro = config de la máquina · double-click = full polar</i>"))
         ptop.addStretch(1); pol_l.addLayout(ptop)
         gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
         gl_pol.ci.setContentsMargins(2, 2, 2, 2); gl_pol.ci.setSpacing(2)
@@ -2607,7 +2627,8 @@ def main() -> int:
         _grid_focus(pol_cells, pol_focus, gl_pol)
 
         def _polar_relabel():
-            cw = (cb_giro.currentText() == "CW")     # CW → ángulos de fase al revés
+            cw = (cb_rot.currentText() == "CW")      # sentido = config de la máquina
+            lbl_pol_rot.setText(f"Rotation: {'CW' if cw else 'CCW'}")
             R = 1.18
             # arco de giro cerca del tope: CW = horario, CCW = antihorario
             degs = np.linspace(-32, 32, 16) if cw else np.linspace(32, -32, 16)
@@ -2620,7 +2641,7 @@ def main() -> int:
                 dx = xs[-1] - xs[-2]; dy = ys[-1] - ys[-2]
                 cl["arw"].setStyle(angle=_mo.degrees(_mo.atan2(dy, -dx)))   # punta en el sentido de avance
         _polar_relabel()
-        cb_giro.currentTextChanged.connect(lambda *_: _polar_relabel())
+        cb_rot.currentTextChanged.connect(lambda *_: _polar_relabel())   # cambia con la config
 
         # --- Cascada (grilla por canal: espectros apilados; doble clic = uno solo) ---
         casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
@@ -3094,8 +3115,9 @@ def main() -> int:
                         am_s, ph_s = _vsmooth(am, ph, 5)         # suaviza en complejo → espiral limpia
                         a = am_s * 2.0
                         phu = _phase_unwrap(ph_s)
-                        # ángulo FÍSICO = sonda + fase contra el giro (CW → signo negativo)
-                        sign = -1.0 if cb_giro.currentText() == "CW" else 1.0
+                        # ángulo FÍSICO = sonda + fase contra el giro (CW → signo negativo).
+                        # El sentido viene de la config de la máquina, no de un selector.
+                        sign = -1.0 if cb_rot.currentText() == "CW" else 1.0
                         phys = np.radians(cl["pa"] + sign * phu)
                         amax = float(a.max()) or 1.0
                         rn = a / amax
