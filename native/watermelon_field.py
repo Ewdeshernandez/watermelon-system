@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.5"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.6"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2557,12 +2557,17 @@ def main() -> int:
             p.showGrid(x=True, y=True, alpha=0.12); p.setLabel("left", f"1X {c.units}"); p.setLabel("bottom", "RPM")
             p.setXLink(php)
             cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); p.addItem(cur); cur.hide()
-            txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1)); p.addItem(txt)
+            txt = pg.TextItem("", color="#1e3a8a", anchor=(0, 1),
+                              fill=pg.mkBrush(255, 255, 255, 220)); p.addItem(txt)
+            hov_dot = pg.ScatterPlotItem(size=11, brush=pg.mkBrush("#2563eb"), pen=pg.mkPen("w", width=1.5))
+            p.addItem(hov_dot); hov_dot.hide()
+            hov_dotp = pg.ScatterPlotItem(size=11, brush=pg.mkBrush("#2563eb"), pen=pg.mkPen("w", width=1.5))
+            php.addItem(hov_dotp); hov_dotp.hide()
             bode_cells.append(dict(
                 p=p, php=php, name=c.name, unit=c.units, cur=cur, curp=curp, txt=txt, data={},
                 amp=p.plot(pen=pg.mkPen(col, width=1.8)),      # línea limpia, sin puntos
                 pha=php.plot(pen=pg.mkPen(col, width=1.8)),     # fase unwrap = línea continua
-                pill=pill))
+                hov_dot=hov_dot, hov_dotp=hov_dotp, pill=pill))
         tabs.addTab(bode_w, "Bode")
 
         def _bode_apply():
@@ -2594,15 +2599,21 @@ def main() -> int:
                 _in = (cl["p"].vb.sceneBoundingRect().contains(pos)
                        or cl["php"].vb.sceneBoundingRect().contains(pos))
                 if rr is None or not len(rr) or not _in:
-                    cl["cur"].hide(); cl["curp"].hide(); cl["txt"].setText(""); return
+                    cl["cur"].hide(); cl["curp"].hide(); cl["txt"].setText("")
+                    cl["hov_dot"].hide(); cl["hov_dotp"].hide(); return
                 _vb = cl["p"].vb if cl["p"].vb.sceneBoundingRect().contains(pos) else cl["php"].vb
                 vx = float(_vb.mapSceneToView(pos).x())
                 j = int(np.abs(rr - vx).argmin())
-                cl["cur"].setPos(float(rr[j])); cl["cur"].show()
-                cl["curp"].setPos(float(rr[j])); cl["curp"].show()
-                cl["txt"].setText(f"1X {cl['data']['am'][j]:.2f} {cl['unit']} @ "
-                                  f"{cl['data']['ph'][j]:.0f}° @ {rr[j]:.0f} rpm")
-                cl["txt"].setPos(float(rr[j]), float(cl['data']['am'][j]))
+                _am = float(cl['data']['am'][j]); _rp = float(rr[j])
+                cl["cur"].setPos(_rp); cl["cur"].show()
+                cl["curp"].setPos(_rp); cl["curp"].show()
+                cl["hov_dot"].setData([_rp], [_am]); cl["hov_dot"].show()      # dot azul (igual al polar)
+                _phu = cl['data'].get('phu')
+                if _phu is not None and j < len(_phu):
+                    cl["hov_dotp"].setData([_rp], [float(_phu[j])]); cl["hov_dotp"].show()
+                cl["txt"].setText(f"{_am:.2f} {cl['unit']} @ "
+                                  f"{cl['data']['ph'][j] % 360:.0f}° @ {_rp:.0f} rpm")
+                cl["txt"].setPos(_rp, _am)
             except Exception:  # noqa: BLE001
                 pass
         gl_bode.scene().sigMouseMoved.connect(_bode_mouse)
@@ -2750,15 +2761,38 @@ def main() -> int:
                 rest = pg.TextItem("REST", color=REDL, anchor=(0.5, 0)); rest.setPos(0, -Cclr * 0.99)
                 p.addItem(rest)
                 cur = pg.ScatterPlotItem(size=9, brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=1.2)); p.addItem(cur)
+                hov_dot = pg.ScatterPlotItem(size=11, brush=pg.mkBrush("#2563eb"), pen=pg.mkPen("w", width=1.5))
+                p.addItem(hov_dot); hov_dot.hide()
+                hov_txt = pg.TextItem("", color="#1e3a8a", anchor=(0, 1),
+                                      fill=pg.mkBrush(255, 255, 255, 220)); p.addItem(hov_txt)
                 pill = pg.TextItem(f"Bearing {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY))
                 p.addItem(pill); pill.setPos(-Cclr * 1.04, Cclr * 1.06)
                 p.setXRange(-Cclr * 1.12, Cclr * 1.12); p.setYRange(-Cclr * 1.12, Cclr * 1.12)
                 scl_items.append(dict(
                     p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg, clr=Cclr,
                     aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
-                    segs=[], cur=cur))
+                    segs=[], cur=cur, hov_dot=hov_dot, hov_txt=hov_txt, pdata=None))
                 scl_track[brg] = {}
             tabs.addTab(scl_w, "Shaft Centerline")
+
+            def _scl_mouse(pos):
+                """Hover: muestra rpm + posición del muñón (mil) del punto más cercano."""
+                try:
+                    for it in scl_items:
+                        if not it["p"].vb.sceneBoundingRect().contains(pos):
+                            it["hov_dot"].hide(); it["hov_txt"].setText(""); continue
+                        d = it.get("pdata")
+                        if not d:
+                            continue
+                        mp = it["p"].vb.mapSceneToView(pos)
+                        xs, ys, rk = d["x"], d["y"], d["rpm"]
+                        j = int(np.argmin((xs - float(mp.x())) ** 2 + (ys - float(mp.y())) ** 2))
+                        it["hov_dot"].setData([xs[j]], [ys[j]]); it["hov_dot"].show()
+                        it["hov_txt"].setText(f"{rk[j]:.0f} rpm · {np.hypot(xs[j], ys[j]):.2f} mil")
+                        it["hov_txt"].setPos(float(xs[j]), float(ys[j]))
+                except Exception:  # noqa: BLE001
+                    pass
+            gl_scl.scene().sigMouseMoved.connect(_scl_mouse)
 
         # --- Diagnostics (whirl/whip + criticals) ---
         diag_w = QtWidgets.QWidget(); diag_l = QtWidgets.QVBoxLayout(diag_w)
@@ -3073,8 +3107,11 @@ def main() -> int:
                         wave_kph[idx].setData(tms[pk], eu0[pk])    # punto en la onda en cada pulso
                     else:
                         wave_kph[idx].setData([], [])
-                    pp = float(eu0.max() - eu0.min()); rms = float(np.sqrt(np.mean(eu0 ** 2)))
-                    cf = (float(np.max(np.abs(eu0))) / rms) if rms > 1e-9 else 0.0
+                    # pp/rms en la MISMA banda de medición que el Direct de la tabla
+                    # (si no, el waveform mostraba el crudo con grass y 'no cambiaba').
+                    _wb = _band_filter(eu0, fs, *_band_for(c))
+                    pp = float(_wb.max() - _wb.min()); rms = float(np.sqrt(np.mean(_wb ** 2)))
+                    cf = (float(np.max(np.abs(_wb))) / rms) if rms > 1e-9 else 0.0
                     wave_stats[idx].setText(f"pp  {pp:.2f} {c.units}\nrms {rms:.2f}\nCF  {cf:.2f}")
                     wave_stats[idx].setPos(tms[-1], eu0.max())
                     wave_pills[idx].setPos(tms[0], eu0.max())
@@ -3172,7 +3209,7 @@ def main() -> int:
                         phu = _despike(_phase_unwrap(ph))      # mata picos aislados
                         cl["amp"].setData(rr, amp)
                         cl["pha"].setData(rr, phu)
-                        cl["data"] = {"rr": rr, "am": amp, "ph": np.asarray(ph, float)}
+                        cl["data"] = {"rr": rr, "am": amp, "ph": np.asarray(ph, float), "phu": phu}
                         cl["pill"].setPos(float(rr[0]), float(np.nanmax(phu)))
             elif cur == "Polar":
                 fk = pol_focus["k"]
@@ -3231,6 +3268,8 @@ def main() -> int:
                     xs = [scl_track[it["brg"]][r][0] for r in rrk]
                     ys = [scl_track[it["brg"]][r][1] for r in rrk]
                     it["cur"].setData([xs[-1]], [ys[-1]])    # posición actual (último rpm)
+                    it["pdata"] = dict(x=np.asarray(xs, float), y=np.asarray(ys, float),
+                                       rpm=np.asarray(rrk, float))      # hover
                     # traza = LÍNEA de color por rpm (segmentos), SIN puntos por dato
                     segs = it["segs"]; need = max(0, len(rrk) - 1)
                     while len(segs) < need:
