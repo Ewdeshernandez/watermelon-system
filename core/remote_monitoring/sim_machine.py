@@ -93,10 +93,12 @@ class SensorSpec:
         return (float(self.f_min), float(self.f_max))
 
     def to_channel(self) -> ChannelConfig:
-        fmn, fmx = self.band()
+        # Pasa la banda EXPLÍCITA del sensor (0/0 si no se fijó). NO hornea el default:
+        # así el editor por tipo (meas_band en Config) controla el Direct en vivo. Si se
+        # horneara, _band_for daría prioridad al canal e ignoraría los cambios del editor.
         return ChannelConfig(name=self.name, coupling=self.coupling(),
                              sensitivity_mv_per_eu=self.sensitivity, bnc_port=self.bnc,
-                             units=self.units(), f_min=fmn, f_max=fmx)
+                             units=self.units(), f_min=float(self.f_min), f_max=float(self.f_max))
 
 
 @dataclass

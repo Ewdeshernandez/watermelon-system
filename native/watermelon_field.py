@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.7"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.8"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -618,9 +618,8 @@ def main() -> int:
                                      "(banda de giro lento por norma: crítica/3 o 15% inferior) y "
                                      "lo muestra para ACEPTAR o EDITAR. Estilo ADRE 408.")
         act_runout = QtGui.QAction("Runout comp", win); act_runout.setCheckable(True)
-        act_runout.setToolTip("Resta el vector de runout slow-roll al 1X/2X (tabla, Bode, Polar).\n"
-                              "El Direct/overall NO se compensa (es el movimiento total, por norma).")
-        tb.addAction(act_slowroll); tb.addAction(act_slowroll_auto); tb.addAction(act_runout)
+        # Los controles de slow-roll/runout viven en la pestaña Monitoring (visibles siempre);
+        # las QAction se conservan solo como estado interno (_ro_for lee act_runout).
         spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                                            QtWidgets.QSizePolicy.Preferred)
         spacer.setStyleSheet("background:transparent;")   # sin esto se ve un recuadro blanco feo
@@ -639,8 +638,7 @@ def main() -> int:
         # Configuration. En Configuration arriba queda limpio: sólo "Detect hardware" y la
         # versión. Lo conduce _on_tab según la pestaña; el estado inicial lo fija _on_tab().
         def _reveal_data_actions(on: bool):
-            for _a in (act_start, act_stop, act_save, act_sync, act_clear,
-                       act_slowroll, act_slowroll_auto, act_runout, *_sep_tb):
+            for _a in (act_start, act_stop, act_save, act_sync, act_clear, *_sep_tb):
                 _a.setVisible(bool(on))
             for _wd in (lbl_modo, cb_run, _lbl_dest, cb_dest):
                 _wd.setVisible(bool(on))
@@ -2304,6 +2302,26 @@ def main() -> int:
             _statcell(_k, _l, first=(_n == 0))
         sl.addStretch(1); mon_l.addWidget(strip)
 
+        # --- Runout / Slow-roll (compensación API 670) — visible SIEMPRE en Monitoring ---
+        sr_row = QtWidgets.QHBoxLayout()
+        sr_row.addWidget(QtWidgets.QLabel("<b>Runout / Slow-roll:</b>"))
+        btn_sr_auto = QtWidgets.QPushButton("Auto desde datos ▸ aceptar/editar")
+        btn_sr_auto.setToolTip("Calcula el vector de runout del ARRANQUE (banda de giro lento por "
+                               "norma: crítica/3 o 15% inferior) y lo muestra para aceptar o editar. ADRE 408.")
+        btn_sr_live = QtWidgets.QPushButton("Capturar en vivo")
+        btn_sr_live.setToolTip("Captura el runout a la velocidad ACTUAL (con el rotor girando LENTO).")
+        chk_runout = QtWidgets.QCheckBox("Compensar (restar runout)")
+        chk_runout.setToolTip("Resta el vector de runout al 1X/2X en tabla, Bode y Polar. "
+                              "El Direct NO se compensa (movimiento total, por norma).")
+        lbl_sr = QtWidgets.QLabel("— sin vector —"); lbl_sr.setStyleSheet("color:#64748b;font-weight:600;")
+        for _wq in (btn_sr_auto, btn_sr_live):
+            _wq.setStyleSheet("QPushButton{background:#0ea5e9;color:white;border:none;font-weight:700;"
+                              "padding:5px 13px;border-radius:6px;} QPushButton:hover{background:#0284c7;}")
+        sr_row.addWidget(btn_sr_auto); sr_row.addWidget(btn_sr_live)
+        sr_row.addSpacing(10); sr_row.addWidget(chk_runout); sr_row.addSpacing(8)
+        sr_row.addWidget(lbl_sr); sr_row.addStretch(1)
+        mon_l.addLayout(sr_row)
+
         # --- Panel de cojinetes (System1: zona ISO + 1X amp/fase + gap por cojinete) ---
         from collections import OrderedDict as _OD
         _brg_groups = _OD()
@@ -2879,6 +2897,8 @@ def main() -> int:
                                 "2": (v2[0], v2[1]) if v2 else None}
             rec_state["runout"] = ro; rec_state["runout_rpm"] = float(rpm)
             act_runout.setChecked(True)
+            lbl_sr.setText(f"✓ runout {len(ro)} canales @ {rpm:.0f} rpm (en vivo)")
+            lbl_sr.setStyleSheet("color:#166534;font-weight:700;")
             QtWidgets.QMessageBox.information(win, "Slow-roll",
                 f"Runout capturado @ {rpm:.0f} rpm ({len(ro)} canales).\n"
                 "Compensación ACTIVADA (1X/2X en tabla, Bode y Polar).")
@@ -2941,10 +2961,17 @@ def main() -> int:
                 ro[_nm]["1"] = (float(sa.value()), float(sp.value()))
             rec_state["runout"] = ro; rec_state["runout_rpm"] = float(thr)
             act_runout.setChecked(True)
+            lbl_sr.setText(f"✓ runout {len(ro)} canales @ ≤{thr:.0f} rpm (auto)")
+            lbl_sr.setStyleSheet("color:#166534;font-weight:700;")
             QtWidgets.QMessageBox.information(win, "Slow-roll auto",
                 f"Runout aplicado ({len(ro)} canales de proximidad) @ giro lento ≤ {thr:.0f} rpm.\n"
                 "Compensación ACTIVADA (Bode, Polar, tabla).")
         act_slowroll_auto.triggered.connect(_slowroll_from_data)
+        btn_sr_auto.clicked.connect(_slowroll_from_data)
+        btn_sr_live.clicked.connect(_capture_slowroll)
+        # chk_runout ↔ act_runout (una sola verdad; _ro_for lee act_runout)
+        chk_runout.toggled.connect(act_runout.setChecked)
+        act_runout.toggled.connect(chk_runout.setChecked)
 
         def _publish_online(snap, fs, f1):
             """Fase 2: envía lecturas en vivo a Watermelon System (best-effort, nunca crashea)."""
