@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.6"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.7"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -611,12 +611,16 @@ def main() -> int:
         tb.addWidget(cb_dest)
         _sep_tb.append(tb.addSeparator())
         act_slowroll = QtGui.QAction("Set slow-roll", win)
-        act_slowroll.setToolTip("Captura el vector 1X/2X de RUNOUT a baja velocidad (slow-roll).\n"
+        act_slowroll.setToolTip("Captura el vector 1X/2X de RUNOUT a la velocidad ACTUAL (en vivo).\n"
                                 "Girá el rotor LENTO (debajo de la 1ª crítica) y presioná. API 670.")
+        act_slowroll_auto = QtGui.QAction("Slow-roll auto", win)
+        act_slowroll_auto.setToolTip("Calcula el vector de runout desde los DATOS del arranque "
+                                     "(banda de giro lento por norma: crítica/3 o 15% inferior) y "
+                                     "lo muestra para ACEPTAR o EDITAR. Estilo ADRE 408.")
         act_runout = QtGui.QAction("Runout comp", win); act_runout.setCheckable(True)
         act_runout.setToolTip("Resta el vector de runout slow-roll al 1X/2X (tabla, Bode, Polar).\n"
                               "El Direct/overall NO se compensa (es el movimiento total, por norma).")
-        tb.addAction(act_slowroll); tb.addAction(act_runout)
+        tb.addAction(act_slowroll); tb.addAction(act_slowroll_auto); tb.addAction(act_runout)
         spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                                            QtWidgets.QSizePolicy.Preferred)
         spacer.setStyleSheet("background:transparent;")   # sin esto se ve un recuadro blanco feo
@@ -636,7 +640,7 @@ def main() -> int:
         # versión. Lo conduce _on_tab según la pestaña; el estado inicial lo fija _on_tab().
         def _reveal_data_actions(on: bool):
             for _a in (act_start, act_stop, act_save, act_sync, act_clear,
-                       act_slowroll, act_runout, *_sep_tb):
+                       act_slowroll, act_slowroll_auto, act_runout, *_sep_tb):
                 _a.setVisible(bool(on))
             for _wd in (lbl_modo, cb_run, _lbl_dest, cb_dest):
                 _wd.setVisible(bool(on))
@@ -2879,6 +2883,68 @@ def main() -> int:
                 f"Runout capturado @ {rpm:.0f} rpm ({len(ro)} canales).\n"
                 "Compensación ACTIVADA (1X/2X en tabla, Bode y Polar).")
         act_slowroll.triggered.connect(_capture_slowroll)
+
+        def _slowroll_from_data():
+            """Slow-roll estilo ADRE 408: calcula el vector de runout 1X de cada canal de
+            PROXIMIDAD desde los datos del arranque (tc), en la banda de GIRO LENTO (crítica/3
+            si hay crítica; si no, el 15% inferior de las rpm capturadas). Lo muestra para
+            ACEPTAR o EDITAR. No exige estar en slow-roll en vivo."""
+            prox = [(pi, pc) for pi, pc in vib if _ckind(pc) == "prox"]
+            if not prox:
+                QtWidgets.QMessageBox.information(win, "Slow-roll auto",
+                    "No hay canales de proximidad (el runout solo aplica a desplazamiento).")
+                return
+            rr0, _a0, _p0 = tc.bode(prox[0][1].name)
+            rr0 = np.asarray(rr0, float)
+            if rr0.size < 3:
+                QtWidgets.QMessageBox.information(win, "Slow-roll auto",
+                    "Pocos datos. Hacé un arranque (run-up) desde baja rpm y reintentá.")
+                return
+            try:
+                crit = float(sp_c1.value()) if float(sp_c1.value()) > 0 else 0.0
+            except Exception:  # noqa: BLE001  (sp_c1 es del form; si no existe, sin crítica)
+                crit = 0.0
+            rmin, rmax = float(np.min(rr0)), float(np.max(rr0))
+            thr = (crit / 3.0) if crit > 0 else (rmin + 0.15 * (rmax - rmin))
+            regla = "crítica/3" if crit > 0 else "15% inferior"
+            ro = {}
+            for _pi, _pc in prox:
+                rr, am, ph = tc.bode(_pc.name)
+                rr = np.asarray(rr, float); am = np.asarray(am, float); ph = np.asarray(ph, float)
+                m = rr <= thr
+                if int(m.sum()) < 2:                      # al menos los 3 puntos más bajos
+                    idx = np.argsort(rr)[:3]; m = np.zeros(rr.size, bool); m[idx] = True
+                c = np.mean(am[m] * np.exp(1j * np.radians(ph[m])))   # promedio COMPLEJO
+                ro[_pc.name] = {"1": (float(np.abs(c)), float(np.degrees(np.angle(c)) % 360.0)),
+                                "2": None}
+            # Diálogo: mostrar el vector por canal, editable, aceptar o cancelar
+            dlg = QtWidgets.QDialog(win); dlg.setWindowTitle("Slow-roll — vector de runout (editable)")
+            lay = QtWidgets.QVBoxLayout(dlg)
+            lay.addWidget(QtWidgets.QLabel(
+                f"Banda de giro lento: rpm ≤ <b>{thr:.0f}</b> ({regla}). "
+                "Vector 1X de runout por canal — aceptá o editá:"))
+            grid = QtWidgets.QGridLayout(); lay.addLayout(grid)
+            for _c, _h in enumerate(("Canal", "Amp 0-pk (mil)", "Fase lag (°)")):
+                grid.addWidget(QtWidgets.QLabel(f"<b>{_h}</b>"), 0, _c)
+            wdg = {}
+            for _r, (_nm, _v) in enumerate(ro.items(), 1):
+                _a, _p = _v["1"]
+                grid.addWidget(QtWidgets.QLabel(_nm), _r, 0)
+                sa = QtWidgets.QDoubleSpinBox(); sa.setRange(0, 100000); sa.setDecimals(3); sa.setValue(_a)
+                sp = QtWidgets.QDoubleSpinBox(); sp.setRange(0, 360); sp.setDecimals(1); sp.setValue(_p)
+                grid.addWidget(sa, _r, 1); grid.addWidget(sp, _r, 2); wdg[_nm] = (sa, sp)
+            bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+            bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); lay.addWidget(bb)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            for _nm, (sa, sp) in wdg.items():
+                ro[_nm]["1"] = (float(sa.value()), float(sp.value()))
+            rec_state["runout"] = ro; rec_state["runout_rpm"] = float(thr)
+            act_runout.setChecked(True)
+            QtWidgets.QMessageBox.information(win, "Slow-roll auto",
+                f"Runout aplicado ({len(ro)} canales de proximidad) @ giro lento ≤ {thr:.0f} rpm.\n"
+                "Compensación ACTIVADA (Bode, Polar, tabla).")
+        act_slowroll_auto.triggered.connect(_slowroll_from_data)
 
         def _publish_online(snap, fs, f1):
             """Fase 2: envía lecturas en vivo a Watermelon System (best-effort, nunca crashea)."""
