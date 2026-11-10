@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.5"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2654,11 +2654,37 @@ def main() -> int:
                 p.addItem(t)
             arc = p.plot(pen=pg.mkPen("#5b6b86", width=2.0))     # arco de giro (visible pero prolijo)
             arw = pg.ArrowItem(angle=0, tipAngle=30, headLen=10, brush="#5b6b86", pen=None); p.addItem(arw)
+            hov_dot = pg.ScatterPlotItem(size=11, brush=pg.mkBrush("#2563eb"), pen=pg.mkPen("w", width=1.5))
+            p.addItem(hov_dot); hov_dot.hide()
+            hov_txt = pg.TextItem("", color="#1e3a8a", anchor=(0, 1),
+                                  fill=pg.mkBrush(255, 255, 255, 220)); p.addItem(hov_txt)
             pol_cells.append(dict(p=p, name=c.name, unit=c.units, pill=pill, curve=curve, pts=pts,
                                   ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls,
-                                  pa=pa, deg_items=deg_items, arc=arc, arw=arw))
+                                  pa=pa, deg_items=deg_items, arc=arc, arw=arw,
+                                  hov_dot=hov_dot, hov_txt=hov_txt, pdata=None))
         tabs.addTab(pol_w, "Polar")
         _grid_focus(pol_cells, pol_focus, gl_pol)
+
+        def _polar_mouse(pos):
+            """Hover numérico (como el Bode): en modo foco, el punto más cercano del cursor
+            muestra amp / fase / rpm. Sin foco (grilla) no hace nada."""
+            try:
+                fk = pol_focus["k"]
+                if fk is None:
+                    return
+                cl = pol_cells[fk]; d = cl.get("pdata")
+                if not d or not cl["p"].vb.sceneBoundingRect().contains(pos):
+                    cl["hov_dot"].hide(); cl["hov_txt"].setText(""); return
+                mp = cl["p"].vb.mapSceneToView(pos)
+                mx, my = float(mp.x()), float(mp.y())
+                j = int(np.argmin((d["x"] - mx) ** 2 + (d["y"] - my) ** 2))
+                cl["hov_dot"].setData([d["x"][j]], [d["y"][j]]); cl["hov_dot"].show()
+                cl["hov_txt"].setText(f"{d['amp'][j]:.2f} {cl['unit']} @ "
+                                      f"{d['ph'][j] % 360:.0f}° @ {d['rpm'][j]:.0f} rpm")
+                cl["hov_txt"].setPos(float(d["x"][j]), float(d["y"][j]))
+            except Exception:  # noqa: BLE001
+                pass
+        gl_pol.scene().sigMouseMoved.connect(_polar_mouse)
 
         def _polar_relabel():
             cw = (cb_rot.currentText() == "CW")      # sentido = config de la máquina
@@ -3171,6 +3197,7 @@ def main() -> int:
                         rn = a / amax
                         x = rn * np.sin(phys); y = rn * np.cos(phys)
                         cl["curve"].setData(x, y); cl["pts"].setData([], [])   # línea limpia, sin puntos crudos
+                        cl["pdata"] = dict(x=x, y=y, amp=a, rpm=np.asarray(rrn, float), ph=phu)  # hover
                         jc = int(np.argmax(a))                        # Ncrit = máx amplitud
                         if rich:
                             cl["ncrit"].setData([x[jc]], [y[jc]]); cl["op"].setData([x[-1]], [y[-1]])
