@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.98"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.5.99"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -174,6 +174,16 @@ def _orbit_sync_avg(X, Y, pulses, n=256):
         return None
     ax = accX / k; ay = accY / k
     return np.append(ax, ax[0]), np.append(ay, ay[0])      # cerrar el lazo
+
+
+def _vsub_arr(amp, ph_deg, ramp, rph_deg):
+    """Resta vectorial (compensación slow-roll / runout, API 670): a cada vector
+    (amp∠fase) le resta el vector de runout (ramp∠rph). amp/ph en 0-pk y grados,
+    misma convención que one_x_sync/_sync_1x. Devuelve (amp, fase[0,360))."""
+    a = np.asarray(amp, float) * np.exp(1j * np.radians(np.asarray(ph_deg, float)))
+    b = float(ramp) * np.exp(1j * np.radians(float(rph_deg)))
+    c = a - b
+    return np.abs(c), np.degrees(np.angle(c)) % 360.0
 
 
 def _stylesheet(scale: float = 1.0) -> str:
@@ -557,6 +567,14 @@ def main() -> int:
         cb_dest.setToolTip("Captura local: graba en el disco del PC (subes después).\n"
                            "Monitoreo en línea: envía lecturas en vivo a Watermelon System.")
         tb.addWidget(cb_dest)
+        _sep_tb.append(tb.addSeparator())
+        act_slowroll = QtGui.QAction("Set slow-roll", win)
+        act_slowroll.setToolTip("Captura el vector 1X/2X de RUNOUT a baja velocidad (slow-roll).\n"
+                                "Girá el rotor LENTO (debajo de la 1ª crítica) y presioná. API 670.")
+        act_runout = QtGui.QAction("Runout comp", win); act_runout.setCheckable(True)
+        act_runout.setToolTip("Resta el vector de runout slow-roll al 1X/2X (tabla, Bode, Polar).\n"
+                              "El Direct/overall NO se compensa (es el movimiento total, por norma).")
+        tb.addAction(act_slowroll); tb.addAction(act_runout)
         spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                                            QtWidgets.QSizePolicy.Preferred)
         spacer.setStyleSheet("background:transparent;")   # sin esto se ve un recuadro blanco feo
@@ -575,7 +593,8 @@ def main() -> int:
         # Configuration. En Configuration arriba queda limpio: sólo "Detect hardware" y la
         # versión. Lo conduce _on_tab según la pestaña; el estado inicial lo fija _on_tab().
         def _reveal_data_actions(on: bool):
-            for _a in (act_start, act_stop, act_save, act_sync, act_clear, *_sep_tb):
+            for _a in (act_start, act_stop, act_save, act_sync, act_clear,
+                       act_slowroll, act_runout, *_sep_tb):
                 _a.setVisible(bool(on))
             for _wd in (lbl_modo, cb_run, _lbl_dest, cb_dest):
                 _wd.setVisible(bool(on))
@@ -2133,12 +2152,16 @@ def main() -> int:
                 return args.alarm, args.danger
             return ALARM_DEF.get(_ckind(c), (0.0, 0.0))
 
-        def _amp3(eu0, fs, f1, kind, kph0=None):
+        def _amp3(eu0, fs, f1, kind, kph0=None, runout=None):
             """Overall + 1X + 2X en la convención de la NORMA del sensor:
             proximidad → pp (API 670/ISO 7919); velocidad/acel → RMS (ISO 20816).
             Amplitudes 1X/2X del pico del espectro (no colapsan). FASE por order
             tracking anclado al keyphasor (kph0) → estable; si no hay keyphasor
-            cae a demodulación síncrona (puede caminar)."""
+            cae a demodulación síncrona (puede caminar).
+
+            runout = {"1": (amp0pk, fase), "2": ...} del slow-roll → si viene, el 1X/2X
+            se COMPENSA por resta vectorial sobre el vector síncrono (API 670). El Direct
+            (overall) NUNCA se compensa — es el movimiento total por definición."""
             from core.remote_monitoring.keyphasor import one_x_sync, one_x_vector
             if kind == "prox":
                 ov = float(eu0.max() - eu0.min()); k = 2.0            # 0-pk → pp
@@ -2150,15 +2173,23 @@ def main() -> int:
                     return 0.0, 0.0
                 ft = o * f1; b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
                 amp = float(mag[b].max()) * k if b.any() else 0.0
-                ph = 0.0
+                ph = 0.0; svec = None
                 if kph0 is not None:
-                    s = one_x_sync(eu0, kph0, fs, order=o)   # fase REFERIDA al keyphasor
-                    if s is not None:
-                        ph = s[1]
+                    svec = one_x_sync(eu0, kph0, fs, order=o)   # (amp0pk, fase, rpm) REF keyphasor
+                    if svec is not None:
+                        ph = svec[1]
                     else:
                         _, ph = one_x_vector(eu0, fs, ft)
                 else:
                     _, ph = one_x_vector(eu0, fs, ft)
+                # Compensación slow-roll: resta vectorial en 0-pk sobre el vector síncrono.
+                _rr = runout.get(str(int(o))) if runout else None
+                if _rr and svec is not None:
+                    meas = svec[0] * np.exp(1j * np.radians(svec[1]))   # 0-pk medido
+                    ref = _rr[0] * np.exp(1j * np.radians(_rr[1]))      # 0-pk runout
+                    comp = meas - ref
+                    amp = float(np.abs(comp)) * k                      # 0-pk → pp/rms
+                    ph = float(np.degrees(np.angle(comp)) % 360.0)
                 return amp, ph
             a1, p1 = _order(1.0); a2, p2 = _order(2.0)
             return ov, a1, p1, a2, p2
@@ -2656,6 +2687,47 @@ def main() -> int:
         # ---------------- Lógica ----------------
         from core.remote_monitoring.keyphasor import one_x_vector
 
+        def _ro_for(name):
+            """Vector de runout slow-roll de un canal si la compensación está activa."""
+            return (rec_state.get("runout") or {}).get(name) if act_runout.isChecked() else None
+
+        def _capture_slowroll():
+            """Captura el vector 1X/2X de RUNOUT a la velocidad actual (slow-roll) → ref
+            para compensación (API 670). Debe hacerse con el rotor girando LENTO."""
+            from core.remote_monitoring.keyphasor import one_x_sync
+            snap = agent.snapshot(2.0)
+            if snap.shape[1] < 16:
+                return
+            fs = agent.sample_rate_hz
+            rpm = agent.estimate_rpm(snap)
+            if not rpm:
+                QtWidgets.QMessageBox.warning(win, "Slow-roll",
+                    "Rotor detenido (sin rpm). Girá LENTO y reintentá.")
+                return
+            if kph_glob is None:
+                QtWidgets.QMessageBox.warning(win, "Slow-roll",
+                    "Sin canal keyphasor no hay referencia de fase para el runout.")
+                return
+            if rpm > 800 and QtWidgets.QMessageBox.question(
+                    win, "Slow-roll alto",
+                    f"La velocidad es {rpm:.0f} rpm. El slow-roll debe tomarse LENTO "
+                    "(bien por debajo de la 1ª crítica) o capturará respuesta dinámica, "
+                    "no solo runout.\n\n¿Capturar igual?") != QtWidgets.QMessageBox.Yes:
+                return
+            kp = snap[kph_glob]
+            ro = {}
+            for _pi, _pc in vib:
+                e0 = snap[_pi] * 1000.0 / (_pc.sensitivity_mv_per_eu or 1.0); e0 = e0 - e0.mean()
+                v1 = one_x_sync(e0, kp, fs, order=1.0); v2 = one_x_sync(e0, kp, fs, order=2.0)
+                ro[_pc.name] = {"1": (v1[0], v1[1]) if v1 else None,
+                                "2": (v2[0], v2[1]) if v2 else None}
+            rec_state["runout"] = ro; rec_state["runout_rpm"] = float(rpm)
+            act_runout.setChecked(True)
+            QtWidgets.QMessageBox.information(win, "Slow-roll",
+                f"Runout capturado @ {rpm:.0f} rpm ({len(ro)} canales).\n"
+                "Compensación ACTIVADA (1X/2X en tabla, Bode y Polar).")
+        act_slowroll.triggered.connect(_capture_slowroll)
+
         def _publish_online(snap, fs, f1):
             """Fase 2: envía lecturas en vivo a Watermelon System (best-effort, nunca crashea)."""
             try:
@@ -2667,7 +2739,8 @@ def main() -> int:
                     _e0 = snap[_pi] * 1000.0 / (_pc.sensitivity_mv_per_eu or 1.0)
                     _e0 = _e0 - _e0.mean()
                     _kp0 = snap[kph_glob] if kph_glob is not None else None
-                    _ov, _a1, _p1, _a2, _p2 = _amp3(_e0, fs, f1, _ckind(_pc), kph0=_kp0)
+                    _ov, _a1, _p1, _a2, _p2 = _amp3(_e0, fs, f1, _ckind(_pc), kph0=_kp0,
+                                                    runout=_ro_for(_pc.name))
                     _base = dict(instance_id=agent.instance_id, variable=_pc.name,
                                  sensor_label=_pc.name, unit=_pc.units, captured_at=now)
                     rds.append(_lr.LiveReading(metric="Direct", value=float(_ov), **_base))
@@ -2782,7 +2855,8 @@ def main() -> int:
                     eu0 = eu - eu.mean()
                     gapv = float(snap[i].mean())            # V (prox real ~-9.5; sim ~0)
                     _kp0 = snap[kph_glob] if kph_glob is not None else None
-                    ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0)
+                    ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0,
+                                               runout=_ro_for(c.name))
                     al, dg = _alarm_for(c)
                     if dg and ov >= dg:
                         estado, bgc, fgc = "DANGER", "#fde2e2", "#991b1b"
@@ -2972,6 +3046,9 @@ def main() -> int:
                     if fk is not None and k != fk:
                         continue
                     rr, am, ph = _bode_clean(*tc.bode(cl["name"]))
+                    _ro = _ro_for(cl["name"])
+                    if _ro and _ro.get("1"):
+                        am, ph = _vsub_arr(am, ph, _ro["1"][0], _ro["1"][1])   # runout comp
                     if len(rr) >= 2:
                         amp = am * 2.0
                         phu = _phase_unwrap(ph)
@@ -2986,6 +3063,9 @@ def main() -> int:
                         continue
                     rich = (fk is not None and k == fk)
                     rr, am, ph = _bode_clean(*tc.bode(cl["name"]))
+                    _ro = _ro_for(cl["name"])
+                    if _ro and _ro.get("1"):
+                        am, ph = _vsub_arr(am, ph, _ro["1"][0], _ro["1"][1])   # runout comp
                     if len(rr) >= 3:
                         rrn = rr
                         a = am * 2.0
@@ -3117,7 +3197,8 @@ def main() -> int:
             for i, c in vib:
                 eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0); eu0 = eu - eu.mean()
                 _kp0 = snap[kph_glob] if kph_glob is not None else None
-                ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0)
+                ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0,
+                                           runout=_ro_for(c.name))
                 al, dg = _alarm_for(c)
                 if dg and ov >= dg:
                     st, scol = T["st"][2], "#b91c1c"; worst = max(worst, 2)
