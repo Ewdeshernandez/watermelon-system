@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.8"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.9"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2561,6 +2561,15 @@ def main() -> int:
             "<b>Bode</b> <i style='color:#64748b'>— 1X amplitude vs rpm per channel (fills during run-up) · "
             "double-click = view one · move the mouse = amplitude/phase/rpm</i>"))
         gl_bode = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_bode, 1)
+        lbl_bode_hint = QtWidgets.QLabel("◷ Sin datos de velocidad — hacé un ARRANQUE (run-up) "
+                                         "desde baja rpm para llenar el Bode (es un formato de transitorio).")
+        lbl_bode_hint.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_bode_hint.setStyleSheet("color:#b45309;font-weight:700;padding:6px;")
+        bode_l.addWidget(lbl_bode_hint)
+        lbl_bode_comp = QtWidgets.QLabel("● COMPENSADO (runout restado)")
+        lbl_bode_comp.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_bode_comp.setStyleSheet("color:#166534;font-weight:800;padding:2px;")
+        lbl_bode_comp.setVisible(False); bode_l.addWidget(lbl_bode_comp)
         gl_bode.ci.setContentsMargins(2, 2, 2, 2); gl_bode.ci.setSpacing(2)
         bode_cells = []; bode_focus = {"k": None}; _ncb = 2 if len(vib) > 1 else 1
         for k, (i, c) in enumerate(vib):
@@ -2653,6 +2662,15 @@ def main() -> int:
             "sentido de giro = config de la máquina · double-click = full polar</i>"))
         ptop.addStretch(1); pol_l.addLayout(ptop)
         gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
+        lbl_pol_hint = QtWidgets.QLabel("◷ Sin datos de velocidad — hacé un ARRANQUE (run-up) "
+                                        "desde baja rpm para llenar el Polar (necesita ≥3 velocidades).")
+        lbl_pol_hint.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_pol_hint.setStyleSheet("color:#b45309;font-weight:700;padding:6px;")
+        pol_l.addWidget(lbl_pol_hint)
+        lbl_pol_comp = QtWidgets.QLabel("● COMPENSADO (runout restado)")
+        lbl_pol_comp.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_pol_comp.setStyleSheet("color:#166534;font-weight:800;padding:2px;")
+        lbl_pol_comp.setVisible(False); pol_l.addWidget(lbl_pol_comp)
         gl_pol.ci.setContentsMargins(2, 2, 2, 2); gl_pol.ci.setSpacing(2)
         pol_cells = []; pol_focus = {"k": None}
         _ncp = 4 if len(vib) >= 5 else (2 if len(vib) > 1 else 1)   # cuadrados: más columnas = más grandes
@@ -2769,6 +2787,11 @@ def main() -> int:
                 "clearance as speed changes. Track colored by rpm · REST = at rest (bottom) · "
                 "large dot = current.</i>"))
             gl_scl = pg.GraphicsLayoutWidget(); scl_l.addWidget(gl_scl, 1)
+            lbl_scl_hint = QtWidgets.QLabel("◷ Sin recorrido de velocidad — el Shaft Centerline se "
+                                            "dibuja al VARIAR la rpm (arranque/parada). Hacé un run-up.")
+            lbl_scl_hint.setAlignment(QtCore.Qt.AlignCenter)
+            lbl_scl_hint.setStyleSheet("color:#b45309;font-weight:700;padding:6px;")
+            scl_l.addWidget(lbl_scl_hint)
             gl_scl.ci.setContentsMargins(2, 2, 2, 2); gl_scl.ci.setSpacing(2)
             ncol = 2 if len(orb_pairs) > 1 else 1
             _th = np.linspace(0, 2 * np.pi, 160); Cclr = 8.0     # juego dibujado (mil)
@@ -3289,6 +3312,9 @@ def main() -> int:
                     else:
                         it["kph"].setData([], []); it["kph1"].setData([], [])
             elif cur == "Bode":
+                _nts = len(tc.samples)
+                lbl_bode_hint.setVisible(_nts < 2)
+                lbl_bode_comp.setVisible(bool(act_runout.isChecked() and rec_state.get("runout")))
                 fk = bode_focus["k"]
                 for k, cl in enumerate(bode_cells):
                     if fk is not None and k != fk:
@@ -3305,6 +3331,8 @@ def main() -> int:
                         cl["data"] = {"rr": rr, "am": amp, "ph": np.asarray(ph, float), "phu": phu}
                         cl["pill"].setPos(float(rr[0]), float(np.nanmax(phu)))
             elif cur == "Polar":
+                lbl_pol_hint.setVisible(len(tc.samples) < 3)
+                lbl_pol_comp.setVisible(bool(act_runout.isChecked() and rec_state.get("runout")))
                 fk = pol_focus["k"]
                 for k, cl in enumerate(pol_cells):
                     if fk is not None and k != fk:
@@ -3354,6 +3382,7 @@ def main() -> int:
                             for t in cl["rpm_lbls"]:
                                 t.setText("")
             elif scl_items and cur == "Shaft Centerline":
+                lbl_scl_hint.setVisible(not any(len(scl_track.get(it["brg"], {})) >= 2 for it in scl_items))
                 for it in scl_items:
                     rrk = sorted(scl_track[it["brg"]])       # ya acumulado arriba (siempre)
                     if not rrk:
