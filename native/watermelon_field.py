@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.6.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1615,6 +1615,12 @@ def main() -> int:
             _sw(lambda: cb_ph_p.setCurrentText(m.phenomena.get("prox", "none")))
             _sw(lambda: cb_ph_v.setCurrentText(m.phenomena.get("vel", "none")))
             _sw(lambda: cb_ph_a.setCurrentText(m.phenomena.get("accel", "none")))
+            # Banda de medición del Direct por tipo (persistida con la máquina; default norma)
+            _mb = getattr(m, "meas_band", None) or {}
+            for _k, (_wmn, _wmx) in meas_band.items():
+                _dv = _mb.get(_k) or list(_BD.get(_k, (0.0, 0.0)))
+                _sw(lambda w=_wmn, v=_dv: w.setValue(float(v[0])))
+                _sw(lambda w=_wmx, v=_dv: w.setValue(float(v[1])))
             tblc.setRowCount(0)
             # Orden canónico SIEMPRE: keyphasor(s) primero, luego por cojinete, y dentro
             # de cada cojinete Y antes que X (convención del analista). Aplica a máquinas
@@ -1661,7 +1667,11 @@ def main() -> int:
             ph = {"prox": _w(lambda: cb_ph_p.currentText(), "none"),
                   "vel": _w(lambda: cb_ph_v.currentText(), "none"),
                   "accel": _w(lambda: cb_ph_a.currentText(), "none")}
+            mb = {}
+            for _k, (_wmn, _wmx) in meas_band.items():
+                mb[_k] = [_w(lambda w=_wmn: w.value(), 0.0), _w(lambda w=_wmx: w.value(), 0.0)]
             return SimMachine(name=(_w(lambda: ed_name.text(), "") or "Machine"),
+                              meas_band=mb,
                               fs=float(_w(lambda: sp_fs.value(), 5120.0)), sensors=sens,
                               rotation=_w(lambda: cb_rot.currentText(), "CCW"),
                               bearing_type=_w(lambda: cb_brg.currentText(), "plain"),

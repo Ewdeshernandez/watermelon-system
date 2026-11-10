@@ -118,6 +118,9 @@ class SimMachine:
     # fenómenos por tipo de sensor + severidad global
     phenomena: Dict[str, str] = field(default_factory=dict)
     severity: float = 1.0
+    # banda de medición del Direct/overall por tipo de sensor: {kind: [f_min, f_max]}.
+    # Vacío → se usan los defaults de norma (BAND_DEFAULTS). Persiste con la máquina.
+    meas_band: Dict[str, list] = field(default_factory=dict)
     # geometría (frecuencias de falla / engrane)
     n_balls: int = 8
     bd_pd: float = 0.34
