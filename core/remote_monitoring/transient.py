@@ -82,6 +82,7 @@ class TransientConfig:
     max_samples: int = 1500        # máximo de puntos de velocidad en memoria
     hop_seconds: float = 0.03      # paso fino del barrido del buffer (densifica, sin saltos)
     sweep_seconds: float = 2.5     # porción reciente del buffer que se barre por refresco
+    vect_revs: int = 12            # vueltas del vector 1X (pocas = sin smear en run-up rápido)
 
 
 @dataclass
@@ -117,6 +118,18 @@ class TransientCapture:
 
     def _capture_window(self, snap, seg, fs, vib_channels, rr, pulses, ref) -> None:
         """Arma y guarda un SpeedSample desde la ventana `seg` del snapshot."""
+        # Vector 1X SOLO sobre las últimas K vueltas: en un arranque RÁPIDO la ventana
+        # abarca decenas de vueltas con rpm cambiando → el vector se emborrona y saltan
+        # picos. Acotar a pocas vueltas (como ADRE) da un Bode/Polar limpio.
+        _pul = pulses
+        if _pul is not None and len(_pul) > self.config.vect_revs + 1:
+            _pul = np.asarray(_pul)[-(self.config.vect_revs + 1):]
+        # rpm COHERENTE con las mismas vueltas del vector (si no, el pico se corre:
+        # vector de rpm alto etiquetado con la rpm media, más baja).
+        if _pul is not None and len(_pul) >= 2:
+            _gap = float(np.median(np.diff(np.asarray(_pul, float))))
+            if _gap > 0:
+                rr = 60.0 * fs / _gap
         sample = SpeedSample(rpm=float(rr))
         for idx, ch in vib_channels:
             sens = float(getattr(ch, "sensitivity_mv_per_eu", 0.0) or 0.0)
@@ -125,7 +138,7 @@ class TransientCapture:
             freqs, mag = self._spectrum(eu, fs)
             # 1X por ORDER TRACKING (amp+fase limpias, referidas al keyphasor);
             # si no hay pulsos, cae al pico del espectro (evita el colapso síncrono).
-            sync = _sync_1x(eu, pulses, order=1)
+            sync = _sync_1x(eu, _pul, order=1)
             if sync is not None:
                 amp, phase = sync
             else:

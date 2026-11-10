@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.5.99"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.6.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -174,6 +174,19 @@ def _orbit_sync_avg(X, Y, pulses, n=256):
         return None
     ax = accX / k; ay = accY / k
     return np.append(ax, ax[0]), np.append(ay, ay[0])      # cerrar el lazo
+
+
+def _despike(y, win=3):
+    """Mediana móvil corta → mata picos AISLADOS de 1 punto (vectores malos del
+    run-up rápido) sin aplastar la resonancia (que es ancha, varios puntos). No
+    desplaza la curva."""
+    y = np.asarray(y, float); n = y.size
+    if n < win or win < 3:
+        return y
+    h = win // 2; out = y.copy()
+    for i in range(h, n - h):
+        out[i] = np.median(y[i - h:i + h + 1])
+    return out
 
 
 def _vsub_arr(amp, ph_deg, ramp, rph_deg):
@@ -2643,8 +2656,6 @@ def main() -> int:
                 p.addItem(pg.ScatterPlotItem([0], [0], symbol="+", size=14, pen=pg.mkPen(NAVY, width=2)))  # centro
                 rest = pg.TextItem("REST", color=REDL, anchor=(0.5, 0)); rest.setPos(0, -Cclr * 0.99)
                 p.addItem(rest)
-                line = p.plot(pen=pg.mkPen("#aab8cc", width=0.6))     # traza fina
-                trk = pg.ScatterPlotItem(size=4, pen=None); p.addItem(trk)     # puntos por rpm (color)
                 cur = pg.ScatterPlotItem(size=9, brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=1.2)); p.addItem(cur)
                 pill = pg.TextItem(f"Bearing {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY))
                 p.addItem(pill); pill.setPos(-Cclr * 1.04, Cclr * 1.06)
@@ -2652,7 +2663,7 @@ def main() -> int:
                 scl_items.append(dict(
                     p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg, clr=Cclr,
                     aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
-                    line=line, trk=trk, cur=cur))
+                    segs=[], cur=cur))
                 scl_track[brg] = {}
             tabs.addTab(scl_w, "Shaft Centerline")
 
@@ -3050,8 +3061,8 @@ def main() -> int:
                     if _ro and _ro.get("1"):
                         am, ph = _vsub_arr(am, ph, _ro["1"][0], _ro["1"][1])   # runout comp
                     if len(rr) >= 2:
-                        amp = am * 2.0
-                        phu = _phase_unwrap(ph)
+                        amp = _despike(am) * 2.0
+                        phu = _despike(_phase_unwrap(ph))      # mata picos aislados
                         cl["amp"].setData(rr, amp)
                         cl["pha"].setData(rr, phu)
                         cl["data"] = {"rr": rr, "am": amp, "ph": np.asarray(ph, float)}
@@ -3068,10 +3079,11 @@ def main() -> int:
                         am, ph = _vsub_arr(am, ph, _ro["1"][0], _ro["1"][1])   # runout comp
                     if len(rr) >= 3:
                         rrn = rr
-                        a = am * 2.0
+                        a = _despike(am) * 2.0
+                        phu = _despike(_phase_unwrap(ph))        # fase continua, sin picos
                         # ángulo FÍSICO = sonda + fase contra el giro (CW → signo negativo)
                         sign = -1.0 if cb_giro.currentText() == "CW" else 1.0
-                        phys = np.radians(cl["pa"] + sign * ph)
+                        phys = np.radians(cl["pa"] + sign * phu)
                         amax = float(a.max()) or 1.0
                         rn = a / amax
                         x = rn * np.sin(phys); y = rn * np.cos(phys)
@@ -3109,14 +3121,19 @@ def main() -> int:
                     xs = [scl_track[it["brg"]][r][0] for r in rrk]
                     ys = [scl_track[it["brg"]][r][1] for r in rrk]
                     it["cur"].setData([xs[-1]], [ys[-1]])    # posición actual (último rpm)
-                    it["line"].setData(xs, ys)
-                    if _scl_cmap is not None and len(rrk) >= 2:
+                    # traza = LÍNEA de color por rpm (segmentos), SIN puntos por dato
+                    segs = it["segs"]; need = max(0, len(rrk) - 1)
+                    while len(segs) < need:
+                        segs.append(it["p"].plot(pen=pg.mkPen("#8aa0bd", width=1.6)))
+                    _grad = _scl_cmap is not None and len(rrk) >= 2
+                    if _grad:
                         rlo, rhi = rrk[0], max(rrk[-1], rrk[0] + 1)
-                        brs = [pg.mkBrush(_scl_cmap.map((r - rlo) / (rhi - rlo), mode="qcolor"))
-                               for r in rrk]
-                        it["trk"].setData(xs, ys, brush=brs)
-                    else:
-                        it["trk"].setData(xs, ys, brush=pg.mkBrush(CORN))
+                    for si in range(need):
+                        segs[si].setData([xs[si], xs[si + 1]], [ys[si], ys[si + 1]])
+                        col = _scl_cmap.map((rrk[si] - rlo) / (rhi - rlo), mode="qcolor") if _grad else CORN
+                        segs[si].setPen(pg.mkPen(col, width=1.6))
+                    for si in range(need, len(segs)):
+                        segs[si].setData([], [])
             elif cur == "Cascade":
                 fk = casc_focus["k"]
                 for k, cl in enumerate(casc_cells):
