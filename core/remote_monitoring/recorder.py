@@ -25,12 +25,21 @@ import numpy as np
 
 
 def _persist_root() -> str:
-    # Capturas locales en carpeta VISIBLE (~/Documents/Watermelon Rotordynamics/
-    # Capturas). Override: WM_PERSIST_DIR. Legacy ~/.watermelon se sigue leyendo si
-    # WM_PERSIST_DIR apunta ahí.
+    # Datos locales en carpeta VISIBLE (~/Documents/Watermelon Rotordynamics/Data),
+    # al lado de Configuraciones. Override: WM_PERSIST_DIR.
     base = os.environ.get("WM_PERSIST_DIR")
     if base:
         return os.path.join(base, "remote_monitoring", "transients")
+    try:
+        from core.remote_monitoring.sim_machine import wm_data_root
+        return os.path.join(wm_data_root(), "Data")
+    except Exception:  # noqa: BLE001
+        return os.path.join(os.path.expanduser("~"), "Documents",
+                            "Watermelon Rotordynamics", "Data")
+
+
+def _legacy_root() -> str:
+    """Carpeta vieja ('Capturas') — se SIGUE leyendo para no perder grabaciones previas."""
     try:
         from core.remote_monitoring.sim_machine import wm_data_root
         return os.path.join(wm_data_root(), "Capturas")
@@ -128,12 +137,16 @@ class TransientRecorder:
     """Graba bloques crudos a disco. Thread-safe (on_block puede venir de un hilo)."""
 
     def __init__(self, instance_id: str, fs: float, ch_meta: List[dict],
-                 machine: str = "", rec_id: Optional[str] = None) -> None:
+                 machine: str = "", rec_id: Optional[str] = None,
+                 folder: Optional[str] = None) -> None:
         self.fs = float(fs)
         self.ch_meta = list(ch_meta)
         self.n_channels = len(ch_meta)
         self.rec_id = rec_id or time.strftime("rec_%Y%m%d_%H%M%S")
-        self.dir = os.path.join(_persist_root(), instance_id, self.rec_id)
+        # Carpeta local por MÁQUINA = el TAG (o el instance_id si no hay tag). El
+        # instance_id REAL va en el manifest → la nube sigue mapeando bien el activo
+        # aunque la carpeta se llame por el tag.
+        self.dir = os.path.join(_persist_root(), (folder or instance_id), self.rec_id)
         os.makedirs(self.dir, exist_ok=True)
         self._lock = threading.Lock()
         self._data = open(os.path.join(self.dir, "data.f32"), "ab")
@@ -143,7 +156,8 @@ class TransientRecorder:
         self.status = RecorderStatus(self.rec_id, self.n_channels, self.fs, started_ts=time.time())
         self.error: Optional[str] = None
         with open(os.path.join(self.dir, "manifest.json"), "w") as f:
-            json.dump({"rec_id": self.rec_id, "fs": self.fs, "machine": machine,
+            json.dump({"rec_id": self.rec_id, "fs": self.fs, "sample_rate_hz": self.fs,
+                       "machine": machine, "instance_id": instance_id,
                        "n_channels": self.n_channels, "channels": self.ch_meta,
                        "started": self.status.started_ts}, f, indent=2)
 
@@ -201,20 +215,25 @@ class TransientRecorder:
 
 
 def list_recordings(instance_id: str) -> List[dict]:
-    """Manifiestos de las grabaciones de una instancia, más recientes primero."""
-    base = os.path.join(_persist_root(), instance_id)
+    """Manifiestos de las grabaciones de una máquina (carpeta por tag/instance), más
+    recientes primero. Lee la carpeta nueva (Data) y la vieja (Capturas)."""
     out = []
-    if not os.path.isdir(base):
-        return out
-    for rid in os.listdir(base):
-        mp = os.path.join(base, rid, "manifest.json")
-        if os.path.isfile(mp):
-            try:
-                m = json.load(open(mp))
-                m["_dir"] = os.path.join(base, rid)
-                out.append(m)
-            except Exception:  # noqa: BLE001
-                pass
+    seen = set()
+    for _root in (_persist_root(), _legacy_root()):
+        base = os.path.join(_root, instance_id)
+        if not os.path.isdir(base):
+            continue
+        for rid in os.listdir(base):
+            if rid in seen:
+                continue
+            mp = os.path.join(base, rid, "manifest.json")
+            if os.path.isfile(mp):
+                try:
+                    m = json.load(open(mp))
+                    m["_dir"] = os.path.join(base, rid)
+                    out.append(m); seen.add(rid)
+                except Exception:  # noqa: BLE001
+                    pass
     out.sort(key=lambda m: m.get("started", 0), reverse=True)
     return out
 
@@ -291,7 +310,9 @@ def upload_recording(rec_dir: str) -> dict:
     try:
         manifest = json.load(open(os.path.join(rec_dir, "manifest.json")))
         rec_id = manifest["rec_id"]
-        instance = os.path.basename(os.path.dirname(rec_dir))
+        # instance_id REAL del manifest (la carpeta puede llamarse por el tag); fallback
+        # al nombre de la carpeta para grabaciones viejas sin instance_id.
+        instance = manifest.get("instance_id") or os.path.basename(os.path.dirname(rec_dir))
         base = f"{instance}/{rec_id}"
         try:
             client.storage.create_bucket(_BUCKET)          # idempotente

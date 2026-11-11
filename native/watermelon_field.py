@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.7.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -460,7 +460,9 @@ def main() -> int:
             el manifest del run y rearma la ventana en modo revisión. No exige reconfigurar."""
             from core.remote_monitoring.sim_machine import wm_data_root, SimMachine, SensorSpec
             import json as _json, tempfile as _tmp
-            cap = os.path.join(wm_data_root(), "Capturas")
+            cap = os.path.join(wm_data_root(), "Data")
+            if not os.path.isdir(cap):
+                cap = wm_data_root()
             rec_dir = QtWidgets.QFileDialog.getExistingDirectory(
                 win, "Elegí la carpeta del run (la que tiene manifest.json)", cap)
             if not rec_dir:
@@ -530,7 +532,7 @@ def main() -> int:
                 from core.remote_monitoring.sim_machine import wm_data_root
                 root = wm_data_root()
                 os.makedirs(os.path.join(root, "Configuraciones"), exist_ok=True)
-                os.makedirs(os.path.join(root, "Capturas"), exist_ok=True)
+                os.makedirs(os.path.join(root, "Data"), exist_ok=True)
                 QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(root))
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, "Carpeta de datos", f"No se pudo abrir:\n{e}")
@@ -2952,6 +2954,17 @@ def main() -> int:
             """Vector de runout slow-roll de un canal si la compensación está activa."""
             return (rec_state.get("runout") or {}).get(name) if act_runout.isChecked() else None
 
+        def _rec_folder():
+            """Carpeta local de las grabaciones de ESTA máquina = su TAG (o el nombre de
+            máquina si no hay tag). Slug seguro para el filesystem. La nube sigue usando
+            el instance_id REAL (guardado en el manifest), no esta carpeta."""
+            from core.remote_monitoring.sim_machine import _slug
+            try:
+                t = (ed_tag.text() or "").strip()
+            except Exception:  # noqa: BLE001
+                t = ""
+            return _slug(t or args.machine) or args.machine
+
         def _band_for(c):
             """Banda de medición del Direct (f_min, f_max): prioridad = banda explícita del
             canal → banda por tipo editable en Config (meas_band) → default de norma."""
@@ -3824,7 +3837,8 @@ def main() -> int:
                             "bnc_port": c.bnc_port, "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0)}
                            for c in agent.channels]
                 rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta,
-                                        machine=args.machine, rec_id=(tag.strip() or None))
+                                        machine=args.machine, rec_id=(tag.strip() or None),
+                                        folder=_rec_folder())      # carpeta por TAG de la máquina
                 agent.on_block = rec.append          # captura CADA bloque desde el inicio
                 rec_state["session"] = rec; rec_state["saved"] = False
             except Exception:  # noqa: BLE001
@@ -3862,11 +3876,11 @@ def main() -> int:
 
         def _refresh_disk():
             try:
-                cnt, used = local_usage(agent.instance_id)
+                cnt, used = local_usage(_rec_folder())
                 free = free_bytes()
                 lbl_disk.setText(f"Disk: {cnt} recording(s) · {used / 1e6:.0f} MB used · "
                                  f"{free / 1e6:.0f} MB free")
-                pend = pending_count(agent.instance_id)
+                pend = pending_count(_rec_folder())
                 act_sync.setText(f"Upload to cloud ({pend})" if pend else "Upload to cloud")
                 act_sync.setEnabled(pend > 0)
             except Exception:  # noqa: BLE001
@@ -3907,7 +3921,7 @@ def main() -> int:
                 try:
                     from core.remote_monitoring.recorder import (list_recordings, is_synced,
                                                                  upload_recording)
-                    pend = [m for m in list_recordings(agent.instance_id) if not is_synced(m["_dir"])]
+                    pend = [m for m in list_recordings(_rec_folder()) if not is_synced(m["_dir"])]
                     res["total"] = len(pend)
                     for k, m in enumerate(pend):
                         res["progress"] = f"Uploading {k + 1} of {len(pend)}…"
@@ -3978,7 +3992,7 @@ def main() -> int:
             pend = 0
             try:
                 from core.remote_monitoring.recorder import pending_count
-                pend = pending_count(agent.instance_id)
+                pend = pending_count(_rec_folder())
             except Exception:  # noqa: BLE001
                 pass
             _nice("Data saved",
@@ -4042,11 +4056,11 @@ def main() -> int:
 
         def do_clear():
             from core.remote_monitoring.recorder import clear_recordings, pending_count, local_usage
-            cnt, used = local_usage(agent.instance_id)
+            cnt, used = local_usage(_rec_folder())
             if cnt == 0:
                 QtWidgets.QMessageBox.information(win, "Delete local data", "No local recordings.")
                 return
-            pend = pending_count(agent.instance_id)
+            pend = pending_count(_rec_folder())
             m = QtWidgets.QMessageBox(win)
             m.setWindowTitle("Delete local recordings")
             m.setIcon(QtWidgets.QMessageBox.Warning)
@@ -4204,7 +4218,7 @@ def main() -> int:
             try:
                 from core.remote_monitoring.recorder import (list_recordings, is_synced,
                                                              _dir_size)
-                recs = list_recordings(agent.instance_id)
+                recs = list_recordings(_rec_folder())
             except Exception:  # noqa: BLE001
                 recs = []
             rows = []; _sess_dirs.clear()
@@ -4364,7 +4378,7 @@ def main() -> int:
                                                                  is_synced, upload_recording)
                     if _sb_client() is None:
                         return
-                    _pend = [m for m in list_recordings(agent.instance_id)
+                    _pend = [m for m in list_recordings(_rec_folder())
                              if not is_synced(m["_dir"])]
                     _did = any(upload_recording(m["_dir"]).get("ok") for m in _pend)
                     if _did:
