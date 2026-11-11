@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.7.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -240,16 +240,19 @@ def _stylesheet(scale: float = 1.0) -> str:
     QWidget {{ background: {BG}; color: {INK};
         font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: {f}px; }}
     QLabel {{ background: transparent; color: {INK}; }}
-    QMenuBar {{ background: {NAVY}; color: #eaf1fb; padding: 3px 6px; font-weight: 600; }}
-    QMenuBar::item {{ padding: 5px 12px; background: transparent; color: #eaf1fb; border-radius: 6px; }}
-    QMenuBar::item:selected {{ background: #1f7a43; color: white; }}
-    QMenuBar::item:pressed {{ background: #14532d; color: white; }}
-    QMenu {{ background: #ffffff; border: 1px solid #d7e0ec; border-radius: 10px;
-        color: {INK}; padding: 6px; }}
-    QMenu::item {{ padding: 8px 20px 8px 16px; border-radius: 7px; margin: 1px 2px; font-weight: 500; }}
-    QMenu::item:selected {{ background: #e7f3ec; color: #14532d; }}
+    QMenuBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #1f7a43, stop:1 #14532d); color: #eafff2; padding: 3px 8px; font-weight: 700; }}
+    QMenuBar::item {{ padding: 6px 14px; background: transparent; color: #eafff2; border-radius: 7px; }}
+    QMenuBar::item:selected {{ background: rgba(255,255,255,0.18); color: #ffffff; }}
+    QMenuBar::item:pressed {{ background: rgba(0,0,0,0.22); color: #ffffff; }}
+    QMenu {{ background: #ffffff; border: 1px solid #cbd7e6; border-radius: 12px;
+        color: {INK}; padding: 7px; }}
+    QMenu::item {{ padding: 9px 24px 9px 18px; border-radius: 8px; margin: 1px 3px;
+        font-weight: 600; color: #1e293b; }}
+    QMenu::item:selected {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+        stop:0 #10b981, stop:1 #16a34a); color: #ffffff; }}
     QMenu::item:disabled {{ color: #9aa7bd; }}
-    QMenu::separator {{ height: 1px; background: #e9eef5; margin: 6px 10px; }}
+    QMenu::separator {{ height: 1px; background: #e4ebf3; margin: 7px 12px; }}
     QMenu::icon {{ padding-left: 8px; }}
     QToolBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
         stop:0 #1f7a43, stop:1 #14532d); spacing: 7px; padding: 8px 12px;
@@ -3822,7 +3825,9 @@ def main() -> int:
                 return
             # --- Captura local: pide nombre/consecutivo y GRABA a disco desde el inicio ---
             import time as _t
-            default = f"{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}"
+            # Nombre del run por defecto = TAG de la máquina + fecha/hora → la data queda en
+            # Data/<tag>/<tag>_<fecha_hora>/.
+            default = f"{_rec_folder()}_{_t.strftime('%Y%m%d_%H%M%S')}"
             tag, ok = QtWidgets.QInputDialog.getText(
                 win, "Start run", "Run name / sequence number:", text=default)
             if not ok:
