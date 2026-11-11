@@ -200,7 +200,8 @@ jobs:
           ls -la out
 
       - uses: actions/upload-artifact@v4
-        with:
+        continue-on-error: true   # un flake al subir el artefacto intermedio NO debe
+        with:                     # bloquear el Release (pasó en 0.7.6)
           name: WatermelonRotordynamics-windows
           path: out/
           retention-days: 30
