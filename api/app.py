@@ -457,6 +457,32 @@ def create_app() -> "FastAPI":
             raise HTTPException(status_code=404, detail="Sin datos para ese cojinete")
         return out
 
+    @app.get("/v1/assets/{asset}/train-svg", tags=["figures"],
+             summary="Diagrama del tren (SVG) con sensores por severidad — mismo de la web")
+    def figure_train_svg(asset: str, api_key_hash: str = Depends(_api_key_dependency)):
+        from core.instance_state import get_instance
+        from core.live_readings import latest_for_instance
+        from core.train_svg import build_train_svg
+        inst = get_instance(asset)
+        if inst is None:
+            raise HTTPException(status_code=404, detail="asset no encontrado")
+        latest = latest_for_instance(asset) or []
+        lookup = {}
+        try:
+            from core.sensor_map import sensor_label as _slbl
+            for s in (getattr(inst, "sensors", None) or []):
+                try:
+                    lookup[_slbl(s)] = s
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+        svg = build_train_svg(inst, latest, lookup)
+        if not svg:
+            raise HTTPException(status_code=404,
+                                detail="sin diagrama (faltan driver/driven_icon_key o sensores mapeables)")
+        return {"asset": asset, "svg": svg}
+
     # =========================================================
     # Manejo global de errores
     # =========================================================
