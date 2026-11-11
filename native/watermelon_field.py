@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.7.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -240,11 +240,17 @@ def _stylesheet(scale: float = 1.0) -> str:
     QWidget {{ background: {BG}; color: {INK};
         font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: {f}px; }}
     QLabel {{ background: transparent; color: {INK}; }}
-    QMenuBar {{ background: {NAVY}; color: #eaf1fb; padding: 2px; }}
-    QMenuBar::item {{ padding: 5px 10px; background: transparent; color: #eaf1fb; }}
-    QMenuBar::item:selected {{ background: {ACC}; border-radius: 5px; color: white; }}
-    QMenu {{ background: {PANEL}; border: 1px solid {LINE}; color: {INK}; }}
-    QMenu::item:selected {{ background: {ACC}; color: white; }}
+    QMenuBar {{ background: {NAVY}; color: #eaf1fb; padding: 3px 6px; font-weight: 600; }}
+    QMenuBar::item {{ padding: 5px 12px; background: transparent; color: #eaf1fb; border-radius: 6px; }}
+    QMenuBar::item:selected {{ background: #1f7a43; color: white; }}
+    QMenuBar::item:pressed {{ background: #14532d; color: white; }}
+    QMenu {{ background: #ffffff; border: 1px solid #d7e0ec; border-radius: 10px;
+        color: {INK}; padding: 6px; }}
+    QMenu::item {{ padding: 8px 20px 8px 16px; border-radius: 7px; margin: 1px 2px; font-weight: 500; }}
+    QMenu::item:selected {{ background: #e7f3ec; color: #14532d; }}
+    QMenu::item:disabled {{ color: #9aa7bd; }}
+    QMenu::separator {{ height: 1px; background: #e9eef5; margin: 6px 10px; }}
+    QMenu::icon {{ padding-left: 8px; }}
     QToolBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
         stop:0 #1f7a43, stop:1 #14532d); spacing: 7px; padding: 8px 12px;
         border-bottom: 1px solid #0f3d22; }}
@@ -492,6 +498,25 @@ def main() -> int:
             if not any(s.kind != "keyphasor" for s in sensors):
                 QtWidgets.QMessageBox.warning(win, "Abrir sesión",
                     "El run no tiene canales de vibración en el manifest.")
+                return
+            # Si los canales del run COINCIDEN con los de la máquina actual → abrir SIN
+            # rearmar (suave, no pierde el hardware en vivo). Solo si es OTRA config se
+            # rearma la ventana (único caso que lo necesita).
+            rec_names = [s.name for s in sensors]
+            try:
+                cur_names = [c.name for c in agent.channels]
+            except Exception:  # noqa: BLE001
+                cur_names = []
+            if rec_names and rec_names == cur_names:
+                _open_recording(rec_dir)
+                return
+            if QtWidgets.QMessageBox.question(
+                    win, "Abrir sesión",
+                    "Esta grabación tiene OTRA configuración de canales que la máquina actual.\n"
+                    "Para revisarla se rearma la ventana en MODO REVISIÓN (no es el hardware en vivo).\n\n"
+                    "¿Continuar?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
                 return
             m = SimMachine(name=(man.get("machine") or os.path.basename(rec_dir.rstrip("/\\")) or "Grabación"),
                            fs=fsR, sensors=sensors)
@@ -4291,6 +4316,10 @@ def main() -> int:
             rec_state["replay"] = {"snap": full[:, best_start:best_start + wlen].copy(),
                                    "fs": fsR, "rec_id": man.get("rec_id", "")}
             btn_sess_live.setVisible(True)
+            hdr_mode.setText("● REVISIÓN DE SESIÓN")
+            hdr_mode.setStyleSheet(
+                "color:#ffffff; background:#215a97; border:1px solid #3b82f6;"
+                "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
             lbl_rec.setText(f"▶ REVISIÓN: {man.get('rec_id','')} · {full.shape[1]/fsR:.0f}s")
             QtWidgets.QMessageBox.information(win, "Abrir sesión",
                 f"Reproduciendo «{man.get('rec_id','')}» ({full.shape[1]/fsR:.0f} s).\n"
@@ -4309,6 +4338,15 @@ def main() -> int:
         def _back_to_live():
             rec_state["replay"] = None
             btn_sess_live.setVisible(False); lbl_rec.setText("")
+            # restaurar el badge real/sim (sale del modo revisión)
+            if _is_sim:
+                hdr_mode.setText("● SIN HARDWARE — MODO PRUEBA")
+                hdr_mode.setStyleSheet("color:#ffffff; background:#b91c1c; border:1px solid #ef4444;"
+                                       "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
+            else:
+                hdr_mode.setText("● HARDWARE REAL")
+                hdr_mode.setStyleSheet("color:#052e16; background:#4ade80; border:1px solid #16a34a;"
+                                       "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
 
         btn_sess_open.clicked.connect(_open_selected)
         btn_sess_live.clicked.connect(_back_to_live)
