@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.7.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -437,15 +437,68 @@ def main() -> int:
         act_clear = QtGui.QAction("Delete data", win)
         act_export = QtGui.QAction("Export configuration to file…", win)
         act_import = QtGui.QAction("Import configuration from file…", win)
+        act_opendata = QtGui.QAction("Open saved session…  (reprocess)", win)
         act_folder = QtGui.QAction("Open data folder…", win)
         act_unlock = QtGui.QAction("Unlock all configuration steps", win)
         act_quit = QtGui.QAction("Quit", win)
         for a in (act_start, act_stop, act_save, act_sync, act_clear):
             m_file.addAction(a)
-        m_file.addSeparator(); m_file.addAction(act_export); m_file.addAction(act_import)
+        m_file.addSeparator(); m_file.addAction(act_opendata)
+        m_file.addAction(act_export); m_file.addAction(act_import)
         m_file.addAction(act_folder)
         m_file.addAction(act_unlock)
         m_file.addSeparator(); m_file.addAction(act_quit)
+
+        def _open_saved_session(*_):
+            """Abre una grabación CUALQUIERA (precarga todo): reconstruye la máquina desde
+            el manifest del run y rearma la ventana en modo revisión. No exige reconfigurar."""
+            from core.remote_monitoring.sim_machine import wm_data_root, SimMachine, SensorSpec
+            import json as _json, tempfile as _tmp
+            cap = os.path.join(wm_data_root(), "Capturas")
+            rec_dir = QtWidgets.QFileDialog.getExistingDirectory(
+                win, "Elegí la carpeta del run (la que tiene manifest.json)", cap)
+            if not rec_dir:
+                return
+            mp = os.path.join(rec_dir, "manifest.json")
+            if not os.path.isfile(mp):
+                QtWidgets.QMessageBox.warning(win, "Abrir sesión",
+                    "Esa carpeta no es un run. Entrá a Capturas/<equipo>/<run>/ (debe tener manifest.json).")
+                return
+            try:
+                man = _json.load(open(mp))
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "Abrir sesión", f"Manifest ilegible: {e}")
+                return
+            fsR = float(man.get("sample_rate_hz") or man.get("fs") or 5120.0)
+            sensors = []
+            for ch in (man.get("channels") or []):
+                nm = ch.get("name", f"CH{len(sensors)}")
+                bnc = int(ch.get("bnc_port") or (len(sensors) + 1))
+                sens = float(ch.get("sensitivity_mv_per_eu") or 100.0)
+                u = (ch.get("units") or "").lower(); cp = (ch.get("coupling") or "").upper()
+                if "kph" in nm.lower() or "pulse" in u:
+                    kind = "keyphasor"
+                elif "mil" in u or "µm" in u or "um" in u or "micron" in u:
+                    kind = "prox"
+                elif "mm/s" in u or "in/s" in u or "ips" in u:
+                    kind = "vel"
+                elif " g" in (" " + u) or cp == "IEPE":
+                    kind = "accel"
+                else:
+                    kind = "prox" if cp == "DC" else "accel"
+                side = "L" if nm.upper().endswith("Y") else ("R" if nm.upper().endswith("X") else "")
+                sensors.append(SensorSpec(nm, kind, bnc, sens,
+                                          angle=(45.0 if kind == "prox" else 0.0), side=side))
+            if not any(s.kind != "keyphasor" for s in sensors):
+                QtWidgets.QMessageBox.warning(win, "Abrir sesión",
+                    "El run no tiene canales de vibración en el manifest.")
+                return
+            m = SimMachine(name=(man.get("machine") or os.path.basename(rec_dir.rstrip("/\\")) or "Grabación"),
+                           fs=fsR, sensors=sensors)
+            path = os.path.join(_tmp.gettempdir(), "wm_replay_machine.json"); m.save(path)
+            pending["path"] = path; pending["replay"] = rec_dir      # main rearma + auto-reproduce
+            app.quit()
+        act_opendata.triggered.connect(_open_saved_session)
 
         def _open_data_folder(*_):
             try:
@@ -4319,6 +4372,11 @@ def main() -> int:
 
         win._agent = agent
         win._timer = timer
+        # Si venimos de "Open saved session…": al terminar de armar la ventana (ya con los
+        # canales del run), auto-reproducí la grabación → precarga Bode/Polar/Órbita/etc.
+        _rpdir = pending.pop("replay", None)
+        if _rpdir:
+            QtCore.QTimer.singleShot(350, lambda d=_rpdir: _open_recording(d))
         return win
 
     cur = {"win": None}
