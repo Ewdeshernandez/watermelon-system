@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.7.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.5"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -3782,6 +3782,11 @@ def main() -> int:
         btn_diag_cloud.clicked.connect(do_upload_report)
 
         def do_start():
+            # Si veníamos revisando una sesión guardada (replay), SALIR de revisión al
+            # iniciar una adquisición en vivo (si no, update() seguía dibujando la grabación
+            # y "no mostraba datos" nuevos).
+            if rec_state.get("replay") is not None:
+                _back_to_live()
             # Intención (Fase 2): captura local (disco) vs monitoreo en línea (nube).
             _online = (cb_dest.currentIndex() == 1)
             rec_state["online"] = _online
