@@ -95,7 +95,11 @@ class NIStreamSource(StreamSource):
         _fs_real = float(fs)
         try:
             _r = float(task.timing.samp_clk_rate)
-            if _r > 0:
+            # SANITY: aceptar el readback solo si es cercano al pedido (0.5×..2×). Si el
+            # driver devuelve un valor absurdo (0, 1, o la tasa de otro reloj), quedarse
+            # con el rate válido calculado — si no, sample_rate_hz se corrompe y
+            # snapshot(2 s) pide muy pocas muestras → la UI no muestra NADA.
+            if 0.5 * fs <= _r <= 2.0 * fs:
                 _fs_real = _r
         except Exception:  # noqa: BLE001
             pass
