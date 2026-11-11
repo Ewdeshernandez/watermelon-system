@@ -20,11 +20,14 @@ escribe.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Callable, List, Optional
 
 import numpy as np
+
+log = logging.getLogger("watermelon.agent")
 
 from core.remote_monitoring.ring_buffer import RingBuffer
 from core.remote_monitoring.stream_source import StreamSource
@@ -54,6 +57,7 @@ class AcqAgent:
         self._last_persist = 0.0
         self._blocks_read = 0
         self._started = False
+        self.last_error: Optional[str] = None   # error del hilo de adquisición (no silencioso)
 
     # ------------------------------------------------------------ helpers
     @property
@@ -117,7 +121,17 @@ class AcqAgent:
         self.pump(n)
 
     def _loop(self) -> None:
-        self._ensure_started()
+        # Regla de oro: el hilo NO debe morir en silencio. Si source.start()/read_block()
+        # fallan (task NI mal configurado, canal inexistente, chasis ausente, etc.) se
+        # guarda el error en self.last_error para que la UI lo muestre (antes el hilo
+        # moría sin aviso → "todo en blanco" sin explicación).
+        try:
+            self._ensure_started()
+        except Exception as e:  # noqa: BLE001
+            import traceback
+            self.last_error = f"start: {type(e).__name__}: {e}"
+            log.error("acq start failed: %s", traceback.format_exc())
+            return
         # Con hardware real, read_block() BLOQUEA hasta que el DAQ llena el bloque
         # (ya corre a tiempo real). Con el SIMULADOR, read_block() devuelve al
         # instante → hay que PACEAR a tiempo real, si no: (1) el arranque de 90 s
@@ -127,7 +141,13 @@ class AcqAgent:
         dt = float(getattr(self.source.config, "block_seconds", 0.1))
         next_t = time.monotonic()
         while not self._stop_evt.is_set():
-            block = self.source.read_block()
+            try:
+                block = self.source.read_block()
+            except Exception as e:  # noqa: BLE001
+                import traceback
+                self.last_error = f"read: {type(e).__name__}: {e}"
+                log.error("acq read failed: %s", traceback.format_exc())
+                return
             self._ingest(block, time.monotonic())
             if sim:
                 next_t += dt

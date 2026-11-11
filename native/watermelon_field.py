@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.7.8"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.9"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -3137,6 +3137,17 @@ def main() -> int:
             else:
                 snap = agent.snapshot(2.0)
                 if snap.shape[1] < 16:
+                    # Si el hilo de adquisición falló (task NI mal, canal/BNC inexistente,
+                    # chasis ausente…), mostrarlo UNA vez en vez de quedar "todo en blanco".
+                    _err = getattr(agent, "last_error", None)
+                    if _err and not rec_state.get("err_shown"):
+                        rec_state["err_shown"] = True
+                        lbl_state.setText(f"⚠ Adquisición falló: {_err}")
+                        QtWidgets.QMessageBox.critical(win, "Adquisición sin datos",
+                            f"La adquisición no entregó datos:\n\n{_err}\n\n"
+                            "Revisá: cDAQ/9229 conectado y encendido, canales/BNC correctos "
+                            "(--chans/--kph-bnc), driver NI-DAQmx instalado, y que el módulo "
+                            "no esté ocupado por otro programa (NI MAX, otra instancia).")
                     return
                 fs = agent.sample_rate_hz
                 rpm = agent.estimate_rpm(snap)
@@ -3787,6 +3798,12 @@ def main() -> int:
             # y "no mostraba datos" nuevos).
             if rec_state.get("replay") is not None:
                 _back_to_live()
+            # Reset del error de adquisición → cada Start vuelve a diagnosticar limpio.
+            rec_state["err_shown"] = False
+            try:
+                agent.last_error = None
+            except Exception:  # noqa: BLE001
+                pass
             # Intención (Fase 2): captura local (disco) vs monitoreo en línea (nube).
             _online = (cb_dest.currentIndex() == 1)
             rec_state["online"] = _online
