@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.7.9"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.7.10"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -4356,6 +4356,10 @@ def main() -> int:
                 p0 += hop
             rec_state["replay"] = {"snap": full[:, best_start:best_start + wlen].copy(),
                                    "fs": fsR, "rec_id": man.get("rec_id", "")}
+            # El panel Monitoring + Orbit/Waveform se dibujan desde update(); en replay abierto
+            # sin Start el timer está parado → arrancarlo para que refresque la ventana cargada.
+            if not timer.isActive():
+                timer.start(90)
             btn_sess_live.setVisible(True)
             hdr_mode.setText("● REVISIÓN DE SESIÓN")
             hdr_mode.setStyleSheet(
@@ -4378,6 +4382,9 @@ def main() -> int:
 
         def _back_to_live():
             rec_state["replay"] = None
+            # si el timer solo se había arrancado para la revisión (no hay adquisición viva), pararlo
+            if not act_stop.isEnabled():
+                timer.stop()
             btn_sess_live.setVisible(False); lbl_rec.setText("")
             # restaurar el badge real/sim (sale del modo revisión)
             if _is_sim:
