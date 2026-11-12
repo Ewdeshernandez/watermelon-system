@@ -111,49 +111,88 @@ def _get_secrets() -> Dict[str, Any]:
         return {}
 
 
-def get_email_backend_status() -> Dict[str, Any]:
-    """Devuelve qué backend está configurado y si tiene los campos
-    mínimos necesarios. Útil para mostrar diagnóstico en admin panel.
-
-    Ciclo 17.16.1: usa _read_secret_section() para evitar el bug del
-    AttrDict de Streamlit Cloud que rompía el isinstance(x, dict) check.
-    """
-    smtp = _read_secret_section("email", "smtp")
-    graph = _read_secret_section("email", "graph")
-
-    smtp_ok = bool(
+def _smtp_ok(smtp: Dict[str, Any]) -> bool:
+    return bool(
         smtp.get("host") and smtp.get("port")
         and smtp.get("username") and smtp.get("password")
         and smtp.get("from_email")
     )
-    graph_ok = bool(
+
+
+def _graph_ok(graph: Dict[str, Any]) -> bool:
+    return bool(
         graph.get("tenant_id") and graph.get("client_id")
         and graph.get("client_secret") and graph.get("from_email")
     )
 
+
+def _resend_ok(resend: Dict[str, Any]) -> bool:
+    return bool(resend.get("api_key") and resend.get("from_email"))
+
+
+def _backend_chain() -> List[str]:
+    """Orden de intento: SMTP → Graph (corporativo) → Resend (fallback
+    independiente de M365). send_email los prueba en orden y usa el
+    primero que ENVÍA bien; si el corporativo está caído (p.ej. Exchange
+    Online 503), el OTP igual sale por Resend y el login no se cae."""
+    chain = []
+    if _smtp_ok(_read_secret_section("email", "smtp")):
+        chain.append("smtp")
+    if _graph_ok(_read_secret_section("email", "graph")):
+        chain.append("graph")
+    if _resend_ok(_read_secret_section("email", "resend")):
+        chain.append("resend")
+    return chain
+
+
+def get_email_backend_status() -> Dict[str, Any]:
+    """Devuelve qué backend(s) está(n) configurado(s) y si tienen los
+    campos mínimos. Útil para mostrar diagnóstico en admin panel.
+
+    Ciclo 17.16.1: usa _read_secret_section() para evitar el bug del
+    AttrDict de Streamlit Cloud que rompía el isinstance(x, dict) check.
+    Ciclo 17.17: soporta Resend como fallback y reporta la cadena.
+    """
+    smtp = _read_secret_section("email", "smtp")
+    graph = _read_secret_section("email", "graph")
+    resend = _read_secret_section("email", "resend")
+
+    smtp_ok = _smtp_ok(smtp)
+    graph_ok = _graph_ok(graph)
+    resend_ok = _resend_ok(resend)
+    chain = _backend_chain()
+
     if smtp_ok:
         return {
-            "configured": True,
-            "backend": "smtp",
+            "configured": True, "backend": "smtp", "chain": chain,
+            "fallback_resend": resend_ok,
             "from_email": smtp.get("from_email", ""),
             "host": smtp.get("host", ""),
-            "details": "SMTP backend listo.",
+            "details": f"SMTP backend listo. Cadena: {' → '.join(chain)}",
         }
     if graph_ok:
         return {
-            "configured": True,
-            "backend": "graph",
+            "configured": True, "backend": "graph", "chain": chain,
+            "fallback_resend": resend_ok,
             "from_email": graph.get("from_email", ""),
             "tenant_id": graph.get("tenant_id", "")[:8] + "…",
-            "details": "Microsoft Graph API backend listo.",
+            "details": f"Microsoft Graph API backend listo. Cadena: {' → '.join(chain)}",
+        }
+    if resend_ok:
+        return {
+            "configured": True, "backend": "resend", "chain": chain,
+            "fallback_resend": True,
+            "from_email": resend.get("from_email", ""),
+            "details": "Resend backend listo (único configurado).",
         }
     return {
-        "configured": False,
-        "backend": None,
+        "configured": False, "backend": None, "chain": [],
+        "fallback_resend": False,
         "details": (
             "NO hay backend de email configurado. Agregá en secrets:\n"
             "  [email.smtp]  con host/port/username/password/from_email\n"
-            "  o [email.graph]  con tenant_id/client_id/client_secret/from_email"
+            "  [email.graph] con tenant_id/client_id/client_secret/from_email\n"
+            "  [email.resend] con api_key/from_email  (fallback independiente de M365)"
         ),
     }
 
@@ -318,6 +357,73 @@ def _send_via_graph(
 
 
 # =============================================================
+# Resend backend (fallback independiente de Microsoft 365)
+# =============================================================
+
+def _send_via_resend(
+    *,
+    to: str,
+    subject: str,
+    body_text: str,
+    body_html: str = "",
+    attachments: Optional[List[Tuple[str, bytes, str]]] = None,
+) -> Dict[str, Any]:
+    """Envía email vía Resend API (https://resend.com).
+
+    Requiere en st.secrets:
+      [email.resend]
+      api_key    = "re_xxx"
+      from_email = "avisos@watermelonsystem.app"   # dominio VERIFICADO en Resend
+      from_name  = "Watermelon System"
+
+    No depende de Exchange Online / M365 → sirve de fallback cuando el
+    backend corporativo (Graph/SMTP) está caído.
+    """
+    cfg = _read_secret_section("email", "resend")
+    api_key = cfg.get("api_key", "")
+    from_email = cfg.get("from_email", "")
+    from_name = cfg.get("from_name", "Watermelon System")
+    if not api_key or not from_email:
+        return {"ok": False, "error": "Resend sin api_key/from_email."}
+
+    try:
+        import httpx
+    except ImportError:
+        return {"ok": False, "error": "El paquete 'httpx' es requerido para Resend."}
+
+    payload: Dict[str, Any] = {
+        "from": f"{from_name} <{from_email}>",
+        "to": [to],
+        "subject": subject,
+        "text": body_text or "",
+    }
+    if body_html:
+        payload["html"] = body_html
+    if attachments:
+        payload["attachments"] = [
+            {"filename": fname, "content": base64.b64encode(data).decode("ascii")}
+            for fname, data, _mime in attachments
+        ]
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(
+                "https://api.resend.com/emails",
+                json=payload,
+                headers={"Authorization": f"Bearer {api_key}",
+                         "Content-Type": "application/json"},
+            )
+            if r.status_code in (200, 201):
+                return {"ok": True, "backend": "resend", "to": to,
+                        "id": (r.json() or {}).get("id", "")}
+            return {"ok": False, "error": f"Resend falló (status {r.status_code}): {r.text[:300]}"}
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": f"Resend HTTP error: {e}"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"Resend error: {type(e).__name__}: {e}"}
+
+
+# =============================================================
 # API PÚBLICA
 # =============================================================
 
@@ -351,41 +457,38 @@ def send_email(
         print(f"[WM_EMAIL] FAIL · validation · {msg}", file=_sys.stderr, flush=True)
         return {"ok": False, "error": msg}
 
-    status = get_email_backend_status()
-    if not status["configured"]:
-        print(f"[WM_EMAIL] FAIL · no_backend · {status['details']}",
+    chain = _backend_chain()
+    if not chain:
+        details = get_email_backend_status()["details"]
+        print(f"[WM_EMAIL] FAIL · no_backend · {details}", file=_sys.stderr, flush=True)
+        return {"ok": False, "error": details}
+
+    _senders = {"smtp": _send_via_smtp, "graph": _send_via_graph, "resend": _send_via_resend}
+    last = {"ok": False, "error": "Sin backend que responda."}
+    # Prueba cada backend en orden; usa el PRIMERO que envía bien. Si el
+    # corporativo (Graph/SMTP) está caído, cae a Resend → el OTP igual sale.
+    for backend in chain:
+        print(f"[WM_EMAIL] sending via {backend} · to={to} · subject={subject!r}",
               file=_sys.stderr, flush=True)
-        return {"ok": False, "error": status["details"]}
+        try:
+            result = _senders[backend](
+                to=to, subject=subject,
+                body_text=body_text, body_html=body_html,
+                attachments=attachments,
+            )
+        except Exception as e:  # noqa: BLE001
+            result = {"ok": False, "error": f"{backend} excepción: {type(e).__name__}: {e}"}
 
-    backend = status["backend"]
-    print(f"[WM_EMAIL] sending via {backend} · to={to} · subject={subject!r}",
-          file=_sys.stderr, flush=True)
-
-    if backend == "smtp":
-        result = _send_via_smtp(
-            to=to, subject=subject,
-            body_text=body_text, body_html=body_html,
-            attachments=attachments,
-        )
-    elif backend == "graph":
-        result = _send_via_graph(
-            to=to, subject=subject,
-            body_text=body_text, body_html=body_html,
-            attachments=attachments,
-        )
-    else:
-        result = {"ok": False, "error": "Backend desconocido."}
-
-    if result.get("ok"):
-        print(f"[WM_EMAIL] OK · {backend} · to={to}", file=_sys.stderr, flush=True)
-    else:
-        # CRÍTICO: si falla, imprimimos el error completo a stderr para
-        # que aparezca en logs de Cloud y se pueda diagnosticar.
+        if result.get("ok"):
+            print(f"[WM_EMAIL] OK · {backend} · to={to}", file=_sys.stderr, flush=True)
+            return result
         err = result.get("error", "?")
         print(f"[WM_EMAIL] FAIL · {backend} · to={to} · ERROR: {err}",
               file=_sys.stderr, flush=True)
+        last = result
+        # continúa al siguiente backend de la cadena (fallback)
 
-    return result
+    return last
 
 
 def send_password_reset_email(
