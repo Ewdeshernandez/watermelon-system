@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.7"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.8"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2540,6 +2540,20 @@ def main() -> int:
         an_tabs = QtWidgets.QTabWidget()
         an_tabs.addTab(mon_w, "Monitoring")
 
+        # --- Tendencias (overall por cojinete vs tiempo; se acumula SIEMPRE) ---
+        trend_w = QtWidgets.QWidget(); trend_l = QtWidgets.QVBoxLayout(trend_w)
+        _trh = QtWidgets.QHBoxLayout()
+        _trh.addWidget(QtWidgets.QLabel(
+            "<b>Tendencias</b>  <span style='color:#8aa0b6'>overall por cojinete vs tiempo</span>"))
+        _trh.addStretch(1); trend_l.addLayout(_trh)
+        gl_trend = pg.GraphicsLayoutWidget(); trend_l.addWidget(gl_trend, 1)
+        p_trend = gl_trend.addPlot(); p_trend.showGrid(x=True, y=True, alpha=0.12)
+        p_trend.setLabel("left", "Overall"); p_trend.setLabel("bottom", "tiempo (s)")
+        p_trend.addLegend(offset=(10, 10))
+        trend_curves = {}
+        trend_buf = {"t": [], "v": {}}
+        an_tabs.addTab(trend_w, "Trends")
+
         # --- Onda (ANÁLISIS: formas de onda + espectro) ---
         ond_w = QtWidgets.QWidget(); ond_l = QtWidgets.QVBoxLayout(ond_w)
         top = QtWidgets.QHBoxLayout()
@@ -3034,8 +3048,8 @@ def main() -> int:
             "font-weight:600;font-size:13px;margin:2px 1px;}"
             "QListWidget#cfgRail::item:selected{background:%s;color:%s;"
             "border-left:3px solid %s;padding-left:10px;}" % (LINE, MUTE, PANEL2, INK, CORN))
-        _AN_LABELS = {"Monitoring": "Monitoreo", "Waveform": "Forma de onda", "Orbit": "Órbita",
-                      "Bode": "Bode", "Polar": "Polar", "Cascade": "Cascada",
+        _AN_LABELS = {"Monitoring": "Monitoreo", "Trends": "Tendencias", "Waveform": "Forma de onda",
+                      "Orbit": "Órbita", "Bode": "Bode", "Polar": "Polar", "Cascade": "Cascada",
                       "Shaft Centerline": "Shaft Centerline", "Diagnostics": "Diagnóstico"}
         for _i in range(an_tabs.count()):
             an_rail.addItem(_AN_LABELS.get(an_tabs.tabText(_i), an_tabs.tabText(_i)))
@@ -3267,6 +3281,26 @@ def main() -> int:
             lbl_rpm.setText((f"RPM: {rpm:.0f}" + (" (revisión)" if _rp is not None else ""))
                             if rpm else ("RPM: — (revisión)" if _rp is not None else "RPM: —"))
             f1 = (rpm / 60.0) if rpm else None
+            # --- Acumular Tendencias (overall por cojinete) ~cada 2 s, SIEMPRE (no solo
+            #     con la vista abierta) para que el histórico exista al abrirla. ---
+            rec_state["tr_n"] = rec_state.get("tr_n", 0) + 1
+            if rec_state["tr_n"] % 22 == 0:
+                import time as _time
+                _bov = {}
+                for (_i2, _c2) in vib[:8]:
+                    _eu = snap[_i2] * 1000.0 / (_c2.sensitivity_mv_per_eu or 1.0)
+                    _eu0 = _eu - _eu.mean()
+                    _ov = (float(_eu0.max() - _eu0.min()) if _ckind(_c2) == "prox"
+                           else float(np.sqrt(np.mean(_eu0 ** 2))))
+                    _bn = _bearing_no(_c2.name) or 1
+                    _bov[_bn] = max(_bov.get(_bn, 0.0), _ov)
+                trend_buf["t"].append(_time.time())
+                for _bn, _ov in _bov.items():
+                    trend_buf["v"].setdefault(_bn, []).append(_ov)
+                if len(trend_buf["t"]) > 4000:
+                    trend_buf["t"] = trend_buf["t"][-4000:]
+                    for _bn in trend_buf["v"]:
+                        trend_buf["v"][_bn] = trend_buf["v"][_bn][-4000:]
             # Monitoreo en línea (Fase 2): publica lecturas ~cada 5 s, corra cual corra la pestaña
             if _rp is None and rec_state.get("online") and act_stop.isEnabled():
                 rec_state["pub_n"] = rec_state.get("pub_n", 0) + 1
@@ -3690,6 +3724,19 @@ def main() -> int:
                         sc = (span / max(1, len(idx))) * 1.5 / pk
                         for cv, i in zip(cl["curves"], idx):
                             cv.setData(fr, rr[i] + mat[i] * sc)
+            elif cur == "Trends":
+                if trend_buf["t"]:
+                    _t0 = trend_buf["t"][0]
+                    _xs = [_tt - _t0 for _tt in trend_buf["t"]]
+                    for _bn in sorted(trend_buf["v"]):
+                        _vv = trend_buf["v"][_bn]
+                        _cv = trend_curves.get(_bn)
+                        if _cv is None:
+                            _cv = p_trend.plot(pen=pg.mkPen(pg.intColor(_bn, hues=8), width=2),
+                                               name=f"Brg {_bn}")
+                            trend_curves[_bn] = _cv
+                        _n = min(len(_vv), len(_xs))
+                        _cv.setData(_xs[-_n:], _vv[-_n:])
 
         # --- Bilingual strings for the preliminary report (EN default, ES for the client) ---
         REPORT_T = {
