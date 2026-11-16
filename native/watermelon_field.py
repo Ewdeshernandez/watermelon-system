@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -724,11 +724,26 @@ def main() -> int:
                                                            QtWidgets.QSizePolicy.Preferred)
         spacer.setStyleSheet("background:transparent;")   # sin esto se ve un recuadro blanco feo
         tb.addWidget(spacer)
-        # Derecha = la CARA del software: marca + versión (no el nombre de máquina).
+        # Derecha del MISMO toolbar (fusionado, SIN banda de marca aparte): nombre de
+        # máquina en vivo + estado (HW real / sesión) + marca y versión. Así se elimina
+        # la banda duplicada de arriba.
+        _GENERIC_MACHINE = {"Rotor_Kit_Field", "Rotor_Kit", "Machine", "Rotor Kit", ""}
+        _mach = QtWidgets.QLabel("·  nueva máquina")      # se actualiza en vivo con el nombre
+        _mach.setStyleSheet("color:#9db6cd; font-family:'Consolas',monospace; font-size:12px;")
+        tb.addWidget(_mach)
+        tb.addSeparator()
+        hdr_mode = QtWidgets.QLabel()                     # HARDWARE REAL / SIN HW (texto se setea abajo)
+        tb.addWidget(hdr_mode)
+        hdr_status = QtWidgets.QLabel("● Standby")
+        hdr_status.setStyleSheet(
+            "color:#9db6cd; background:#15273a; border:1px solid #27425e;"
+            "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
+        tb.addWidget(hdr_status)
+        tb.addSeparator()
         lbl_machine = QtWidgets.QLabel(
             "<span style='color:#eafff2;font-weight:800;letter-spacing:1px;'>WATERMELON</span>"
             "<span style='color:#86efac;font-weight:800;letter-spacing:1px;'>&nbsp;ROTORDYNAMICS</span>"
-            f"<span style='color:#bfe8cf;font-weight:600;'>&nbsp;&nbsp;v{__version__}&nbsp;</span>")
+            f"<span style='color:#9db6cd;font-weight:600;'>&nbsp;&nbsp;v{__version__}&nbsp;</span>")
         lbl_machine.setTextFormat(QtCore.Qt.RichText)
         lbl_machine.setStyleSheet("font-size:13px;")
         tb.addWidget(lbl_machine)
@@ -748,30 +763,8 @@ def main() -> int:
         tabs = QtWidgets.QTabWidget()
         live_skin = None   # piel HTML embebida (tab "Live"); se crea abajo si QtWebEngine está
 
-        # --- Banda de marca (chrome industrial · familia Torsional/Modal/Balanceo) ---
-        _hdr = QtWidgets.QFrame(); _hdr.setObjectName("wmBrandBar")
-        _hdr.setStyleSheet(
-            "QFrame#wmBrandBar{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #0e1a28, stop:0.6 #16293d, stop:1 #1c3a52);"
-            "border-bottom:2px solid #e23b55;}")   # navy + franja roja = rebanada de sandía
-        _hb = QtWidgets.QHBoxLayout(_hdr); _hb.setContentsMargins(16, 8, 14, 8); _hb.setSpacing(12)
-        _brand = QtWidgets.QLabel(
-            "<span style='color:#eafff2;font-weight:800;letter-spacing:2px;'>WATERMELON</span>"
-            "<span style='color:#86efac;font-weight:800;letter-spacing:2px;'>&nbsp;ROTORDYNAMICS</span>")
-        _brand.setTextFormat(QtCore.Qt.RichText)
-        _brand.setStyleSheet("font-size:15px;")
-        _hb.addWidget(_brand)
-        _mach = QtWidgets.QLabel("·  nueva máquina")   # se actualiza en vivo con el nombre
-        _mach.setStyleSheet("color:#bfe8cf; font-family:'Consolas',monospace; font-size:12px;")
-        _GENERIC_MACHINE = {"Rotor_Kit_Field", "Rotor_Kit", "Machine", "Rotor Kit", ""}
-        _hb.addWidget(_mach)
-        _hb.addStretch(1)
-        hdr_status = QtWidgets.QLabel("● Standby")
-        hdr_status.setStyleSheet(
-            "color:#9db6cd; background:#15273a; border:1px solid #27425e;"
-            "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
-        _hb.addWidget(hdr_status)
-
+        # (La banda de marca aparte se eliminó: marca + nombre de máquina + estado
+        #  ahora viven en el toolbar de arriba → una banda apilada menos.)
         _wrap = QtWidgets.QWidget()
         _wv = QtWidgets.QVBoxLayout(_wrap); _wv.setContentsMargins(0, 0, 0, 0); _wv.setSpacing(0)
         # --- Stepper de flujo (Fase 1: primero configurar+validar, luego tomar datos) ---
@@ -798,7 +791,7 @@ def main() -> int:
 
         # El stepper (_flow) ya NO va como banda global: se mueve DENTRO del tab Config
         # (abajo, cfg_ol.insertWidget) → menos bandas apiladas arriba.
-        _wv.addWidget(_hdr); _wv.addWidget(tabs, 1)
+        _wv.addWidget(tabs, 1)
         win.setCentralWidget(_wrap)
         act_start.setEnabled(False)          # bloqueado hasta validar (Fase 1)
         act_start.setToolTip("Valida la configuración (pestaña Validation) antes de iniciar.")
@@ -869,7 +862,7 @@ def main() -> int:
         # Badge REAL/SIN-HARDWARE inequívoco en el header (regla de oro: nunca simular
         # en silencio). White-label: sin marca del fabricante. Rojo = sin hardware;
         # verde = adquisición real con hardware Watermelon.
-        hdr_mode = QtWidgets.QLabel()
+        # hdr_mode ya existe (creado en el toolbar); acá solo se fija texto/estilo.
         if _is_sim:
             hdr_mode.setText("● SIN HARDWARE — MODO PRUEBA")
             hdr_mode.setStyleSheet(
@@ -880,10 +873,6 @@ def main() -> int:
             hdr_mode.setStyleSheet(
                 "color:#052e16; background:#4ade80; border:1px solid #16a34a;"
                 "border-radius:999px; padding:4px 14px; font-weight:800; font-size:11px;")
-        try:
-            _hb.insertWidget(_hb.indexOf(hdr_status), hdr_mode)
-        except Exception:  # noqa: BLE001
-            _hb.addWidget(hdr_mode)
 
         def _dsp(mn, mx, val, step=100.0):
             s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s
