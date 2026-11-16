@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.10.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.10.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -4821,7 +4821,12 @@ def main() -> int:
         btn_sess_live.clicked.connect(_back_to_live)
         btn_sess_ref.clicked.connect(_refresh_sessions)
         btn_sess_up.clicked.connect(lambda: (do_sync(), _refresh_sessions()))
-        tabs.addTab(sess_w, "Capturas")
+        # Capturas va DENTRO del rail de Análisis (grupo Datos), no como tab suelto.
+        an_tabs.addTab(sess_w, "Capturas")
+        an_rail.addItem("Capturas")
+        _an_idx.append(an_tabs.indexOf(sess_w))
+        an_tabs.currentChanged.connect(
+            lambda i: _refresh_sessions() if an_tabs.tabText(i) == "Capturas" else None)
 
         # --- Tab LIVE: piel HTML embebida (híbrido web/campo) con datos en vivo ---
         # Se inserta como 2ª pestaña (después de Configuration). Si QtWebEngine no
