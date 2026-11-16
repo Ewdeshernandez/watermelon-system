@@ -54,7 +54,7 @@ _N = 150  # muestras por ventana de scope
 class FieldSkin(QtWidgets.QWidget):
     """Piel HTML embebida. Reusable como pestaña dentro del app de campo."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, embed: bool = True):
         super().__init__(parent)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -62,7 +62,10 @@ class FieldSkin(QtWidgets.QWidget):
         lay.addWidget(self.view)
         self._ph = 0.0
         self._timer = None
-        self.view.load(QtCore.QUrl.fromLocalFile(_skin_path()))
+        url = QtCore.QUrl.fromLocalFile(_skin_path())
+        if embed:               # dentro de un tab del app → sin chrome propio (no duplicar)
+            url.setQuery("embed=1")
+        self.view.load(url)
 
     # --- API de datos ---------------------------------------------------
     def push(self, payload: dict) -> None:

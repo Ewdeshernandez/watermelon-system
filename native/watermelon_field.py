@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.8.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.8.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

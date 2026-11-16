@@ -22,6 +22,11 @@ html,body{height:100%}
 body{font-family:var(--sans);color:var(--ink);background:#05080c;background-image:radial-gradient(1000px 600px at 60% -10%,#0f1f30,transparent 60%);min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:18px;-webkit-font-smoothing:antialiased}
 
 .app{width:100%;max-width:1320px;border:1px solid #223850;border-radius:11px;overflow:hidden;background:var(--bg);box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column}
+/* Modo EMBEBIDO: la piel va dentro de un tab del app nativo → ocultar su propio
+   chrome (barra título/menú/toolbar/status) para no duplicar el del app. */
+.embed body{padding:0;display:block;background:var(--bg)}
+.embed .app{max-width:none;border:0;border-radius:0;box-shadow:none}
+.embed .titlebar,.embed .menubar,.embed .toolbar,.embed .statusbar{display:none!important}
 .titlebar{display:flex;align-items:center;gap:10px;padding:9px 14px;background:linear-gradient(180deg,#0f1d2b,#0b1521);border-bottom:1px solid var(--line)}
 .titlebar .app-nm{font-size:12.5px;font-weight:600;color:#cfe0f0}.titlebar .app-nm b{color:#fff}
 .titlebar .ver{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
@@ -113,6 +118,9 @@ body{font-family:var(--sans);color:var(--ink);background:#05080c;background-imag
 </style>
 </head>
 <body>
+<script>/* embebido dentro de un tab del app nativo → oculta el chrome propio */
+if(location.search.indexOf('embed')>=0||location.hash.indexOf('embed')>=0)
+  document.documentElement.classList.add('embed');</script>
 <div class="app">
   <div class="titlebar"><span>&#127817;</span><span class="app-nm"><b>Watermelon</b> Rotordynamics <span style="color:var(--dim)">&middot;</span> Campo</span><span class="ver">v0.7.10</span><div class="winbtns"><span>&#8211;</span><span>&#9633;</span><span>&#10005;</span></div></div>
   <div class="menubar"><div>Archivo</div><div>Ver</div><div>Sesi&oacute;n</div><div>Hardware</div><div>An&aacute;lisis</div><div>Reporte</div><div>Ayuda</div></div>
