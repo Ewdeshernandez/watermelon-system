@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.5"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.6"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -3023,6 +3023,7 @@ def main() -> int:
 
         # --- Envolver an_tabs con rail lateral y agregarlo como UN tab "Análisis"
         #     (mismo esquema de barra lateral que Live/Config). ---
+        an_tabs.addTab(diag_w, "Diagnostics")      # Diagnóstico va DENTRO de Análisis
         an_tabs.tabBar().hide()
         an_rail = QtWidgets.QListWidget(); an_rail.setObjectName("cfgRail")
         an_rail.setFixedWidth(182); an_rail.setFocusPolicy(QtCore.Qt.NoFocus)
@@ -3035,7 +3036,7 @@ def main() -> int:
             "border-left:3px solid %s;padding-left:10px;}" % (LINE, MUTE, PANEL2, INK, CORN))
         _AN_LABELS = {"Monitoring": "Monitoreo", "Waveform": "Forma de onda", "Orbit": "Órbita",
                       "Bode": "Bode", "Polar": "Polar", "Cascade": "Cascada",
-                      "Shaft Centerline": "Shaft Centerline"}
+                      "Shaft Centerline": "Shaft Centerline", "Diagnostics": "Diagnóstico"}
         for _i in range(an_tabs.count()):
             an_rail.addItem(_AN_LABELS.get(an_tabs.tabText(_i), an_tabs.tabText(_i)))
         an_rail.setCurrentRow(an_tabs.currentIndex())
@@ -3046,8 +3047,6 @@ def main() -> int:
         _anl.setContentsMargins(0, 0, 0, 0); _anl.setSpacing(12)
         _anl.addWidget(an_rail); _anl.addWidget(an_tabs, 1)
         tabs.addTab(an_outer, "Análisis")
-
-        tabs.addTab(diag_w, "Diagnostics")
 
         lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("stopped")
         lbl_rec = QtWidgets.QLabel("")
@@ -4554,7 +4553,7 @@ def main() -> int:
         btn_sess_live.clicked.connect(_back_to_live)
         btn_sess_ref.clicked.connect(_refresh_sessions)
         btn_sess_up.clicked.connect(lambda: (do_sync(), _refresh_sessions()))
-        tabs.addTab(sess_w, "Sessions")
+        tabs.addTab(sess_w, "Capturas")
 
         # --- Tab LIVE: piel HTML embebida (híbrido web/campo) con datos en vivo ---
         # Se inserta como 2ª pestaña (después de Configuration). Si QtWebEngine no
@@ -4616,7 +4615,7 @@ def main() -> int:
             _reveal_data_actions(_acquiring or _t != "Configuration")
             if _t == "Monitoring":
                 _revalidate()
-            elif _t == "Sessions":
+            elif _t == "Capturas":
                 _refresh_sessions()
         tabs.currentChanged.connect(_on_tab)
         _revalidate(); _refresh_sessions()
