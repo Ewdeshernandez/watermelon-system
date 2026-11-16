@@ -729,6 +729,7 @@ def main() -> int:
 
         # ---------------- Pestañas ----------------
         tabs = QtWidgets.QTabWidget()
+        live_skin = None   # piel HTML embebida (tab "Live"); se crea abajo si QtWebEngine está
 
         # --- Banda de marca (chrome industrial · familia Torsional/Modal/Balanceo) ---
         _hdr = QtWidgets.QFrame(); _hdr.setObjectName("wmBrandBar")
@@ -3198,6 +3199,50 @@ def main() -> int:
                         cy = dX * _mo.cos(it["aX"]) + dY * _mo.cos(it["aY"]) - clr * 0.9
                         scl_track[brg][bk] = (cx, cy)
             cur = tabs.tabText(tabs.currentIndex())
+            if cur == "Live" and live_skin is not None:
+                # Piel HTML embebida: arma el payload desde los MISMOS datos reales
+                # (ondas, overall, zona ISO, rpm) y lo empuja a la vista Monitoreo.
+                try:
+                    _kp0 = snap[kph_glob] if kph_glob is not None else None
+                    _chs = []
+                    _bagg = {}
+                    for (i, c) in vib[:8]:            # hasta 8 lanes en el scope
+                        eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
+                        eu0 = eu - eu.mean()
+                        ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c), kph0=_kp0,
+                                                   runout=_ro_for(c.name), band=_band_for(c))
+                        al, dg = _alarm_for(c)
+                        if dg and ov >= dg:
+                            sev, cls = 2, "vd"
+                        elif al and ov >= al:
+                            sev, cls = 1, "vc"
+                        else:
+                            sev, cls = 0, "va"
+                        s = eu0
+                        if s.size > 160:
+                            s = s[np.linspace(0, s.size - 1, 160).astype(int)]
+                        pk = float(np.max(np.abs(s))) or 1.0
+                        _chs.append({"name": c.name, "sub": SENSOR_LABELS.get(_ckind(c), ""),
+                                     "cls": cls, "val": f"{ov:.3g}", "unit": c.units,
+                                     "samples": [round(float(v / pk), 3) for v in s]})
+                        _bn = _bearing_no(c.name) or 1
+                        g = _bagg.setdefault(_bn, {"sev": 0, "amp": -1.0, "unit": c.units})
+                        g["sev"] = max(g["sev"], sev)
+                        if a1 >= g["amp"]:
+                            g["amp"] = a1
+                            g["unit"] = c.units
+                    _zmap = {0: ("A", "a"), 1: ("C", "c"), 2: ("D", "d")}
+                    _brs = []
+                    for _bn in sorted(_bagg):
+                        g = _bagg[_bn]
+                        z, zc = _zmap[g["sev"]]
+                        _brs.append({"zone": z, "zcls": zc, "cls": "v" + zc,
+                                     "name": f"Cojinete {_bn}", "sub": "",
+                                     "val": f"{g['amp']:.3g}" if g["amp"] >= 0 else "—",
+                                     "unit": g["unit"]})
+                    live_skin.push({"rpm": rpm or 0, "channels": _chs, "bearings": _brs})
+                except Exception:  # noqa: BLE001
+                    pass
             if cur == "Monitoring":
                 # global state (steady/run-up/coast-down) from rpm variation
                 prev = rec_state.get("prev_rpm")
@@ -4401,6 +4446,17 @@ def main() -> int:
         btn_sess_ref.clicked.connect(_refresh_sessions)
         btn_sess_up.clicked.connect(lambda: (do_sync(), _refresh_sessions()))
         tabs.addTab(sess_w, "Sessions")
+
+        # --- Tab LIVE: piel HTML embebida (híbrido web/campo) con datos en vivo ---
+        # Se inserta como 2ª pestaña (después de Configuration). Si QtWebEngine no
+        # está disponible, el app sigue funcionando sin esta vista (nunca crashea).
+        try:
+            from field_ui.web_skin import FieldSkin
+            live_skin = FieldSkin()
+            tabs.insertTab(1, live_skin, "Live")
+        except Exception as _le:  # noqa: BLE001
+            live_skin = None
+            print("Live skin no disponible (QtWebEngine?):", _le)
 
         # Auto-subida de pendientes (hilo de fondo; no congela la UI; no sube adquiriendo)
         def _auto_upload():

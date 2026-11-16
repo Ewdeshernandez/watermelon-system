@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watermelon Rotordynamics Campo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0a1016;--bg2:#0e1823;--panel:#111f2e;--panel2:#15273a;
+  --line:#1f344a;--line2:#27425e;
+  --ink:#e8f0f8;--mute:#8aa0b6;--dim:#5f7389;
+  --steel:#2f84c4;--steel-d:#1c5a8a;--cyan:#34c6e8;--amber:#e6b93f;--mag:#c678dd;
+  --za:#27c08a;--zb:#e6b93f;--zc:#ef8a3c;--zd:#ec4b52;--rec:#ec4b52;
+  --grid:rgba(120,160,200,.09);--grid2:rgba(120,160,200,.16);
+  --mono:'IBM Plex Mono',ui-monospace,monospace;--sans:'IBM Plex Sans',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--sans);color:var(--ink);background:#05080c;background-image:radial-gradient(1000px 600px at 60% -10%,#0f1f30,transparent 60%);min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:18px;-webkit-font-smoothing:antialiased}
+
+.app{width:100%;max-width:1320px;border:1px solid #223850;border-radius:11px;overflow:hidden;background:var(--bg);box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column}
+.titlebar{display:flex;align-items:center;gap:10px;padding:9px 14px;background:linear-gradient(180deg,#0f1d2b,#0b1521);border-bottom:1px solid var(--line)}
+.titlebar .app-nm{font-size:12.5px;font-weight:600;color:#cfe0f0}.titlebar .app-nm b{color:#fff}
+.titlebar .ver{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.winbtns{margin-left:auto;display:flex;gap:16px;color:var(--mute);font-size:13px}
+.menubar{display:flex;gap:4px;padding:5px 10px;background:#0c1724;border-bottom:1px solid var(--line);font-size:12px}
+.menubar div{padding:4px 10px;border-radius:5px;color:var(--mute);cursor:default}
+.menubar div:hover{background:var(--panel2);color:var(--ink)}
+.toolbar{display:flex;align-items:center;gap:8px;padding:9px 12px;background:linear-gradient(180deg,#132436,#0e1a28);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.btn{display:flex;align-items:center;gap:7px;font-family:var(--sans);font-size:12px;font-weight:600;border:1px solid var(--line2);background:var(--panel);color:var(--ink);padding:7px 13px;border-radius:7px;cursor:pointer}
+.btn.stop{color:#f0c7c9;border-color:#4a2326;background:#1a1012}.btn.stop .ico{color:var(--zd)}
+.btn.go{background:linear-gradient(180deg,#2aa97a,#1d8160);border-color:#2fbf8c;color:#fff;opacity:.55}
+.rec{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:#f0c7c9;background:rgba(236,75,82,.12);border:1px solid rgba(236,75,82,.4);padding:7px 12px;border-radius:7px}
+.rec .rd{width:9px;height:9px;border-radius:50%;background:var(--rec);animation:blink 1.4s infinite}
+@keyframes blink{50%{opacity:.25}}
+.tsep{width:1px;height:22px;background:var(--line2);margin:0 4px}
+.tbchip{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;color:var(--mute);padding:6px 10px;background:#0b1622;border:1px solid var(--line);border-radius:6px}
+.tbchip b{color:var(--ink);font-weight:600}
+.daq{margin-left:auto;display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;color:#cfe8dc;background:rgba(39,192,138,.1);border:1px solid rgba(39,192,138,.3);padding:7px 12px;border-radius:7px}
+.daq .ld{width:8px;height:8px;border-radius:50%;background:var(--za);box-shadow:0 0 8px var(--za)}
+
+.main{display:grid;grid-template-columns:150px 1fr 290px;min-height:560px}
+.vrail{background:var(--bg2);border-right:1px solid var(--line);padding:8px 6px;display:flex;flex-direction:column;gap:3px}
+.vrail .grp{font-family:var(--mono);font-size:9px;letter-spacing:1.2px;color:var(--dim);padding:10px 10px 4px;text-transform:uppercase}
+.vrail a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;color:var(--mute);text-decoration:none;font-size:12.5px;font-weight:500;cursor:pointer}
+.vrail a .vi{font-size:13px;width:16px;text-align:center}
+.vrail a.on{background:var(--panel2);color:var(--cyan);box-shadow:inset 2px 0 0 var(--cyan)}
+.vrail a:hover:not(.on){color:var(--ink);background:rgba(21,39,58,.5)}
+
+.stage{padding:12px;display:flex;flex-direction:column;gap:12px;background:var(--bg);overflow:hidden}
+.view{display:none;flex-direction:column;gap:12px;flex:1}
+.view.on{display:flex}
+.card{background:linear-gradient(180deg,var(--panel),#0f1b28);border:1px solid var(--line);border-radius:9px}
+.card .hd{display:flex;align-items:center;gap:10px;padding:9px 13px;border-bottom:1px solid var(--line)}
+.card .hd h2{font-size:11px;font-weight:600;letter-spacing:1.3px;text-transform:uppercase;color:var(--mute)}
+.card .hd .tag{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-left:auto}
+.card .hd .live{margin-left:auto;display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--za)}
+.card .hd .live .d{width:7px;height:7px;border-radius:50%;background:var(--za);animation:blink 1.6s infinite}
+.pbody{padding:10px}
+.pbody svg{display:block;width:100%;height:auto}
+.co-t{font-family:var(--mono);font-size:9px;fill:#9db6cd}
+.ax{font-family:var(--mono);font-size:8.5px;fill:var(--dim)}
+
+/* train+scope (monitoreo) */
+.mach{fill:#1a2d40;stroke:#2b4866;stroke-width:1.5}.mach-d{fill:#152536;stroke:#24405c;stroke-width:1.5}
+.shaft{stroke:#3a5f85;stroke-width:4;stroke-linecap:round}
+.band-ok{fill:var(--za)}.band-b{fill:var(--zb)}.band-c{fill:var(--zc)}.band-d{fill:var(--zd)}
+.brg{fill:#0a141e;stroke-width:2}.brg-n{font-family:var(--mono);font-size:10px;font-weight:600;fill:#fff}
+.lanes{padding:4px 0}
+.lane{display:grid;grid-template-columns:72px 1fr 64px;align-items:center;border-bottom:1px solid rgba(31,52,74,.4);height:46px}
+.lane:last-child{border-bottom:0}
+.lane .lab{padding-left:13px}.lane .lab b{font-family:var(--mono);font-size:11.5px;font-weight:600;display:block}.lane .lab small{font-family:var(--mono);font-size:9px;color:var(--dim)}
+.lane .trace{height:100%;overflow:hidden;position:relative}.lane .trace svg{position:absolute;top:0;left:0;height:100%}
+.lane .amp{text-align:right;padding-right:13px;font-family:var(--mono);font-size:11.5px;font-weight:600}.lane .amp small{display:block;font-size:8px;color:var(--dim);font-weight:400}
+@keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-240px)}}
+.scrollwrap{animation:scroll 3.2s linear infinite}
+@media(prefers-reduced-motion:reduce){.scrollwrap{animation:none}}
+.va{color:var(--za)}.vb{color:var(--zb)}.vc{color:var(--zc)}.vd{color:var(--zd)}
+
+/* grids for multi-plot views */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1}
+.grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+.plotbg{fill:#0a131d}
+
+/* side */
+.side{background:var(--bg2);border-left:1px solid var(--line);display:flex;flex-direction:column}
+.side .sh{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+.side .sh h2{font-size:11px;font-weight:600;letter-spacing:1.3px;text-transform:uppercase;color:var(--mute)}
+.side .sh .pill{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dim)}
+.brow{display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:center;padding:9px 14px;border-bottom:1px solid rgba(31,52,74,.5);cursor:pointer}
+.brow.on{background:var(--panel2);box-shadow:inset 3px 0 0 var(--cyan)}
+.brow:hover:not(.on){background:rgba(21,39,58,.5)}
+.bz{width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;font-weight:700;color:#07121c}
+.bz.a{background:var(--za)}.bz.b{background:var(--zb)}.bz.c{background:var(--zc)}.bz.d{background:var(--zd)}
+.bname{font-size:12px;font-weight:600}.bsub{font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:1px}
+.bval{text-align:right}.bval b{font-family:var(--mono);font-size:14px;font-weight:600}.bval small{display:block;font-family:var(--mono);font-size:8.5px;color:var(--dim)}
+.chstat{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line)}
+.chstat .t{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;margin-bottom:9px}
+.chgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.ch{height:15px;border-radius:3px;background:#12263a;border:1px solid var(--line2)}
+.ch.ok{background:rgba(39,192,138,.25);border-color:var(--za)}.ch.warn{background:rgba(230,185,63,.25);border-color:var(--zb)}
+
+.statusbar{display:flex;align-items:center;gap:16px;padding:7px 14px;background:#0a1420;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--mute);flex-wrap:wrap}
+.statusbar .k{color:var(--dim)}.statusbar b{color:var(--ink);font-weight:600}
+.statusbar .sep{width:1px;height:12px;background:var(--line2)}
+.statusbar .r{margin-left:auto;display:flex;align-items:center;gap:7px;color:var(--cyan)}
+
+@media(max-width:980px){.main{grid-template-columns:120px 1fr}.side{display:none}.grid4{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}}
+@media(max-width:640px){body{padding:6px}.main{grid-template-columns:1fr}.vrail{flex-direction:row;overflow-x:auto}.vrail .grp{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="titlebar"><span>&#127817;</span><span class="app-nm"><b>Watermelon</b> Rotordynamics <span style="color:var(--dim)">&middot;</span> Campo</span><span class="ver">v0.7.10</span><div class="winbtns"><span>&#8211;</span><span>&#9633;</span><span>&#10005;</span></div></div>
+  <div class="menubar"><div>Archivo</div><div>Ver</div><div>Sesi&oacute;n</div><div>Hardware</div><div>An&aacute;lisis</div><div>Reporte</div><div>Ayuda</div></div>
+  <div class="toolbar">
+    <button class="btn go"><span class="ico">&#9654;</span> Iniciar</button>
+    <button class="btn stop"><span class="ico">&#9632;</span> Detener</button>
+    <div class="rec"><span class="rd"></span> REC 00:14:32</div>
+    <div class="tsep"></div>
+    <div class="tbchip">M&aacute;quina <b>SGT300B</b></div>
+    <div class="tbchip">Modo <b id="modechip">Monitoreo</b></div>
+    <div class="tbchip">Fs <b>51.2 kS/s</b></div>
+    <div class="daq"><span class="ld"></span> cDAQ-9185 &middot; 14 ch</div>
+  </div>
+
+  <div class="main">
+    <nav class="vrail" id="rail">
+      <a class="on" data-v="mon">Monitoreo</a>
+      <div class="grp">Estable</div>
+      <a data-v="tabular">Tabular</a>
+      <a data-v="trend">Tendencias</a>
+      <a data-v="wave">Forma de onda</a>
+      <a data-v="spec">Espectro</a>
+      <a data-v="fullspec">Full Spectrum</a>
+      <a data-v="orb">&Oacute;rbita</a>
+      <a data-v="defl">Deflexi&oacute;n del eje</a>
+      <div class="grp">Transientes</div>
+      <a data-v="scl">Shaft Centerline</a>
+      <a data-v="bode">Bode</a>
+      <a data-v="polar">Polar</a>
+      <a data-v="waterfall">Waterfall</a>
+      <a data-v="casc">Cascada</a>
+      <div class="grp">Datos</div>
+      <a data-v="rec">Capturas</a>
+    </nav>
+
+    <div class="stage">
+
+      <!-- ===== MONITOREO ===== -->
+      <div class="view on" id="mon">
+        <div class="card">
+          <div class="hd"><h2>Tren &mdash; Salud en vivo</h2><span class="tag">ISO 20816 &middot; API 670 &middot; turbina 14030 / gen 1803 rpm</span></div>
+          <div class="pbody" style="padding:6px 8px 2px">
+            <svg viewBox="0 0 960 148" xmlns="http://www.w3.org/2000/svg">
+              <rect x="40" y="116" width="880" height="6" rx="3" fill="#0d1a27" stroke="#1d3349"/>
+              <line class="shaft" x1="120" y1="70" x2="860" y2="70"/>
+              <path class="mach-d" d="M86 42 L140 30 L168 42 L168 98 L140 110 L86 98 Z"/>
+              <path class="mach" d="M168 38 L300 32 L300 108 L168 102 Z"/><rect class="band-ok" x="288" y="32" width="8" height="76"/>
+              <path class="mach" d="M300 36 L384 36 L384 104 L300 104 Z"/><rect class="band-ok" x="304" y="36" width="8" height="68"/>
+              <text x="235" y="24" text-anchor="middle" class="co-t">AERO GT</text>
+              <circle cx="410" cy="70" r="9" fill="#223b55" stroke="#345574"/>
+              <rect class="mach" x="438" y="44" width="84" height="64" rx="6"/><rect class="band-b" x="438" y="44" width="8" height="64" rx="2"/>
+              <text x="480" y="24" text-anchor="middle" class="co-t">CAJA</text>
+              <circle cx="548" cy="70" r="9" fill="#223b55" stroke="#345574"/>
+              <rect class="mach" x="576" y="36" width="248" height="74" rx="9"/>
+              <g stroke="#2b4866" stroke-width="1.3"><line x1="616" y1="36" x2="616" y2="110"/><line x1="656" y1="36" x2="656" y2="110"/><line x1="696" y1="36" x2="696" y2="110"/><line x1="736" y1="36" x2="736" y2="110"/><line x1="776" y1="36" x2="776" y2="110"/></g>
+              <rect class="band-c" x="576" y="36" width="8" height="74" rx="2"/><rect class="band-d" x="816" y="36" width="8" height="74" rx="2"/>
+              <text x="700" y="24" text-anchor="middle" class="co-t">GENERADOR</text>
+              <circle class="brg" cx="196" cy="70" r="12" stroke="#27c08a"/><text x="196" y="74" text-anchor="middle" class="brg-n">1</text>
+              <circle class="brg" cx="352" cy="70" r="12" stroke="#27c08a"/><text x="352" y="74" text-anchor="middle" class="brg-n">2</text>
+              <circle class="brg" cx="480" cy="70" r="12" stroke="#e6b93f"/><text x="480" y="74" text-anchor="middle" class="brg-n">G</text>
+              <circle class="brg" cx="624" cy="70" r="12" stroke="#ef8a3c"/><text x="624" y="74" text-anchor="middle" class="brg-n">5</text>
+              <circle class="brg" cx="792" cy="70" r="12" stroke="#ec4b52"/><text x="792" y="74" text-anchor="middle" class="brg-n">6</text>
+            </svg>
+          </div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Osciloscopio en vivo</h2><span class="tag">20 ms/div</span><span class="live"><span class="d"></span>ADQUIRIENDO</span></div>
+          <div class="lanes">
+            <div class="lane"><div class="lab"><b style="color:var(--cyan)">6XD</b><small>Gen NDE</small></div><div class="trace"><svg viewBox="0 0 480 46" preserveAspectRatio="none" style="width:200%"><g class="scrollwrap"><path d="M0 23 Q15 2 30 23 T60 23 T90 23 T120 23 T150 23 T180 23 T210 23 T240 23 T270 23 T300 23 T330 23 T360 23 T390 23 T420 23 T450 23 T480 23" fill="none" stroke="var(--zd)" stroke-width="2"/></g></svg></div><div class="amp"><span class="vd">44.1</span><small>&micro;m pp</small></div></div>
+            <div class="lane"><div class="lab"><b style="color:var(--cyan)">6YD</b><small>Gen NDE</small></div><div class="trace"><svg viewBox="0 0 480 46" preserveAspectRatio="none" style="width:200%"><g class="scrollwrap" style="animation-duration:3s"><path d="M0 23 Q15 5 30 23 T60 23 Q75 40 90 23 T120 23 Q135 6 150 23 T180 23 T210 23 Q225 39 240 23 T270 23 T300 23 T330 23 T360 23 T390 23 T420 23 T450 23 T480 23" fill="none" stroke="var(--zd)" stroke-width="2"/></g></svg></div><div class="amp"><span class="vd">42.7</span><small>&micro;m pp</small></div></div>
+            <div class="lane"><div class="lab"><b style="color:var(--cyan)">5XD</b><small>Gen DE</small></div><div class="trace"><svg viewBox="0 0 480 46" preserveAspectRatio="none" style="width:200%"><g class="scrollwrap" style="animation-duration:3.5s"><path d="M0 23 Q20 11 40 23 T80 23 T120 23 T160 23 T200 23 T240 23 T280 23 T320 23 T360 23 T400 23 T440 23 T480 23" fill="none" stroke="var(--cyan)" stroke-width="1.8"/></g></svg></div><div class="amp"><span class="vc">38.2</span><small>&micro;m pp</small></div></div>
+            <div class="lane"><div class="lab"><b style="color:var(--cyan)">1XD</b><small>Turbina DE</small></div><div class="trace"><svg viewBox="0 0 480 46" preserveAspectRatio="none" style="width:200%"><g class="scrollwrap" style="animation-duration:2.8s"><path d="M0 23 Q18 18 36 23 T72 23 T108 23 T144 23 T180 23 T216 23 T252 23 T288 23 T324 23 T360 23 T396 23 T432 23 T468 23 T480 23" fill="none" stroke="var(--cyan)" stroke-width="1.6"/></g></svg></div><div class="amp"><span class="va">11.8</span><small>&micro;m pp</small></div></div>
+            <div class="lane"><div class="lab"><b style="color:var(--amber)">KPH</b><small>keyphasor</small></div><div class="trace"><svg viewBox="0 0 480 46" preserveAspectRatio="none" style="width:200%"><g class="scrollwrap" style="animation-duration:3.2s"><path d="M0 34 L60 34 L60 10 L66 10 L66 34 L180 34 L180 10 L186 10 L186 34 L300 34 L300 10 L306 10 L306 34 L420 34 L420 10 L426 10 L426 34 L480 34" fill="none" stroke="var(--amber)" stroke-width="1.8"/></g></svg></div><div class="amp"><span style="color:var(--amber)">1803</span><small>rpm</small></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== ORBITA ===== -->
+      <div class="view" id="orb">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>&Oacute;rbita + Timebase</h2><span class="tag">6 GEN NDE &middot; 6XD/6YD &middot; filtrado 1X</span><span class="live"><span class="d"></span>VIVO</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="420" height="300" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="210" y1="20" x2="210" y2="280"/><line x1="40" y1="150" x2="400" y2="150"/><circle cx="210" cy="150" r="70" fill="none"/><circle cx="210" cy="150" r="120" fill="none"/></g>
+              <text x="214" y="34" class="ax">Y &middot; 6YD</text><text x="372" y="146" class="ax">X &middot; 6XD</text>
+              <ellipse cx="210" cy="150" rx="120" ry="92" transform="rotate(-26 210 150)" fill="none" stroke="var(--zd)" stroke-width="2.5"/>
+              <ellipse cx="210" cy="150" rx="70" ry="54" transform="rotate(-26 210 150)" fill="none" stroke="#6f8aa5" stroke-width="1" stroke-dasharray="4 3"/>
+              <circle cx="316" cy="104" r="6" fill="var(--amber)"/><text x="326" y="100" class="ax" style="fill:var(--amber)">KPH</text>
+              <text x="52" y="276" class="co-t" style="fill:var(--zd)">44.1 &micro;m pp &middot; CCW &middot; 234&deg;</text>
+              <!-- timebase X/Y -->
+              <rect class="plotbg" x="440" y="0" width="460" height="142" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="470" y1="71" x2="880" y2="71"/></g>
+              <path d="M470 71 Q500 20 530 71 T590 71 T650 71 T710 71 T770 71 T830 71 T880 71" fill="none" stroke="var(--cyan)" stroke-width="1.8"/>
+              <text x="450" y="18" class="ax">X &middot; 6XD</text>
+              <rect class="plotbg" x="440" y="158" width="460" height="142" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="470" y1="229" x2="880" y2="229"/></g>
+              <path d="M470 229 Q500 180 530 229 T590 229 T650 229 T710 229 T770 229 T830 229 T880 229" fill="none" stroke="#6ad0ec" stroke-width="1.8" transform="translate(16 0)"/>
+              <text x="450" y="176" class="ax">Y &middot; 6YD</text>
+            </svg>
+          </div>
+        </div>
+        <div class="card">
+          <div class="hd"><h2>&Oacute;rbitas por cojinete</h2><span class="tag">todos &middot; full-speed</span></div>
+          <div class="pbody"><div class="grid4">
+            <svg viewBox="0 0 120 120"><rect class="plotbg" x="0" y="0" width="120" height="120" rx="6"/><g stroke="var(--grid)" stroke-width="1"><line x1="60" y1="12" x2="60" y2="108"/><line x1="12" y1="60" x2="108" y2="60"/></g><circle cx="60" cy="60" r="26" fill="none" stroke="var(--za)" stroke-width="2"/><text x="10" y="116" class="ax" style="fill:var(--za)">1 TRB DE 11.8</text></svg>
+            <svg viewBox="0 0 120 120"><rect class="plotbg" x="0" y="0" width="120" height="120" rx="6"/><g stroke="var(--grid)" stroke-width="1"><line x1="60" y1="12" x2="60" y2="108"/><line x1="12" y1="60" x2="108" y2="60"/></g><ellipse cx="60" cy="60" rx="30" ry="24" transform="rotate(-18 60 60)" fill="none" stroke="var(--za)" stroke-width="2"/><text x="8" y="116" class="ax" style="fill:var(--za)">2 TRB NDE 13.1</text></svg>
+            <svg viewBox="0 0 120 120"><rect class="plotbg" x="0" y="0" width="120" height="120" rx="6"/><g stroke="var(--grid)" stroke-width="1"><line x1="60" y1="12" x2="60" y2="108"/><line x1="12" y1="60" x2="108" y2="60"/></g><ellipse cx="60" cy="60" rx="38" ry="30" transform="rotate(-24 60 60)" fill="none" stroke="var(--zc)" stroke-width="2"/><text x="14" y="116" class="ax" style="fill:var(--zc)">5 GEN DE 38.2</text></svg>
+            <svg viewBox="0 0 120 120"><rect class="plotbg" x="0" y="0" width="120" height="120" rx="6"/><g stroke="var(--grid)" stroke-width="1"><line x1="60" y1="12" x2="60" y2="108"/><line x1="12" y1="60" x2="108" y2="60"/></g><ellipse cx="60" cy="60" rx="46" ry="34" transform="rotate(-26 60 60)" fill="none" stroke="var(--zd)" stroke-width="2.5"/><text x="10" y="116" class="ax" style="fill:var(--zd)">6 GEN NDE 44.1</text></svg>
+          </div></div>
+        </div>
+      </div>
+
+      <!-- ===== ESPECTRO ===== -->
+      <div class="view" id="spec">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Espectro FFT</h2><span class="tag">6YD GEN NDE &middot; 0&ndash;200 Hz &middot; &micro;m pp</span><span class="live"><span class="d"></span>VIVO</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="260" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="50" y1="40" x2="880" y2="40"/><line x1="50" y1="100" x2="880" y2="100"/><line x1="50" y1="160" x2="880" y2="160"/><line x1="50" y1="220" x2="880" y2="220"/></g>
+              <line x1="50" y1="50" x2="880" y2="50" stroke="var(--zd)" stroke-width="1" stroke-dasharray="5 3" opacity=".7"/><text x="16" y="54" class="ax" style="fill:var(--zd)">41</text>
+              <!-- peaks: 1X=30Hz big, 2X=60, 3X=90 -->
+              <g fill="var(--cyan)">
+                <rect x="170" y="48" width="6" height="172"/><rect x="290" y="150" width="6" height="70"/><rect x="410" y="188" width="6" height="32"/><rect x="530" y="206" width="5" height="14"/>
+                <rect x="95" y="212" width="3" height="8"/><rect x="130" y="210" width="3" height="10"/><rect x="230" y="214" width="3" height="6"/><rect x="350" y="213" width="3" height="7"/><rect x="470" y="215" width="3" height="5"/><rect x="620" y="216" width="3" height="4"/><rect x="720" y="217" width="3" height="3"/>
+              </g>
+              <rect x="167" y="48" width="12" height="172" fill="none" stroke="var(--zd)" stroke-width="1.5"/>
+              <text x="160" y="40" class="ax" style="fill:var(--zd);font-weight:600">1X &middot; 30Hz &middot; 42.1</text>
+              <text x="282" y="142" class="ax">2X &middot; 60Hz</text><text x="402" y="180" class="ax">3X</text>
+              <text x="50" y="240" class="ax">0</text><text x="290" y="240" class="ax">60</text><text x="530" y="240" class="ax">120</text><text x="770" y="240" class="ax">180 Hz</text>
+            </svg>
+          </div>
+        </div>
+        <div class="card">
+          <div class="hd"><h2>Diagn&oacute;stico</h2><span class="tag">auto</span></div>
+          <div class="pbody" style="display:flex;gap:10px;font-family:var(--mono);font-size:11px;color:var(--mute);flex-wrap:wrap">
+            <span style="color:var(--zd)">&#9679; 1X dominante &middot; desbalance/pandeo gen</span>
+            <span style="color:var(--mute)">&#9679; 2X 24% de 1X &middot; leve</span>
+            <span style="color:var(--za)">&#9679; sin &lt;1X (rub/oil whirl descartado)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== CASCADA ===== -->
+      <div class="view" id="casc">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Cascada (waterfall)</h2><span class="tag">6YD GEN NDE &middot; &uacute;ltimas 8 capturas &middot; tendencia 1X &#9650;</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="300" rx="6"/>
+              <!-- 1X ridge line -->
+              <line x1="190" y1="40" x2="150" y2="250" stroke="var(--zd)" stroke-width="1" stroke-dasharray="3 3" opacity=".6"/>
+              <!-- stacked spectra, each offset up-right, 1X peak growing as time goes up (newer=front/bottom) -->
+              <g>
+                <g transform="translate(0 250)"><path d="M60 0 L140 0 L160 -58 L172 0 L300 0 L340 -24 L352 0 L480 0 L520 -10 L532 0 L820 0" fill="#0d1d2c" stroke="var(--zd)" stroke-width="1.6"/></g>
+                <g transform="translate(16 214)"><path d="M60 0 L140 0 L160 -50 L172 0 L300 0 L340 -22 L352 0 L480 0 L520 -9 L532 0 L820 0" fill="#0c1b29" stroke="var(--zc)" stroke-width="1.4"/></g>
+                <g transform="translate(32 178)"><path d="M60 0 L140 0 L160 -40 L172 0 L300 0 L340 -20 L352 0 L480 0 L520 -8 L532 0 L820 0" fill="#0b1926" stroke="#cf9a4e" stroke-width="1.3"/></g>
+                <g transform="translate(48 142)"><path d="M60 0 L140 0 L160 -33 L172 0 L300 0 L340 -18 L352 0 L820 0" fill="#0a1824" stroke="#9a8a6a" stroke-width="1.2"/></g>
+                <g transform="translate(64 106)"><path d="M60 0 L140 0 L160 -27 L172 0 L300 0 L340 -16 L352 0 L820 0" fill="#0a1622" stroke="#8aa0b6" stroke-width="1.1"/></g>
+                <g transform="translate(80 70)"><path d="M60 0 L140 0 L160 -22 L172 0 L300 0 L340 -13 L352 0 L820 0" fill="#091521" stroke="#6f8aa5" stroke-width="1"/></g>
+                <g transform="translate(96 40)"><path d="M60 0 L140 0 L160 -18 L172 0 L300 0 L340 -11 L352 0 L820 0" fill="#08131f" stroke="#55708a" stroke-width="1"/></g>
+              </g>
+              <text x="60" y="292" class="ax">0 Hz</text><text x="300" y="292" class="ax">60</text><text x="540" y="292" class="ax">120</text>
+              <text x="820" y="60" class="ax" style="fill:var(--zd)">reciente &#9660;</text>
+              <text x="150" y="36" class="ax" style="fill:var(--zd)">1X creciendo</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== BODE ===== -->
+      <div class="view" id="bode">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Bode &mdash; Arranque / Run-up</h2><span class="tag">6 GEN NDE &middot; 1X vs rpm &middot; cr&iacute;tica ~1015 rpm Q&asymp;10</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+              <!-- phase (top, inverted axis per System1 style) -->
+              <rect class="plotbg" x="0" y="0" width="900" height="120" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="50" y1="40" x2="880" y2="40"/><line x1="50" y1="80" x2="880" y2="80"/></g>
+              <text x="12" y="20" class="ax">Fase &deg;</text>
+              <path d="M70 92 L250 90 L360 78 L420 54 L470 30 L540 20 L700 16 L880 14" fill="none" stroke="var(--amber)" stroke-width="2"/>
+              <line x1="445" y1="8" x2="445" y2="118" stroke="var(--zd)" stroke-width="1" stroke-dasharray="4 3" opacity=".6"/>
+              <!-- amplitude (bottom) -->
+              <rect class="plotbg" x="0" y="134" width="900" height="166" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="50" y1="174" x2="880" y2="174"/><line x1="50" y1="214" x2="880" y2="214"/><line x1="50" y1="254" x2="880" y2="254"/></g>
+              <line x1="50" y1="162" x2="880" y2="162" stroke="var(--zd)" stroke-width="1" stroke-dasharray="5 3" opacity=".6"/><text x="16" y="166" class="ax" style="fill:var(--zd)">41</text>
+              <path d="M70 288 L200 282 L300 270 L380 240 L430 150 L470 232 L560 262 L700 250 L820 176 L880 158" fill="none" stroke="var(--cyan)" stroke-width="2.4"/>
+              <path d="M70 288 L200 282 L300 270 L380 240 L430 150 L470 232 L560 262 L700 250 L820 176 L880 158 L880 294 L70 294 Z" fill="var(--cyan)" opacity=".1"/>
+              <circle cx="430" cy="150" r="5" fill="var(--zd)"/><text x="396" y="142" class="ax" style="fill:var(--zd)">cr&iacute;tica 1015</text>
+              <circle cx="868" cy="162" r="5" fill="var(--zd)"/><text x="788" y="152" class="ax" style="fill:var(--zd)">oper 1803 &middot; 44&micro;</text>
+              <text x="12" y="150" class="ax">Amp &micro;m</text>
+              <text x="70" y="294" class="ax" style="opacity:0">.</text>
+              <text x="60" y="300" class="ax">0</text><text x="420" y="300" class="ax">1015</text><text x="840" y="300" class="ax">1850 rpm</text>
+            </svg>
+          </div>
+        </div>
+        <div class="card">
+          <div class="hd"><h2>Hallazgo</h2></div>
+          <div class="pbody" style="font-family:var(--mono);font-size:11px;color:var(--mute)">
+            <span style="color:var(--zd)">&#9679; Cr&iacute;tica generador ~1015 rpm &middot; margen de separaci&oacute;n 43% &middot; amp operaci&oacute;n 44&micro;m &gt; l&iacute;mite 41 &mdash; <b>falla alta</b></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SHAFT CENTERLINE ===== -->
+      <div class="view" id="scl">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Shaft Centerline</h2><span class="tag">claros SGT-300 &middot; sondas X=45&deg;R / Y=45&deg;L</span></div>
+          <div class="pbody"><div class="grid2">
+            <svg viewBox="0 0 360 300"><rect class="plotbg" x="0" y="0" width="360" height="300" rx="6"/>
+              <text x="16" y="24" class="ax">5 GEN DE &middot; claro diametral 152&micro;m</text>
+              <circle cx="180" cy="160" r="110" fill="none" stroke="var(--line2)" stroke-width="1.5"/>
+              <circle cx="180" cy="160" r="110" fill="none" stroke="var(--dim)" stroke-dasharray="3 4" stroke-width="1" opacity=".5"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="180" y1="46" x2="180" y2="274"/><line x1="66" y1="160" x2="294" y2="160"/></g>
+              <!-- rise path with load -->
+              <path d="M180 262 L176 236 L166 206 L150 186 L138 176" fill="none" stroke="#6f8aa5" stroke-width="1.5" stroke-dasharray="3 3"/>
+              <circle cx="138" cy="176" r="7" fill="var(--zc)"/><text x="100" y="172" class="ax" style="fill:var(--zc)">op</text>
+              <circle cx="180" cy="262" r="4" fill="var(--dim)"/><text x="186" y="276" class="ax">reposo</text>
+              <text x="150" y="150" class="ax">excentr. 0.62</text>
+            </svg>
+            <svg viewBox="0 0 360 300"><rect class="plotbg" x="0" y="0" width="360" height="300" rx="6"/>
+              <text x="16" y="24" class="ax">6 GEN NDE &middot; claro diametral 152&micro;m</text>
+              <circle cx="180" cy="160" r="110" fill="none" stroke="var(--line2)" stroke-width="1.5"/>
+              <circle cx="180" cy="160" r="110" fill="none" stroke="var(--dim)" stroke-dasharray="3 4" stroke-width="1" opacity=".5"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="180" y1="46" x2="180" y2="274"/><line x1="66" y1="160" x2="294" y2="160"/></g>
+              <path d="M180 262 L174 232 L160 198 L140 172 L126 158" fill="none" stroke="#6f8aa5" stroke-width="1.5" stroke-dasharray="3 3"/>
+              <circle cx="126" cy="158" r="7" fill="var(--zd)"/><text x="86" y="154" class="ax" style="fill:var(--zd)">op</text>
+              <circle cx="180" cy="262" r="4" fill="var(--dim)"/><text x="186" y="276" class="ax">reposo</text>
+              <text x="150" y="150" class="ax" style="fill:var(--zd)">excentr. 0.79 &#9650;</text>
+            </svg>
+          </div></div>
+        </div>
+      </div>
+
+      <!-- ===== TENDENCIAS ===== -->
+      <div class="view" id="trend">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Tendencias 1X</h2><span class="tag">gen NDE/DE &middot; 30 d&iacute;as &middot; &micro;m pp</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 290" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="290" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="50" y1="50" x2="880" y2="50"/><line x1="50" y1="110" x2="880" y2="110"/><line x1="50" y1="170" x2="880" y2="170"/><line x1="50" y1="230" x2="880" y2="230"/></g>
+              <line x1="50" y1="64" x2="880" y2="64" stroke="var(--zd)" stroke-width="1" stroke-dasharray="5 3" opacity=".7"/><text x="16" y="68" class="ax" style="fill:var(--zd)">41 D</text>
+              <line x1="50" y1="104" x2="880" y2="104" stroke="var(--zc)" stroke-width="1" stroke-dasharray="5 3" opacity=".6"/><text x="16" y="108" class="ax" style="fill:var(--zc)">34 C</text>
+              <!-- gen NDE rising -->
+              <path d="M60 196 L150 192 L240 188 L330 182 L420 170 L510 150 L600 122 L690 96 L780 74 L870 58" fill="none" stroke="var(--zd)" stroke-width="2.4"/>
+              <path d="M60 196 L150 192 L240 188 L330 182 L420 170 L510 150 L600 122 L690 96 L780 74 L870 58 L870 270 L60 270 Z" fill="var(--zd)" opacity=".08"/>
+              <circle cx="870" cy="58" r="4.5" fill="var(--zd)"/><text x="792" y="50" class="ax" style="fill:var(--zd)">6 NDE 44.1</text>
+              <!-- gen DE -->
+              <path d="M60 210 L150 208 L240 206 L330 202 L420 196 L510 186 L600 172 L690 158 L780 144 L870 132" fill="none" stroke="var(--zc)" stroke-width="2"/>
+              <circle cx="870" cy="132" r="4" fill="var(--zc)"/><text x="792" y="126" class="ax" style="fill:var(--zc)">5 DE 38.2</text>
+              <text x="56" y="286" class="ax">hace 30d</text><text x="440" y="286" class="ax">15d</text><text x="840" y="286" class="ax">hoy</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== TABULAR ===== -->
+      <div class="view" id="tabular">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Tabular &mdash; Lista de puntos</h2><span class="tag">14 canales &middot; ISO 20816 zona</span><span class="live"><span class="d"></span>VIVO</span></div>
+          <div class="pbody" style="font-family:var(--mono);font-size:12px">
+            <div style="display:grid;grid-template-columns:28px 1.4fr .8fr .8fr 1fr .8fr .7fr;gap:12px;padding:9px 6px;border-bottom:1px solid var(--line);color:var(--dim);font-size:10px;letter-spacing:.5px;text-transform:uppercase">
+              <span>Z</span><span>Punto</span><span>Direct</span><span>1X amp</span><span>1X &phi;</span><span>Gap V</span><span>Zona</span></div>
+            <div class="tr" style="display:grid;grid-template-columns:28px 1.4fr .8fr .8fr 1fr .8fr .7fr;gap:12px;padding:10px 6px;border-bottom:1px solid rgba(31,52,74,.4);align-items:center"><span class="bz a" style="width:16px;height:16px;font-size:9px">A</span><span style="color:var(--ink)">1XD Turbina DE</span><span>11.8</span><span>9.2</span><span>44&deg;</span><span>&minus;9.4</span><span class="va">A</span></div>
+            <div class="tr" style="display:grid;grid-template-columns:28px 1.4fr .8fr .8fr 1fr .8fr .7fr;gap:12px;padding:10px 6px;border-bottom:1px solid rgba(31,52,74,.4);align-items:center"><span class="bz a" style="width:16px;height:16px;font-size:9px">A</span><span style="color:var(--ink)">2XD Turbina NDE</span><span>13.1</span><span>10.4</span><span>58&deg;</span><span>&minus;9.1</span><span class="va">A</span></div>
+            <div class="tr" style="display:grid;grid-template-columns:28px 1.4fr .8fr .8fr 1fr .8fr .7fr;gap:12px;padding:10px 6px;border-bottom:1px solid rgba(31,52,74,.4);align-items:center"><span class="bz b" style="width:16px;height:16px;font-size:9px">B</span><span style="color:var(--ink)">3YA Caja engrane</span><span>2.34</span><span>1.71</span><span>&mdash;</span><span>IEPE</span><span class="vb">B</span></div>
+            <div class="tr" style="display:grid;grid-template-columns:28px 1.4fr .8fr .8fr 1fr .8fr .7fr;gap:12px;padding:10px 6px;border-bottom:1px solid rgba(31,52,74,.4);align-items:center"><span class="bz c" style="width:16px;height:16px;font-size:9px">C</span><span style="color:var(--ink)">5XD Gen DE</span><span>38.2</span><span>36.1</span><span>212&deg;</span><span>&minus;8.8</span><span class="vc">C</span></div>
+            <div class="tr" style="display:grid;grid-template-columns:28px 1.4fr .8fr .8fr 1fr .8fr .7fr;gap:12px;padding:10px 6px;border-bottom:1px solid rgba(31,52,74,.4);align-items:center;background:var(--panel2);box-shadow:inset 3px 0 0 var(--zd)"><span class="bz d" style="width:16px;height:16px;font-size:9px">D</span><span style="color:#fff">6XD Gen NDE</span><span class="vd">44.1</span><span class="vd">42.1</span><span>234&deg;</span><span>&minus;8.6</span><span class="vd">D</span></div>
+            <div class="tr" style="display:grid;grid-template-columns:28px 1.4fr .8fr .8fr 1fr .8fr .7fr;gap:12px;padding:10px 6px;align-items:center"><span class="bz a" style="width:16px;height:16px;font-size:9px">&#9679;</span><span style="color:var(--mute)">KPH Turbina / Gen</span><span>14030</span><span>&mdash;</span><span>&mdash;</span><span>1/rev</span><span style="color:var(--amber)">1803</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== FORMA DE ONDA ===== -->
+      <div class="view" id="wave">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Forma de onda &mdash; Timebase</h2><span class="tag">6 GEN NDE &middot; 6XD/6YD &middot; sin filtrar &middot; &micro;m vs ms</span><span class="live"><span class="d"></span>VIVO</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 290" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="134" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="40" y1="67" x2="880" y2="67"/><line x1="40" y1="30" x2="880" y2="30"/><line x1="40" y1="104" x2="880" y2="104"/></g>
+              <path d="M40 67 Q70 20 100 67 T160 67 Q190 110 220 67 T280 67 Q310 18 340 67 T400 67 T460 67 Q490 108 520 67 T580 67 T640 67 Q670 22 700 67 T760 67 T820 67 T880 67" fill="none" stroke="var(--zd)" stroke-width="2"/>
+              <text x="48" y="22" class="ax" style="fill:var(--zd)">6XD &middot; 44.1 &micro;m pp</text>
+              <rect class="plotbg" x="0" y="146" width="900" height="134" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="40" y1="213" x2="880" y2="213"/><line x1="40" y1="176" x2="880" y2="176"/><line x1="40" y1="250" x2="880" y2="250"/></g>
+              <path d="M40 213 Q70 170 100 213 T160 213 Q190 254 220 213 T280 213 Q310 168 340 213 T400 213 T460 213 T520 213 Q550 252 580 213 T640 213 T700 213 T760 213 Q790 172 820 213 T880 213" fill="none" stroke="#6ad0ec" stroke-width="2"/>
+              <text x="48" y="168" class="ax" style="fill:#6ad0ec">6YD &middot; 42.7 &micro;m pp</text>
+              <text x="820" y="292" class="ax">20 ms/div</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== FULL SPECTRUM ===== -->
+      <div class="view" id="fullspec">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Full Spectrum</h2><span class="tag">6 GEN NDE &middot; forward (+) / reverse (&minus;) &middot; precesi&oacute;n</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="280" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1"><line x1="40" y1="230" x2="880" y2="230"/></g>
+              <line x1="460" y1="20" x2="460" y2="240" stroke="var(--grid2)" stroke-width="1.3"/>
+              <text x="464" y="258" class="ax">0</text>
+              <!-- forward side (right, bigger = forward precession dominant) -->
+              <g fill="var(--za)">
+                <rect x="560" y="58" width="8" height="172"/><rect x="660" y="172" width="7" height="58"/><rect x="760" y="206" width="6" height="24"/>
+              </g>
+              <text x="540" y="50" class="ax" style="fill:var(--za)">+1X 42.0 (fwd)</text>
+              <!-- reverse side (left, small) -->
+              <g fill="var(--zc)">
+                <rect x="352" y="196" width="8" height="34"/><rect x="252" y="218" width="7" height="12"/>
+              </g>
+              <text x="250" y="188" class="ax" style="fill:var(--zc)">&minus;1X 8.4 (rev)</text>
+              <text x="60" y="258" class="ax">reverse &larr; Hz</text><text x="800" y="258" class="ax">Hz &rarr; forward</text>
+              <text x="40" y="24" class="ax" style="fill:var(--mute)">Precesi&oacute;n FORWARD dominante &middot; ratio 5:1 &middot; sin reverse fuerte (descarta rub severo)</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== DEFLEXION DEL EJE ===== -->
+      <div class="view" id="defl">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Deflexi&oacute;n del eje (ODS 1X)</h2><span class="tag">tren completo &middot; amplitud por cojinete &middot; filtrado 1X</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="280" rx="6"/>
+              <line x1="60" y1="150" x2="840" y2="150" stroke="var(--line2)" stroke-width="1" stroke-dasharray="4 4"/>
+              <!-- undeflected shaft -->
+              <line x1="60" y1="150" x2="840" y2="150" stroke="#2b4866" stroke-width="2"/>
+              <!-- deflected shape (1X) - gen end whips up -->
+              <path d="M60 150 Q180 150 240 148 T420 142 Q560 130 660 108 Q760 86 840 70" fill="none" stroke="var(--cyan)" stroke-width="2.5"/>
+              <!-- bearings as supports + amplitude dots -->
+              <g>
+                <circle cx="120" cy="150" r="5" fill="var(--za)"/><text x="104" y="172" class="ax">1 TRB</text><text x="104" y="184" class="ax" style="fill:var(--za)">11.8</text>
+                <circle cx="300" cy="147" r="5" fill="var(--za)"/><text x="284" y="172" class="ax">2 TRB</text><text x="284" y="184" class="ax" style="fill:var(--za)">13.1</text>
+                <circle cx="480" cy="138" r="5" fill="var(--zb)"/><text x="468" y="172" class="ax">CAJA</text>
+                <circle cx="660" cy="108" r="6" fill="var(--zc)"/><text x="640" y="96" class="ax" style="fill:var(--zc)">5 GEN 38.2</text>
+                <circle cx="820" cy="72" r="7" fill="var(--zd)"/><text x="776" y="60" class="ax" style="fill:var(--zd)">6 GEN 44.1 &#9650;</text>
+              </g>
+              <text x="40" y="24" class="ax" style="fill:var(--mute)">Modo de deflexi&oacute;n: voladizo del generador &middot; m&aacute;x en NDE &mdash; consistente con desbalance/1er modo gen</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== POLAR ===== -->
+      <div class="view" id="polar">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Polar &mdash; Nyquist 1X</h2><span class="tag">6 GEN NDE &middot; vector 1X vs rpm (run-up)</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="300" rx="6"/>
+              <g stroke="var(--grid)" stroke-width="1">
+                <circle cx="450" cy="150" r="40" fill="none"/><circle cx="450" cy="150" r="80" fill="none"/><circle cx="450" cy="150" r="120" fill="none"/>
+                <line x1="330" y1="150" x2="570" y2="150"/><line x1="450" y1="30" x2="450" y2="270"/>
+              </g>
+              <text x="574" y="154" class="ax">0&deg;</text><text x="452" y="26" class="ax">90&deg;</text><text x="318" y="154" class="ax">180&deg;</text><text x="452" y="286" class="ax">270&deg;</text>
+              <!-- spiral vector loop (resonance loop) -->
+              <path d="M450 150 L470 142 L500 140 L540 158 L556 196 L520 238 L452 252 L392 228 L372 180 L398 138 L446 120 L470 110" fill="none" stroke="var(--cyan)" stroke-width="2.2"/>
+              <!-- rpm dots -->
+              <circle cx="470" cy="142" r="3.5" fill="#6f8aa5"/><text x="476" y="138" class="ax">600</text>
+              <circle cx="556" cy="196" r="4.5" fill="var(--zd)"/><text x="562" y="200" class="ax" style="fill:var(--zd)">1015 cr&iacute;t</text>
+              <circle cx="470" cy="110" r="4.5" fill="var(--amber)"/><text x="476" y="106" class="ax" style="fill:var(--amber)">1803 op</text>
+              <text x="40" y="24" class="ax" style="fill:var(--mute)">Lazo de resonancia claro en ~1015 rpm &middot; alto &aacute;ngulo de fase &mdash; cr&iacute;tica confirmada</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== WATERFALL ===== -->
+      <div class="view" id="waterfall">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Waterfall (mapa espectral)</h2><span class="tag">6 GEN NDE &middot; intensidad vs rpm &middot; run-up</span></div>
+          <div class="pbody">
+            <svg viewBox="0 0 900 290" xmlns="http://www.w3.org/2000/svg">
+              <rect class="plotbg" x="0" y="0" width="900" height="290" rx="6"/>
+              <!-- order lines 1X,2X,3X -->
+              <line x1="150" y1="30" x2="300" y2="250" stroke="var(--grid2)" stroke-width="1" stroke-dasharray="3 3"/>
+              <line x1="300" y1="30" x2="520" y2="250" stroke="var(--grid)" stroke-width="1" stroke-dasharray="3 3"/>
+              <text x="296" y="26" class="ax">1X</text><text x="516" y="26" class="ax">2X</text>
+              <!-- heat cells: 1X ridge bright near critical and at top (op) -->
+              <g>
+                <rect x="286" y="40" width="26" height="22" fill="#ec4b52" opacity=".9"/>
+                <rect x="276" y="64" width="26" height="22" fill="#ef6a4e" opacity=".85"/>
+                <rect x="262" y="88" width="26" height="22" fill="#ef8a3c" opacity=".8"/>
+                <rect x="244" y="112" width="26" height="22" fill="#ec4b52" opacity=".95"/>
+                <rect x="232" y="136" width="26" height="22" fill="#ef8a3c" opacity=".7"/>
+                <rect x="216" y="160" width="26" height="22" fill="#e6b93f" opacity=".6"/>
+                <rect x="200" y="184" width="26" height="22" fill="#cf9a4e" opacity=".5"/>
+                <rect x="184" y="208" width="26" height="22" fill="#6f8aa5" opacity=".5"/>
+                <!-- 2X faint -->
+                <rect x="468" y="40" width="22" height="22" fill="#e6b93f" opacity=".45"/>
+                <rect x="448" y="112" width="22" height="22" fill="#cf9a4e" opacity=".4"/>
+                <rect x="412" y="184" width="22" height="22" fill="#55708a" opacity=".4"/>
+              </g>
+              <text x="236" y="128" class="ax" style="fill:#fff">cr&iacute;tica</text>
+              <text x="820" y="50" class="ax" style="fill:var(--amber)">op 1803 &#9650;</text>
+              <text x="820" y="244" class="ax">600 rpm</text>
+              <text x="60" y="280" class="ax">0 Hz</text><text x="300" y="280" class="ax">60</text><text x="540" y="280" class="ax">120 Hz</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== GRABACIONES ===== -->
+      <div class="view" id="rec">
+        <div class="card" style="flex:1">
+          <div class="hd"><h2>Capturas de sesi&oacute;n</h2><span class="tag">~/WatermelonField/data &middot; offline-first</span></div>
+          <div class="pbody" style="font-family:var(--mono);font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:0">
+            <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:14px;padding:10px 4px;border-bottom:1px solid var(--line);color:var(--dim);font-size:10px;letter-spacing:.5px">RUN&nbsp;·&nbsp;TIPO<span>DURACI&Oacute;N</span><span>TAMA&Ntilde;O</span><span>NUBE</span></div>
+            <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:14px;padding:11px 4px;border-bottom:1px solid rgba(31,52,74,.5)"><span><b style="color:var(--ink)">2026-11-16_1028</b> &middot; run-up</span><span>18:42</span><span>612 MB</span><span style="color:var(--za)">&#10003; sync</span></div>
+            <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:14px;padding:11px 4px;border-bottom:1px solid rgba(31,52,74,.5)"><span><b style="color:var(--ink)">2026-11-15_2314</b> &middot; monitoreo</span><span>2:04:11</span><span>3.1 GB</span><span style="color:var(--za)">&#10003; sync</span></div>
+            <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:14px;padding:11px 4px"><span><b style="color:var(--ink)">2026-11-16_1042</b> &middot; monitoreo &middot; <span style="color:var(--rec)">&#9679; grabando</span></span><span>00:14:32</span><span>248 MB</span><span style="color:var(--amber)">&#8635; pendiente</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <aside class="side">
+      <div class="sh"><h2>Cojinetes</h2><span class="pill">DIRECT &micro;m pp</span></div>
+      <div class="brow"><div class="bz a">A</div><div><div class="bname">1 Turbina DE</div><div class="bsub">1XD/1YD &middot; 45&deg;R</div></div><div class="bval"><b class="va">11.8</b><small>gap &minus;9.4V</small></div></div>
+      <div class="brow"><div class="bz a">A</div><div><div class="bname">2 Turbina NDE</div><div class="bsub">2XD/2YD &middot; 45&deg;R</div></div><div class="bval"><b class="va">13.1</b><small>gap &minus;9.1V</small></div></div>
+      <div class="brow"><div class="bz b">B</div><div><div class="bname">Caja engrane</div><div class="bsub">3YA/4XD &middot; accel</div></div><div class="bval"><b class="vb">2.34</b><small>g RMS</small></div></div>
+      <div class="brow"><div class="bz c">C</div><div><div class="bname">5 Gen DE</div><div class="bsub">5XD/5YD &middot; 45&deg;R</div></div><div class="bval"><b class="vc">38.2</b><small>gap &minus;8.8V</small></div></div>
+      <div class="brow on"><div class="bz d">D</div><div><div class="bname">6 Gen NDE</div><div class="bsub">6XD/6YD &middot; 45&deg;R</div></div><div class="bval"><b class="vd">44.1</b><small>&gt;41 l&iacute;m</small></div></div>
+      <div class="chstat">
+        <div class="t">Canales adquiriendo &middot; 14/14</div>
+        <div class="chgrid"><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch warn"></div><div class="ch warn"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div><div class="ch ok"></div></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span><span class="k">Buffer</span> <b>8.0 s</b></span><div class="sep"></div>
+    <span><span class="k">CPU</span> <b>23%</b></span><div class="sep"></div>
+    <span><span class="k">Disco</span> <b>1.2 TB libre</b></span><div class="sep"></div>
+    <span><span class="k">Sync local</span> <b>1 pendiente</b></span>
+    <span class="r">&#9679; Nube conectada &middot; Starlink 48 ms</span>
+  </div>
+</div>
+
+<script>
+(function(){
+  var rail=document.getElementById('rail');
+  var links=rail.querySelectorAll('a[data-v]');
+  var views={};
+  document.querySelectorAll('.view').forEach(function(v){views[v.id]=v;});
+  var names={mon:'Monitoreo',tabular:'Tabular',trend:'Tendencias',wave:'Forma de onda',spec:'Espectro',fullspec:'Full Spectrum',orb:'Órbita',defl:'Deflexión del eje',scl:'Shaft Centerline',bode:'Bode',polar:'Polar',waterfall:'Waterfall',casc:'Cascada',rec:'Capturas'};
+  links.forEach(function(a){
+    a.addEventListener('click',function(){
+      var id=a.getAttribute('data-v');
+      links.forEach(function(x){x.classList.remove('on');});
+      a.classList.add('on');
+      Object.keys(views).forEach(function(k){views[k].classList.toggle('on',k===id);});
+      var mc=document.getElementById('modechip'); if(mc&&names[id])mc.textContent=names[id];
+    });
+  });
+})();
+</script>
+<script>
+/* ===== Capa de datos EN VIVO (Python -> JS vía runJavaScript) =====
+   Si nadie llama applyLive (ej. navegador standalone), la piel queda estática
+   con la animación CSS. Dentro del .exe, el agente empuja datos reales acá. */
+(function(){
+  var S={sig:null, lanes:[], brows:[]};
+  function buildPath(samples,w,h){
+    if(!samples||!samples.length) return '';
+    var cy=h/2, amp=h*0.42, n=samples.length, d='';
+    for(var i=0;i<n;i++){
+      var x=(i/(n-1))*w, y=cy - samples[i]*amp;
+      d += (i?'L':'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+    }
+    return d;
+  }
+  function esc(t){ return (''+t).replace(/[<&>]/g,function(c){return {'<':'&lt;','&':'&amp;','>':'&gt;'}[c];}); }
+  var COL={va:'var(--za)',vb:'var(--zb)',vc:'var(--zc)',vd:'var(--zd)'};
+  function rebuild(data){
+    // Reconstruye lanes del scope + filas de cojinetes DESDE el payload (cualquier máquina).
+    var lanesEl=document.querySelector('#mon .lanes');
+    S.lanes=[];
+    if(lanesEl && data.channels){
+      lanesEl.innerHTML='';
+      data.channels.forEach(function(ch){
+        var lane=document.createElement('div'); lane.className='lane';
+        var col=COL[ch.cls]||'var(--cyan)';
+        lane.innerHTML='<div class="lab"><b style="color:var(--cyan)">'+esc(ch.name)+'</b><small>'+esc(ch.sub||'')+'</small></div>'+
+          '<div class="trace"><svg viewBox="0 0 480 46" preserveAspectRatio="none" style="width:100%"><path fill="none" stroke="'+col+'" stroke-width="1.8"/></svg></div>'+
+          '<div class="amp"><span class="'+(ch.cls||'')+'">'+esc(ch.val)+'</span><small>'+esc(ch.unit||'')+'</small></div>';
+        lanesEl.appendChild(lane);
+        S.lanes.push({path:lane.querySelector('path'), amp:lane.querySelector('.amp span')});
+      });
+    }
+    var side=document.querySelector('.side');
+    S.brows=[];
+    if(side && data.bearings){
+      Array.prototype.slice.call(side.querySelectorAll('.brow')).forEach(function(b){ b.remove(); });
+      var anchor=side.querySelector('.chstat');
+      data.bearings.forEach(function(b){
+        var row=document.createElement('div'); row.className='brow';
+        row.innerHTML='<div class="bz '+(b.zcls||'a')+'">'+esc(b.zone||'A')+'</div>'+
+          '<div><div class="bname">'+esc(b.name)+'</div><div class="bsub">'+esc(b.sub||'')+'</div></div>'+
+          '<div class="bval"><b class="'+(b.cls||'')+'">'+esc(b.val)+'</b><small>'+esc(b.unit||'')+'</small></div>';
+        if(anchor) side.insertBefore(row, anchor); else side.appendChild(row);
+        S.brows.push({val:row.querySelector('.bval b'), bz:row.querySelector('.bz')});
+      });
+    }
+  }
+  window.applyLive=function(data){
+    try{
+      if(!data) return;
+      var sig=(data.channels||[]).map(function(c){return c.name;}).join('|')
+            +'#'+(data.bearings||[]).map(function(b){return b.name;}).join('|');
+      if(sig!==S.sig){ rebuild(data); S.sig=sig; }
+      (data.channels||[]).forEach(function(ch,i){
+        var L=S.lanes[i]; if(!L) return;
+        if(ch.samples) L.path.setAttribute('d', buildPath(ch.samples,480,46));
+        if(ch.val!=null){ L.amp.textContent=ch.val; if(ch.cls) L.amp.className=ch.cls; }
+      });
+      (data.bearings||[]).forEach(function(b,i){
+        var B=S.brows[i]; if(!B) return;
+        if(b.val!=null){ B.val.textContent=b.val; if(b.cls) B.val.className=b.cls; }
+        if(b.zcls){ B.bz.className='bz '+b.zcls; B.bz.textContent=b.zone||''; }
+      });
+    }catch(e){ /* nunca romper la piel por un payload malo */ }
+  };
+})();
+</script>
+</body>
+</html>
