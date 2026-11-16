@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.9"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.10.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2637,6 +2637,78 @@ def main() -> int:
             p_spec2.addItem(_oln); _spec_ord.append(_oln)
         an_tabs.addTab(spec_w, "Spectrum")
 
+        # --- Tabular (lista de puntos: gap/overall/1X/zona) ---
+        tabv_w = QtWidgets.QWidget(); tabv_l = QtWidgets.QVBoxLayout(tabv_w)
+        tabv_l.addWidget(QtWidgets.QLabel(
+            "<b>Tabular</b>  <span style='color:#8aa0b6'>lista de puntos · ISO 20816</span>"))
+        tblv = QtWidgets.QTableWidget(len(vib), 6)
+        tblv.setHorizontalHeaderLabels(["Sensor", "Gap", "Overall", "1X", "1X φ", "Zona"])
+        tblv.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+        tblv.verticalHeader().setVisible(False); tblv.setShowGrid(False)
+        tblv.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection); tblv.setFocusPolicy(QtCore.Qt.NoFocus)
+        tabv_l.addWidget(tblv, 1); an_tabs.addTab(tabv_w, "Tabular")
+
+        # --- Full Spectrum (forward/reverse de un par X/Y por cojinete) ---
+        _fs_pairs = []            # (label, xi, yi, sx, sy)
+        _by_brg = {}
+        for (_fi, _fc) in vib:
+            if _ckind(_fc) not in ("prox", "vel", "accel"):
+                continue
+            _bn = _bearing_no(_fc.name) or 0
+            _nm = _fc.name.upper()
+            _d = _by_brg.setdefault(_bn, {})
+            if "X" in _nm and "x" not in _d:
+                _d["x"] = (_fi, _fc.sensitivity_mv_per_eu or 1.0)
+            elif "Y" in _nm and "y" not in _d:
+                _d["y"] = (_fi, _fc.sensitivity_mv_per_eu or 1.0)
+        for _bn in sorted(_by_brg):
+            _d = _by_brg[_bn]
+            if "x" in _d and "y" in _d:
+                _fs_pairs.append((f"Cojinete {_bn}", _d["x"][0], _d["y"][0], _d["x"][1], _d["y"][1]))
+        fspec_w = QtWidgets.QWidget(); fspec_l = QtWidgets.QVBoxLayout(fspec_w)
+        _fsh = QtWidgets.QHBoxLayout()
+        _fsh.addWidget(QtWidgets.QLabel(
+            "<b>Full Spectrum</b>  <span style='color:#8aa0b6'>forward (+) / reverse (−) · precesión</span>"))
+        _fsh.addStretch(1); _fsh.addWidget(QtWidgets.QLabel("Cojinete:"))
+        cb_fs = QtWidgets.QComboBox()
+        for _p in _fs_pairs:
+            cb_fs.addItem(_p[0])
+        _fsh.addWidget(cb_fs); fspec_l.addLayout(_fsh)
+        gl_fs = pg.GraphicsLayoutWidget(); fspec_l.addWidget(gl_fs, 1)
+        p_fs = gl_fs.addPlot(); p_fs.showGrid(x=True, y=True, alpha=0.12)
+        p_fs.setLabel("left", "amplitud"); p_fs.setLabel("bottom", "Frecuencia (CPM) · −reverse / +forward")
+        p_fs.addLine(x=0, pen=pg.mkPen("#3a4c66", width=1))
+        fs_curve = p_fs.plot(pen=pg.mkPen(GREEN, width=1.5))
+        an_tabs.addTab(fspec_w, "FullSpectrum")
+
+        # --- Deflexión del eje (ODS 1X: amplitud 1X por cojinete a lo largo del tren) ---
+        defl_w = QtWidgets.QWidget(); defl_l = QtWidgets.QVBoxLayout(defl_w)
+        defl_l.addWidget(QtWidgets.QLabel(
+            "<b>Deflexión del eje</b>  <span style='color:#8aa0b6'>amplitud 1X por cojinete (ODS)</span>"))
+        gl_defl = pg.GraphicsLayoutWidget(); defl_l.addWidget(gl_defl, 1)
+        p_defl = gl_defl.addPlot(); p_defl.showGrid(x=True, y=True, alpha=0.12)
+        p_defl.setLabel("left", "1X amp"); p_defl.setLabel("bottom", "cojinete (orden axial)")
+        defl_curve = p_defl.plot(pen=pg.mkPen(CORN, width=2), symbol="o", symbolSize=9,
+                                 symbolBrush=CORN)
+        an_tabs.addTab(defl_w, "Deflection")
+
+        # --- Waterfall (espectros apilados vs tiempo; acumula del canal seleccionado) ---
+        wf_w = QtWidgets.QWidget(); wf_l = QtWidgets.QVBoxLayout(wf_w)
+        _wfh = QtWidgets.QHBoxLayout()
+        _wfh.addWidget(QtWidgets.QLabel(
+            "<b>Waterfall</b>  <span style='color:#8aa0b6'>espectros apilados vs tiempo</span>"))
+        _wfh.addStretch(1); _wfh.addWidget(QtWidgets.QLabel("Canal:"))
+        cb_wf = QtWidgets.QComboBox()
+        for (_wi, _wc) in vib:
+            cb_wf.addItem(_wc.name)
+        _wfh.addWidget(cb_wf); wf_l.addLayout(_wfh)
+        gl_wf = pg.GraphicsLayoutWidget(); wf_l.addWidget(gl_wf, 1)
+        p_wf = gl_wf.addPlot(); p_wf.showGrid(x=False, y=False)
+        p_wf.setLabel("left", "tiempo →"); p_wf.setLabel("bottom", "Frecuencia (CPM)")
+        wf_curves = [p_wf.plot(pen=pg.mkPen(pg.intColor(_r, hues=16), width=1)) for _r in range(16)]
+        wf_buf = {"ch": -1, "spec": []}
+        an_tabs.addTab(wf_w, "Waterfall")
+
         onda_focus = {"i": None}    # None = todas; idx = solo esa onda
 
         def _apply_onda_focus():
@@ -3067,16 +3139,33 @@ def main() -> int:
             "font-weight:600;font-size:13px;margin:2px 1px;}"
             "QListWidget#cfgRail::item:selected{background:%s;color:%s;"
             "border-left:3px solid %s;padding-left:10px;}" % (LINE, MUTE, PANEL2, INK, CORN))
-        _AN_LABELS = {"Monitoring": "Monitoreo", "Trends": "Tendencias", "Waveform": "Forma de onda",
-                      "Spectrum": "Espectro", "Orbit": "Órbita", "Bode": "Bode", "Polar": "Polar",
-                      "Cascade": "Cascada", "Shaft Centerline": "Shaft Centerline",
-                      "Diagnostics": "Diagnóstico"}
-        for _i in range(an_tabs.count()):
-            an_rail.addItem(_AN_LABELS.get(an_tabs.tabText(_i), an_tabs.tabText(_i)))
-        an_rail.setCurrentRow(an_tabs.currentIndex())
-        an_rail.currentRowChanged.connect(
-            lambda r: an_tabs.setCurrentIndex(r) if 0 <= r < an_tabs.count() else None)
-        an_tabs.currentChanged.connect(lambda i: an_rail.setCurrentRow(i))
+        _AN_LABELS = {"Monitoring": "Monitoreo", "Tabular": "Tabular", "Trends": "Tendencias",
+                      "Waveform": "Forma de onda", "Spectrum": "Espectro", "FullSpectrum": "Full Spectrum",
+                      "Orbit": "Órbita", "Deflection": "Deflexión del eje",
+                      "Shaft Centerline": "Shaft Centerline", "Bode": "Bode", "Polar": "Polar",
+                      "Waterfall": "Waterfall", "Cascade": "Cascada", "Diagnostics": "Diagnóstico"}
+        # Orden del rail = MISMO que el rail de Live (estable → transientes → diagnóstico).
+        _AN_ORDER = ["Monitoring", "Tabular", "Trends", "Waveform", "Spectrum", "FullSpectrum",
+                     "Orbit", "Deflection", "Shaft Centerline", "Bode", "Polar", "Waterfall",
+                     "Cascade", "Diagnostics"]
+        _an_idx = []            # fila del rail -> índice en an_tabs (en el orden de Live)
+        for _tt in _AN_ORDER:
+            for _j in range(an_tabs.count()):
+                if an_tabs.tabText(_j) == _tt:
+                    _an_idx.append(_j); an_rail.addItem(_AN_LABELS.get(_tt, _tt)); break
+
+        def _an_row_to_tab(_r):
+            if 0 <= _r < len(_an_idx):
+                an_tabs.setCurrentIndex(_an_idx[_r])
+
+        def _an_tab_to_row(_i):
+            if _i in _an_idx:
+                an_rail.blockSignals(True); an_rail.setCurrentRow(_an_idx.index(_i)); an_rail.blockSignals(False)
+        an_rail.currentRowChanged.connect(_an_row_to_tab)
+        an_tabs.currentChanged.connect(_an_tab_to_row)
+        an_rail.setCurrentRow(0)
+        if _an_idx:
+            an_tabs.setCurrentIndex(_an_idx[0])
         an_outer = QtWidgets.QWidget(); _anl = QtWidgets.QHBoxLayout(an_outer)
         _anl.setContentsMargins(0, 0, 0, 0); _anl.setSpacing(12)
         _anl.addWidget(an_rail); _anl.addWidget(an_tabs, 1)
@@ -3772,6 +3861,81 @@ def main() -> int:
                     else:
                         for _oln in _spec_ord:
                             _oln.hide()
+            elif cur == "Tabular":
+                try:
+                    for _r3, (_ti, _tc) in enumerate(vib):
+                        _eu3 = snap[_ti] * 1000.0 / (_tc.sensitivity_mv_per_eu or 1.0)
+                        _eu3 = _eu3 - _eu3.mean()
+                        _ov3, _a13, _p13, _a23, _p23 = _amp3(
+                            _eu3, fs, f1, _ckind(_tc),
+                            kph0=(snap[kph_glob] if kph_glob is not None else None),
+                            runout=_ro_for(_tc.name), band=_band_for(_tc))
+                        _al3, _dg3 = _alarm_for(_tc)
+                        _z3 = "D" if (_dg3 and _ov3 >= _dg3) else ("C" if (_al3 and _ov3 >= _al3) else "A")
+                        _vals3 = [_tc.name, f"{float(snap[_ti].mean()):.2f} V",
+                                  f"{_ov3:.3g} {_tc.units}", f"{_a13:.3g}" if f1 else "—",
+                                  f"{_p13:.0f}°" if f1 else "—", _z3]
+                        for _c3, _v3 in enumerate(_vals3):
+                            tblv.setItem(_r3, _c3, QtWidgets.QTableWidgetItem(str(_v3)))
+                except Exception:  # noqa: BLE001
+                    pass
+            elif cur == "FullSpectrum":
+                try:
+                    _ixf = cb_fs.currentIndex()
+                    if 0 <= _ixf < len(_fs_pairs):
+                        _lbf, _xif, _yif, _sxf, _syf = _fs_pairs[_ixf]
+                        _xf = snap[_xif] * 1000.0 / _sxf; _yf = snap[_yif] * 1000.0 / _syf
+                        _xf = _xf - _xf.mean(); _yf = _yf - _yf.mean()
+                        _zf = _xf + 1j * _yf
+                        _Zf = np.fft.fftshift(np.fft.fft(_zf))
+                        _fff = np.fft.fftshift(np.fft.fftfreq(len(_zf), 1.0 / fs)) * 60.0
+                        _mgf = np.abs(_Zf) / max(1, len(_zf)) * 2.0
+                        _kf = np.abs(_fff) <= (fs / 2.56) * 60.0
+                        fs_curve.setData(_fff[_kf], _mgf[_kf])
+                except Exception:  # noqa: BLE001
+                    pass
+            elif cur == "Deflection":
+                try:
+                    _agg2 = {}
+                    for (_di, _dc) in vib:
+                        if _ckind(_dc) not in ("prox", "vel", "accel"):
+                            continue
+                        _eu2 = snap[_di] * 1000.0 / (_dc.sensitivity_mv_per_eu or 1.0)
+                        _eu2 = _eu2 - _eu2.mean()
+                        _o2, _a12, _p12, _a22, _p22 = _amp3(
+                            _eu2, fs, f1, _ckind(_dc),
+                            kph0=(snap[kph_glob] if kph_glob is not None else None),
+                            runout=_ro_for(_dc.name), band=_band_for(_dc))
+                        _bn2 = _bearing_no(_dc.name) or 0
+                        _agg2[_bn2] = max(_agg2.get(_bn2, 0.0), _a12 if f1 else 0.0)
+                    _bns = sorted(_agg2)
+                    defl_curve.setData(_bns, [_agg2[_b] for _b in _bns])
+                except Exception:  # noqa: BLE001
+                    pass
+            elif cur == "Waterfall":
+                try:
+                    _ciw = cb_wf.currentIndex()
+                    if wf_buf["ch"] != _ciw:
+                        wf_buf["ch"] = _ciw; wf_buf["spec"] = []
+                    if 0 <= _ciw < len(vib) and rec_state.get("tr_n", 0) % 22 == 0:
+                        _wsel, _wc = vib[_ciw]
+                        _ws = snap[_wsel] * 1000.0 / (_wc.sensitivity_mv_per_eu or 1.0)
+                        _ws = _ws - _ws.mean()
+                        _wfr, _wmag = _spectrum(_ws, fs)
+                        _wk = _wfr <= (fs / 2.56)
+                        wf_buf["spec"].append((_wfr[_wk] * 60.0, _wmag[_wk]))
+                        if len(wf_buf["spec"]) > 16:
+                            wf_buf["spec"] = wf_buf["spec"][-16:]
+                    _spk = max((float(s[1].max()) for s in wf_buf["spec"] if s[1].size), default=1.0) or 1.0
+                    _nsp = len(wf_buf["spec"])
+                    for _rw, _cvw in enumerate(wf_curves):
+                        if _rw < _nsp:
+                            _frq, _mg = wf_buf["spec"][_nsp - 1 - _rw]
+                            _cvw.setData(_frq, _mg / _spk * 0.9 + _rw)
+                        else:
+                            _cvw.setData([], [])
+                except Exception:  # noqa: BLE001
+                    pass
 
         # --- Bilingual strings for the preliminary report (EN default, ES for the client) ---
         REPORT_T = {
