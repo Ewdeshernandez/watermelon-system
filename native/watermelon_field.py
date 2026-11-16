@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1003,13 +1003,33 @@ def main() -> int:
             _train_builder = TrainBuilder()
 
             def _on_machine_built(spec):
-                _ms = spec.get("machines", []); _ss = spec.get("sensors", [])
-                _nb = sum(int(m.get("bearings", 0)) for m in _ms)
-                QtWidgets.QMessageBox.information(
-                    win, "Máquina construida",
-                    f"Tren: {len(_ms)} máquina(s) · {_nb} cojinetes\n"
-                    f"{len(_ss)} sondas generadas y mapeadas al rack Watermelon.\n\n"
-                    "Las sondas se aplicarán a la configuración de canales en el siguiente paso.")
+                # Fase 2: traduce el spec del builder → SensorSpec → SimMachine y lo
+                # carga en la config real con fill_form() (mismo camino que 'cargar máquina').
+                try:
+                    _KMAP = {"prox": "prox", "accel": "accel", "vel": "vel", "kph": "keyphasor"}
+                    _DEFSENS = {"prox": 200.0, "accel": 100.0, "vel": 100.0, "keyphasor": 1.0}
+                    _sspec = []
+                    for _i, _s in enumerate(spec.get("sensors", [])):
+                        _k = _KMAP.get(_s.get("k", "accel"), "accel")
+                        _ang = str(_s.get("ang", ""))
+                        _adeg = 45.0 if "45" in _ang else 0.0
+                        _side = "R" if "R" in _ang else ("L" if "L" in _ang else "")
+                        _sspec.append(SensorSpec(_s.get("n", "CH"), _k, _i + 1,
+                                                 _DEFSENS[_k], _adeg, side=_side))
+                    _ms = spec.get("machines", [])
+                    _bts = {m.get("bearing_type") for m in _ms}
+                    _bt = "mixed" if len(_bts) > 1 else ("rolling" if "rolling" in _bts else "plain")
+                    _nm = (_ms[0].get("name") if _ms else "Tren") or "Tren"
+                    _m = SimMachine(name=_nm, fs=5120.0, sensors=_sspec, bearing_type=_bt, rpm=3000.0)
+                    fill_form(_m)
+                    cfg_tabs.setCurrentWidget(pg_sensors)
+                    QtWidgets.QMessageBox.information(
+                        win, "Máquina construida",
+                        f"{len(_sspec)} sondas aplicadas a la configuración.\n"
+                        "Revisá en 'Sensors & layout' / 'Channel editor' y seguí a Validación.")
+                except Exception as _e2:  # noqa: BLE001
+                    QtWidgets.QMessageBox.warning(win, "Constructor",
+                                                  f"No se pudo aplicar la máquina:\n{_e2}")
             _train_builder.machineBuilt.connect(_on_machine_built)
             cfg_tabs.insertTab(1, _train_builder, "Constructor")
         except Exception as _be:  # noqa: BLE001
