@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -796,7 +796,9 @@ def main() -> int:
                 _sl.setStyleSheet(_STEP_ON if _s == active else _STEP_OFF)
         _set_step("Configurar")
 
-        _wv.addWidget(_hdr); _wv.addWidget(_flow); _wv.addWidget(tabs, 1)
+        # El stepper (_flow) ya NO va como banda global: se mueve DENTRO del tab Config
+        # (abajo, cfg_ol.insertWidget) → menos bandas apiladas arriba.
+        _wv.addWidget(_hdr); _wv.addWidget(tabs, 1)
         win.setCentralWidget(_wrap)
         act_start.setEnabled(False)          # bloqueado hasta validar (Fase 1)
         act_start.setToolTip("Valida la configuración (pestaña Validation) antes de iniciar.")
@@ -848,6 +850,7 @@ def main() -> int:
 
         cfg_outer = QtWidgets.QWidget(); cfg_ol = QtWidgets.QVBoxLayout(cfg_outer)
         cfg_ol.setContentsMargins(4, 4, 4, 4); cfg_ol.setSpacing(8)
+        cfg_ol.addWidget(_flow)          # stepper Configurar→Validar→Listo→Adquirir→Guardar (antes era banda global)
         # Config amigable estilo web: letra chica, casillas prolijas, pestañas internas.
         cfg_outer.setStyleSheet(
             "QWidget { font-size: 12px; }"
@@ -955,11 +958,29 @@ def main() -> int:
         sp_nbrg = QtWidgets.QSpinBox(); sp_nbrg.setRange(1, 12); sp_nbrg.setValue(4); r2b.addWidget(sp_nbrg)
         btn_autolay = QtWidgets.QPushButton("Auto-generate sensor layout")
         btn_autolay.setStyleSheet(
-            "QPushButton{background:#eef5ff;color:#12467f;border:1px solid #bcd6f5;font-weight:700;"
-            "padding:6px 14px;border-radius:7px;} QPushButton:hover{background:#dbe8f7;}")
+            "QPushButton{background:#15273a;color:#9bd0ef;border:1px solid #2f84c4;font-weight:700;"
+            "padding:6px 14px;border-radius:7px;} QPushButton:hover{background:#1c3a52;}")
         r2b.addWidget(btn_autolay)
-        r2b.addWidget(QtWidgets.QLabel("<i style='color:#64748b'>→ fills a recommended X/Y layout you can edit</i>"))
+        r2b.addWidget(QtWidgets.QLabel("<i style='color:#8aa0b6'>→ fills a recommended X/Y layout you can edit</i>"))
         r2b.addStretch(1); ml.addLayout(r2b)
+
+        # --- Tipo de monitoreo: acá se DECLARA qué es esta máquina (se refleja en el
+        #     badge del toolbar). Puntual = por oportunidad; En línea = continuo. ---
+        ml.addWidget(_subhdr("Tipo de monitoreo"))
+        r2c = QtWidgets.QHBoxLayout()
+        cb_montype = QtWidgets.QComboBox()
+        cb_montype.addItems(["Puntual — por oportunidad (conectás, medís, te vas)",
+                             "En línea — monitoreo continuo (equipo fijo, alarmas 24/7)"])
+        cb_montype.setMinimumWidth(380)
+        cb_montype.setToolTip("Declarás acá el rol de esta máquina. Puntual: grabás una sesión\n"
+                              "al disco y la subís después. En línea: publica en vivo a la nube\n"
+                              "con alarmas y heartbeat. El badge del toolbar lo refleja.")
+        r2c.addWidget(QtWidgets.QLabel("Esta máquina es para:"))
+        r2c.addWidget(cb_montype); r2c.addStretch(1); ml.addLayout(r2c)
+        # Sincronización en ambos sentidos con el Destino del toolbar (mismo índice).
+        cb_montype.currentIndexChanged.connect(lambda i: cb_dest.setCurrentIndex(i))
+        cb_dest.currentIndexChanged.connect(lambda i: cb_montype.setCurrentIndex(i))
+
         ml.addStretch(1)
         cfg_tabs.addTab(pg_machine, "Machine")
 
