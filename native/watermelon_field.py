@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.6"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.7"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -441,11 +441,11 @@ def main() -> int:
         m_file = mb.addMenu("&File")
         m_view = mb.addMenu("&View")
         m_help = mb.addMenu("&Help")
-        act_start = QtGui.QAction("Start", win)
-        act_stop = QtGui.QAction("Stop", win); act_stop.setEnabled(False)
-        act_save = QtGui.QAction("Save data", win)
-        act_sync = QtGui.QAction("Upload to cloud", win)
-        act_clear = QtGui.QAction("Delete data", win)
+        act_start = QtGui.QAction("Iniciar", win); act_start.setToolTip("Iniciar adquisición")
+        act_stop = QtGui.QAction("Detener", win); act_stop.setEnabled(False); act_stop.setToolTip("Detener adquisición")
+        act_save = QtGui.QAction("Guardar", win); act_save.setToolTip("Guardar captura (onda cruda + config) al disco")
+        act_sync = QtGui.QAction("Subir", win); act_sync.setToolTip("Subir capturas pendientes a la nube")
+        act_clear = QtGui.QAction("Borrar", win); act_clear.setToolTip("Borrar la captura actual")
         act_export = QtGui.QAction("Export configuration to file…", win)
         act_import = QtGui.QAction("Import configuration from file…", win)
         act_opendata = QtGui.QAction("Open saved session…  (reprocess)", win)
@@ -670,7 +670,7 @@ def main() -> int:
             _refresh()
             dlg.exec()
 
-        act_hw = QtGui.QAction("Detect hardware…", win)
+        act_hw = QtGui.QAction("Detectar HW", win); act_hw.setToolTip("Detectar el rack/hardware Watermelon")
         act_hw.triggered.connect(_show_hw_dialog)
         m_view.addSeparator(); m_view.addAction(act_hw)
 
