@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.5"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -635,7 +635,7 @@ def main() -> int:
                     ch_txt = ", ".join(f"{d.get('name','')} ({_wm_label(d.get('product_type',''))})"
                                        for d in chassis) or "—"
                     hdr.setText("<b style='color:#34d399;font-size:14px'>● Hardware Watermelon detectado</b>"
-                                f"<div style='color:#334155;margin-top:4px'>Chasis: {html.escape(ch_txt)} "
+                                f"<div style='color:#9db6cd;margin-top:4px'>Chasis: {html.escape(ch_txt)} "
                                 f"· {len(mods)} módulo(s) · {len(devs)} dispositivo(s)</div>")
                     show = mods if mods else devs   # si no hay 'Mod' en el nombre, muestra TODO
                     nine = None
@@ -980,7 +980,7 @@ def main() -> int:
             f"<span style='color:{SENSOR_COLORS['vel']}'>●</span> Velocity&nbsp;&nbsp;"
             f"<span style='color:{SENSOR_COLORS['accel']}'>●</span> Accelerometer&nbsp;&nbsp;"
             f"<span style='color:{SENSOR_COLORS['keyphasor']}'>●</span> Keyphasor"
-            f"&nbsp;&nbsp;&nbsp;<span style='color:#64748b'>API 670 angle: from TDC · "
+            f"&nbsp;&nbsp;&nbsp;<span style='color:#8aa0b6'>API 670 angle: from TDC · "
             f"R=clockwise · L=counter-clockwise (45°L+45°R=90°)</span>")
         sl.addWidget(leg)
         canv = QtWidgets.QHBoxLayout()
@@ -1112,7 +1112,7 @@ def main() -> int:
             rb.addStretch(1); al.addLayout(rb)
             acq_band[_t] = (_wfx, _wfn, _wln)
 
-        lbl_acq_df = QtWidgets.QLabel(""); lbl_acq_df.setStyleSheet("color:#64748b; font-weight:600;")
+        lbl_acq_df = QtWidgets.QLabel(""); lbl_acq_df.setStyleSheet("color:#8aa0b6; font-weight:600;")
         al.addWidget(lbl_acq_df)
         al.addWidget(QtWidgets.QLabel(
             "<i style='color:#94a3b8'>El resumen completo por canal (pareo, keyphasor, banda) "
@@ -1199,7 +1199,7 @@ def main() -> int:
         for _b in (btn_ch_prev, btn_ch_next):
             _b.setFixedWidth(26); _b.setToolTip("Previous / next channel"); _b.setStyleSheet(_navbtn)
             hrow.addWidget(_b)
-        lbl_ch_bearing = QtWidgets.QLabel(""); lbl_ch_bearing.setStyleSheet("color:#64748b;")
+        lbl_ch_bearing = QtWidgets.QLabel(""); lbl_ch_bearing.setStyleSheet("color:#8aa0b6;")
         hrow.addWidget(lbl_ch_bearing); hrow.addStretch(1)
         cl.addLayout(hrow)
 
@@ -1383,7 +1383,7 @@ def main() -> int:
         pg_val = QtWidgets.QWidget(); vl = QtWidgets.QVBoxLayout(pg_val); vl.setSpacing(8)
         vtop = QtWidgets.QHBoxLayout()
         vtop.addWidget(QtWidgets.QLabel(
-            "<b>Validation</b> <span style='color:#64748b'>— API 670 / ISO 20816 · runs on the "
+            "<b>Validation</b> <span style='color:#8aa0b6'>— API 670 / ISO 20816 · runs on the "
             "current configuration</span>"))
         vtop.addStretch(1)
         btn_validate = QtWidgets.QPushButton("↻ Validate now")
@@ -1431,7 +1431,7 @@ def main() -> int:
             _ic = {"error": ("🔴", "#b91c1c"), "warn": ("🟡", "#b45309"), "ok": ("🟢", "#34d399")}
             rows = []
             for f in findings:
-                ic, col = _ic.get(f.level, ("•", "#334155"))
+                ic, col = _ic.get(f.level, ("•", "#9db6cd"))
                 rows.append(f"<div style='margin:4px 0'><span>{ic}</span> "
                             f"<span style='color:{col}'>{html.escape(f.message)}</span></div>")
             val_out.setHtml("<div style='font-family:Segoe UI,Arial;font-size:12.5px'>"
@@ -1519,7 +1519,7 @@ def main() -> int:
         cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
         r3.addStretch(1); sml.addLayout(r3)
         sml.addWidget(QtWidgets.QLabel(
-            "<i style='color:#64748b'>Test-bench only: injects faults/criticals to validate the "
+            "<i style='color:#8aa0b6'>Test-bench only: injects faults/criticals to validate the "
             "software without hardware. Not shown in field mode.</i>"))
         sml.addStretch(1)
         # El tab Simulator SOLO aparece en modo dev (WM_DEV=1). El producto de campo
@@ -1660,7 +1660,7 @@ def main() -> int:
                 for b in brs:
                     cx = xpos[b]
                     brg_plot.plot(cx + R * np.sin(th), R * np.cos(th), pen=pg.mkPen(NAVY, width=9))
-                    lb = pg.TextItem(html=f"<div style='font-size:10pt;color:#64748b;"
+                    lb = pg.TextItem(html=f"<div style='font-size:10pt;color:#8aa0b6;"
                                      f"font-weight:700'>Brg {b}</div>", anchor=(0.5, 0))
                     lb.setPos(cx, -R - 0.24); brg_plot.addItem(lb)
                     bs = [s for s in meas if _pl(s) == b]
@@ -1935,7 +1935,7 @@ def main() -> int:
                 _nice("Configuration saved",
                       "<div style='font-size:15px'><b style='color:#34d399'>💾 Saved on this PC</b></div>"
                       f"<div style='color:#0F1E3D;margin-top:6px'><b>{m.name}</b> · local library</div>"
-                      "<div style='color:#64748b;margin-top:8px'>Stored locally only. To share it with the "
+                      "<div style='color:#8aa0b6;margin-top:8px'>Stored locally only. To share it with the "
                       "web/other PCs, use <b>Save machine to Watermelon System</b> (cloud).</div>")
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, "Library", f"Could not save: {e}")
@@ -2059,14 +2059,14 @@ def main() -> int:
                           "Watermelon System</b></div>"
                           f"<div style='color:#0F1E3D;margin-top:6px'><b>{res.get('name','')}</b> · "
                           f"{len(setup.channels)} channels</div>"
-                          "<div style='color:#64748b;margin-top:8px'>Now available in the web "
+                          "<div style='color:#8aa0b6;margin-top:8px'>Now available in the web "
                           "(Remote Monitoring). 🍉</div>")
                 elif res.get("reason") == "offline":
                     _nice("Save machine", "<b>No cloud connection.</b> Check internet and try again "
                           "(the machine is still in your local library).", QtWidgets.QMessageBox.Warning)
                 else:
                     _nice("Save machine", f"<b style='color:#b91c1c'>Could not save</b><br>"
-                          f"<span style='color:#334155'>{res.get('reason','?')}</span>",
+                          f"<span style='color:#9db6cd'>{res.get('reason','?')}</span>",
                           QtWidgets.QMessageBox.Warning)
             QtCore.QTimer.singleShot(300, _check)
 
@@ -2088,7 +2088,7 @@ def main() -> int:
                   "<div style='font-size:15px'><b style='color:#34d399'>✅ Recommended layout generated</b></div>"
                   f"<div style='color:#0F1E3D;margin-top:6px'>{nb} bearings · keyphasor + X/Y per bearing "
                   f"({nb * 2 + 1} channels).</div>"
-                  "<div style='color:#64748b;margin-top:8px'>Review/edit angles, alarms and gaps in "
+                  "<div style='color:#8aa0b6;margin-top:8px'>Review/edit angles, alarms and gaps in "
                   "<b>Sensors &amp; layout</b>, then continue. 🍉</div>")
 
         def _add_sensor_click():
@@ -2121,7 +2121,7 @@ def main() -> int:
                   "<div style='font-size:15px'><b style='color:#34d399'>✓ Changes applied</b></div>"
                   f"<div style='color:#0F1E3D;margin-top:6px'>Layout diagram &amp; Summary updated · "
                   f"{n} channels · rotation {cb_rot.currentText()}</div>"
-                  "<div style='color:#64748b;margin-top:8px'>Revisá el diagrama y la pestaña "
+                  "<div style='color:#8aa0b6;margin-top:8px'>Revisá el diagrama y la pestaña "
                   "<b>Summary</b>. Para medir con esta config usá <b>Apply &amp; measure</b>.</div>")
         btn_refresh.clicked.connect(_refresh_all)
         # En "Channel editor" manda su propio "✓ Apply to channel" (por canal); ahí ocultamos
@@ -2470,7 +2470,7 @@ def main() -> int:
         chk_runout = QtWidgets.QCheckBox("Compensar (restar runout)")
         chk_runout.setToolTip("Resta el vector de runout al 1X/2X en tabla, Bode y Polar. "
                               "El Direct NO se compensa (movimiento total, por norma).")
-        lbl_sr = QtWidgets.QLabel("— sin vector —"); lbl_sr.setStyleSheet("color:#64748b;font-weight:600;")
+        lbl_sr = QtWidgets.QLabel("— sin vector —"); lbl_sr.setStyleSheet("color:#8aa0b6;font-weight:600;")
         for _wq in (btn_sr_auto, btn_sr_live):
             _wq.setStyleSheet("QPushButton{background:#0ea5e9;color:white;border:none;font-weight:700;"
                               "padding:5px 13px;border-radius:6px;} QPushButton:hover{background:#0284c7;}")
@@ -2517,7 +2517,7 @@ def main() -> int:
 
         # (Start/Stop/Save/Upload/Delete live in the top toolbar)
         ctl = QtWidgets.QHBoxLayout()
-        lbl_disk = QtWidgets.QLabel("Disk: —"); lbl_disk.setStyleSheet("color:#64748b;")
+        lbl_disk = QtWidgets.QLabel("Disk: —"); lbl_disk.setStyleSheet("color:#8aa0b6;")
         ctl.addStretch(1); ctl.addWidget(lbl_disk)
         mon_l.addLayout(ctl)
         # tabular list — current values (fast)
@@ -2532,7 +2532,7 @@ def main() -> int:
         tblt.setFocusPolicy(QtCore.Qt.NoFocus)
         mon_l.addWidget(tblt, 1)
         mon_l.addWidget(QtWidgets.QLabel(
-            "<i style='color:#64748b'>Amplitudes by standard: displacement in pp (API 670 · "
+            "<i style='color:#8aa0b6'>Amplitudes by standard: displacement in pp (API 670 · "
             "ISO 7919), velocity/acceleration in RMS (ISO 20816).</i>"))
         # --- Área ANÁLISIS: todas las vistas de gráficos bajo UN tab "Análisis" con
         #     rail lateral (mismo esquema que Live/Config). an_tabs = sub-pestañas;
@@ -2545,7 +2545,7 @@ def main() -> int:
         top = QtWidgets.QHBoxLayout()
         top.addWidget(QtWidgets.QLabel("<b>Waveforms</b>"))
         top.addWidget(QtWidgets.QLabel(
-            "<i style='color:#64748b'>double-click a waveform = view it alone with its spectrum (FFT) · "
+            "<i style='color:#8aa0b6'>double-click a waveform = view it alone with its spectrum (FFT) · "
             "double-click again = back to all</i>"))
         top.addStretch(1); ond_l.addLayout(top)
         gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
@@ -2585,7 +2585,7 @@ def main() -> int:
         spec_info = pg.TextItem("", color=NAVY, anchor=(1, 0)); p_spec.addItem(spec_info)
         # Cursor del espectro: mové el mouse y muestra "valor unidad @ CPM"
         spec_data = {}
-        spec_cursor = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1))
+        spec_cursor = pg.InfiniteLine(angle=90, pen=pg.mkPen("#9db6cd", width=1))
         spec_cur_txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1))
         p_spec.addItem(spec_cursor); p_spec.addItem(spec_cur_txt); spec_cursor.hide()
 
@@ -2652,7 +2652,7 @@ def main() -> int:
         if orb_ok:
             orb_w = QtWidgets.QWidget(); orb_l = QtWidgets.QVBoxLayout(orb_w)
             orb_l.addWidget(QtWidgets.QLabel(
-                "<b>Orbits</b> <i style='color:#64748b'>— oriented to the probe angle "
+                "<b>Orbits</b> <i style='color:#8aa0b6'>— oriented to the probe angle "
                 "(Y=45°L · X=45°R) · double-click = view one · double-click again = back</i>"))
             gl_orb = pg.GraphicsLayoutWidget(); orb_l.addWidget(gl_orb, 1)
             gl_orb.ci.setContentsMargins(2, 2, 2, 2); gl_orb.ci.setSpacing(2)
@@ -2719,7 +2719,7 @@ def main() -> int:
         # --- Bode (grilla por canal: amplitud 1X vs rpm; doble clic = uno + cursor) ---
         bode_w = QtWidgets.QWidget(); bode_l = QtWidgets.QVBoxLayout(bode_w)
         bode_l.addWidget(QtWidgets.QLabel(
-            "<b>Bode</b> <i style='color:#64748b'>— 1X amplitude vs rpm per channel (fills during run-up) · "
+            "<b>Bode</b> <i style='color:#8aa0b6'>— 1X amplitude vs rpm per channel (fills during run-up) · "
             "double-click = view one · move the mouse = amplitude/phase/rpm</i>"))
         gl_bode = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_bode, 1)
         lbl_bode_hint = QtWidgets.QLabel("◷ Sin datos de velocidad — hacé un ARRANQUE (run-up) "
@@ -2743,12 +2743,12 @@ def main() -> int:
             php.invertY(True)                     # fase-lag hacia arriba; rango auto (unwrap)
             php.setMaximumHeight(170)
             pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); php.addItem(pill)
-            curp = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); php.addItem(curp); curp.hide()
+            curp = pg.InfiniteLine(angle=90, pen=pg.mkPen("#9db6cd", width=1)); php.addItem(curp); curp.hide()
             # AMPLITUD abajo — eje X compartido con la fase de arriba
             p = gl_bode.addPlot(row=2 * rr_ + 1, col=cc_)
             p.showGrid(x=True, y=True, alpha=0.12); p.setLabel("left", f"1X {c.units}"); p.setLabel("bottom", "RPM")
             p.setXLink(php)
-            cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); p.addItem(cur); cur.hide()
+            cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#9db6cd", width=1)); p.addItem(cur); cur.hide()
             txt = pg.TextItem("", color="#1e3a8a", anchor=(0, 1),
                               fill=pg.mkBrush(255, 255, 255, 220)); p.addItem(txt)
             hov_dot = pg.ScatterPlotItem(size=11, brush=pg.mkBrush("#2563eb"), pen=pg.mkPen("w", width=1.5))
@@ -2819,7 +2819,7 @@ def main() -> int:
         lbl_pol_rot.setStyleSheet("color:#34d399; font-weight:700;")
         ptop.addWidget(lbl_pol_rot)
         ptop.addWidget(QtWidgets.QLabel(
-            "<i style='color:#64748b'>0° = probe angle · phase AGAINST rotation · "
+            "<i style='color:#8aa0b6'>0° = probe angle · phase AGAINST rotation · "
             "sentido de giro = config de la máquina · double-click = full polar</i>"))
         ptop.addStretch(1); pol_l.addLayout(ptop)
         gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
@@ -2861,7 +2861,7 @@ def main() -> int:
             p.addItem(ncrit); p.addItem(op)
             ncrit_txt = pg.TextItem("", color=REDL, anchor=(0, 0.5)); p.addItem(ncrit_txt)
             box = pg.TextItem("", color=NAVY, anchor=(0, 1)); p.addItem(box); box.setPos(-1.3, -1.1)
-            rpm_lbls = [pg.TextItem("", color="#64748b", anchor=(0.5, 0.5)) for _ in range(8)]
+            rpm_lbls = [pg.TextItem("", color="#8aa0b6", anchor=(0.5, 0.5)) for _ in range(8)]
             for t in rpm_lbls:
                 p.addItem(t)
             arc = p.plot(pen=pg.mkPen("#5b6b86", width=2.0))     # arco de giro (visible pero prolijo)
@@ -2918,7 +2918,7 @@ def main() -> int:
         # --- Cascada (grilla por canal: espectros apilados; doble clic = uno solo) ---
         casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
         casc_l.addWidget(QtWidgets.QLabel(
-            "<b>Cascade</b> <i style='color:#64748b'>— spectra stacked by rpm per channel (run-up) · "
+            "<b>Cascade</b> <i style='color:#8aa0b6'>— spectra stacked by rpm per channel (run-up) · "
             "double-click = view one</i>"))
         gl_casc = pg.GraphicsLayoutWidget(); casc_l.addWidget(gl_casc, 1)
         gl_casc.ci.setContentsMargins(2, 2, 2, 2); gl_casc.ci.setSpacing(2)
@@ -2944,7 +2944,7 @@ def main() -> int:
         if orb_ok:
             scl_w = QtWidgets.QWidget(); scl_l = QtWidgets.QVBoxLayout(scl_w)
             scl_l.addWidget(QtWidgets.QLabel(
-                "<b>Shaft Centerline</b> <i style='color:#64748b'>— journal position within the bearing "
+                "<b>Shaft Centerline</b> <i style='color:#8aa0b6'>— journal position within the bearing "
                 "clearance as speed changes. Track colored by rpm · REST = at rest (bottom) · "
                 "large dot = current.</i>"))
             gl_scl = pg.GraphicsLayoutWidget(); scl_l.addWidget(gl_scl, 1)
@@ -3800,10 +3800,10 @@ def main() -> int:
             h = [f"<div style='font-family:Segoe UI,Arial'>",
                  header,
                  f"<h2 style='color:{NAVY};margin:10px 0 0 0'>{T['title']}</h2>",
-                 f"<div style='color:#64748b;font-size:12px'>{T['machine']} <b>{args.machine}</b> · "
+                 f"<div style='color:#8aa0b6;font-size:12px'>{T['machine']} <b>{args.machine}</b> · "
                  f"{_t.strftime(T['dfmt'])} · RPM {rpm:.0f} · {T['sampling']} {fs/1000:.1f} kS/s</div>",
                  f"<p style='font-size:15px'>{T['verdict']}: <b style='color:{verdict[1]}'>{verdict[0]}</b> "
-                 f"<span style='color:#64748b;font-size:12px'>{T['verdict_note']}</span></p>",
+                 f"<span style='color:#8aa0b6;font-size:12px'>{T['verdict_note']}</span></p>",
                  f"<h3 style='color:#0F1E3D'>{T['s1']}</h3>",
                  "<table cellspacing='0' cellpadding='5' border='1' style='border-collapse:collapse;"
                  "border-color:#d6deea;font-size:12px'>",
@@ -3852,8 +3852,8 @@ def main() -> int:
                     f.write("<html><meta charset='utf-8'><body>" + diag_state["html"] + "</body></html>")
                 _nice("Report saved",
                       "<div style='font-size:15px'><b style='color:#34d399'>✅ Report saved</b></div>"
-                      f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{path}</div>"
-                      "<div style='color:#64748b;margin-top:8px'>Open it in your browser; you can print it to PDF.</div>")
+                      f"<div style='color:#9db6cd;font-family:monospace;margin-top:6px'>{path}</div>"
+                      "<div style='color:#8aa0b6;margin-top:8px'>Open it in your browser; you can print it to PDF.</div>")
             except Exception as e:  # noqa: BLE001
                 _nice("Save report", f"<b style='color:#b91c1c'>Could not save</b><br>{e}",
                       QtWidgets.QMessageBox.Warning)
@@ -3885,8 +3885,8 @@ def main() -> int:
                 doc.print_(writer)
                 _nice("PDF saved",
                       "<div style='font-size:15px'><b style='color:#34d399'>✅ PDF saved</b></div>"
-                      f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{path}</div>"
-                      "<div style='color:#64748b;margin-top:8px'>Ready to send by email / WhatsApp.</div>")
+                      f"<div style='color:#9db6cd;font-family:monospace;margin-top:6px'>{path}</div>"
+                      "<div style='color:#8aa0b6;margin-top:8px'>Ready to send by email / WhatsApp.</div>")
             except Exception as e:  # noqa: BLE001
                 _nice("Save PDF", f"<b style='color:#b91c1c'>Could not export PDF</b><br>{e}",
                       QtWidgets.QMessageBox.Warning)
@@ -3933,10 +3933,10 @@ def main() -> int:
                 if res.get("ok"):
                     _nice("Report uploaded",
                           "<div style='font-size:15px'><b style='color:#34d399'>☁ Report uploaded</b></div>"
-                          f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{_BUCKET}/{key}</div>")
+                          f"<div style='color:#9db6cd;font-family:monospace;margin-top:6px'>{_BUCKET}/{key}</div>")
                 else:
                     _nice("Upload report", f"<b style='color:#b91c1c'>Upload failed</b><br>"
-                          f"<span style='color:#334155'>{res.get('err','?')}</span>",
+                          f"<span style='color:#9db6cd'>{res.get('err','?')}</span>",
                           QtWidgets.QMessageBox.Warning)
             QtCore.QTimer.singleShot(300, _check)
 
@@ -4126,11 +4126,11 @@ def main() -> int:
                 ok, fail = res.get("ok", 0), res.get("fail", 0)
                 if res.get("err"):
                     _nice("Upload", f"<b style='color:#b91c1c'>Upload failed</b><br>"
-                          f"<span style='color:#334155'>{res['err']}</span>", QtWidgets.QMessageBox.Warning)
+                          f"<span style='color:#9db6cd'>{res['err']}</span>", QtWidgets.QMessageBox.Warning)
                 elif fail == 0 and ok > 0:
                     _nice("Uploaded",
                           "<div style='font-size:17px'><b style='color:#34d399'>☁ Data synced to the cloud</b></div>"
-                          f"<div style='color:#334155;margin-top:6px'>{ok} recording(s) uploaded.</div>"
+                          f"<div style='color:#9db6cd;margin-top:6px'>{ok} recording(s) uploaded.</div>"
                           "<div style='color:#0F1E3D;margin-top:10px;font-size:14px'>You can now <b>start the "
                           "diagnosis in Watermelon System</b> (web → Analysis → Reprocess). 🍉</div>")
                 elif ok == 0 and fail == 0:
@@ -4154,7 +4154,7 @@ def main() -> int:
             if act_stop.isEnabled():
                 _nice("Save data",
                       "<div style='font-size:15px'><b style='color:#b45309'>⏸ Stop acquisition first</b></div>"
-                      "<div style='color:#334155;margin-top:4px'>Press <b>■ Stop</b> and then "
+                      "<div style='color:#9db6cd;margin-top:4px'>Press <b>■ Stop</b> and then "
                       "<b>💾 Save data</b>.</div>", QtWidgets.QMessageBox.Warning)
                 return
             # 2) is there a stopped run?
@@ -4162,7 +4162,7 @@ def main() -> int:
             if not rec:
                 _nice("Save data",
                       "<div style='font-size:15px'><b>No run to save</b></div>"
-                      "<div style='color:#334155;margin-top:4px'>Do: <b>▶ Start</b> → measure → "
+                      "<div style='color:#9db6cd;margin-top:4px'>Do: <b>▶ Start</b> → measure → "
                       "<b>■ Stop</b> → <b>💾 Save data</b>.</div>")
                 return
             # 3) La corrida YA está en disco (se graba desde Iniciar). Guardar = confirmar local.
@@ -4364,7 +4364,7 @@ def main() -> int:
         # --- Sessions (Fase 3: gestor de sesiones · local vs nube + auto-subida) ---
         sess_w = QtWidgets.QWidget(); sess_l = QtWidgets.QVBoxLayout(sess_w)
         _ssh = QtWidgets.QHBoxLayout()
-        _ssh.addWidget(QtWidgets.QLabel("<b>Sessions</b> <i style='color:#64748b'>— capturas "
+        _ssh.addWidget(QtWidgets.QLabel("<b>Sessions</b> <i style='color:#8aa0b6'>— capturas "
                                         "locales y su estado en la nube</i>"))
         _ssh.addStretch(1)
         btn_sess_open = QtWidgets.QPushButton("▶ Abrir (revisar)")
@@ -4388,7 +4388,7 @@ def main() -> int:
         sess_l.addWidget(sess_tbl, 1)
         _sess_dirs = {}      # fila → rec_dir (para abrir)
         sess_l.addWidget(QtWidgets.QLabel(
-            "<i style='color:#64748b'>● Local = en disco (sin subir) · ● En la nube = subida ✓ · "
+            "<i style='color:#8aa0b6'>● Local = en disco (sin subir) · ● En la nube = subida ✓ · "
             "● En línea = streaming. Auto-sube los pendientes al haber red.</i>"))
 
         _SBADGE = {"LOCAL": ("● LOCAL", "#f6ecd8", "#8a5a13"),
@@ -4428,7 +4428,7 @@ def main() -> int:
             for _r, (_run, _fe, _sz, _st) in enumerate(rows):
                 for _cc, _v in enumerate((_run, _fe, _sz, "")):
                     if _cc == 3:
-                        _tx, _bg, _fg = _SBADGE.get(_st, ("—", "#eef2f7", "#64748b"))
+                        _tx, _bg, _fg = _SBADGE.get(_st, ("—", "#eef2f7", "#8aa0b6"))
                         _it = QtWidgets.QTableWidgetItem(_tx)
                         _it.setBackground(QtGui.QColor(_bg)); _it.setForeground(QtGui.QColor(_fg))
                         _f = _it.font(); _f.setBold(True); _it.setFont(_f)
