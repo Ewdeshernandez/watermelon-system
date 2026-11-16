@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2534,7 +2534,11 @@ def main() -> int:
         mon_l.addWidget(QtWidgets.QLabel(
             "<i style='color:#64748b'>Amplitudes by standard: displacement in pp (API 670 · "
             "ISO 7919), velocity/acceleration in RMS (ISO 20816).</i>"))
-        tabs.addTab(mon_w, "Monitoring")
+        # --- Área ANÁLISIS: todas las vistas de gráficos bajo UN tab "Análisis" con
+        #     rail lateral (mismo esquema que Live/Config). an_tabs = sub-pestañas;
+        #     su barra se oculta abajo y un rail las selecciona. ---
+        an_tabs = QtWidgets.QTabWidget()
+        an_tabs.addTab(mon_w, "Monitoring")
 
         # --- Onda (ANÁLISIS: formas de onda + espectro) ---
         ond_w = QtWidgets.QWidget(); ond_l = QtWidgets.QVBoxLayout(ond_w)
@@ -2598,7 +2602,7 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 pass
         p_spec.scene().sigMouseMoved.connect(_spec_mouse)
-        tabs.addTab(ond_w, "Waveform")
+        an_tabs.addTab(ond_w, "Waveform")
 
         onda_focus = {"i": None}    # None = todas; idx = solo esa onda
 
@@ -2669,7 +2673,7 @@ def main() -> int:
                     pill=pg.TextItem(f"Bearing {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY)))
                 p.addItem(it["smax_txt"]); p.addItem(it["pill"])
                 orb_items.append(it)
-            tabs.addTab(orb_w, "Orbit")
+            an_tabs.addTab(orb_w, "Orbit")
 
             def _apply_orb_focus():
                 fk = orb_focus["k"]
@@ -2756,7 +2760,7 @@ def main() -> int:
                 amp=p.plot(pen=pg.mkPen(col, width=1.8)),      # línea limpia, sin puntos
                 pha=php.plot(pen=pg.mkPen(col, width=1.8)),     # fase unwrap = línea continua
                 hov_dot=hov_dot, hov_dotp=hov_dotp, pill=pill))
-        tabs.addTab(bode_w, "Bode")
+        an_tabs.addTab(bode_w, "Bode")
 
         def _bode_apply():
             fk = bode_focus["k"]
@@ -2870,7 +2874,7 @@ def main() -> int:
                                   ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls,
                                   pa=pa, deg_items=deg_items, arc=arc, arw=arw,
                                   hov_dot=hov_dot, hov_txt=hov_txt, pdata=None))
-        tabs.addTab(pol_w, "Polar")
+        an_tabs.addTab(pol_w, "Polar")
         _grid_focus(pol_cells, pol_focus, gl_pol)
 
         def _polar_mouse(pos):
@@ -2926,7 +2930,7 @@ def main() -> int:
             pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
             casc_cells.append(dict(p=p, name=c.name, pill=pill,
                                    curves=[p.plot(pen=pg.mkPen(col, width=0.8)) for _ in range(_NCC)]))
-        tabs.addTab(casc_w, "Cascade")
+        an_tabs.addTab(casc_w, "Cascade")
         _grid_focus(casc_cells, casc_focus, gl_casc)
 
         # --- Shaft Centerline (posición del muñón en el cojinete vs rpm) — estilo web ---
@@ -2975,7 +2979,7 @@ def main() -> int:
                     aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
                     segs=[], cur=cur, hov_dot=hov_dot, hov_txt=hov_txt, pdata=None))
                 scl_track[brg] = {}
-            tabs.addTab(scl_w, "Shaft Centerline")
+            an_tabs.addTab(scl_w, "Shaft Centerline")
 
             def _scl_mouse(pos):
                 """Hover: muestra rpm + posición del muñón (mil) del punto más cercano."""
@@ -3016,6 +3020,33 @@ def main() -> int:
         diag_txt = QtWidgets.QTextEdit(); diag_txt.setReadOnly(True)
         diag_l.addWidget(diag_txt, 1)
         diag_state = {"html": ""}
+
+        # --- Envolver an_tabs con rail lateral y agregarlo como UN tab "Análisis"
+        #     (mismo esquema de barra lateral que Live/Config). ---
+        an_tabs.tabBar().hide()
+        an_rail = QtWidgets.QListWidget(); an_rail.setObjectName("cfgRail")
+        an_rail.setFixedWidth(182); an_rail.setFocusPolicy(QtCore.Qt.NoFocus)
+        an_rail.setStyleSheet(
+            "QListWidget#cfgRail{background:#0e1823;border:1px solid %s;border-radius:10px;"
+            "padding:6px;outline:0;}"
+            "QListWidget#cfgRail::item{padding:12px 13px;border-radius:8px;color:%s;"
+            "font-weight:600;font-size:13px;margin:2px 1px;}"
+            "QListWidget#cfgRail::item:selected{background:%s;color:%s;"
+            "border-left:3px solid %s;padding-left:10px;}" % (LINE, MUTE, PANEL2, INK, CORN))
+        _AN_LABELS = {"Monitoring": "Monitoreo", "Waveform": "Forma de onda", "Orbit": "Órbita",
+                      "Bode": "Bode", "Polar": "Polar", "Cascade": "Cascada",
+                      "Shaft Centerline": "Shaft Centerline"}
+        for _i in range(an_tabs.count()):
+            an_rail.addItem(_AN_LABELS.get(an_tabs.tabText(_i), an_tabs.tabText(_i)))
+        an_rail.setCurrentRow(an_tabs.currentIndex())
+        an_rail.currentRowChanged.connect(
+            lambda r: an_tabs.setCurrentIndex(r) if 0 <= r < an_tabs.count() else None)
+        an_tabs.currentChanged.connect(lambda i: an_rail.setCurrentRow(i))
+        an_outer = QtWidgets.QWidget(); _anl = QtWidgets.QHBoxLayout(an_outer)
+        _anl.setContentsMargins(0, 0, 0, 0); _anl.setSpacing(12)
+        _anl.addWidget(an_rail); _anl.addWidget(an_tabs, 1)
+        tabs.addTab(an_outer, "Análisis")
+
         tabs.addTab(diag_w, "Diagnostics")
 
         lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("stopped")
@@ -3271,7 +3302,12 @@ def main() -> int:
                         cx = dX * _mo.sin(it["aX"]) + dY * _mo.sin(it["aY"])
                         cy = dX * _mo.cos(it["aX"]) + dY * _mo.cos(it["aY"]) - clr * 0.9
                         scl_track[brg][bk] = (cx, cy)
+            # Vista activa: si el tab principal es "Análisis", la vista real es la
+            # sub-pestaña (Monitoring/Waveform/Orbit/...). Así los chequeos de abajo
+            # (cur == "Monitoring", etc.) siguen igual sin re-cablear update().
             cur = tabs.tabText(tabs.currentIndex())
+            if cur == "Análisis":
+                cur = an_tabs.tabText(an_tabs.currentIndex())
             if cur == "Live" and live_skin is not None:
                 # Piel HTML embebida: arma el payload desde los MISMOS datos reales
                 # (ondas, overall, zona ISO, rpm) y lo empuja a la vista Monitoreo.
