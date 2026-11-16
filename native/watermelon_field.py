@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.8.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -29,21 +29,23 @@ from core.remote_monitoring.agent import AcqAgent
 from core.remote_monitoring.stream_source import (ChannelConfig, StreamConfig,
                                                   SimulatedStreamSource, is_keyphasor_channel)
 
-# --- Paleta instrumento (paridad con la WEB): tema claro ---
-BG = "#eef2f7"       # fondo app (gris azulado claro, como la web)
-PANEL = "#ffffff"    # paneles / plots (blancos)
-PANEL2 = "#e7edf6"   # hover / panel elevado
-LINE = "#d6deea"     # bordes / grid
-INK = "#1f2937"      # texto principal
-MUTE = "#64748b"     # texto secundario
-ACC = "#2fa65a"      # acento VERDE sandía (marca Watermelon de campo)
-NAVY = "#17512f"     # chrome (menú/toolbar/status) = verde cáscara profundo
-BLUE = "#2f6fb0"
-CORN = "#4f8fd0"     # traza primaria (cornflower)
-AMBER = "#e08a1e"    # traza secundaria (ámbar) para fase/espectro
-GREEN = "#2fa36b"    # órbita
-REDL = "#c0392b"     # 1X / peligro
-KPH = "#12467f"      # puntos keyphasor (azul profundo)
+# --- Paleta instrumento CAMPO: tema OSCURO sala-control (paridad con el mockup) ---
+# Nota: pg.setConfigOptions(background=PANEL,...) → todos los plots pyqtgraph
+# toman PANEL como fondo, así que voltear estas constantes oscurece también los plots.
+BG = "#0a1016"       # fondo app (navy casi negro)
+PANEL = "#111f2e"    # paneles / plots
+PANEL2 = "#15273a"   # hover / panel elevado
+LINE = "#1f344a"     # bordes / grid
+INK = "#e8f0f8"      # texto principal (claro)
+MUTE = "#8aa0b6"     # texto secundario
+ACC = "#2f84c4"      # acento azul acero (selección/hover); la marca verde vive en el melón
+NAVY = "#132436"     # chrome (menú/toolbar/status) = navy instrumento
+BLUE = "#2f84c4"
+CORN = "#34c6e8"     # traza primaria (cyan)
+AMBER = "#e6b93f"    # traza secundaria (ámbar) para fase/espectro
+GREEN = "#27c08a"    # órbita / zona OK
+REDL = "#ec4b52"     # 1X / peligro
+KPH = "#4a90d9"      # puntos keyphasor (azul visible sobre oscuro)
 # Colores por TIPO de sensor (idénticos a la web: bolitas de la sección)
 SENSOR_COLORS = {"prox": "#8b5cf6", "vel": "#22b8cf", "accel": "#ef4444", "keyphasor": "#f59e0b"}
 SENSOR_LABELS = {"prox": "Proximity", "vel": "Velocity", "accel": "Accelerometer", "keyphasor": "Keyphasor"}
@@ -241,22 +243,22 @@ def _stylesheet(scale: float = 1.0) -> str:
         font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: {f}px; }}
     QLabel {{ background: transparent; color: {INK}; }}
     QMenuBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-        stop:0 #1f7a43, stop:1 #14532d); color: #eafff2; padding: 3px 8px; font-weight: 700; }}
-    QMenuBar::item {{ padding: 6px 14px; background: transparent; color: #eafff2; border-radius: 7px; }}
-    QMenuBar::item:selected {{ background: rgba(255,255,255,0.18); color: #ffffff; }}
-    QMenuBar::item:pressed {{ background: rgba(0,0,0,0.22); color: #ffffff; }}
-    QMenu {{ background: #ffffff; border: 1px solid #cbd7e6; border-radius: 12px;
+        stop:0 #16293d, stop:1 #0e1a28); color: #cfe0f0; padding: 3px 8px; font-weight: 700; }}
+    QMenuBar::item {{ padding: 6px 14px; background: transparent; color: #cfe0f0; border-radius: 7px; }}
+    QMenuBar::item:selected {{ background: rgba(255,255,255,0.12); color: #ffffff; }}
+    QMenuBar::item:pressed {{ background: rgba(0,0,0,0.30); color: #ffffff; }}
+    QMenu {{ background: {PANEL}; border: 1px solid {LINE}; border-radius: 12px;
         color: {INK}; padding: 7px; }}
     QMenu::item {{ padding: 9px 24px 9px 18px; border-radius: 8px; margin: 1px 3px;
-        font-weight: 600; color: #1e293b; }}
+        font-weight: 600; color: {INK}; }}
     QMenu::item:selected {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-        stop:0 #10b981, stop:1 #16a34a); color: #ffffff; }}
-    QMenu::item:disabled {{ color: #9aa7bd; }}
-    QMenu::separator {{ height: 1px; background: #e4ebf3; margin: 7px 12px; }}
+        stop:0 #2f84c4, stop:1 #1c5a8a); color: #ffffff; }}
+    QMenu::item:disabled {{ color: {MUTE}; }}
+    QMenu::separator {{ height: 1px; background: {LINE}; margin: 7px 12px; }}
     QMenu::icon {{ padding-left: 8px; }}
     QToolBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-        stop:0 #1f7a43, stop:1 #14532d); spacing: 7px; padding: 8px 12px;
-        border-bottom: 1px solid #0f3d22; }}
+        stop:0 #16293d, stop:1 #0e1a28); spacing: 7px; padding: 8px 12px;
+        border-bottom: 1px solid {LINE}; }}
     QToolBar::separator {{ background: rgba(255,255,255,0.18); width: 1px; margin: 5px 7px; }}
     /* Cada acción como CHIP visible (estilo estación de análisis) — el nombre
        nunca se pierde sobre el fondo oscuro. */
@@ -305,13 +307,13 @@ def _stylesheet(scale: float = 1.0) -> str:
     QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {ACC}; }}
     QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ width: 9px; height: 9px; }}
     QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ width: 9px; height: 9px; }}
-    QTableWidget {{ background: {PANEL}; color: {INK}; gridline-color: #eef2f8;
+    QTableWidget {{ background: {PANEL}; color: {INK}; gridline-color: {LINE};
         border: 1px solid {LINE}; border-radius: 10px;
-        alternate-background-color: #f6f9fd; }}
+        alternate-background-color: {PANEL2}; }}
     QTableWidget::item {{ padding: 6px 8px; }}
-    QTableWidget::item:selected {{ background: #dbe8f7; color: {INK}; }}
-    QHeaderView::section {{ background: {NAVY}; color: #bfe8cf; padding: 9px 8px;
-        border: none; border-right: 1px solid #1c5e38; font-weight: 700; font-size: {fh}px;
+    QTableWidget::item:selected {{ background: {PANEL2}; color: {INK}; }}
+    QHeaderView::section {{ background: {NAVY}; color: #9db6cd; padding: 9px 8px;
+        border: none; border-right: 1px solid {LINE}; font-weight: 700; font-size: {fh}px;
         text-transform: uppercase; letter-spacing: .04em; }}
     QHeaderView::section:first {{ border-top-left-radius: 9px; }}
     QHeaderView::section:last {{ border-top-right-radius: 9px; border-right: none; }}
@@ -632,7 +634,7 @@ def main() -> int:
                     chassis = [d for d in devs if _slot_of(d.get("name", "")) == 0]
                     ch_txt = ", ".join(f"{d.get('name','')} ({_wm_label(d.get('product_type',''))})"
                                        for d in chassis) or "—"
-                    hdr.setText("<b style='color:#166534;font-size:14px'>● Hardware Watermelon detectado</b>"
+                    hdr.setText("<b style='color:#34d399;font-size:14px'>● Hardware Watermelon detectado</b>"
                                 f"<div style='color:#334155;margin-top:4px'>Chasis: {html.escape(ch_txt)} "
                                 f"· {len(mods)} módulo(s) · {len(devs)} dispositivo(s)</div>")
                     show = mods if mods else devs   # si no hay 'Mod' en el nombre, muestra TODO
@@ -649,11 +651,11 @@ def main() -> int:
                             it = QtWidgets.QTableWidgetItem(str(v))
                             if is9229:
                                 it.setBackground(QtGui.QColor("#dcfce7"))
-                                it.setForeground(QtGui.QColor("#065f46"))
+                                it.setForeground(QtGui.QColor("#34d399"))
                             tbl.setItem(r, c, it)
                     if nine:
                         s, nm = nine; b0 = (s - 1) * 4 + 1
-                        note.setText(f"<b style='color:#065f46'>✓ Módulo de proximidad DC (Watermelon) en "
+                        note.setText(f"<b style='color:#34d399'>✓ Módulo de proximidad DC (Watermelon) en "
                                      f"slot {s}</b> → BNC {b0}–{s*4}.<br>Keyphasor + 2 radiales: "
                                      f"<b>KPH=BNC {b0}, 1Y=BNC {b0+1}, 1X=BNC {b0+2}</b>.")
                     else:
@@ -688,10 +690,25 @@ def main() -> int:
         _sep_tb.append(tb.addSeparator())
         _lbl_dest = QtWidgets.QLabel(" Destino: "); _lbl_dest.setStyleSheet("color:white;")
         tb.addWidget(_lbl_dest)
-        cb_dest = QtWidgets.QComboBox(); cb_dest.addItems(["Captura local", "Monitoreo en línea"])
-        cb_dest.setToolTip("Captura local: graba en el disco del PC (subes después).\n"
-                           "Monitoreo en línea: envía lecturas en vivo a Watermelon System.")
+        cb_dest = QtWidgets.QComboBox()
+        cb_dest.addItems(["Puntual · captura local", "En línea · monitoreo continuo"])
+        cb_dest.setToolTip("Puntual (por oportunidad): conectás el equipo un rato, grabás la\n"
+                           "sesión al disco y la subís después. Sin alarmas 24/7.\n"
+                           "En línea (continuo): equipo fijo, publica lecturas en vivo a\n"
+                           "Watermelon System con alarmas y heartbeat.")
         tb.addWidget(cb_dest)
+        # Badge del tipo de sesión (Puntual / En línea), visible siempre
+        lbl_sess = QtWidgets.QLabel()
+
+        def _upd_sess_badge(_i=None):
+            _on = cb_dest.currentIndex() == 1
+            lbl_sess.setText("  ● EN LÍNEA  " if _on else "  ● PUNTUAL  ")
+            lbl_sess.setStyleSheet(
+                "color:#07121c;border-radius:999px;font-weight:800;font-size:11px;"
+                "background:%s;" % ("#27c08a" if _on else "#e6b93f"))
+        cb_dest.currentIndexChanged.connect(_upd_sess_badge)
+        _upd_sess_badge()
+        tb.addWidget(lbl_sess)
         _sep_tb.append(tb.addSeparator())
         act_slowroll = QtGui.QAction("Set slow-roll", win)
         act_slowroll.setToolTip("Captura el vector 1X/2X de RUNOUT a la velocidad ACTUAL (en vivo).\n"
@@ -735,7 +752,7 @@ def main() -> int:
         _hdr = QtWidgets.QFrame(); _hdr.setObjectName("wmBrandBar")
         _hdr.setStyleSheet(
             "QFrame#wmBrandBar{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #14532d, stop:0.6 #1f7a43, stop:1 #166534);"
+            "stop:0 #14532d, stop:0.6 #1f7a43, stop:1 #34d399);"
             "border-bottom:2px solid #e23b55;}")   # franja roja = rebanada de sandía
         _hb = QtWidgets.QHBoxLayout(_hdr); _hb.setContentsMargins(16, 8, 14, 8); _hb.setSpacing(12)
         _brand = QtWidgets.QLabel(
@@ -834,14 +851,14 @@ def main() -> int:
         # Config amigable estilo web: letra chica, casillas prolijas, pestañas internas.
         cfg_outer.setStyleSheet(
             "QWidget { font-size: 12px; }"
-            "QLabel { color:#475569; font-weight:600; }"
+            "QLabel { color:#b7c6de; font-weight:600; }"
             "QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
-            "  background:#ffffff; border:1px solid #d6deea; border-radius:7px;"
+            f"  background:{PANEL}; color:{INK}; border:1px solid {LINE}; border-radius:7px;"
             "  padding:4px 8px; min-height:24px; }"
             "QSpinBox, QDoubleSpinBox { padding-right:20px; }"
             "QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {"
-            "  border:1px solid #4f8fd0; }"
-            "QTableWidget { border:1px solid #e6ebf2; border-radius:10px; gridline-color:#eef2f8; }"
+            f"  border:1px solid {ACC}; }}"
+            f"QTableWidget {{ border:1px solid {LINE}; border-radius:10px; gridline-color:{LINE}; }}"
             "QTableWidget::item { padding:3px 6px; }")
 
         _is_sim = type(agent.source).__name__ == "SimulatedStreamSource"
@@ -971,7 +988,7 @@ def main() -> int:
         tblc.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         tblc.setMinimumHeight(240); tblc.setMaximumWidth(560)
         canv.addWidget(tblc, 2)
-        brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
+        brg_plot = pg.PlotWidget(); brg_plot.setBackground(PANEL); brg_plot.setAspectLocked(True)
         brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
         brg_plot.setMinimumWidth(420)
         brg_plot.setTitle("Machine layout", color=NAVY, size="10pt")
@@ -1221,7 +1238,7 @@ def main() -> int:
         btn_ch_apply.setStyleSheet(
             "QPushButton{background:#10b981;color:white;border:none;font-weight:800;"
             "padding:9px 18px;border-radius:8px;} QPushButton:hover{background:#0e9f6e;}")
-        lbl_ch_ok = QtWidgets.QLabel(""); lbl_ch_ok.setStyleSheet("color:#166534;font-weight:700;")
+        lbl_ch_ok = QtWidgets.QLabel(""); lbl_ch_ok.setStyleSheet("color:#34d399;font-weight:700;")
         arow = QtWidgets.QHBoxLayout(); arow.addStretch(1)
         arow.addWidget(lbl_ch_ok); arow.addWidget(btn_ch_apply)
         cl.addLayout(arow); cl.addStretch(1)
@@ -1382,7 +1399,7 @@ def main() -> int:
                 val_summary.setStyleSheet("font-size:14px;font-weight:800;color:#b45309;")
             else:
                 val_summary.setText("🟢 Configuration valid — no findings")
-                val_summary.setStyleSheet("font-size:14px;font-weight:800;color:#166534;")
+                val_summary.setStyleSheet("font-size:14px;font-weight:800;color:#34d399;")
             # --- Gate de arranque (Fase 1): Start solo con 0 errores ---
             acq_state["validated"] = (ne == 0)
             if not act_stop.isEnabled():          # no tocar en medio de una adquisición
@@ -1393,7 +1410,7 @@ def main() -> int:
                 # Nota: la VISIBILIDAD de las acciones de datos ya NO depende de validar;
                 # ahora es contextual por pestaña (solo en Monitoring/datos). La validación
                 # solo controla si Start está HABILITADO (arriba).
-            _ic = {"error": ("🔴", "#b91c1c"), "warn": ("🟡", "#b45309"), "ok": ("🟢", "#166534")}
+            _ic = {"error": ("🔴", "#b91c1c"), "warn": ("🟡", "#b45309"), "ok": ("🟢", "#34d399")}
             rows = []
             for f in findings:
                 ic, col = _ic.get(f.level, ("•", "#334155"))
@@ -1861,7 +1878,7 @@ def main() -> int:
             try:
                 save_to_library(m); refresh_lib()
                 _nice("Configuration saved",
-                      "<div style='font-size:15px'><b style='color:#166534'>💾 Saved on this PC</b></div>"
+                      "<div style='font-size:15px'><b style='color:#34d399'>💾 Saved on this PC</b></div>"
                       f"<div style='color:#0F1E3D;margin-top:6px'><b>{m.name}</b> · local library</div>"
                       "<div style='color:#64748b;margin-top:8px'>Stored locally only. To share it with the "
                       "web/other PCs, use <b>Save machine to Watermelon System</b> (cloud).</div>")
@@ -1983,7 +2000,7 @@ def main() -> int:
                 btn_cloud.setEnabled(True); btn_cloud.setText("Save machine to Watermelon System")
                 if res.get("ok"):
                     _nice("Machine saved",
-                          "<div style='font-size:16px'><b style='color:#166534'>☁ Machine saved to "
+                          "<div style='font-size:16px'><b style='color:#34d399'>☁ Machine saved to "
                           "Watermelon System</b></div>"
                           f"<div style='color:#0F1E3D;margin-top:6px'><b>{res.get('name','')}</b> · "
                           f"{len(setup.channels)} channels</div>"
@@ -2013,7 +2030,7 @@ def main() -> int:
             cfg_tabs.setCurrentWidget(pg_sensors)          # mostrar el resultado
             _refresh_acq_info()
             _nice("Layout ready",
-                  "<div style='font-size:15px'><b style='color:#166534'>✅ Recommended layout generated</b></div>"
+                  "<div style='font-size:15px'><b style='color:#34d399'>✅ Recommended layout generated</b></div>"
                   f"<div style='color:#0F1E3D;margin-top:6px'>{nb} bearings · keyphasor + X/Y per bearing "
                   f"({nb * 2 + 1} channels).</div>"
                   "<div style='color:#64748b;margin-top:8px'>Review/edit angles, alarms and gaps in "
@@ -2046,7 +2063,7 @@ def main() -> int:
                     pass
             n = tblc.rowCount()
             _nice("Changes applied",
-                  "<div style='font-size:15px'><b style='color:#166534'>✓ Changes applied</b></div>"
+                  "<div style='font-size:15px'><b style='color:#34d399'>✓ Changes applied</b></div>"
                   f"<div style='color:#0F1E3D;margin-top:6px'>Layout diagram &amp; Summary updated · "
                   f"{n} channels · rotation {cb_rot.currentText()}</div>"
                   "<div style='color:#64748b;margin-top:8px'>Revisá el diagrama y la pestaña "
@@ -2361,7 +2378,7 @@ def main() -> int:
         # tira de estado (RPM · 1X · Estado · Ventana · Samples · Vectores · Guardados · Tamaño)
         strip = QtWidgets.QFrame(); strip.setObjectName("statStrip")
         # selector con # → el borde queda SOLO en el panel, no en cada celda (bug anterior)
-        strip.setStyleSheet(f"QFrame#statStrip {{ background:white; border:1px solid {LINE}; "
+        strip.setStyleSheet(f"QFrame#statStrip {{ background:{PANEL}; border:1px solid {LINE}; "
                             f"border-radius:10px; }}")
         sl = QtWidgets.QHBoxLayout(strip); sl.setContentsMargins(6, 8, 6, 8); sl.setSpacing(0)
         sv = {}
@@ -2419,19 +2436,19 @@ def main() -> int:
             _brow = QtWidgets.QHBoxLayout(); _brow.setSpacing(8)
             for _bn in _brg_groups:
                 _card = QtWidgets.QFrame(); _card.setObjectName("brgCard")
-                _card.setStyleSheet("QFrame#brgCard{background:white;border:1px solid %s;"
-                                    "border-left:3px solid #2fa36b;border-radius:10px;}" % LINE)
+                _card.setStyleSheet("QFrame#brgCard{background:%s;border:1px solid %s;"
+                                    "border-left:3px solid #27c08a;border-radius:10px;}" % (PANEL2, LINE))
                 _cv = QtWidgets.QVBoxLayout(_card)
                 _cv.setContentsMargins(12, 9, 12, 9); _cv.setSpacing(4)
                 _hh = QtWidgets.QHBoxLayout(); _hh.setSpacing(8)
                 _nm = QtWidgets.QLabel(f"Brg {_bn}")
-                _nm.setStyleSheet("border:none;color:#0b1f3a;font:800 13px 'Segoe UI';")
+                _nm.setStyleSheet("border:none;color:#e8f0f8;font:800 13px 'Segoe UI';")
                 _zone = QtWidgets.QLabel("—"); _zone.setAlignment(QtCore.Qt.AlignCenter)
                 _zone.setStyleSheet("border:1px solid #bfe3cf;background:#e6f4ea;color:#166534;"
                                     "border-radius:999px;padding:1px 9px;font:800 9px 'Segoe UI';")
                 _hh.addWidget(_nm); _hh.addStretch(1); _hh.addWidget(_zone)
                 _v1 = QtWidgets.QLabel("1X  —")
-                _v1.setStyleSheet("border:none;color:#274b7d;font:600 11px 'Consolas',monospace;")
+                _v1.setStyleSheet("border:none;color:#9db6cd;font:600 11px 'Consolas',monospace;")
                 _v2 = QtWidgets.QLabel("Gap  —")
                 _v2.setStyleSheet("border:none;color:#8090a6;font:600 11px 'Consolas',monospace;")
                 _cv.addLayout(_hh); _cv.addWidget(_v1); _cv.addWidget(_v2)
@@ -2652,7 +2669,7 @@ def main() -> int:
         bode_l.addWidget(lbl_bode_hint)
         lbl_bode_comp = QtWidgets.QLabel("● COMPENSADO (runout restado)")
         lbl_bode_comp.setAlignment(QtCore.Qt.AlignCenter)
-        lbl_bode_comp.setStyleSheet("color:#166534;font-weight:800;padding:2px;")
+        lbl_bode_comp.setStyleSheet("color:#34d399;font-weight:800;padding:2px;")
         lbl_bode_comp.setVisible(False); bode_l.addWidget(lbl_bode_comp)
         gl_bode.ci.setContentsMargins(2, 2, 2, 2); gl_bode.ci.setSpacing(2)
         bode_cells = []; bode_focus = {"k": None}; _ncb = 2 if len(vib) > 1 else 1
@@ -2739,7 +2756,7 @@ def main() -> int:
         ptop.addWidget(QtWidgets.QLabel("<b>Polar</b>"))
         # El sentido de giro NO se cambia acá: viene de la config de la máquina (cb_rot).
         lbl_pol_rot = QtWidgets.QLabel("Rotation: —")
-        lbl_pol_rot.setStyleSheet("color:#166534; font-weight:700;")
+        lbl_pol_rot.setStyleSheet("color:#34d399; font-weight:700;")
         ptop.addWidget(lbl_pol_rot)
         ptop.addWidget(QtWidgets.QLabel(
             "<i style='color:#64748b'>0° = probe angle · phase AGAINST rotation · "
@@ -2753,7 +2770,7 @@ def main() -> int:
         pol_l.addWidget(lbl_pol_hint)
         lbl_pol_comp = QtWidgets.QLabel("● COMPENSADO (runout restado)")
         lbl_pol_comp.setAlignment(QtCore.Qt.AlignCenter)
-        lbl_pol_comp.setStyleSheet("color:#166534;font-weight:800;padding:2px;")
+        lbl_pol_comp.setStyleSheet("color:#34d399;font-weight:800;padding:2px;")
         lbl_pol_comp.setVisible(False); pol_l.addWidget(lbl_pol_comp)
         gl_pol.ci.setContentsMargins(2, 2, 2, 2); gl_pol.ci.setSpacing(2)
         pol_cells = []; pol_focus = {"k": None}
@@ -3016,7 +3033,7 @@ def main() -> int:
             rec_state["runout"] = ro; rec_state["runout_rpm"] = float(rpm)
             act_runout.setChecked(True)
             lbl_sr.setText(f"✓ runout {len(ro)} canales @ {rpm:.0f} rpm (en vivo)")
-            lbl_sr.setStyleSheet("color:#166534;font-weight:700;")
+            lbl_sr.setStyleSheet("color:#34d399;font-weight:700;")
             QtWidgets.QMessageBox.information(win, "Slow-roll",
                 f"Runout capturado @ {rpm:.0f} rpm ({len(ro)} canales).\n"
                 "Compensación ACTIVADA (1X/2X en tabla, Bode y Polar).")
@@ -3080,7 +3097,7 @@ def main() -> int:
             rec_state["runout"] = ro; rec_state["runout_rpm"] = float(thr)
             act_runout.setChecked(True)
             lbl_sr.setText(f"✓ runout {len(ro)} canales @ ≤{thr:.0f} rpm (auto)")
-            lbl_sr.setStyleSheet("color:#166534;font-weight:700;")
+            lbl_sr.setStyleSheet("color:#34d399;font-weight:700;")
             QtWidgets.QMessageBox.information(win, "Slow-roll auto",
                 f"Runout aplicado ({len(ro)} canales de proximidad) @ giro lento ≤ {thr:.0f} rpm.\n"
                 "Compensación ACTIVADA (Bode, Polar, tabla).")
@@ -3292,7 +3309,7 @@ def main() -> int:
                     elif al and ov >= al:
                         estado, bgc, fgc = "ALERT", "#fdf0d5", "#92400e"
                     else:
-                        estado, bgc, fgc = "OK", "#e6f4ea", "#166534"
+                        estado, bgc, fgc = "OK", "#e6f4ea", "#34d399"
                     # agregado por cojinete (peor severidad + mayor 1X + gap) para el panel
                     _bn = _bearing_no(c.name) or 1
                     _ag = _brg_live.setdefault(_bn, {"amp": -1.0, "ph": 0.0, "gap": gapv,
@@ -3322,7 +3339,7 @@ def main() -> int:
                             it.setTextAlignment(QtCore.Qt.AlignCenter)
                         tblt.setItem(r, cc, it)
                 # panel de cojinetes (System1): zona ISO + 1X amp/fase + gap, en vivo
-                _ZC = [("ISO A", "#e6f4ea", "#166534", "#2fa36b"),
+                _ZC = [("ISO A", "#e6f4ea", "#34d399", "#2fa36b"),
                        ("ISO B", "#fdf0d5", "#92400e", "#e08a1e"),
                        ("ISO D", "#fde2e2", "#991b1b", "#c0392b")]
                 for _bn, _cd in brg_cards.items():
@@ -3338,8 +3355,8 @@ def main() -> int:
                         f"border:1px solid {_brc};background:{_bgc};color:{_fgc};"
                         "border-radius:999px;padding:1px 9px;font:800 9px 'Segoe UI';")
                     _cd["card"].setStyleSheet(
-                        "QFrame#brgCard{background:white;border:1px solid %s;"
-                        "border-left:3px solid %s;border-radius:10px;}" % (LINE, _brc))
+                        "QFrame#brgCard{background:%s;border:1px solid %s;"
+                        "border-left:3px solid %s;border-radius:10px;}" % (PANEL2, LINE, _brc))
                 # barra de estado (System1): rec · fs · Fmax · alarma
                 # (en modo online, sb_rec lo maneja el publicador de nube → no lo pisamos)
                 _s2 = rec_state.get("session")
@@ -3589,7 +3606,7 @@ def main() -> int:
                 need_acq="<i>Start acquisition (▶ Start) to generate the report.</i>",
                 title="Preliminary vibration report", machine="Machine", sampling="Sampling",
                 verdict="Verdict", verdict_note="(overall vs ISO 20816 / configured levels)",
-                verdicts=[("NO FINDINGS", "#166534"), ("WATCH — ALERT level", "#b45309"),
+                verdicts=[("NO FINDINGS", "#34d399"), ("WATCH — ALERT level", "#b45309"),
                           ("ACTION — DANGER level", "#b91c1c")],
                 s1="1 · Current levels by sensor",
                 th=["Sensor", "Overall", "1X", "1X phase", "2X", "Alarm", "Danger", "Status"],
@@ -3611,7 +3628,7 @@ def main() -> int:
                 need_acq="<i>Iniciá la adquisición (▶ Iniciar) para generar el reporte.</i>",
                 title="Reporte preliminar de vibraciones", machine="Máquina", sampling="Muestreo",
                 verdict="Veredicto", verdict_note="(overall vs ISO 20816 / niveles configurados)",
-                verdicts=[("SIN NOVEDAD", "#166534"), ("OBSERVAR — nivel de ALERTA", "#b45309"),
+                verdicts=[("SIN NOVEDAD", "#34d399"), ("OBSERVAR — nivel de ALERTA", "#b45309"),
                           ("ACCIÓN — nivel de PELIGRO", "#b91c1c")],
                 s1="1 · Niveles actuales por sensor",
                 th=["Sensor", "Overall", "1X", "1X fase", "2X", "Alarma", "Peligro", "Estado"],
@@ -3654,7 +3671,7 @@ def main() -> int:
                 elif al and ov >= al:
                     st, scol = T["st"][1], "#b45309"; worst = max(worst, 1)
                 else:
-                    st, scol = T["st"][0], "#166534"
+                    st, scol = T["st"][0], "#34d399"
                 rows.append((c.name, ov, c.units, a1, p1, a2, p2, al, dg, st, scol))
             # 2) Critical speeds + AF (from the transient)
             crit_lines = []; crits = set()
@@ -3686,7 +3703,7 @@ def main() -> int:
                 f"<td style='background:#ffffff;padding:12px 16px'>{logo_img}"
                 "<span style='color:#0F1E3D;font-size:22px;font-weight:800;vertical-align:middle;"
                 "letter-spacing:-.02em'>Watermelon System</span>"
-                "<span style='color:#0e9f6e;font-size:13px;font-weight:700;margin-left:12px'>"
+                "<span style='color:#34d399;font-size:13px;font-weight:700;margin-left:12px'>"
                 "Vibration &amp; Rotordynamics</span></td></tr></table>")
             h = [f"<div style='font-family:Segoe UI,Arial'>",
                  header,
@@ -3742,7 +3759,7 @@ def main() -> int:
                 with open(path, "w", encoding="utf-8") as f:
                     f.write("<html><meta charset='utf-8'><body>" + diag_state["html"] + "</body></html>")
                 _nice("Report saved",
-                      "<div style='font-size:15px'><b style='color:#166534'>✅ Report saved</b></div>"
+                      "<div style='font-size:15px'><b style='color:#34d399'>✅ Report saved</b></div>"
                       f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{path}</div>"
                       "<div style='color:#64748b;margin-top:8px'>Open it in your browser; you can print it to PDF.</div>")
             except Exception as e:  # noqa: BLE001
@@ -3775,7 +3792,7 @@ def main() -> int:
                     pass
                 doc.print_(writer)
                 _nice("PDF saved",
-                      "<div style='font-size:15px'><b style='color:#166534'>✅ PDF saved</b></div>"
+                      "<div style='font-size:15px'><b style='color:#34d399'>✅ PDF saved</b></div>"
                       f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{path}</div>"
                       "<div style='color:#64748b;margin-top:8px'>Ready to send by email / WhatsApp.</div>")
             except Exception as e:  # noqa: BLE001
@@ -3823,7 +3840,7 @@ def main() -> int:
                 btn_diag_cloud.setEnabled(True); btn_diag_cloud.setText("Upload report to cloud")
                 if res.get("ok"):
                     _nice("Report uploaded",
-                          "<div style='font-size:15px'><b style='color:#166534'>☁ Report uploaded</b></div>"
+                          "<div style='font-size:15px'><b style='color:#34d399'>☁ Report uploaded</b></div>"
                           f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{_BUCKET}/{key}</div>")
                 else:
                     _nice("Upload report", f"<b style='color:#b91c1c'>Upload failed</b><br>"
@@ -4020,7 +4037,7 @@ def main() -> int:
                           f"<span style='color:#334155'>{res['err']}</span>", QtWidgets.QMessageBox.Warning)
                 elif fail == 0 and ok > 0:
                     _nice("Uploaded",
-                          "<div style='font-size:17px'><b style='color:#166534'>☁ Data synced to the cloud</b></div>"
+                          "<div style='font-size:17px'><b style='color:#34d399'>☁ Data synced to the cloud</b></div>"
                           f"<div style='color:#334155;margin-top:6px'>{ok} recording(s) uploaded.</div>"
                           "<div style='color:#0F1E3D;margin-top:10px;font-size:14px'>You can now <b>start the "
                           "diagnosis in Watermelon System</b> (web → Analysis → Reprocess). 🍉</div>")
@@ -4068,7 +4085,7 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 pass
             _nice("Data saved",
-                  "<div style='font-size:17px'><b style='color:#166534'>✅ Data saved on this computer</b></div>"
+                  "<div style='font-size:17px'><b style='color:#34d399'>✅ Data saved on this computer</b></div>"
                   f"<div style='color:#0F1E3D;font-family:monospace;margin-top:6px'>{rec.rec_id}<br>"
                   f"{rec.status.duration_s:.0f} s · {rec.status.size_mb:.1f} MB</div>"
                   "<div style='color:#b45309;margin-top:10px;font-size:14px'>⏳ <b>Pending cloud upload</b> — "
@@ -4283,7 +4300,7 @@ def main() -> int:
             "● En línea = streaming. Auto-sube los pendientes al haber red.</i>"))
 
         _SBADGE = {"LOCAL": ("● LOCAL", "#f6ecd8", "#8a5a13"),
-                   "CLOUD": ("● EN LA NUBE", "#e6f4ea", "#166534"),
+                   "CLOUD": ("● EN LA NUBE", "#e6f4ea", "#34d399"),
                    "ONLINE": ("● EN LÍNEA", "#e7f0fb", "#215a97")}
 
         def _refresh_sessions(*_):
