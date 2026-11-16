@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.10.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -994,6 +994,26 @@ def main() -> int:
 
         ml.addStretch(1)
         cfg_tabs.addTab(pg_machine, "Machine")
+
+        # --- Constructor de tren (librería de equipos premium, embebido) ---
+        # Arma el tren con la librería → recomienda sondas por API 670 / ISO 20816 →
+        # emite el spec. (La aplicación al AcqSetup de canales se conecta en el paso 2.)
+        try:
+            from field_ui.builder import TrainBuilder
+            _train_builder = TrainBuilder()
+
+            def _on_machine_built(spec):
+                _ms = spec.get("machines", []); _ss = spec.get("sensors", [])
+                _nb = sum(int(m.get("bearings", 0)) for m in _ms)
+                QtWidgets.QMessageBox.information(
+                    win, "Máquina construida",
+                    f"Tren: {len(_ms)} máquina(s) · {_nb} cojinetes\n"
+                    f"{len(_ss)} sondas generadas y mapeadas al rack Watermelon.\n\n"
+                    "Las sondas se aplicarán a la configuración de canales en el siguiente paso.")
+            _train_builder.machineBuilt.connect(_on_machine_built)
+            cfg_tabs.insertTab(1, _train_builder, "Constructor")
+        except Exception as _be:  # noqa: BLE001
+            print("Constructor de tren no disponible (QtWebEngine?):", _be)
 
         # ---------- Pestaña 2: Sensors & layout ----------
         pg_sensors = QtWidgets.QWidget(); sl = QtWidgets.QVBoxLayout(pg_sensors)

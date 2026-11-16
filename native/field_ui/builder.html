@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watermelon Equipment Library</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#0a1016;--bg2:#0e1823;--panel:#111f2e;--panel2:#15273a;
+  --line:#1f344a;--line2:#27425e;--ink:#e8f0f8;--mute:#8aa0b6;--dim:#5f7389;
+  --steel:#2f84c4;--cyan:#34c6e8;--amber:#e6b93f;
+  --za:#27c08a;--zc:#ef8a3c;--zd:#ec4b52;--prox:#8b5cf6;--accel:#ef4444;--kph:#f59e0b;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;--sans:'IBM Plex Sans',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1280px;margin:0 auto}
+.head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.head h1{font-size:13px;font-weight:600;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute)}
+.head .mach{font-family:var(--mono);font-size:13px;color:var(--cyan);font-weight:600}
+.head .hint{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.grid{display:grid;grid-template-columns:1fr 252px;gap:14px;align-items:start}
+.card{background:linear-gradient(180deg,var(--panel),#0f1b28);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.card .ch{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.card .ch h2{font-size:12px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute)}
+.card .ch .tag{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.stage{padding:16px 14px}
+.stage svg{display:block;width:100%;height:auto}
+.cfg{margin-top:14px}
+.cfgbody{padding:16px;display:grid;grid-template-columns:260px 1fr;gap:20px}
+.fld{margin-bottom:14px}
+.fld label{display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500}
+.seg{display:inline-flex;background:#0a141e;border:1px solid var(--line2);border-radius:8px;padding:3px}
+.seg button{font-family:var(--sans);font-size:12px;font-weight:600;color:var(--mute);background:none;border:0;padding:7px 14px;border-radius:6px;cursor:pointer}
+.seg button.on{background:linear-gradient(180deg,var(--steel),#1c5a8a);color:#fff}
+.stepn{display:inline-flex;align-items:center;background:#0a141e;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.stepn button{background:var(--panel2);border:0;color:var(--ink);width:34px;height:34px;font-size:16px;cursor:pointer}
+.stepn span{font-family:var(--mono);font-size:15px;font-weight:600;width:44px;text-align:center}
+.gen{margin-top:4px;background:rgba(52,198,232,.07);border:1px solid rgba(52,198,232,.3);border-radius:9px;padding:12px 14px}
+.gen .t{font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--cyan);text-transform:uppercase;margin-bottom:8px}
+.gen .r{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12px;color:var(--ink);margin:6px 0}
+.gen .r i{width:10px;height:10px;border-radius:50%;flex:none}
+.cfgsvg{background:#0a131d;border:1px solid var(--line);border-radius:9px;padding:8px}
+.pal{background:var(--bg2);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.pal .ph{padding:12px 15px;border-bottom:1px solid var(--line)}
+.pal .ph h3{font-size:11px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute)}
+.pal .search{margin:10px 12px;background:var(--panel);border:1px solid var(--line2);border-radius:7px;padding:7px 11px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.pal .grp{font-family:var(--mono);font-size:9px;letter-spacing:1.1px;color:var(--cyan);text-transform:uppercase;padding:11px 15px 5px;font-weight:600}
+.pit{display:flex;align-items:center;gap:12px;padding:8px 13px;cursor:grab;border-left:3px solid transparent}
+.pit:hover{background:var(--panel2);border-left-color:var(--cyan)}
+.pit.sel{background:var(--panel2);border-left-color:var(--cyan)}
+.pit .ic{width:60px;height:40px;flex:none;border-radius:7px;background:radial-gradient(130% 130% at 50% -10%,#182a3e,#0a1420);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.pit .ic svg{width:58px;height:38px}
+.pit .t{font-size:12.5px;font-weight:600;line-height:1.15}
+.pit .s{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:1px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}.cfgbody{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<!-- ===== defs: gradientes + símbolos de equipos ===== -->
+<svg width="0" height="0" style="position:absolute"><defs>
+  <linearGradient id="cyl" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#26374a"/><stop offset=".16" stop-color="#52708c"/>
+    <stop offset=".34" stop-color="#3a4e63"/><stop offset=".72" stop-color="#1d2c3e"/><stop offset="1" stop-color="#121c29"/>
+  </linearGradient>
+  <linearGradient id="cyl2" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#2a3d52"/><stop offset=".2" stop-color="#5d7d9b"/><stop offset=".45" stop-color="#3e5369"/><stop offset="1" stop-color="#15202e"/>
+  </linearGradient>
+  <radialGradient id="flange" cx=".38" cy=".3" r=".85">
+    <stop offset="0" stop-color="#6f8da8"/><stop offset=".6" stop-color="#3a4e63"/><stop offset="1" stop-color="#16222f"/>
+  </radialGradient>
+  <linearGradient id="shaft" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#b6c8d8"/><stop offset=".45" stop-color="#6f8aa2"/><stop offset="1" stop-color="#36465a"/>
+  </linearGradient>
+  <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#2a3a4c"/><stop offset="1" stop-color="#101a26"/>
+  </linearGradient>
+  <radialGradient id="shadow" cx=".5" cy=".5" r=".5">
+    <stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
+  </radialGradient>
+
+  <!-- MOTOR ELÉCTRICO TEFC (bastidor con aletas axiales + capota con rejilla +
+       caja de conexiones con conduit + tapa de cojinete + argolla + placa + patas) -->
+  <symbol id="eq-motor" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="72" rx="44" ry="6" fill="url(#shadow)"/>
+    <!-- patas con agujeros -->
+    <rect x="30" y="64" width="15" height="9" rx="1" fill="url(#base)"/><circle cx="37" cy="68.5" r="1.5" fill="#0a141e"/>
+    <rect x="80" y="64" width="15" height="9" rx="1" fill="url(#base)"/><circle cx="87" cy="68.5" r="1.5" fill="#0a141e"/>
+    <!-- capota de ventilador (trasera) con rejilla radial -->
+    <ellipse cx="21" cy="44" rx="12" ry="24" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <g stroke="#0c1826" stroke-width="1" opacity=".55"><line x1="21" y1="21" x2="21" y2="67"/><line x1="15" y1="25" x2="15" y2="63"/><line x1="27" y1="25" x2="27" y2="63"/><line x1="18" y1="23" x2="18" y2="65"/><line x1="24" y1="23" x2="24" y2="65"/></g>
+    <ellipse cx="21" cy="44" rx="5" ry="10" fill="#09141f" stroke="#2b4866" stroke-width=".8"/>
+    <!-- bastidor con aletas AXIALES (se ven horizontales de perfil) -->
+    <rect x="30" y="24" width="64" height="40" rx="7" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="32" y="27" width="60" height="3" rx="2" fill="#bcd6e6" opacity=".5"/>
+    <g stroke="#0c1826" stroke-width="1.5" opacity=".5"><line x1="31" y1="31" x2="93" y2="31"/><line x1="31" y1="37" x2="93" y2="37"/><line x1="31" y1="43" x2="93" y2="43"/><line x1="31" y1="49" x2="93" y2="49"/><line x1="31" y1="55" x2="93" y2="55"/><line x1="31" y1="61" x2="93" y2="61"/></g>
+    <g stroke="#9db6cd" stroke-width=".8" opacity=".45"><line x1="31" y1="33" x2="93" y2="33"/><line x1="31" y1="39" x2="93" y2="39"/><line x1="31" y1="45" x2="93" y2="45"/><line x1="31" y1="51" x2="93" y2="51"/><line x1="31" y1="57" x2="93" y2="57"/></g>
+    <!-- argolla de izaje -->
+    <path d="M44 24 Q43 14 51 14 Q59 14 58 24" fill="none" stroke="#7f9db8" stroke-width="2.4"/>
+    <!-- caja de conexiones + conduit -->
+    <rect x="52" y="8" width="24" height="16" rx="2" fill="#33485d" stroke="#5a7890" stroke-width="1"/><rect x="54" y="10" width="20" height="4" rx="1" fill="#6f8da8" opacity=".5"/>
+    <rect x="74" y="16" width="8" height="5" rx="1.5" fill="#2b3f53" stroke="#5a7890" stroke-width=".6"/>
+    <!-- placa de datos -->
+    <rect x="38" y="45" width="13" height="9" rx="1" fill="#cfe0ef" opacity=".26"/>
+    <!-- tapa de cojinete (lado acople) + eje -->
+    <ellipse cx="94" cy="44" rx="8" ry="22" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <circle cx="94" cy="44" r="8" fill="url(#flange)" stroke="#5a7890" stroke-width=".8"/>
+    <g fill="#1a2838"><circle cx="94" cy="29" r="1.5"/><circle cx="94" cy="59" r="1.5"/><circle cx="101" cy="37" r="1.3"/><circle cx="101" cy="51" r="1.3"/></g>
+    <circle cx="94" cy="44" r="3" fill="#6f8da8"/>
+    <rect x="98" y="40" width="22" height="8" rx="3" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- TURBINA DE GAS (admisión + compresor + cámaras de combustión + turbina + escape) -->
+  <symbol id="eq-turb" viewBox="0 0 120 80">
+    <ellipse cx="62" cy="73" rx="54" ry="6" fill="url(#shadow)"/>
+    <!-- bellmouth / admisión -->
+    <path d="M2 24 Q8 18 20 20 L20 60 Q8 62 2 56 Z" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <ellipse cx="19" cy="40" rx="4" ry="18" fill="#09141f"/>
+    <!-- compresor (tapered) -->
+    <path d="M20 26 L50 29 L50 51 L20 54 Z" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <g stroke="#0c1826" stroke-width="1.3" opacity=".5"><line x1="27" y1="28" x2="27" y2="52"/><line x1="33" y1="28" x2="33" y2="52"/><line x1="39" y1="29" x2="39" y2="51"/><line x1="45" y1="29" x2="45" y2="51"/></g>
+    <!-- sección de combustión + cámaras (cans) -->
+    <rect x="50" y="22" width="32" height="36" rx="4" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <g><ellipse cx="58" cy="20" rx="5.5" ry="4.5" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/><ellipse cx="68" cy="19" rx="5.5" ry="4.5" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/><ellipse cx="78" cy="20" rx="5.5" ry="4.5" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/></g>
+    <rect x="52" y="25" width="28" height="3" rx="2" fill="#bcd6e6" opacity=".4"/>
+    <!-- turbina de potencia -->
+    <path d="M82 25 L104 29 L104 51 L82 55 Z" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <g stroke="#0c1826" stroke-width="1.2" opacity=".45"><line x1="89" y1="30" x2="89" y2="50"/><line x1="96" y1="31" x2="96" y2="49"/></g>
+    <!-- escape + eje -->
+    <path d="M104 31 L113 35 L113 45 L104 49 Z" fill="url(#flange)" stroke="#5a7890" stroke-width=".8"/>
+    <rect x="110" y="37" width="10" height="7" rx="2" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- TURBINA DE VAPOR (casco escalonado HP→LP + cofre de vapor + junta partida) -->
+  <symbol id="eq-steam" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="73" rx="50" ry="6" fill="url(#shadow)"/>
+    <rect x="16" y="56" width="10" height="14" rx="1" fill="url(#base)"/><rect x="98" y="56" width="10" height="14" rx="1" fill="url(#base)"/>
+    <!-- casco escalonado (HP chico izq → LP grande der) -->
+    <rect x="22" y="32" width="30" height="24" rx="4" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="48" y="27" width="30" height="34" rx="5" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="74" y="21" width="32" height="46" rx="6" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <!-- sheen arriba -->
+    <rect x="24" y="35" width="26" height="3" rx="2" fill="#bcd6e6" opacity=".4"/><rect x="76" y="24" width="28" height="3" rx="2" fill="#bcd6e6" opacity=".45"/>
+    <!-- junta partida horizontal + pernos -->
+    <line x1="22" y1="44" x2="106" y2="44" stroke="#0c1826" stroke-width="2" opacity=".55"/>
+    <g fill="#1a2838"><circle cx="30" cy="44" r="1.4"/><circle cx="44" cy="44" r="1.4"/><circle cx="60" cy="44" r="1.4"/><circle cx="76" cy="44" r="1.4"/><circle cx="92" cy="44" r="1.4"/></g>
+    <!-- cofre de vapor / válvula gobernadora arriba -->
+    <rect x="30" y="9" width="13" height="24" rx="3" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <ellipse cx="36.5" cy="9" rx="8" ry="3.5" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <!-- ejes -->
+    <rect x="4" y="40" width="18" height="7" rx="2" fill="url(#shaft)"/><rect x="104" y="40" width="16" height="7" rx="2" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- CAJA / REDUCTOR -->
+  <symbol id="eq-gear" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="74" rx="38" ry="6" fill="url(#shadow)"/>
+    <rect x="30" y="16" width="60" height="52" rx="7" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="32" y="20" width="56" height="3" rx="2" fill="#aaccdd" opacity=".45"/>
+    <rect x="28" y="30" width="64" height="4" rx="2" fill="#0c1826" opacity=".5"/>
+    <circle cx="60" cy="42" r="15" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <g stroke="#0c1826" stroke-width="2.2"><circle cx="60" cy="42" r="11" fill="none"/><line x1="60" y1="29" x2="60" y2="55"/><line x1="47" y1="42" x2="73" y2="42"/><line x1="51" y1="33" x2="69" y2="51"/><line x1="51" y1="51" x2="69" y2="33"/></g>
+    <circle cx="60" cy="42" r="3" fill="#6f8da8"/>
+    <rect x="10" y="32" width="22" height="8" rx="2" fill="url(#shaft)"/>
+    <rect x="88" y="46" width="22" height="8" rx="2" fill="url(#shaft)"/>
+    <rect x="24" y="68" width="11" height="7" rx="1" fill="url(#base)"/><rect x="85" y="68" width="11" height="7" rx="1" fill="url(#base)"/>
+  </symbol>
+
+  <!-- ACOPLE -->
+  <symbol id="eq-coupling" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="66" rx="30" ry="5" fill="url(#shadow)"/>
+    <rect x="30" y="28" width="16" height="34" rx="2" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="74" y="28" width="16" height="34" rx="2" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="46" y="36" width="28" height="18" rx="3" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <g stroke="#101c28" stroke-width="1.5" opacity=".5"><line x1="53" y1="37" x2="53" y2="53"/><line x1="60" y1="37" x2="60" y2="53"/><line x1="67" y1="37" x2="67" y2="53"/></g>
+    <g fill="#1a2838"><circle cx="38" cy="33" r="1.6"/><circle cx="38" cy="57" r="1.6"/><circle cx="82" cy="33" r="1.6"/><circle cx="82" cy="57" r="1.6"/></g>
+    <rect x="10" y="41" width="22" height="8" rx="2" fill="url(#shaft)"/><rect x="88" y="41" width="22" height="8" rx="2" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- GENERADOR (excitatriz + carcasa con louvers + bornera + patas) -->
+  <symbol id="eq-gen" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="72" rx="52" ry="6" fill="url(#shadow)"/>
+    <rect x="26" y="66" width="12" height="8" rx="1" fill="url(#base)"/><rect x="84" y="66" width="12" height="8" rx="1" fill="url(#base)"/>
+    <!-- excitatriz (cilindro menor izq) -->
+    <ellipse cx="13" cy="46" rx="8" ry="15" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <g stroke="#0c1826" stroke-width=".8" opacity=".5"><line x1="10" y1="33" x2="10" y2="59"/><line x1="13" y1="31" x2="13" y2="61"/><line x1="16" y1="33" x2="16" y2="59"/></g>
+    <!-- carcasa principal -->
+    <rect x="20" y="22" width="84" height="46" rx="11" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="22" y="27" width="80" height="3.5" rx="2" fill="#bcd6e6" opacity=".5"/>
+    <!-- louvers de ventilación (persianas inclinadas) -->
+    <g stroke="#0c1826" stroke-width="2" opacity=".55">
+      <line x1="30" y1="33" x2="36" y2="30"/><line x1="30" y1="39" x2="36" y2="36"/><line x1="30" y1="45" x2="36" y2="42"/><line x1="30" y1="51" x2="36" y2="48"/><line x1="30" y1="57" x2="36" y2="54"/>
+      <line x1="42" y1="33" x2="48" y2="30"/><line x1="42" y1="39" x2="48" y2="36"/><line x1="42" y1="45" x2="48" y2="42"/><line x1="42" y1="51" x2="48" y2="48"/><line x1="42" y1="57" x2="48" y2="54"/>
+      <line x1="72" y1="33" x2="78" y2="30"/><line x1="72" y1="39" x2="78" y2="36"/><line x1="72" y1="45" x2="78" y2="42"/><line x1="72" y1="51" x2="78" y2="48"/><line x1="72" y1="57" x2="78" y2="54"/>
+      <line x1="84" y1="33" x2="90" y2="30"/><line x1="84" y1="39" x2="90" y2="36"/><line x1="84" y1="45" x2="90" y2="42"/><line x1="84" y1="51" x2="90" y2="48"/><line x1="84" y1="57" x2="90" y2="54"/>
+    </g>
+    <!-- bornera grande -->
+    <rect x="54" y="7" width="30" height="16" rx="3" fill="#33485d" stroke="#5a7890" stroke-width="1"/><rect x="56" y="9" width="26" height="4" rx="2" fill="#6f8da8" opacity=".5"/>
+    <!-- campana + eje -->
+    <ellipse cx="104" cy="46" rx="6" ry="22" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="104" y="42" width="16" height="8" rx="3" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- BOMBA -->
+  <symbol id="eq-pump" viewBox="0 0 120 80">
+    <ellipse cx="58" cy="72" rx="44" ry="6" fill="url(#shadow)"/>
+    <circle cx="42" cy="42" r="27" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <circle cx="42" cy="42" r="27" fill="none" stroke="#0c1826" stroke-width="1" opacity=".4" stroke-dasharray="2 5"/>
+    <path d="M34 20 A25 25 0 0 1 60 26" fill="none" stroke="#bcd6e6" stroke-width="2" opacity=".4"/>
+    <circle cx="42" cy="42" r="10" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/><circle cx="42" cy="42" r="3" fill="#6f8da8"/>
+    <path d="M42 15 L72 15 L72 28 L60 28" fill="none" stroke="#3a4e63" stroke-width="8" stroke-linejoin="round"/>
+    <rect x="68" y="30" width="38" height="24" rx="6" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="70" y="33" width="34" height="3" rx="2" fill="#aaccdd" opacity=".4"/>
+    <g stroke="#101c28" stroke-width="1.6" opacity=".5"><line x1="78" y1="31" x2="78" y2="53"/><line x1="86" y1="31" x2="86" y2="53"/><line x1="94" y1="31" x2="94" y2="53"/></g>
+    <rect x="26" y="66" width="44" height="7" rx="1" fill="url(#base)"/>
+  </symbol>
+
+  <!-- VENTILADOR / SOPLADOR CENTRÍFUGO (voluta/scroll + descarga + ojo de entrada
+       + rodete + pedestal de cojinete) -->
+  <symbol id="eq-fan" viewBox="0 0 120 80">
+    <ellipse cx="48" cy="72" rx="42" ry="6" fill="url(#shadow)"/>
+    <rect x="26" y="64" width="44" height="9" rx="1" fill="url(#base)"/>
+    <!-- descarga rectangular (sale tangente arriba) -->
+    <path d="M48 18 L72 18 L72 44 L58 44 Z" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="46" y="8" width="28" height="10" rx="2" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="44" y="6" width="32" height="5" rx="2" fill="url(#flange)"/>
+    <!-- voluta (scroll) -->
+    <path d="M20 46 A26 26 0 1 1 58 44 L58 44 Z" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <circle cx="44" cy="44" r="26" fill="url(#cyl)" stroke="#5a7890" stroke-width="1.2"/>
+    <path d="M44 20 A24 24 0 0 1 68 44" fill="none" stroke="#bcd6e6" stroke-width="1.4" opacity=".4"/>
+    <!-- ojo de entrada + rodete -->
+    <circle cx="44" cy="44" r="16" fill="#0a1622" stroke="#2b4866" stroke-width="1"/>
+    <circle cx="44" cy="44" r="16" fill="none" stroke="#3a5f85" stroke-width="1" opacity=".5"/>
+    <g stroke="#52708c" stroke-width="1.4" opacity=".65"><path d="M44 30 A14 14 0 0 1 56 40" fill="none"/><path d="M58 44 A14 14 0 0 1 48 57" fill="none"/><path d="M44 58 A14 14 0 0 1 31 49" fill="none"/><path d="M30 44 A14 14 0 0 1 40 31" fill="none"/></g>
+    <circle cx="44" cy="44" r="5" fill="url(#flange)"/><circle cx="44" cy="44" r="2" fill="#9db6cd"/>
+    <!-- pedestal de cojinete + eje -->
+    <rect x="78" y="39" width="16" height="12" rx="2" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <g stroke="#0c1826" stroke-width="1" opacity=".5"><line x1="82" y1="40" x2="82" y2="50"/><line x1="86" y1="40" x2="86" y2="50"/><line x1="90" y1="40" x2="90" y2="50"/></g>
+    <rect x="94" y="41" width="20" height="7" rx="2" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- COMPRESOR CENTRÍFUGO (barril horizontal + 2 toberas arriba + tapas) -->
+  <symbol id="eq-comp" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="72" rx="46" ry="6" fill="url(#shadow)"/>
+    <rect x="34" y="64" width="12" height="8" rx="1" fill="url(#base)"/><rect x="76" y="64" width="12" height="8" rx="1" fill="url(#base)"/>
+    <!-- toberas arriba (succión + descarga) -->
+    <rect x="38" y="10" width="12" height="20" rx="2" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/><ellipse cx="44" cy="10" rx="9" ry="3.5" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <rect x="72" y="10" width="12" height="20" rx="2" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/><ellipse cx="78" cy="10" rx="9" ry="3.5" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <!-- barril -->
+    <rect x="22" y="26" width="76" height="40" rx="19" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="26" y="31" width="68" height="3" rx="2" fill="#bcd6e6" opacity=".45"/>
+    <line x1="24" y1="46" x2="96" y2="46" stroke="#0c1826" stroke-width="1.5" opacity=".4"/>
+    <!-- tapas / end covers con pernos -->
+    <ellipse cx="22" cy="46" rx="8" ry="20" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <ellipse cx="98" cy="46" rx="8" ry="20" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <g fill="#1a2838"><circle cx="22" cy="32" r="1.5"/><circle cx="22" cy="60" r="1.5"/><circle cx="98" cy="32" r="1.5"/><circle cx="98" cy="60" r="1.5"/></g>
+    <rect x="100" y="42" width="18" height="8" rx="3" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- BOMBA MULTIETAPA (Flowserve: cuerpo segmentado horizontal + toberas + soportes) -->
+  <symbol id="eq-pumpmulti" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="72" rx="50" ry="6" fill="url(#shadow)"/>
+    <rect x="30" y="64" width="12" height="8" rx="1" fill="url(#base)"/><rect x="78" y="64" width="12" height="8" rx="1" fill="url(#base)"/>
+    <!-- tobera de descarga arriba -->
+    <rect x="56" y="12" width="11" height="18" rx="2" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/><ellipse cx="61.5" cy="12" rx="8" ry="3.5" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <!-- cuerpo segmentado (ring-section) -->
+    <rect x="24" y="30" width="72" height="34" rx="7" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="26" y="33" width="68" height="3" rx="2" fill="#bcd6e6" opacity=".45"/>
+    <g stroke="#0c1826" stroke-width="1.8" opacity=".55"><line x1="33" y1="30" x2="33" y2="64"/><line x1="41" y1="30" x2="41" y2="64"/><line x1="49" y1="30" x2="49" y2="64"/><line x1="57" y1="30" x2="57" y2="64"/><line x1="65" y1="30" x2="65" y2="64"/><line x1="73" y1="30" x2="73" y2="64"/><line x1="81" y1="30" x2="81" y2="64"/><line x1="89" y1="30" x2="89" y2="64"/></g>
+    <g stroke="#89a6c0" stroke-width=".8" opacity=".4"><line x1="35" y1="30" x2="35" y2="64"/><line x1="43" y1="30" x2="43" y2="64"/><line x1="51" y1="30" x2="51" y2="64"/><line x1="59" y1="30" x2="59" y2="64"/><line x1="67" y1="30" x2="67" y2="64"/><line x1="75" y1="30" x2="75" y2="64"/><line x1="83" y1="30" x2="83" y2="64"/></g>
+    <!-- soportes de cojinete en los extremos -->
+    <ellipse cx="20" cy="47" rx="8" ry="17" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <ellipse cx="100" cy="47" rx="8" ry="17" fill="url(#flange)" stroke="#5a7890" stroke-width="1"/>
+    <!-- tobera de succión (mayor, extremo) -->
+    <path d="M16 56 L16 70 L34 70 L34 56" fill="none" stroke="#3a4e63" stroke-width="7" stroke-linejoin="round"/>
+    <rect x="100" y="43" width="18" height="8" rx="3" fill="url(#shaft)"/>
+  </symbol>
+
+  <!-- COMPRESOR RECIPROCANTE (frame + cilindros a los LADOS + valve covers) -->
+  <symbol id="eq-comprecip" viewBox="0 0 120 80">
+    <ellipse cx="60" cy="72" rx="50" ry="6" fill="url(#shadow)"/>
+    <!-- cilindro IZQUIERDO -->
+    <rect x="6" y="38" width="32" height="18" rx="5" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <ellipse cx="7" cy="47" rx="4" ry="9" fill="url(#flange)"/>
+    <circle cx="20" cy="38" r="4" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/><circle cx="20" cy="56" r="4" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <!-- cilindro DERECHO -->
+    <rect x="82" y="38" width="32" height="18" rx="5" fill="url(#cyl2)" stroke="#5a7890" stroke-width="1"/>
+    <ellipse cx="113" cy="47" rx="4" ry="9" fill="url(#flange)"/>
+    <circle cx="100" cy="38" r="4" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/><circle cx="100" cy="56" r="4" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <!-- distance pieces -->
+    <rect x="34" y="42" width="9" height="12" rx="1" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <rect x="77" y="42" width="9" height="12" rx="1" fill="url(#flange)" stroke="#5a7890" stroke-width=".6"/>
+    <!-- frame / crankcase (centro) -->
+    <rect x="42" y="28" width="36" height="38" rx="4" fill="url(#cyl)" stroke="#5a7890" stroke-width="1"/>
+    <rect x="44" y="32" width="32" height="3" rx="2" fill="#bcd6e6" opacity=".4"/>
+    <circle cx="60" cy="47" r="6" fill="url(#flange)" stroke="#5a7890" stroke-width=".8"/>
+    <rect x="44" y="66" width="32" height="6" rx="1" fill="url(#base)"/>
+  </symbol>
+</defs></svg>
+<style>
+  .topbar{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .topbar h1{font-size:13px;font-weight:600;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute)}
+  .topbar .mach{font-family:var(--mono);font-size:13px;color:var(--cyan);font-weight:600}
+  .topbar .sp{margin-left:auto}
+  .addbtn{font-size:11px;font-weight:700;color:var(--cyan);background:rgba(52,198,232,.12);border:1px solid rgba(52,198,232,.4);border-radius:6px;padding:5px 10px;cursor:pointer;flex:none}
+  .pit:hover .addbtn{background:var(--cyan);color:#07121c}
+  .emptyhint{padding:46px 20px;text-align:center;color:var(--dim);font-family:var(--mono);font-size:13px;line-height:1.7}
+  .buildbar{display:flex;gap:12px;padding:12px 16px;border-top:1px solid var(--line);align-items:center}
+  .btn{font-size:12.5px;font-weight:600;border-radius:8px;padding:9px 16px;cursor:pointer;border:1px solid var(--line2);background:var(--panel);color:var(--ink)}
+  .btn.primary{background:linear-gradient(180deg,var(--steel),#1c5a8a);border-color:var(--steel);color:#fff}
+  .btn:disabled{opacity:.4;cursor:default}
+  .brgpill{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#0a141e;font-family:var(--mono);font-size:10px;font-weight:700;color:#fff}
+  .selbox{fill:none;stroke:var(--cyan);stroke-width:2;stroke-dasharray:5 4;rx:8}
+  .delx{cursor:pointer}
+</style>
+<div class="wrap">
+  <div class="topbar">
+    <h1>Sensores &amp; layout</h1><span class="mach" id="machName">Nueva m&aacute;quina</span>
+    <span class="sp"></span>
+  </div>
+  <div class="grid">
+    <div>
+      <div class="card">
+        <div class="ch"><h2>Tren de m&aacute;quina</h2><span class="tag" id="trainTag">vac&iacute;o</span></div>
+        <div class="stage">
+          <svg id="trainSvg" viewBox="0 0 940 190" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div class="emptyhint" id="emptyHint">Eleg&iacute; equipos de la librer&iacute;a &rarr; <b style="color:var(--cyan)">+ Agregar al tren</b><br>Los acoples se insertan solos entre m&aacute;quinas.</div>
+        </div>
+        <div class="buildbar">
+          <button class="btn primary" id="btnBuild" disabled>Construir m&aacute;quina &rarr;</button>
+          <button class="btn" id="btnClear">Vaciar</button>
+          <span class="sp" id="buildInfo" style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
+        </div>
+      </div>
+      <div id="cfgHost" style="margin-top:14px"></div>
+    </div>
+
+    <div class="pal">
+      <div class="ph"><h3>Librer&iacute;a de equipos</h3></div>
+      <div class="search">Buscar equipo&hellip;</div>
+      <div id="libList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var SVGNS='http://www.w3.org/2000/svg';
+  // --- Librería (key -> def) ---
+  var LIB={
+    motor:{label:'Motor eléctrico',sym:'eq-motor',grp:'Motriz (driver)',brg:2,bt:'rolling',sub:'rodamientos / planos',w:200},
+    turb:{label:'Turbina de gas',sym:'eq-turb',grp:'Motriz (driver)',brg:2,bt:'journal',sub:'aero / industrial',w:210},
+    steam:{label:'Turbina de vapor',sym:'eq-steam',grp:'Motriz (driver)',brg:2,bt:'journal',sub:'impulso / reacción',w:200},
+    gear:{label:'Caja / reductor',sym:'eq-gear',grp:'Intermedio',brg:2,bt:'journal',sub:'2-7 ejes',w:150},
+    coupling:{label:'Acople',sym:'eq-coupling',grp:'Intermedio',brg:0,bt:'none',sub:'rígido / flexible',w:90},
+    gen:{label:'Generador',sym:'eq-gen',grp:'Arrastrado (driven)',brg:2,bt:'journal',sub:'2 cojinetes',w:240},
+    pump:{label:'Bomba',sym:'eq-pump',grp:'Arrastrado (driven)',brg:2,bt:'rolling',sub:'centerhung / overhung',w:180},
+    pumpmulti:{label:'Bomba multietapa',sym:'eq-pumpmulti',grp:'Arrastrado (driven)',brg:2,bt:'journal',sub:'ring-section (Flowserve)',w:190},
+    fan:{label:'Ventilador / soplador',sym:'eq-fan',grp:'Arrastrado (driven)',brg:2,bt:'rolling',sub:'centerhung / overhung',w:180},
+    comp:{label:'Compresor centrífugo',sym:'eq-comp',grp:'Arrastrado (driven)',brg:2,bt:'journal',sub:'barril / toberas',w:190},
+    comprecip:{label:'Compresor reciprocante',sym:'eq-comprecip',grp:'Arrastrado (driven)',brg:4,bt:'journal',sub:'cilindros a los lados',w:190}
+  };
+  var ORDER=['motor','turb','steam','gear','coupling','gen','pump','pumpmulti','fan','comp','comprecip'];
+
+  var train=[];   // [{key,name,brg,bt,bno:[]}]
+  var sel=-1;
+
+  // --- construir la librería (panel derecho) ---
+  (function buildLib(){
+    var host=document.getElementById('libList'); var lastGrp='';
+    ORDER.forEach(function(k){
+      var d=LIB[k];
+      if(d.grp!==lastGrp){ var g=document.createElement('div'); g.className='grp'; g.textContent=d.grp; host.appendChild(g); lastGrp=d.grp; }
+      var it=document.createElement('div'); it.className='pit';
+      it.innerHTML='<div class="ic"><svg viewBox="0 0 120 80"><use href="#'+d.sym+'"/></svg></div>'+
+        '<div style="flex:1"><div class="t">'+d.label+'</div><div class="s">'+d.sub+'</div></div>'+
+        '<button class="addbtn">+ Agregar</button>';
+      it.querySelector('.addbtn').addEventListener('click',function(e){e.stopPropagation(); add(k);});
+      it.addEventListener('click',function(){ add(k); });
+      host.appendChild(it);
+    });
+  })();
+
+  function add(key){
+    var d=LIB[key];
+    if(train.length && key!=='coupling' && train[train.length-1].key!=='coupling'){
+      train.push({key:'coupling',name:'Acople',brg:0,bt:'none'});
+    }
+    train.push({key:key,name:d.label,brg:d.brg,bt:d.bt});
+    sel=train.length-1; render();
+  }
+  function removeAt(i){ train.splice(i,1); if(sel>=train.length) sel=train.length-1; render(); }
+
+  function numberBearings(){ var n=0; train.forEach(function(c){ c.bno=[]; for(var i=0;i<c.brg;i++){n++; c.bno.push(n);} }); return n; }
+  function zoneColor(bt){ return bt==='journal'?'#2f84c4':'#27c08a'; }
+
+  function sensorsOfComp(c){
+    var s=[];
+    (c.bno||[]).forEach(function(no){
+      if(c.bt==='journal'){ s.push({n:no+'XD',k:'prox',ang:'45°R'}); s.push({n:no+'YD',k:'prox',ang:'45°L'}); }
+      else { s.push({n:no+'A',k:'accel',ang:'radial'}); }
+    });
+    return s;
+  }
+  function allSensors(){
+    var out=[]; train.forEach(function(c){ sensorsOfComp(c).forEach(function(x){ x.comp=c.name; out.push(x); }); });
+    if(train.some(function(c){return c.bt==='journal';})) out.push({comp:'tren',n:'KPH',k:'kph',ang:'1/rev'});
+    var ch=0; out.forEach(function(x){ x.rack='Mód '+String.fromCharCode(65+Math.floor(ch/4))+' Ch'+(ch%4); ch++; });
+    return out;
+  }
+
+  function render(){
+    var n=numberBearings();
+    document.getElementById('emptyHint').style.display=train.length?'none':'block';
+    document.getElementById('trainTag').textContent=train.length? (train.filter(function(c){return c.key!=='coupling';}).length+' máquinas · '+n+' cojinetes') : 'vacío';
+    document.getElementById('btnBuild').disabled=!train.length;
+    renderTrain(n); renderCfg();
+    var sc=allSensors();
+    document.getElementById('buildInfo').textContent=train.length? (sc.length+' sondas · mapeadas al rack'):'';
+  }
+
+  function renderTrain(n){
+    var svg=document.getElementById('trainSvg'); svg.innerHTML='';
+    if(!train.length) return;
+    var pad=24, gap=-6, y0=96, x=pad, pos=[];
+    train.forEach(function(c){ var w=LIB[c.key].w; pos.push({c:c,x:x,w:w}); x+=w+gap; });
+    var total=x+pad;
+    svg.setAttribute('viewBox','0 0 '+Math.max(940,total)+' 190');
+    // eje continuo
+    function L(x1,x2,yy,col,wd){ var l=document.createElementNS(SVGNS,'line'); l.setAttribute('x1',x1);l.setAttribute('y1',yy);l.setAttribute('x2',x2);l.setAttribute('y2',yy);l.setAttribute('stroke',col);l.setAttribute('stroke-width',wd);l.setAttribute('stroke-linecap','round'); svg.appendChild(l); }
+    L(pad-6,total-pad+6,98,'#2a3b4d',8); L(pad-6,total-pad+6,96,'url(#shaft)',5);
+    pos.forEach(function(p,idx){
+      var w=p.w, h=w*0.66, yy=y0-h*0.52;
+      var u=document.createElementNS(SVGNS,'use'); u.setAttribute('href','#'+LIB[p.c.key].sym);
+      u.setAttribute('x',p.x); u.setAttribute('y',yy); u.setAttribute('width',w); u.setAttribute('height',h);
+      u.style.cursor='pointer'; u.addEventListener('click',function(){ sel=idx; render(); });
+      svg.appendChild(u);
+      // caja de selección
+      if(idx===sel){ var r=document.createElementNS(SVGNS,'rect'); r.setAttribute('x',p.x+6);r.setAttribute('y',yy+4);r.setAttribute('width',w-12);r.setAttribute('height',h-8);r.setAttribute('rx',8);r.setAttribute('class','selbox'); svg.appendChild(r); }
+      // cojinetes sobre el eje
+      var bs=p.c.bno||[]; bs.forEach(function(no,bi){
+        var bx=p.x + w*(0.30 + 0.40*(bs.length>1?bi/(bs.length-1):0.5));
+        var g=document.createElementNS(SVGNS,'g');
+        var cc=document.createElementNS(SVGNS,'circle'); cc.setAttribute('cx',bx);cc.setAttribute('cy',96);cc.setAttribute('r',12);cc.setAttribute('fill','#0a141e');cc.setAttribute('stroke',zoneColor(p.c.bt));cc.setAttribute('stroke-width',2);
+        var tx=document.createElementNS(SVGNS,'text'); tx.setAttribute('x',bx);tx.setAttribute('y',100);tx.setAttribute('text-anchor','middle');tx.setAttribute('font-family','IBM Plex Mono,monospace');tx.setAttribute('font-size','11');tx.setAttribute('font-weight','600');tx.setAttribute('fill','#fff');tx.textContent=no;
+        g.appendChild(cc); g.appendChild(tx); svg.appendChild(g);
+      });
+    });
+  }
+
+  function renderCfg(){
+    var host=document.getElementById('cfgHost'); host.innerHTML='';
+    if(sel<0||sel>=train.length){ return; }
+    var c=train[sel];
+    if(c.key==='coupling'){
+      host.innerHTML='<div class="card"><div class="ch"><h2>Acople</h2><span class="tag">une los ejes</span></div><div style="padding:16px;font-family:var(--mono);font-size:12px;color:var(--mute)">Une el eje del equipo anterior con el siguiente. Sin cojinetes propios.<br><button class="btn" id="delc" style="margin-top:12px">Quitar acople</button></div></div>';
+      document.getElementById('delc').addEventListener('click',function(){removeAt(sel);});
+      return;
+    }
+    var sens=sensorsOfComp(c);
+    var rows=sens.map(function(s){ var col=s.k==='prox'?'#8b5cf6':(s.k==='accel'?'#ef4444':'#f59e0b'); return '<div class="r"><i style="background:'+col+'"></i>'+s.n+' · '+(s.k==='prox'?'proximidad':(s.k==='accel'?'acelerómetro':'keyphasor'))+' '+s.ang+'</div>'; }).join('');
+    var norm=c.bt==='journal'?'API 670 · proximidad X/Y (desplazamiento µm pp)':'ISO 20816 · acelerómetro + envelope (defecto rodamiento)';
+    host.innerHTML=
+      '<div class="card"><div class="ch"><h2>'+c.name+' &mdash; configuración</h2><span class="tag">'+LIB[c.key].grp+'</span></div>'+
+      '<div style="padding:16px;display:grid;grid-template-columns:260px 1fr;gap:20px">'+
+        '<div>'+
+          '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Número de cojinetes</label>'+
+            '<div class="stepn"><button id="bm">−</button><span id="bv">'+c.brg+'</span><button id="bp">+</button></div></div>'+
+          '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Tipo de cojinete</label>'+
+            '<div class="seg"><button id="btj" class="'+(c.bt==='journal'?'on':'')+'">Plano / journal</button><button id="btr" class="'+(c.bt==='rolling'?'on':'')+'">Rodamiento</button></div></div>'+
+          '<div class="gen"><div class="t">Recomendado por norma &rarr; '+norm+'</div>'+rows+'</div>'+
+          '<button class="btn" id="delc" style="margin-top:12px">Quitar equipo</button>'+
+        '</div>'+
+        '<div class="cfgsvg"><svg viewBox="0 0 360 210"><use href="#'+LIB[c.key].sym+'" x="70" y="30" width="220" height="150"/></svg></div>'+
+      '</div></div>';
+    document.getElementById('bm').addEventListener('click',function(){ c.brg=Math.max(1,c.brg-1); render(); });
+    document.getElementById('bp').addEventListener('click',function(){ c.brg=Math.min(8,c.brg+1); render(); });
+    document.getElementById('btj').addEventListener('click',function(){ c.bt='journal'; render(); });
+    document.getElementById('btr').addEventListener('click',function(){ c.bt='rolling'; render(); });
+    document.getElementById('delc').addEventListener('click',function(){ removeAt(sel); });
+  }
+
+  document.getElementById('btnClear').addEventListener('click',function(){ train=[]; sel=-1; render(); });
+  document.getElementById('btnBuild').addEventListener('click',function(){
+    numberBearings();
+    var spec={machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return {type:c.key,name:c.name,bearings:c.brg,bearing_type:c.bt,bno:c.bno};}),
+              sensors:allSensors()};
+    window.__wm_build=JSON.stringify(spec);   // Python lo recoge por polling
+    document.getElementById('buildInfo').textContent='✓ enviado a Watermelon · '+spec.sensors.length+' sondas';
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
