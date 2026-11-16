@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -752,8 +752,8 @@ def main() -> int:
         _hdr = QtWidgets.QFrame(); _hdr.setObjectName("wmBrandBar")
         _hdr.setStyleSheet(
             "QFrame#wmBrandBar{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #14532d, stop:0.6 #1f7a43, stop:1 #34d399);"
-            "border-bottom:2px solid #e23b55;}")   # franja roja = rebanada de sandía
+            "stop:0 #0e1a28, stop:0.6 #16293d, stop:1 #1c3a52);"
+            "border-bottom:2px solid #e23b55;}")   # navy + franja roja = rebanada de sandía
         _hb = QtWidgets.QHBoxLayout(_hdr); _hb.setContentsMargins(16, 8, 14, 8); _hb.setSpacing(12)
         _brand = QtWidgets.QLabel(
             "<span style='color:#eafff2;font-weight:800;letter-spacing:2px;'>WATERMELON</span>"
@@ -768,7 +768,7 @@ def main() -> int:
         _hb.addStretch(1)
         hdr_status = QtWidgets.QLabel("● Standby")
         hdr_status.setStyleSheet(
-            "color:#bfe8cf; background:#14402a; border:1px solid #1c5e38;"
+            "color:#9db6cd; background:#15273a; border:1px solid #27425e;"
             "border-radius:999px; padding:4px 12px; font-weight:700; font-size:11px;")
         _hb.addWidget(hdr_status)
 
@@ -888,7 +888,15 @@ def main() -> int:
         def _wrap(layout):
             w = QtWidgets.QWidget(); layout.setContentsMargins(0, 0, 0, 0); w.setLayout(layout); return w
 
-        cfg_tabs = QtWidgets.QTabWidget(); cfg_ol.addWidget(cfg_tabs, 1)
+        cfg_tabs = QtWidgets.QTabWidget()
+        # Rail de secciones a la IZQUIERDA (reemplaza la barra de tabs horizontal
+        # apretada). La barra propia del QTabWidget se oculta abajo; TODA la lógica
+        # y el gating siguen en cfg_tabs — el rail solo es un selector bonito.
+        cfg_rail = QtWidgets.QListWidget(); cfg_rail.setObjectName("cfgRail")
+        cfg_rail.setFixedWidth(212); cfg_rail.setFocusPolicy(QtCore.Qt.NoFocus)
+        _cfg_body = QtWidgets.QHBoxLayout(); _cfg_body.setSpacing(12); _cfg_body.setContentsMargins(0, 0, 0, 0)
+        _cfg_body.addWidget(cfg_rail); _cfg_body.addWidget(cfg_tabs, 1)
+        cfg_ol.addLayout(_cfg_body, 1)
 
         # ---------- Pestaña 1: Machine ----------
         pg_machine = QtWidgets.QWidget(); ml = QtWidgets.QVBoxLayout(pg_machine); ml.setSpacing(9)
@@ -1543,6 +1551,43 @@ def main() -> int:
                                 "(luego la abres con '📁 Open file…').")
         rb.addWidget(btn_cloud); rb.addWidget(btn_savefile); rb.addWidget(btn_save); rb.addWidget(btn_apply)
         cfg_ol.addLayout(rb)
+
+        # --- Activar el rail de secciones: ocultar la barra de tabs y sincronizar ---
+        cfg_tabs.tabBar().hide()
+        cfg_rail.setStyleSheet(
+            "QListWidget#cfgRail{background:#0e1823;border:1px solid %s;border-radius:10px;"
+            "padding:6px;outline:0;}"
+            "QListWidget#cfgRail::item{padding:13px 13px;border-radius:8px;color:%s;"
+            "font-weight:600;font-size:13px;margin:2px 1px;}"
+            "QListWidget#cfgRail::item:selected{background:%s;color:%s;"
+            "border-left:3px solid %s;padding-left:10px;}"
+            "QListWidget#cfgRail::item:disabled{color:#445268;}" % (LINE, MUTE, PANEL2, INK, CORN))
+
+        def _sync_cfg_rail(*_):
+            cfg_rail.blockSignals(True)
+            if cfg_rail.count() != cfg_tabs.count():
+                cfg_rail.clear()
+                for _i in range(cfg_tabs.count()):
+                    cfg_rail.addItem(QtWidgets.QListWidgetItem(f"  {_i + 1}   {cfg_tabs.tabText(_i)}"))
+            for _i in range(cfg_tabs.count()):
+                _it = cfg_rail.item(_i)
+                if _it is not None:
+                    _fl = _it.flags()
+                    _it.setFlags(_fl | QtCore.Qt.ItemIsEnabled if cfg_tabs.isTabEnabled(_i)
+                                 else _fl & ~QtCore.Qt.ItemIsEnabled)
+            cfg_rail.setCurrentRow(cfg_tabs.currentIndex())
+            cfg_rail.blockSignals(False)
+
+        def _cfg_rail_clicked(_row):
+            if 0 <= _row < cfg_tabs.count() and cfg_tabs.isTabEnabled(_row):
+                cfg_tabs.setCurrentIndex(_row)
+            else:                                   # sección bloqueada por gating → revertir
+                cfg_rail.blockSignals(True); cfg_rail.setCurrentRow(cfg_tabs.currentIndex()); cfg_rail.blockSignals(False)
+
+        cfg_rail.currentRowChanged.connect(_cfg_rail_clicked)
+        cfg_tabs.currentChanged.connect(_sync_cfg_rail)
+        _sync_cfg_rail()
+
         tabs.addTab(cfg_outer, "Configuration")
 
         import math as _math
@@ -2098,6 +2143,7 @@ def main() -> int:
         def _apply_gate():
             for i in _GATE_TABS:
                 cfg_tabs.setTabEnabled(i, i in _gate["unlocked"])
+            _sync_cfg_rail()          # refleja el bloqueo/desbloqueo en el rail de secciones
 
         def _unlock_upto(i, switch=False):
             for j in _GATE_TABS:
