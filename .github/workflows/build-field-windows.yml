@@ -77,6 +77,7 @@ jobs:
             --hidden-import PySide6.QtWebEngineCore \
             --hidden-import PySide6.QtWebChannel \
             --add-data "assets/watermelon_logo.png;assets" \
+            --add-data "assets/fonts;assets/fonts" \
             --add-data "native/field_ui/skin.html;field_ui" \
             --icon "assets/watermelon.ico" \
             --collect-all nidaqmx \

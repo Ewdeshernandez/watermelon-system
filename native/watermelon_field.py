@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.10.0"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.10.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -240,7 +240,7 @@ def _stylesheet(scale: float = 1.0) -> str:
     return f"""
     QMainWindow, QDialog {{ background: {BG}; }}
     QWidget {{ background: {BG}; color: {INK};
-        font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: {f}px; }}
+        font-family: 'IBM Plex Sans', 'Segoe UI', 'Inter', Arial, sans-serif; font-size: {f}px; }}
     QLabel {{ background: transparent; color: {INK}; }}
     QMenuBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
         stop:0 #16293d, stop:1 #0e1a28); color: #cfe0f0; padding: 3px 8px; font-weight: 700; }}
@@ -366,6 +366,28 @@ def main() -> int:
         pass
     app = QtWidgets.QApplication(sys.argv)
     QtCore.QLocale.setDefault(QtCore.QLocale(QtCore.QLocale.C))   # punto decimal SIEMPRE
+
+    # --- Cargar IBM Plex (misma fuente que la piel Live) para que TODO el Qt
+    #     (Análisis, Config, menú, tablas) tenga el mismo "ambiente" que Live. ---
+    try:
+        from PySide6.QtGui import QFontDatabase
+        _fdir = _asset_path("assets/fonts")
+        for _fn in ("IBMPlexSans-Regular.ttf", "IBMPlexSans-Medium.ttf", "IBMPlexSans-SemiBold.ttf",
+                    "IBMPlexSans-Bold.ttf", "IBMPlexMono-Regular.ttf", "IBMPlexMono-Medium.ttf",
+                    "IBMPlexMono-SemiBold.ttf"):
+            _fp = os.path.join(_fdir, _fn)
+            if os.path.exists(_fp):
+                QFontDatabase.addApplicationFont(_fp)
+        if "IBM Plex Sans" in QFontDatabase.families():
+            _af = QtGui.QFont("IBM Plex Sans", 10)
+            _af.setHintingPreference(QtGui.QFont.PreferFullHinting)
+            app.setFont(_af)
+            try:
+                pg.setConfigOption("foreground", MUTE)   # ejes de los plots legibles
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        pass
 
     # --- Gate de licencia (modelo PAQUETE: una activación cubre todos los módulos de
     # campo, incluido este). FAIL-CLOSED en producción; WM_LICENSING=0 lo salta (dev). ---
@@ -729,7 +751,7 @@ def main() -> int:
         # la banda duplicada de arriba.
         _GENERIC_MACHINE = {"Rotor_Kit_Field", "Rotor_Kit", "Machine", "Rotor Kit", ""}
         _mach = QtWidgets.QLabel("·  nueva máquina")      # se actualiza en vivo con el nombre
-        _mach.setStyleSheet("color:#9db6cd; font-family:'Consolas',monospace; font-size:12px;")
+        _mach.setStyleSheet("color:#9db6cd; font-family:'IBM Plex Mono',monospace; font-size:12px;")
         tb.addWidget(_mach)
         tb.addSeparator()
         hdr_mode = QtWidgets.QLabel()                     # HARDWARE REAL / SIN HW (texto se setea abajo)
@@ -773,8 +795,8 @@ def main() -> int:
         _flow.setStyleSheet("QFrame#wmFlow{background:#0c1830;border-bottom:1px solid #23345c;}")
         _fl = QtWidgets.QHBoxLayout(_flow); _fl.setContentsMargins(16, 5, 16, 5); _fl.setSpacing(6)
         _step_lbls = {}
-        _STEP_OFF = ("color:#5f77a3;font:600 11px 'Segoe UI';padding:2px 9px;border-radius:6px;")
-        _STEP_ON = ("color:#08243a;background:#1AAEE5;font:800 11px 'Segoe UI';"
+        _STEP_OFF = ("color:#5f77a3;font:600 11px 'IBM Plex Sans';padding:2px 9px;border-radius:6px;")
+        _STEP_ON = ("color:#08243a;background:#1AAEE5;font:800 11px 'IBM Plex Sans';"
                     "padding:2px 9px;border-radius:6px;")
         for _si, _s in enumerate(["Configurar", "Validar", "Listo", "Adquirir", "Guardar"]):
             if _si > 0:
@@ -799,7 +821,7 @@ def main() -> int:
         # --- Barra de estado enriquecida (System1: rec · fs · Fmax · alarma · norma · versión) ---
         def _sbcell(txt="—", color="#9fb4d8", bold=False):
             _l = QtWidgets.QLabel(txt)
-            _l.setStyleSheet("color:%s;padding:2px 10px;font-family:'Consolas',monospace;"
+            _l.setStyleSheet("color:%s;padding:2px 10px;font-family:'IBM Plex Mono',monospace;"
                              "font-size:11px;font-weight:%s;" % (color, "700" if bold else "600"))
             return _l
         sb_rec = _sbcell("Rec idle"); sb_fs = _sbcell("fs —"); sb_fmax = _sbcell("Fmax —")
@@ -2449,7 +2471,7 @@ def main() -> int:
                               " letter-spacing:.06em;")
             val = QtWidgets.QLabel("—")
             val.setStyleSheet(f"border:none; color:{NAVY}; font-size:18px; font-weight:800;"
-                              " font-family:'Consolas','SF Mono',monospace;")
+                              " font-family:'IBM Plex Mono','IBM Plex Mono',monospace;")
             v.addWidget(lab); v.addWidget(val); sv[key] = val
             sl.addWidget(w)
         _cells = [("rpm", "RPM"), ("x1", "1X"), ("estado", "STATUS"), ("srate", "SAMPLING"),
@@ -2487,7 +2509,7 @@ def main() -> int:
         brg_cards = {}
         if _brg_groups:
             _blab = QtWidgets.QLabel("BEARINGS")
-            _blab.setStyleSheet("color:#5f77a3; font:700 10px 'Consolas',monospace;"
+            _blab.setStyleSheet("color:#5f77a3; font:700 10px 'IBM Plex Mono',monospace;"
                                 " letter-spacing:.14em;")
             _brow = QtWidgets.QHBoxLayout(); _brow.setSpacing(8)
             for _bn in _brg_groups:
@@ -2498,15 +2520,15 @@ def main() -> int:
                 _cv.setContentsMargins(12, 9, 12, 9); _cv.setSpacing(4)
                 _hh = QtWidgets.QHBoxLayout(); _hh.setSpacing(8)
                 _nm = QtWidgets.QLabel(f"Brg {_bn}")
-                _nm.setStyleSheet("border:none;color:#e8f0f8;font:800 13px 'Segoe UI';")
+                _nm.setStyleSheet("border:none;color:#e8f0f8;font:800 13px 'IBM Plex Sans';")
                 _zone = QtWidgets.QLabel("—"); _zone.setAlignment(QtCore.Qt.AlignCenter)
                 _zone.setStyleSheet("border:1px solid #bfe3cf;background:#e6f4ea;color:#166534;"
-                                    "border-radius:999px;padding:1px 9px;font:800 9px 'Segoe UI';")
+                                    "border-radius:999px;padding:1px 9px;font:800 9px 'IBM Plex Sans';")
                 _hh.addWidget(_nm); _hh.addStretch(1); _hh.addWidget(_zone)
                 _v1 = QtWidgets.QLabel("1X  —")
-                _v1.setStyleSheet("border:none;color:#9db6cd;font:600 11px 'Consolas',monospace;")
+                _v1.setStyleSheet("border:none;color:#9db6cd;font:600 11px 'IBM Plex Mono',monospace;")
                 _v2 = QtWidgets.QLabel("Gap  —")
-                _v2.setStyleSheet("border:none;color:#8090a6;font:600 11px 'Consolas',monospace;")
+                _v2.setStyleSheet("border:none;color:#8090a6;font:600 11px 'IBM Plex Mono',monospace;")
                 _cv.addLayout(_hh); _cv.addWidget(_v1); _cv.addWidget(_v2)
                 _brow.addWidget(_card)
                 brg_cards[_bn] = {"zone": _zone, "v1": _v1, "v2": _v2, "card": _card}
@@ -3341,7 +3363,7 @@ def main() -> int:
                                                    value=float(snap[_pi].mean()), **_base))
                 n = _lr.ingest_batch(rds)
                 sb_rec.setText(f"↑ Nube {n}" if n > 0 else "Nube ✕ sin conexión")
-                sb_rec.setStyleSheet("color:%s;padding:2px 10px;font-family:'Consolas',monospace;"
+                sb_rec.setStyleSheet("color:%s;padding:2px 10px;font-family:'IBM Plex Mono',monospace;"
                                      "font-size:11px;font-weight:700;"
                                      % ("#8fc3ef" if n > 0 else "#ff8a8a"))
             except Exception:  # noqa: BLE001
@@ -3518,7 +3540,7 @@ def main() -> int:
                 sv["estado"].setText(estado_g)
                 sv["estado"].setStyleSheet(
                     "border:none; font-size:18px; font-weight:800;"
-                    " font-family:'Consolas','SF Mono',monospace; color:"
+                    " font-family:'IBM Plex Mono','IBM Plex Mono',monospace; color:"
                     + ("#16a34a" if estado_g == "Steady" else "#b45309"))
                 sv["srate"].setText(f"{fs/1000:.1f} kS/s" if fs >= 1000 else f"{fs:.0f} S/s")
                 sv["vent"].setText(f"{snap.shape[1] / fs:.1f} s")
@@ -3587,7 +3609,7 @@ def main() -> int:
                     _cd["zone"].setText(_z)
                     _cd["zone"].setStyleSheet(
                         f"border:1px solid {_brc};background:{_bgc};color:{_fgc};"
-                        "border-radius:999px;padding:1px 9px;font:800 9px 'Segoe UI';")
+                        "border-radius:999px;padding:1px 9px;font:800 9px 'IBM Plex Sans';")
                     _cd["card"].setStyleSheet(
                         "QFrame#brgCard{background:%s;border:1px solid %s;"
                         "border-left:3px solid %s;border-radius:10px;}" % (PANEL2, LINE, _brc))
@@ -3598,11 +3620,11 @@ def main() -> int:
                     pass
                 elif _s2 is not None and getattr(_s2, "open", False):
                     sb_rec.setText(f"● Rec {_s2.status.duration_s:.0f}s · {_s2.status.size_mb:.1f} MB")
-                    sb_rec.setStyleSheet("color:#7ff0bd;padding:2px 10px;font-family:'Consolas',"
+                    sb_rec.setStyleSheet("color:#7ff0bd;padding:2px 10px;font-family:'IBM Plex Mono',"
                                          "monospace;font-size:11px;font-weight:700;")
                 else:
                     sb_rec.setText("Rec idle")
-                    sb_rec.setStyleSheet("color:#9fb4d8;padding:2px 10px;font-family:'Consolas',"
+                    sb_rec.setStyleSheet("color:#9fb4d8;padding:2px 10px;font-family:'IBM Plex Mono',"
                                          "monospace;font-size:11px;font-weight:600;")
                 sb_fs.setText(f"fs {fs/1000:.1f} kS/s" if fs >= 1000 else f"fs {fs:.0f} S/s")
                 sb_fmax.setText(f"Fmax {fs/2560:.1f} kHz")
@@ -3610,7 +3632,7 @@ def main() -> int:
                 _alz = [("Alarma OK", "#7ff0bd"), ("ALERT", "#f5c451"),
                         ("DANGER", "#ff8a8a")][_ws]
                 sb_alarm.setText(_alz[0])
-                sb_alarm.setStyleSheet(f"color:{_alz[1]};padding:2px 10px;font-family:'Consolas',"
+                sb_alarm.setStyleSheet(f"color:{_alz[1]};padding:2px 10px;font-family:'IBM Plex Mono',"
                                        "monospace;font-size:11px;font-weight:700;")
             elif cur == "Waveform":
                 fi = onda_focus["i"]
