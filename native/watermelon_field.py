@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.9.8"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.9.9"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2618,6 +2618,25 @@ def main() -> int:
         p_spec.scene().sigMouseMoved.connect(_spec_mouse)
         an_tabs.addTab(ond_w, "Waveform")
 
+        # --- Espectro (FFT de un canal seleccionado, con marcas 1X/2X/3X) ---
+        spec_w = QtWidgets.QWidget(); spec_ly = QtWidgets.QVBoxLayout(spec_w)
+        _sph = QtWidgets.QHBoxLayout()
+        _sph.addWidget(QtWidgets.QLabel("<b>Espectro</b>  <span style='color:#8aa0b6'>FFT · 1X/2X/3X</span>"))
+        _sph.addStretch(1); _sph.addWidget(QtWidgets.QLabel("Canal:"))
+        cb_spec_ch = QtWidgets.QComboBox()
+        for (_sci, _scc) in vib:
+            cb_spec_ch.addItem(_scc.name)
+        _sph.addWidget(cb_spec_ch); spec_ly.addLayout(_sph)
+        gl_spec2 = pg.GraphicsLayoutWidget(); spec_ly.addWidget(gl_spec2, 1)
+        p_spec2 = gl_spec2.addPlot(); p_spec2.showGrid(x=True, y=True, alpha=0.12)
+        p_spec2.setLabel("left", "amplitud"); p_spec2.setLabel("bottom", "Frecuencia (CPM)")
+        spec_curve2 = p_spec2.plot(pen=pg.mkPen(CORN, width=1.5))
+        _spec_ord = []
+        for _ko in range(1, 4):
+            _oln = pg.InfiniteLine(angle=90, pen=pg.mkPen(AMBER, width=1, style=QtCore.Qt.DashLine))
+            p_spec2.addItem(_oln); _spec_ord.append(_oln)
+        an_tabs.addTab(spec_w, "Spectrum")
+
         onda_focus = {"i": None}    # None = todas; idx = solo esa onda
 
         def _apply_onda_focus():
@@ -3049,8 +3068,9 @@ def main() -> int:
             "QListWidget#cfgRail::item:selected{background:%s;color:%s;"
             "border-left:3px solid %s;padding-left:10px;}" % (LINE, MUTE, PANEL2, INK, CORN))
         _AN_LABELS = {"Monitoring": "Monitoreo", "Trends": "Tendencias", "Waveform": "Forma de onda",
-                      "Orbit": "Órbita", "Bode": "Bode", "Polar": "Polar", "Cascade": "Cascada",
-                      "Shaft Centerline": "Shaft Centerline", "Diagnostics": "Diagnóstico"}
+                      "Spectrum": "Espectro", "Orbit": "Órbita", "Bode": "Bode", "Polar": "Polar",
+                      "Cascade": "Cascada", "Shaft Centerline": "Shaft Centerline",
+                      "Diagnostics": "Diagnóstico"}
         for _i in range(an_tabs.count()):
             an_rail.addItem(_AN_LABELS.get(an_tabs.tabText(_i), an_tabs.tabText(_i)))
         an_rail.setCurrentRow(an_tabs.currentIndex())
@@ -3737,6 +3757,21 @@ def main() -> int:
                             trend_curves[_bn] = _cv
                         _n = min(len(_vv), len(_xs))
                         _cv.setData(_xs[-_n:], _vv[-_n:])
+            elif cur == "Spectrum":
+                _si2 = cb_spec_ch.currentIndex()
+                if 0 <= _si2 < len(vib):
+                    _sel2, _csel2 = vib[_si2]
+                    _sig2 = snap[_sel2] * 1000.0 / (_csel2.sensitivity_mv_per_eu or 1.0)
+                    _sig2 = _sig2 - _sig2.mean()
+                    _fr2, _mag2 = _spectrum(_sig2, fs)
+                    _keep2 = _fr2 <= (fs / 2.56)
+                    spec_curve2.setData(_fr2[_keep2] * 60.0, _mag2[_keep2])
+                    if f1:
+                        for _ko, _oln in enumerate(_spec_ord, start=1):
+                            _oln.setValue(f1 * _ko * 60.0); _oln.show()
+                    else:
+                        for _oln in _spec_ord:
+                            _oln.hide()
 
         # --- Bilingual strings for the preliminary report (EN default, ES for the client) ---
         REPORT_T = {
