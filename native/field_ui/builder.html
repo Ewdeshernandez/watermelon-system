@@ -330,6 +330,9 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
         <div class="buildbar">
           <button class="btn primary" id="btnBuild" disabled>Construir m&aacute;quina &rarr;</button>
           <button class="btn" id="btnClear">Vaciar</button>
+          <span style="display:inline-flex;align-items:center;gap:8px;margin-left:16px;font-family:var(--mono);font-size:11px;color:var(--mute)">Keyphasors
+            <span class="stepn" style="transform:scale(.82);transform-origin:left center"><button id="km">&minus;</button><span id="kv">1</span><button id="kp">+</button></span>
+          </span>
           <span class="sp" id="buildInfo" style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
         </div>
       </div>
@@ -363,8 +366,9 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
   };
   var ORDER=['motor','turb','steam','gear','coupling','gen','pump','pumpmulti','fan','comp','comprecip'];
 
-  var train=[];   // [{key,name,brg,bt,bno:[]}]
+  var train=[];   // [{key,name,brg,bt,axial,bno:[]}]
   var sel=-1;
+  var trainKph=1; // nº de keyphasors del tren (0..2) — referencia de velocidad/fase
 
   // --- construir la librería (panel derecho) ---
   (function buildLib(){
@@ -401,11 +405,17 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
       if(c.bt==='journal'){ s.push({n:no+'XD',k:'prox',ang:'45°R'}); s.push({n:no+'YD',k:'prox',ang:'45°L'}); }
       else { s.push({n:no+'A',k:'accel',ang:'radial'}); }
     });
+    // Sondas axiales (empuje) — solo journal con cojinete de empuje; prox axial.
+    var ax=c.axial||0;
+    if(c.bt==='journal' && ax>0 && (c.bno||[]).length){
+      var first=c.bno[0];
+      for(var i=0;i<ax;i++){ s.push({n:first+'AX'+(i?(i+1):''),k:'prox',ang:'axial'}); }
+    }
     return s;
   }
   function allSensors(){
     var out=[]; train.forEach(function(c){ sensorsOfComp(c).forEach(function(x){ x.comp=c.name; out.push(x); }); });
-    if(train.some(function(c){return c.bt==='journal';})) out.push({comp:'tren',n:'KPH',k:'kph',ang:'1/rev'});
+    for(var i=0;i<trainKph;i++){ out.push({comp:'tren',n:i?'KPH'+(i+1):'KPH',k:'kph',ang:'1/rev'}); }
     var ch=0; out.forEach(function(x){ x.rack='Mód '+String.fromCharCode(65+Math.floor(ch/4))+' Ch'+(ch%4); ch++; });
     return out;
   }
@@ -469,6 +479,9 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
             '<div class="stepn"><button id="bm">−</button><span id="bv">'+c.brg+'</span><button id="bp">+</button></div></div>'+
           '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Tipo de cojinete</label>'+
             '<div class="seg"><button id="btj" class="'+(c.bt==='journal'?'on':'')+'">Plano / journal</button><button id="btr" class="'+(c.bt==='rolling'?'on':'')+'">Rodamiento</button></div></div>'+
+          (c.bt==='journal'?
+          '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Sondas axiales (empuje)</label>'+
+            '<div class="stepn"><button id="am">&minus;</button><span id="av">'+(c.axial||0)+'</span><button id="ap">+</button></div></div>':'')+
           '<div class="gen"><div class="t">Recomendado por norma &rarr; '+norm+'</div>'+rows+'</div>'+
           '<button class="btn" id="delc" style="margin-top:12px">Quitar equipo</button>'+
         '</div>'+
@@ -477,14 +490,21 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
     document.getElementById('bm').addEventListener('click',function(){ c.brg=Math.max(1,c.brg-1); render(); });
     document.getElementById('bp').addEventListener('click',function(){ c.brg=Math.min(8,c.brg+1); render(); });
     document.getElementById('btj').addEventListener('click',function(){ c.bt='journal'; render(); });
-    document.getElementById('btr').addEventListener('click',function(){ c.bt='rolling'; render(); });
+    document.getElementById('btr').addEventListener('click',function(){ c.bt='rolling'; c.axial=0; render(); });
+    var _am=document.getElementById('am');
+    if(_am){ _am.addEventListener('click',function(){ c.axial=Math.max(0,(c.axial||0)-1); render(); });
+             document.getElementById('ap').addEventListener('click',function(){ c.axial=Math.min(2,(c.axial||0)+1); render(); }); }
     document.getElementById('delc').addEventListener('click',function(){ removeAt(sel); });
   }
 
   document.getElementById('btnClear').addEventListener('click',function(){ train=[]; sel=-1; render(); });
+  function setKph(v){ trainKph=Math.max(0,Math.min(2,v)); document.getElementById('kv').textContent=trainKph; render(); }
+  document.getElementById('km').addEventListener('click',function(){ setKph(trainKph-1); });
+  document.getElementById('kp').addEventListener('click',function(){ setKph(trainKph+1); });
   document.getElementById('btnBuild').addEventListener('click',function(){
     numberBearings();
-    var spec={machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return {type:c.key,name:c.name,bearings:c.brg,bearing_type:c.bt,bno:c.bno};}),
+    var spec={machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return {type:c.key,name:c.name,bearings:c.brg,bearing_type:c.bt,axial:c.axial||0,bno:c.bno};}),
+              keyphasors:trainKph,
               sensors:allSensors()};
     window.__wm_build=JSON.stringify(spec);   // Python lo recoge por polling
     document.getElementById('buildInfo').textContent='✓ enviado a Watermelon · '+spec.sensors.length+' sondas';

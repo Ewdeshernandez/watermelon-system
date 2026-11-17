@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.1"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -996,8 +996,19 @@ def main() -> int:
         cfg_tabs.addTab(pg_machine, "Machine")
 
         # --- Constructor de tren (librería de equipos premium, embebido) ---
-        # Arma el tren con la librería → recomienda sondas por API 670 / ISO 20816 →
-        # emite el spec. (La aplicación al AcqSetup de canales se conecta en el paso 2.)
+        # Vista PRINCIPAL de sensores/layout: armá el tren con la librería → recomienda
+        # sondas por API 670 / ISO 20816 → construye la máquina real (SensorSpec→SimMachine).
+        _train_builder = None
+        # Defaults por tipo = MISMOS que las plantillas de sim_machine (fuente única de verdad):
+        # prox 200 mV/mil, gap -9.5 V, alarma 2.5 / peligro 4.0 µm pp (API 670);
+        # accel 100 mV/g, alarma 4.5 / peligro 7.1 mm/s (ISO 20816); keyphasor 1 mV.
+        _SDEF = {
+            "prox":      dict(sens=200.0, gap=-9.5, alarm=2.5, danger=4.0),
+            "accel":     dict(sens=100.0, gap=0.0,  alarm=4.5, danger=7.1),
+            "vel":       dict(sens=100.0, gap=0.0,  alarm=4.5, danger=7.1),
+            "keyphasor": dict(sens=1.0,   gap=0.0,  alarm=0.0, danger=0.0),
+        }
+        _KMAP = {"prox": "prox", "accel": "accel", "vel": "vel", "kph": "keyphasor"}
         try:
             from field_ui.builder import TrainBuilder
             _train_builder = TrainBuilder()
@@ -1006,22 +1017,28 @@ def main() -> int:
                 # Fase 2: traduce el spec del builder → SensorSpec → SimMachine y lo
                 # carga en la config real con fill_form() (mismo camino que 'cargar máquina').
                 try:
-                    _KMAP = {"prox": "prox", "accel": "accel", "vel": "vel", "kph": "keyphasor"}
-                    _DEFSENS = {"prox": 200.0, "accel": 100.0, "vel": 100.0, "keyphasor": 1.0}
-                    _sspec = []
-                    for _i, _s in enumerate(spec.get("sensors", [])):
+                    # Keyphasor(s) PRIMERO → BNC bajos (convención: KPH = BNC 1).
+                    _kph, _rest = [], []
+                    for _s in spec.get("sensors", []):
                         _k = _KMAP.get(_s.get("k", "accel"), "accel")
+                        (_kph if _k == "keyphasor" else _rest).append((_k, _s))
+                    _sspec = []
+                    for _i, (_k, _s) in enumerate(_kph + _rest):
                         _ang = str(_s.get("ang", ""))
-                        _adeg = 45.0 if "45" in _ang else 0.0
+                        _adeg = 45.0 if "45" in _ang else 0.0   # axial/radial → 0°
                         _side = "R" if "R" in _ang else ("L" if "L" in _ang else "")
+                        _d = _SDEF.get(_k, _SDEF["accel"])
                         _sspec.append(SensorSpec(_s.get("n", "CH"), _k, _i + 1,
-                                                 _DEFSENS[_k], _adeg, side=_side))
+                                                 _d["sens"], _adeg, side=_side,
+                                                 gap=_d["gap"], alarm=_d["alarm"],
+                                                 danger=_d["danger"]))
                     _ms = spec.get("machines", [])
                     _bts = {m.get("bearing_type") for m in _ms}
                     _bt = "mixed" if len(_bts) > 1 else ("rolling" if "rolling" in _bts else "plain")
                     _nm = (_ms[0].get("name") if _ms else "Tren") or "Tren"
                     _m = SimMachine(name=_nm, fs=5120.0, sensors=_sspec, bearing_type=_bt, rpm=3000.0)
                     fill_form(_m)
+                    _unlock_all_tabs()          # construir = config completa → desbloquea todo
                     cfg_tabs.setCurrentWidget(pg_sensors)
                     QtWidgets.QMessageBox.information(
                         win, "Máquina construida",
@@ -1031,7 +1048,7 @@ def main() -> int:
                     QtWidgets.QMessageBox.warning(win, "Constructor",
                                                   f"No se pudo aplicar la máquina:\n{_e2}")
             _train_builder.machineBuilt.connect(_on_machine_built)
-            cfg_tabs.insertTab(1, _train_builder, "Constructor")
+            cfg_tabs.insertTab(0, _train_builder, "Constructor")     # vista principal
         except Exception as _be:  # noqa: BLE001
             print("Constructor de tren no disponible (QtWebEngine?):", _be)
 
@@ -2435,6 +2452,14 @@ def main() -> int:
                 _unlock_all_tabs()
             _sync_next_btn()
         _init_gate()
+
+        # Entrada de Config = Constructor (vista principal de sensores/layout).
+        try:
+            _ci = cfg_tabs.indexOf(_train_builder) if _train_builder is not None else -1
+            if _ci >= 0:
+                cfg_tabs.setCurrentIndex(_ci)
+        except Exception:  # noqa: BLE001
+            pass
 
         # --- Monitoreo (adquisición + estado + tabular rápido, estilo web) ---
         from core.remote_monitoring.stream_source import channel_kind as _ckind
@@ -4959,6 +4984,18 @@ def main() -> int:
                             pos = le.cursorPosition(); le.setText(txt.replace(",", ".")); le.setCursorPosition(pos)
                     return _f
                 _le.textEdited.connect(_mk(_le))
+        # Auto-ajuste a la pantalla donde se abre el software: maximiza en la pantalla
+        # bajo el cursor (multi-monitor) y acota tamaño/mínimo al área disponible
+        # (mini-PC de campo con pantalla chica no queda recortado).
+        try:
+            _scr = QtGui.QGuiApplication.screenAt(QtGui.QCursor.pos()) or app.primaryScreen()
+            _ag = _scr.availableGeometry()
+            _w.setMinimumSize(min(1024, _ag.width()), min(680, _ag.height()))
+            _w.resize(min(1360, int(_ag.width() * 0.96)),
+                      min(860, int(_ag.height() * 0.95)))
+            _fg = _w.frameGeometry(); _fg.moveCenter(_ag.center()); _w.move(_fg.topLeft())
+        except Exception:  # noqa: BLE001
+            pass
         _w.showMaximized()
         _old = cur["win"]; cur["win"] = _w
         if _old is not None:
