@@ -36,6 +36,17 @@ import time
 from pathlib import Path
 from typing import List
 
+# Windows en la VM imprime en cp1252: un print() con caracteres no-ASCII (→, …)
+# lanza UnicodeEncodeError y MATA el robot — mataba la auto-recuperación del cruce
+# de pestañas (Export csv1 ↔ csv2) justo al loguear "CRUCE ... → reintento".
+# Forzamos UTF-8 en stdout/stderr (equivale a PYTHONUTF8=1) para que ningún print
+# vuelva a crashear por un carácter no-ASCII. Debe correr ANTES de cualquier print.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # py3.7+
+    except Exception:  # noqa: BLE001
+        pass
+
 try:
     import tomllib as _toml  # py311+
 except ModuleNotFoundError:  # pragma: no cover
