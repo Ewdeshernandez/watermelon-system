@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.11"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.12"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1319,6 +1319,71 @@ def main() -> int:
         cfg_tabs.currentChanged.connect(lambda *_: _refresh_acq_info())
 
         # ---------- Pestaña: Channel editor (maestro-detalle, por norma API 670) ----------
+        # Dial de orientación de sonda estilo System1: 0°=TDC arriba, R horario,
+        # L antihorario; punto vivo en la posición absoluta mientras se edita.
+        class ProbeDial(QtWidgets.QWidget):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self._ang = 0.0
+                self._side = ""
+                self.setFixedSize(136, 136)
+                self.setToolTip("Posición de la sonda · 0°=arriba (TDC) · R=horario · L=antihorario")
+
+            def set_probe(self, ang, side):
+                try:
+                    self._ang = float(ang or 0)
+                except Exception:  # noqa: BLE001
+                    self._ang = 0.0
+                s = (side or "").strip().upper()
+                self._side = s if s in ("R", "L") else ""
+                self.update()
+
+            def _abs(self):
+                a = self._ang % 360.0
+                return (-a) % 360.0 if self._side == "L" else a
+
+            def paintEvent(self, ev):  # noqa: N802
+                import math
+                p = QtGui.QPainter(self)
+                p.setRenderHint(QtGui.QPainter.Antialiasing)
+                w, h = self.width(), self.height()
+                cx, cy = w / 2.0, h / 2.0
+                R = min(w, h) / 2.0 - 18
+                p.setPen(QtGui.QPen(QtGui.QColor("#27425e"), 2))
+                p.setBrush(QtGui.QColor("#0e1823"))
+                p.drawEllipse(QtCore.QPointF(cx, cy), R, R)
+                # ticks cada 45°
+                p.setPen(QtGui.QPen(QtGui.QColor("#3a5570"), 1))
+                for deg in range(0, 360, 45):
+                    a = math.radians(deg)
+                    p.drawLine(QtCore.QPointF(cx + (R - 6) * math.sin(a), cy - (R - 6) * math.cos(a)),
+                               QtCore.QPointF(cx + R * math.sin(a), cy - R * math.cos(a)))
+                f = p.font(); f.setPointSize(7); f.setBold(True); p.setFont(f)
+                p.setPen(QtGui.QColor("#8aa0b6"))
+                p.drawText(QtCore.QRectF(cx - 14, cy - R - 15, 28, 12), QtCore.Qt.AlignCenter, "0°")
+                p.drawText(QtCore.QRectF(cx - 16, cy + R + 3, 32, 12), QtCore.Qt.AlignCenter, "180°")
+                p.setPen(QtGui.QColor("#2f84c4"))
+                p.drawText(QtCore.QRectF(cx + R + 1, cy - 7, 14, 14), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, "R")
+                p.setPen(QtGui.QColor("#e6b93f"))
+                p.drawText(QtCore.QRectF(cx - R - 15, cy - 7, 14, 14), QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, "L")
+                # eje (centro)
+                p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QColor("#6f8aa2"))
+                p.drawEllipse(QtCore.QPointF(cx, cy), 3.2, 3.2)
+                # sonda
+                ab = math.radians(self._abs())
+                px, py = cx + R * math.sin(ab), cy - R * math.cos(ab)
+                col = (QtGui.QColor("#2f84c4") if self._side == "R"
+                       else QtGui.QColor("#e6b93f") if self._side == "L"
+                       else QtGui.QColor("#34d399"))
+                p.setPen(QtGui.QPen(col, 2)); p.drawLine(QtCore.QPointF(cx, cy), QtCore.QPointF(px, py))
+                p.setBrush(col); p.setPen(QtGui.QPen(QtGui.QColor("#07121c"), 1.5))
+                p.drawEllipse(QtCore.QPointF(px, py), 7, 7)
+                # lectura centro-abajo
+                f.setPointSize(8); p.setFont(f); p.setPen(QtGui.QColor("#e8f0f8"))
+                _lbl = f"{self._ang:g}°{self._side}" if self._side else f"{self._ang:g}°"
+                p.drawText(QtCore.QRectF(0, cy + 8, w, 14), QtCore.Qt.AlignHCenter, _lbl)
+                p.end()
+
         pg_ched = QtWidgets.QWidget(); cl = QtWidgets.QVBoxLayout(pg_ched); cl.setSpacing(8)
         _ched_row = {"r": None, "busy": False}
         hrow = QtWidgets.QHBoxLayout()
@@ -1378,8 +1443,18 @@ def main() -> int:
         _grp("Transducer", [("Type:", e_type), ("Sensitivity mV/EU:", e_sens),
                             ("Unit:", e_unit), ("Coupling:", e_coup)])
         _grp("", [("Full-scale (EU):", e_full), ("Gap/Bias (V):", e_gap)])
-        _grp("Orientation (TDC top · R clockwise · L counter-clockwise)",
-             [("Angle°:", e_ang), ("Side:", e_side)])
+        probe_dial = ProbeDial()
+        cl.addWidget(_subhdr("Orientation (TDC top · R clockwise · L counter-clockwise)"))
+        _orow = QtWidgets.QHBoxLayout()
+        _ocol = QtWidgets.QVBoxLayout()
+        for _lab, _wd in (("Angle°:", e_ang), ("Side:", e_side)):
+            _rr = QtWidgets.QHBoxLayout(); _rr.addWidget(QtWidgets.QLabel(_lab))
+            _wd.setMinimumWidth(150); _wd.setMaximumWidth(220)
+            _rr.addWidget(_wd); _rr.addStretch(1); _ocol.addLayout(_rr)
+        _ocol.addStretch(1)
+        _orow.addLayout(_ocol); _orow.addSpacing(24)
+        _orow.addWidget(probe_dial); _orow.addStretch(1)
+        cl.addLayout(_orow)
         _grp("Associations (phase reference + orbit pair)",
              [("Associated keyphasor:", e_kph), ("X/Y pair (orbit):", e_pair)])
         _grp("Alarms (API 670 / ISO 20816)", [("Alert:", e_alert), ("Danger:", e_danger)])
@@ -1442,6 +1517,7 @@ def main() -> int:
                 e_bearing.setValue(1)
             lbl_ch_bearing.setText("")
             lbl_ch_ok.setText("")
+            probe_dial.set_probe(e_ang.value(), e_side.currentText())
             _ched_row["busy"] = False
 
         def _ched_apply():
@@ -1499,6 +1575,9 @@ def main() -> int:
             draw_bearing()
 
         cb_ched.currentIndexChanged.connect(lambda i: _ched_load_row(i))
+        # El dial sigue a los spinners SIEMPRE (visual puro, sin depender de fila activa).
+        e_ang.valueChanged.connect(lambda *_: probe_dial.set_probe(e_ang.value(), e_side.currentText()))
+        e_side.currentTextChanged.connect(lambda *_: probe_dial.set_probe(e_ang.value(), e_side.currentText()))
         e_ang.valueChanged.connect(_ched_live_orient)
         e_side.currentTextChanged.connect(_ched_live_orient)
         e_bearing.valueChanged.connect(_ched_live_orient)
