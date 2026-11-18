@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.2"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1048,7 +1048,7 @@ def main() -> int:
                     QtWidgets.QMessageBox.warning(win, "Constructor",
                                                   f"No se pudo aplicar la máquina:\n{_e2}")
             _train_builder.machineBuilt.connect(_on_machine_built)
-            cfg_tabs.insertTab(0, _train_builder, "Constructor")     # vista principal
+            cfg_tabs.insertTab(1, _train_builder, "Constructor")     # tras Machine (paso 2 del flujo)
         except Exception as _be:  # noqa: BLE001
             print("Constructor de tren no disponible (QtWebEngine?):", _be)
 
@@ -2222,9 +2222,13 @@ def main() -> int:
         # Hard-gating con ANTI-LOCKOUT: se desbloquea TODO al Cargar/Importar/Auto-
         # generar y hay escape manual (File → Unlock all configuration steps). Si la
         # máquina de arranque ya trae sensores (lanzada real con canales) → todo abierto.
-        _GATE_TABS = [cfg_tabs.indexOf(w) for w in
-                      (pg_machine, pg_sensors, pg_ched, pg_acq, pg_val, pg_sum)]
-        _GATE_TABS = [i for i in _GATE_TABS if i >= 0]
+        # Flujo: Machine (1) → Constructor (2) → Sensors/Channel → Acq → Val → Summary.
+        # El Constructor entra al gate para que no se pueda saltar (si está disponible).
+        _GATE_WIDGETS = [pg_machine]
+        if _train_builder is not None:
+            _GATE_WIDGETS.append(_train_builder)
+        _GATE_WIDGETS += [pg_sensors, pg_ched, pg_acq, pg_val, pg_sum]
+        _GATE_TABS = sorted(i for i in (cfg_tabs.indexOf(w) for w in _GATE_WIDGETS) if i >= 0)
         _gmin = min(_GATE_TABS) if _GATE_TABS else 0
         _gmax = max(_GATE_TABS) if _GATE_TABS else 0
         _gate = {"unlocked": {_gmin}}
@@ -2253,9 +2257,26 @@ def main() -> int:
             m = read_form()
             if i == cfg_tabs.indexOf(pg_machine) and not (m.name or "").strip():
                 return "Ponle nombre a la máquina antes de continuar."
+            if (_train_builder is not None and i == cfg_tabs.indexOf(_train_builder)
+                    and len(m.sensors) < 1):
+                return "Armá el tren y tocá 'Construir máquina' antes de continuar."
             if i == cfg_tabs.indexOf(pg_sensors) and len(m.sensors) < 1:
-                return "Agrega sensores (usá 'Auto-generate sensor layout')."
+                return "Agrega sensores (usá el Constructor o 'Auto-generate sensor layout')."
             return ""
+
+        def _prompt_save_machine():
+            """Al terminar el flujo (llegar a Summary): ofrecer guardar la máquina."""
+            if QtWidgets.QMessageBox.question(
+                    win, "Guardar máquina",
+                    "Configuración completa. ¿Guardar la máquina en la librería ahora?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.Yes) == QtWidgets.QMessageBox.Yes:
+                do_save_lib()
+
+        def _advance(i):
+            _unlock_upto(i + 1, switch=True)
+            if cfg_tabs.currentWidget() is pg_sum:   # último paso → pedir guardar
+                _prompt_save_machine()
 
         def _do_continue():
             i = cfg_tabs.currentIndex()
@@ -2264,7 +2285,7 @@ def main() -> int:
             if i == cfg_tabs.indexOf(pg_val):          # Validation → usa su propio chequeo
                 _run_validation()
                 if acq_state.get("validated"):
-                    _unlock_upto(i + 1, switch=True)
+                    _advance(i)
                 else:
                     QtWidgets.QMessageBox.information(
                         win, "Validation", "Corrige los errores de Validation antes de continuar.")
@@ -2273,7 +2294,7 @@ def main() -> int:
             if err:
                 QtWidgets.QMessageBox.information(win, "Falta un paso", err)
                 return
-            _unlock_upto(i + 1, switch=True)
+            _advance(i)
 
         btn_next.clicked.connect(_do_continue)
         cfg_tabs.currentChanged.connect(_sync_next_btn)
@@ -2453,11 +2474,10 @@ def main() -> int:
             _sync_next_btn()
         _init_gate()
 
-        # Entrada de Config = Constructor (vista principal de sensores/layout).
+        # Entrada de Config = Machine (paso 1 del flujo: identificar la máquina,
+        # después el Constructor arma el tren/sondas).
         try:
-            _ci = cfg_tabs.indexOf(_train_builder) if _train_builder is not None else -1
-            if _ci >= 0:
-                cfg_tabs.setCurrentIndex(_ci)
+            cfg_tabs.setCurrentWidget(pg_machine)
         except Exception:  # noqa: BLE001
             pass
 
