@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.3"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1339,7 +1339,9 @@ def main() -> int:
         arow = QtWidgets.QHBoxLayout(); arow.addStretch(1)
         arow.addWidget(lbl_ch_ok); arow.addWidget(btn_ch_apply)
         cl.addLayout(arow); cl.addStretch(1)
-        cfg_tabs.insertTab(2, pg_ched, "Channel editor")
+        # Justo DESPUÉS de "Sensors & layout" (índice dinámico: el Constructor
+        # va antes y desplaza las posiciones fijas → calcular con indexOf).
+        cfg_tabs.insertTab(cfg_tabs.indexOf(pg_sensors) + 1, pg_ched, "Channel editor")
 
         def _cell(r, c):
             it = tblc.item(r, c)
@@ -1516,7 +1518,7 @@ def main() -> int:
             val_out.setHtml("<div style='font-family:Segoe UI,Arial;font-size:12.5px'>"
                             + "".join(rows) + "</div>")
         btn_validate.clicked.connect(_run_validation)
-        cfg_tabs.insertTab(4, pg_val, "Validation")
+        cfg_tabs.insertTab(cfg_tabs.indexOf(pg_acq) + 1, pg_val, "Validation")
         cfg_tabs.currentChanged.connect(
             lambda *_: _run_validation() if cfg_tabs.currentWidget() is pg_val else None)
 
@@ -2464,13 +2466,10 @@ def main() -> int:
 
         # Estado inicial del gating (se corre tras el fill_form de arranque, más abajo).
         def _init_gate():
-            try:
-                if len(read_form().sensors) >= 1:
-                    _unlock_all_tabs()
-                else:
-                    _apply_gate()
-            except Exception:  # noqa: BLE001
-                _unlock_all_tabs()
+            # El flujo SIEMPRE arranca bloqueado (solo el primer paso), aunque el
+            # arranque traiga una máquina demo con sensores. Para editar una máquina
+            # ya existente sin recorrer el flujo: usar Cargar/Importar (desbloquean todo).
+            _apply_gate()
             _sync_next_btn()
         _init_gate()
 
