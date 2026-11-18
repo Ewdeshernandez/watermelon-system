@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.7"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.8"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -973,7 +973,12 @@ def main() -> int:
             "padding:6px 14px;border-radius:7px;} QPushButton:hover{background:#1c3a52;}")
         r2b.addWidget(btn_autolay)
         r2b.addWidget(QtWidgets.QLabel("<i style='color:#8aa0b6'>→ fills a recommended X/Y layout you can edit</i>"))
-        r2b.addStretch(1); ml.addLayout(r2b)
+        r2b.addStretch(1)
+        # Fila "Auto-generate sensor layout" OCULTA: el Constructor (paso 2) reemplaza
+        # este camino. Se deja viva (sp_nbrg/_do_autolayout) para no romper refs, pero
+        # no se muestra — una sola forma de armar sensores = menos confusión.
+        _autolay_row = QtWidgets.QWidget(); _autolay_row.setLayout(r2b); _autolay_row.hide()
+        ml.addWidget(_autolay_row)
 
         # --- Tipo de monitoreo: acá se DECLARA qué es esta máquina (se refleja en el
         #     badge del toolbar). Puntual = por oportunidad; En línea = continuo. ---
@@ -1018,15 +1023,12 @@ def main() -> int:
         _built = {"ok": False}
 
         def _show_premium_layout(spec=None):
-            _v = _layout_ui.get("viewer"); _st = _layout_ui.get("stack")
-            if _v is None or _st is None:
-                return
+            # Guarda el spec REAL de un build y lo pinta en el visor premium.
+            _v = _layout_ui.get("viewer")
             if spec is not None:
-                _v.load_spec(spec)
-            _st.setCurrentWidget(_v)
-            _bt = _layout_ui.get("btn_train")   # refleja el modo en el toggle
-            if _bt is not None:
-                _bt.setChecked(True)
+                _layout_ui["spec"] = spec
+            if _v is not None and _layout_ui.get("spec"):
+                _v.load_spec(_layout_ui["spec"])
 
         try:
             from field_ui.builder import TrainBuilder
@@ -1093,19 +1095,18 @@ def main() -> int:
                                         "Angle°", "Side", "Gap (V)", "Alarm", "Danger",
                                         "FullScale", "Active", "Coupling", "Unit", "Keyphasor",
                                         "Pair", "Plane"])
-        # En 'Sensors & layout' se ven 6 columnas: Channel/Type/BNC/Sensit/Angle/Side.
-        # Sensit (mV/EU) ya es EDITABLE aquí (antes solo en 'Channel editor'). Gap/Alarm/
-        # Danger + los avanzados siguen en 'Channel editor' → tabla limpia y espacio al diagrama.
-        for _c in (6, 7, 8, _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR, _COL_PLANE):
+        # En 'Sensors & layout' solo LO BÁSICO: Channel/Type/BNC/Angle/Side. Sensit/Gap/
+        # Alarm/Danger + avanzados = 'Channel editor' (ahí se editan) → tabla limpia.
+        for _c in (3, 6, 7, 8, _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR, _COL_PLANE):
             tblc.setColumnHidden(_c, True)
-        for _c in (0, 1, 2, 3, 4, 5):
+        for _c in (0, 1, 2, 4, 5):
             tblc.horizontalHeader().setSectionResizeMode(_c, QtWidgets.QHeaderView.Stretch)
         tblc.verticalHeader().setVisible(False)
         tblc.setAlternatingRowColors(True)
         tblc.setShowGrid(False)
         tblc.verticalHeader().setDefaultSectionSize(26)      # filas compactas (combos no gigantes)
         tblc.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        tblc.setMinimumHeight(240); tblc.setMaximumWidth(660)
+        tblc.setMinimumHeight(240); tblc.setMaximumWidth(520)
         canv.addWidget(tblc, 2)
         brg_plot = pg.PlotWidget(); brg_plot.setBackground(PANEL); brg_plot.setAspectLocked(True)
         brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
@@ -1118,48 +1119,22 @@ def main() -> int:
             brg_plot.getPlotItem().hideButtons()
         except Exception:  # noqa: BLE001
             pass
-        # Stack: tren premium (Constructor, read-only) + sketch pyqtgraph de ángulos.
-        # Un toggle alterna entre ambos: "Tren" = overview de equipos (igual al
-        # Constructor); "Sondas" = diagrama de cojinetes con los ángulos X/Y (se ven
-        # al editar Angle/Side en la tabla, cosa que el tren premium no refleja).
-        _layout_stack = QtWidgets.QStackedWidget()
-        _layout_stack.addWidget(brg_plot)                 # idx 0 = sketch de ángulos
+        # Visual = SOLO el tren premium (igual al Constructor). Se quitó el sketch
+        # pyqtgraph de ángulos (crudo); los ángulos X/Y viven en la tabla (ANGLE°/
+        # SIDE). Si una máquina se CARGA sin build, se sintetiza un tren genérico
+        # desde los cojinetes de la tabla → el visor nunca queda vacío. brg_plot se
+        # mantiene vivo (draw_bearing escribe ahí sin romper) pero NO se muestra si
+        # hay visor premium; es el fallback solo cuando no hay QtWebEngine.
         _train_viewer = None
         try:
             from field_ui.builder import TrainViewer
             _train_viewer = TrainViewer()
-            _layout_stack.addWidget(_train_viewer)        # idx 1 = tren premium
             _layout_ui["viewer"] = _train_viewer
+            canv.addWidget(_train_viewer, 3)
+            brg_plot.setParent(pg_sensors); brg_plot.hide()   # vive para draw_bearing, no se muestra
         except Exception:  # noqa: BLE001
             _train_viewer = None
-        _layout_ui["stack"] = _layout_stack
-
-        _lay_col = QtWidgets.QVBoxLayout(); _lay_col.setSpacing(4)
-        _vtog = QtWidgets.QHBoxLayout(); _vtog.setSpacing(4)
-        btn_view_train = QtWidgets.QPushButton("Tren"); btn_view_train.setCheckable(True)
-        btn_view_ang = QtWidgets.QPushButton("Sondas (ángulos)"); btn_view_ang.setCheckable(True)
-        _vgrp = QtWidgets.QButtonGroup(pg_sensors); _vgrp.setExclusive(True)
-        for _b in (btn_view_train, btn_view_ang):
-            _b.setMaximumHeight(22); _b.setCursor(QtCore.Qt.PointingHandCursor)
-            _b.setStyleSheet("QPushButton{padding:2px 12px;font-size:11px;}"
-                             "QPushButton:checked{background:%s;color:white;font-weight:600;}" % NAVY)
-            _vgrp.addButton(_b); _vtog.addWidget(_b)
-        _vtog.addStretch(1)
-
-        def _set_layout_mode(premium):
-            _v = _layout_ui.get("viewer")
-            _layout_stack.setCurrentWidget(_v if (premium and _v is not None) else brg_plot)
-        btn_view_train.clicked.connect(lambda: _set_layout_mode(True))
-        btn_view_ang.clicked.connect(lambda: _set_layout_mode(False))
-
-        if _train_viewer is not None:
-            _layout_ui["btn_train"] = btn_view_train
-            _lay_col.addLayout(_vtog)                      # toggle solo si hay tren premium
-            btn_view_ang.setChecked(True)                  # arranca en sketch (sin construir aún)
-        else:
-            btn_view_train.hide(); btn_view_ang.hide()     # sin QtWebEngine → solo sketch
-        _lay_col.addWidget(_layout_stack, 1)
-        canv.addLayout(_lay_col, 3)
+            canv.addWidget(brg_plot, 3)                   # sin QtWebEngine → sketch
         sl.addLayout(canv, 1)
         r_sb = QtWidgets.QHBoxLayout()
         btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")
@@ -1891,6 +1866,9 @@ def main() -> int:
             _color_name_cell(r)
 
         def fill_form(m: SimMachine):
+            # Cargar una máquina invalida el spec premium previo (un build posterior lo
+            # vuelve a setear). Así el visor sintetiza desde la tabla al cargar.
+            _layout_ui.pop("spec", None)
             # Robusto ante widgets borrados por Qt (igual que read_form): si un widget
             # del Simulador ya no existe en modo real, no revienta la carga completa.
             def _sw(fn):
@@ -1990,6 +1968,42 @@ def main() -> int:
                               location=_w(lambda: ed_loc.text(), ""),
                               machine_type=_w(lambda: ed_type.text(), ""),
                               phenomena={k: v for k, v in ph.items() if v != "none"})
+
+        def _spec_from_form():
+            """Sintetiza un spec de tren genérico desde los cojinetes de la tabla.
+            Se usa cuando se CARGA una máquina sin build del Constructor, para que el
+            visor premium muestre un tren (equipo genérico + nº de cojinetes) en vez
+            de quedar vacío. Un build real siempre pisa esto."""
+            import re as _re
+            m = read_form()
+            _brg, _nk = {}, 0
+            for s in m.sensors:
+                if s.kind == "keyphasor":
+                    _nk += 1
+                    continue
+                _mt = _re.match(r"\d+", s.name or "")
+                if not _mt:
+                    continue
+                _b = int(_mt.group())
+                _brg.setdefault(_b, "rolling" if s.kind == "accel" else "journal")
+            if not _brg:
+                return None
+            _n = max(_brg)                       # nº de cojinete más alto ≈ cantidad
+            _bt = "journal" if "journal" in _brg.values() else "rolling"
+            _etype = "turb" if _bt == "journal" else "motor"
+            return {"machines": [{"type": _etype, "name": m.name or "Máquina",
+                                  "bearings": _n, "bearing_type": _bt, "axial": 0}],
+                    "keyphasors": _nk, "sensors": []}
+
+        def _refresh_layout_view(*_):
+            """Pinta el visor premium: spec real del build si existe, si no uno
+            sintetizado desde la tabla (máquina cargada)."""
+            _v = _layout_ui.get("viewer")
+            if _v is None:
+                return
+            _sp = _layout_ui.get("spec") or _spec_from_form()
+            if _sp:
+                _v.load_spec(_sp)
 
         def _setup_to_sim(setup) -> SimMachine:
             """AcqSetup (nube/RM) → SimMachine (formato del nativo) para poder editar y
@@ -2281,7 +2295,8 @@ def main() -> int:
         # Redibujar el diagrama al entrar a "Sensors & layout" → evita que quede viejo
         # (ej. cambiabas rotación a CW en Machine y el diagrama seguía mostrando CCW).
         cfg_tabs.currentChanged.connect(
-            lambda *_: draw_bearing() if cfg_tabs.currentWidget() is pg_sensors else None)
+            lambda *_: (draw_bearing(), _refresh_layout_view())
+            if cfg_tabs.currentWidget() is pg_sensors else None)
 
         # ====== Flujo guiado (Ola B #1): gating de sub-pestañas + "Continuar →" ======
         # Hard-gating con ANTI-LOCKOUT: se desbloquea TODO al Cargar/Importar/Auto-
@@ -2322,7 +2337,9 @@ def main() -> int:
         def _gate_check(i):
             m = read_form()
             if i == cfg_tabs.indexOf(pg_machine):
+                # TODOS los campos de identidad del activo son obligatorios.
                 _miss = [_lbl for _lbl, _v in (("nombre", m.name),
+                                               ("tag", getattr(m, "tag", "")),
                                                ("cliente", getattr(m, "client", "")),
                                                ("location", getattr(m, "location", "")))
                          if not (_v or "").strip()]
@@ -2333,9 +2350,9 @@ def main() -> int:
             if (_train_builder is not None and i == cfg_tabs.indexOf(_train_builder)
                     and not _built["ok"]):
                 return ("Armá el tren y tocá 'Construir máquina →' antes de continuar.\n"
-                        "(Si preferís no usar el Constructor: usá 'Auto-generar' en Sensors & layout.)")
+                        "(O cargá una máquina guardada con 'Cargar'.)")
             if i == cfg_tabs.indexOf(pg_sensors) and len(m.sensors) < 1:
-                return "Agrega sensores (usá el Constructor o 'Auto-generate sensor layout')."
+                return "Agrega sensores: construí el tren en el Constructor (paso 2)."
             return ""
 
         def _prompt_save_machine():
