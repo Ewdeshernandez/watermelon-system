@@ -339,8 +339,8 @@ body.viewer .stage{padding:10px 8px}
         <div class="buildbar">
           <button class="btn primary" id="btnBuild" disabled>Construir m&aacute;quina &rarr;</button>
           <button class="btn" id="btnClear">Vaciar</button>
-          <span style="display:inline-flex;align-items:center;gap:8px;margin-left:16px;font-family:var(--mono);font-size:11px;color:var(--mute)">Keyphasors
-            <span class="stepn" style="transform:scale(.82);transform-origin:left center"><button id="km">&minus;</button><span id="kv">1</span><button id="kp">+</button></span>
+          <span style="display:inline-flex;align-items:center;gap:8px;margin-left:16px;font-family:var(--mono);font-size:11px;color:var(--mute)" title="Keyphasors sueltos del tren. Lo normal es 1 por máquina (en la config de cada equipo).">KPH tren (extra)
+            <span class="stepn" style="transform:scale(.82);transform-origin:left center"><button id="km">&minus;</button><span id="kv">0</span><button id="kp">+</button></span>
           </span>
           <span class="sp" id="buildInfo" style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim)"></span>
         </div>
@@ -378,7 +378,7 @@ body.viewer .stage{padding:10px 8px}
 
   var train=[];   // [{key,name,brg,bt,axial,axialBrg,casing,bno:[]}]
   var sel=-1;
-  var trainKph=1; // nº de keyphasors del tren (0..2) — referencia de velocidad/fase
+  var trainKph=0; // KPH sueltos del tren (extra) — lo normal es 1 keyphasor POR máquina
   var aux=[];     // puntos auxiliares FUERA del tren [{name,k,count}] (bomba lube, motor aux…)
   var VIEWER=(location.hash||'').indexOf('view')>=0;  // read-only embebido en Sensors&layout
   if(VIEWER){ document.body.classList.add('viewer'); }
@@ -435,10 +435,16 @@ body.viewer .stage{padding:10px 8px}
     return s;
   }
   function allSensors(){
-    var out=[]; train.forEach(function(c){ sensorsOfComp(c).forEach(function(x){ x.comp=c.name; out.push(x); }); });
-    for(var i=0;i<trainKph;i++){ out.push({comp:'tren',n:i?'KPH'+(i+1):'KPH',k:'kph',ang:'1/rev'}); }
+    var out=[], kN=0;
+    function addKph(comp){ kN++; out.push({comp:comp,n:(kN>1?'KPH'+kN:'KPH'),k:'kph',ang:'1/rev'}); }
+    // Keyphasors POR MÁQUINA (turbina, generador…): uno puede ir en cada equipo.
+    // Python los manda a BNC bajos (kph→BNC1..). + KPH sueltos del tren (extra).
+    train.forEach(function(c){ if(c.key!=='coupling'){ for(var j=0;j<(c.kph||0);j++) addKph(c.name); } });
+    for(var i=0;i<trainKph;i++) addKph('tren');
+    // Radiales/axiales/carcasa por máquina
+    train.forEach(function(c){ sensorsOfComp(c).forEach(function(x){ x.comp=c.name; out.push(x); }); });
     // Puntos AUXILIARES (fuera del tren): bomba de lube, motor aux, etc. No cuelgan
-    // de un cojinete del eje → lista aparte; igual se mapean al rack.
+    // de un cojinete del eje → al FINAL; numeración API 670 continúa tras el tren.
     aux.forEach(function(a){
       var c=a.count||1;
       for(var j=0;j<c;j++){ out.push({comp:'Auxiliar',n:(c>1?a.name+(j+1):a.name),k:a.k,ang:'aux'}); }
@@ -484,6 +490,21 @@ body.viewer .stage{padding:10px 8px}
         g.appendChild(cc); g.appendChild(tx); svg.appendChild(g);
       });
     });
+    // ---- Auxiliares: cajas DESCONECTADAS del eje, debajo del tren ----
+    var vbW=Math.max(940,total), vbH=190;
+    if(aux.length){
+      vbH=262;
+      var ay=208, bw=140, bh=42, bgap=18, ax0=pad, KC={prox:'#8b5cf6',accel:'#ef4444',vel:'#34c6e8',kph:'#f59e0b'};
+      var lbl=document.createElementNS(SVGNS,'text'); lbl.setAttribute('x',pad);lbl.setAttribute('y',194);lbl.setAttribute('font-family','IBM Plex Mono,monospace');lbl.setAttribute('font-size','10');lbl.setAttribute('letter-spacing','1.2');lbl.setAttribute('fill','#5f7389');lbl.textContent='AUXILIARES · fuera del tren'; svg.appendChild(lbl);
+      aux.forEach(function(a,i){
+        var bx=ax0+i*(bw+bgap), cnt=a.count||1, col=KC[a.k]||'#8aa0b6';
+        var r=document.createElementNS(SVGNS,'rect'); r.setAttribute('x',bx);r.setAttribute('y',ay);r.setAttribute('width',bw);r.setAttribute('height',bh);r.setAttribute('rx',8);r.setAttribute('fill','#111f2e');r.setAttribute('stroke','#27425e');r.setAttribute('stroke-width','1.2');r.setAttribute('stroke-dasharray','5 4'); svg.appendChild(r);
+        var t=document.createElementNS(SVGNS,'text'); t.setAttribute('x',bx+11);t.setAttribute('y',ay+18);t.setAttribute('font-family','IBM Plex Mono,monospace');t.setAttribute('font-size','11');t.setAttribute('font-weight','600');t.setAttribute('fill','#e8f0f8');t.textContent=a.name+' ×'+cnt; svg.appendChild(t);
+        for(var j=0;j<cnt;j++){ var d=document.createElementNS(SVGNS,'circle'); d.setAttribute('cx',bx+13+j*15);d.setAttribute('cy',ay+31);d.setAttribute('r',4.2);d.setAttribute('fill',col); svg.appendChild(d); }
+      });
+      vbW=Math.max(vbW,ax0+aux.length*(bw+bgap)+pad);
+    }
+    svg.setAttribute('viewBox','0 0 '+vbW+' '+vbH);
   }
 
   function renderCfg(){
@@ -506,6 +527,9 @@ body.viewer .stage{padding:10px 8px}
             '<div class="stepn"><button id="bm">−</button><span id="bv">'+c.brg+'</span><button id="bp">+</button></div></div>'+
           '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Tipo de cojinete</label>'+
             '<div class="seg"><button id="btj" class="'+(c.bt==='journal'?'on':'')+'">Plano / journal</button><button id="btr" class="'+(c.bt==='rolling'?'on':'')+'">Rodamiento</button></div></div>'+
+          '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Keyphasor (1/rev) en esta máquina</label>'+
+            '<div class="stepn"><button id="hm">&minus;</button><span id="hv">'+(c.kph||0)+'</span><button id="hp">+</button></div>'+
+            '<div style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:4px">1 por máquina es lo típico (turbina + generador = 2)</div></div>'+
           '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Sísmicos de carcasa (H/V · accel)</label>'+
             '<div class="stepn"><button id="cm">&minus;</button><span id="cv">'+(c.casing||0)+'</span><button id="cp">+</button></div>'+
             '<div style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:4px">por cojinete · 1=H · 2=H+V</div></div>'+
@@ -527,6 +551,8 @@ body.viewer .stage{padding:10px 8px}
     document.getElementById('bp').addEventListener('click',function(){ c.brg=Math.min(8,c.brg+1); render(); });
     document.getElementById('btj').addEventListener('click',function(){ c.bt='journal'; render(); });
     document.getElementById('btr').addEventListener('click',function(){ c.bt='rolling'; c.axial=0; render(); });
+    document.getElementById('hm').addEventListener('click',function(){ c.kph=Math.max(0,(c.kph||0)-1); render(); });
+    document.getElementById('hp').addEventListener('click',function(){ c.kph=Math.min(2,(c.kph||0)+1); render(); });
     document.getElementById('cm').addEventListener('click',function(){ c.casing=Math.max(0,(c.casing||0)-1); render(); });
     document.getElementById('cp').addEventListener('click',function(){ c.casing=Math.min(2,(c.casing||0)+1); render(); });
     var _am=document.getElementById('am');
@@ -579,7 +605,7 @@ body.viewer .stage{padding:10px 8px}
   document.getElementById('kp').addEventListener('click',function(){ setKph(trainKph+1); });
   document.getElementById('btnBuild').addEventListener('click',function(){
     numberBearings();
-    var spec={machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return {type:c.key,name:c.name,bearings:c.brg,bearing_type:c.bt,axial:c.axial||0,axial_brg:c.axialBrg||0,casing:c.casing||0,bno:c.bno};}),
+    var spec={machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return {type:c.key,name:c.name,bearings:c.brg,bearing_type:c.bt,axial:c.axial||0,axial_brg:c.axialBrg||0,casing:c.casing||0,kph:c.kph||0,bno:c.bno};}),
               keyphasors:trainKph,
               aux:aux.slice(),
               sensors:allSensors()};
@@ -595,7 +621,7 @@ body.viewer .stage{padding:10px 8px}
     train=[];
     (s.machines||[]).forEach(function(m){
       if(train.length) train.push({key:'coupling',name:'Acople',brg:0,bt:'none'});
-      train.push({key:m.type,name:m.name,brg:m.bearings,bt:m.bearing_type,axial:m.axial||0,axialBrg:m.axial_brg||0,casing:m.casing||0});
+      train.push({key:m.type,name:m.name,brg:m.bearings,bt:m.bearing_type,axial:m.axial||0,axialBrg:m.axial_brg||0,casing:m.casing||0,kph:m.kph||0});
     });
     if(s.keyphasors!=null) trainKph=s.keyphasors;
     aux=(s.aux||[]).slice();
