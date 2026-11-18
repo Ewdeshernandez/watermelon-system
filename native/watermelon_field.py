@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.6"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.7"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1012,6 +1012,10 @@ def main() -> int:
         # El panel 'Sensors & layout' puebla esto (stack + visor premium). Al construir
         # una máquina mostramos el MISMO tren premium ahí (no el sketch viejo).
         _layout_ui = {}
+        # ¿Se construyó la máquina en el Constructor en ESTA sesión? El gate lo exige
+        # (no basta con que la demo de arranque ya tenga sensores → si no, se saltaba
+        # el Constructor y Sensors mostraba la demo, no lo que armó el usuario).
+        _built = {"ok": False}
 
         def _show_premium_layout(spec=None):
             _v = _layout_ui.get("viewer"); _st = _layout_ui.get("stack")
@@ -1053,6 +1057,7 @@ def main() -> int:
                     _nm = (_ms[0].get("name") if _ms else "Tren") or "Tren"
                     _m = SimMachine(name=_nm, fs=5120.0, sensors=_sspec, bearing_type=_bt, rpm=3000.0)
                     fill_form(_m)
+                    _built["ok"] = True         # construcción real → el gate deja avanzar
                     _show_premium_layout(spec)  # mismo tren premium en 'Sensors & layout'
                     # Construir = paso del flujo completo → avanza al siguiente paso
                     # (Sensors & layout), sin saltarse el resto del flujo guiado.
@@ -2307,6 +2312,7 @@ def main() -> int:
                 cfg_tabs.setCurrentIndex(i)
 
         def _unlock_all_tabs(*_):
+            _built["ok"] = True        # Cargar/Importar/Auto-gen/Unlock = config completa
             _unlock_upto(_gmax)
 
         def _sync_next_btn(*_):
@@ -2315,11 +2321,19 @@ def main() -> int:
 
         def _gate_check(i):
             m = read_form()
-            if i == cfg_tabs.indexOf(pg_machine) and not (m.name or "").strip():
-                return "Ponle nombre a la máquina antes de continuar."
+            if i == cfg_tabs.indexOf(pg_machine):
+                _miss = [_lbl for _lbl, _v in (("nombre", m.name),
+                                               ("cliente", getattr(m, "client", "")),
+                                               ("location", getattr(m, "location", "")))
+                         if not (_v or "").strip()]
+                if _miss:
+                    return "Completá en Machine: " + ", ".join(_miss) + " — antes de continuar."
+            # Constructor: exige una construcción REAL esta sesión (no basta con que la
+            # demo de arranque traiga sensores → si no, se saltaba y Sensors mostraba la demo).
             if (_train_builder is not None and i == cfg_tabs.indexOf(_train_builder)
-                    and len(m.sensors) < 1):
-                return "Armá el tren y tocá 'Construir máquina' antes de continuar."
+                    and not _built["ok"]):
+                return ("Armá el tren y tocá 'Construir máquina →' antes de continuar.\n"
+                        "(Si preferís no usar el Constructor: usá 'Auto-generar' en Sensors & layout.)")
             if i == cfg_tabs.indexOf(pg_sensors) and len(m.sensors) < 1:
                 return "Agrega sensores (usá el Constructor o 'Auto-generate sensor layout')."
             return ""
@@ -2334,6 +2348,13 @@ def main() -> int:
                 do_save_lib()
 
         def _advance(i):
+            # Aplicar en silencio (equivale a 'Apply changes' sin el modal): propaga
+            # la máquina/geometría a diagrama, Summary, Acq y selector de canal.
+            for _fn in (draw_bearing, _refresh_acq_info, _refresh_summary, _ched_refresh_selector):
+                try:
+                    _fn()
+                except Exception:  # noqa: BLE001
+                    pass
             _unlock_upto(i + 1, switch=True)
             if cfg_tabs.currentWidget() is pg_sum:   # último paso → pedir guardar
                 _prompt_save_machine()
