@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.10"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.11"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1056,14 +1056,18 @@ def main() -> int:
                     # Orden canónico (kph → cojinete → auxiliar) y BNC SECUENCIAL 1..N
                     # sin huecos → coincide con el orden de la tabla (fill_form usa el
                     # mismo criterio) y la numeración corre del cojinete 1 al auxiliar.
-                    def _bk(_sp):
+                    def _bk(_pair):
+                        _oi, _sp = _pair
                         _n = (_sp.name or "").upper()
-                        _g = 0 if _sp.kind == "keyphasor" else (1 if _n[:1].isdigit() else 2)
-                        return (_g, 0 if _g == 0 else (_bearing_no(_sp.name) or 99),
-                                0 if _n.endswith("Y") else (1 if _n.endswith("X") else 2), _n)
-                    _sspec.sort(key=_bk)
+                        if _sp.kind == "keyphasor":
+                            return (0, (_oi,))          # kph en orden de colocación (KPH, KPH2…)
+                        if _n[:1].isdigit():            # sensor de cojinete → canónico Y/X
+                            return (1, (_bearing_no(_sp.name) or 99,
+                                        0 if _n.endswith("Y") else (1 if _n.endswith("X") else 2), _n))
+                        return (2, (_oi,))              # auxiliar: orden de lista (agrupado por equipo)
+                    _sspec = [_sp for _, _sp in sorted(enumerate(_sspec), key=_bk)]
                     for _i, _sp in enumerate(_sspec):
-                        _sp.bnc_port = _i + 1
+                        _sp.bnc = _i + 1                # BNC secuencial 1..N (atributo real = .bnc)
                     _ms = spec.get("machines", [])
                     _bts = {m.get("bearing_type") for m in _ms}
                     _bt = "mixed" if len(_bts) > 1 else ("rolling" if "rolling" in _bts else "plain")
@@ -1916,16 +1920,19 @@ def main() -> int:
             # Orden canónico SIEMPRE: keyphasor(s) primero, luego por cojinete, y dentro
             # de cada cojinete Y antes que X (convención del analista). Aplica a máquinas
             # cargadas o derivadas del agente real (que traían el KPH al final).
-            def _canon_key(s):
+            def _canon_key(_pair):
+                _oi, s = _pair
                 nm = (s.name or "").upper()
-                # grupo: keyphasor(0) → sensor de cojinete(1, nombre arranca con nº) →
-                # auxiliar(2, nombre arranca con letra: LUBE, MOTOR…) → al FINAL. Antes
-                # 'LUBE1' caía en cojinete 1 (dígito final) y se interleaveaba.
-                grp = 0 if s.kind == "keyphasor" else (1 if nm[:1].isdigit() else 2)
-                brg = 0 if grp == 0 else (_bearing_no(s.name) or 99)  # kph→0 (KPH<KPH2)
-                axord = 0 if nm.endswith("Y") else (1 if nm.endswith("X") else 2)
-                return (grp, brg, axord, nm)
-            for s in sorted(m.sensors, key=_canon_key): _add_sensor_row(s)
+                # kph(0) y auxiliares(2) conservan el ORDEN DE COLOCACIÓN (índice);
+                # cojinetes(1) van canónicos (cojinete, Y antes X). Antes 'LB0011'/
+                # 'START11' colisionaban en brg 11 (dígitos del nombre) → interleaveados.
+                if s.kind == "keyphasor":
+                    return (0, (_oi,))
+                if nm[:1].isdigit():
+                    return (1, (_bearing_no(s.name) or 99,
+                                0 if nm.endswith("Y") else (1 if nm.endswith("X") else 2), nm))
+                return (2, (_oi,))
+            for _oi, s in sorted(enumerate(m.sensors), key=_canon_key): _add_sensor_row(s)
             draw_bearing()
             _ched_refresh_selector()
             if tblc.rowCount():
