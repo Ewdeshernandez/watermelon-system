@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.5"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.6"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1020,6 +1020,9 @@ def main() -> int:
             if spec is not None:
                 _v.load_spec(spec)
             _st.setCurrentWidget(_v)
+            _bt = _layout_ui.get("btn_train")   # refleja el modo en el toggle
+            if _bt is not None:
+                _bt.setChecked(True)
 
         try:
             from field_ui.builder import TrainBuilder
@@ -1110,19 +1113,48 @@ def main() -> int:
             brg_plot.getPlotItem().hideButtons()
         except Exception:  # noqa: BLE001
             pass
-        # Stack: tren premium (Constructor, read-only) como visual principal; el
-        # sketch pyqtgraph queda de fallback si aún no se construyó con la librería.
+        # Stack: tren premium (Constructor, read-only) + sketch pyqtgraph de ángulos.
+        # Un toggle alterna entre ambos: "Tren" = overview de equipos (igual al
+        # Constructor); "Sondas" = diagrama de cojinetes con los ángulos X/Y (se ven
+        # al editar Angle/Side en la tabla, cosa que el tren premium no refleja).
         _layout_stack = QtWidgets.QStackedWidget()
-        _layout_stack.addWidget(brg_plot)                 # idx 0 = fallback (por defecto)
+        _layout_stack.addWidget(brg_plot)                 # idx 0 = sketch de ángulos
+        _train_viewer = None
         try:
             from field_ui.builder import TrainViewer
             _train_viewer = TrainViewer()
             _layout_stack.addWidget(_train_viewer)        # idx 1 = tren premium
             _layout_ui["viewer"] = _train_viewer
         except Exception:  # noqa: BLE001
-            pass
+            _train_viewer = None
         _layout_ui["stack"] = _layout_stack
-        canv.addWidget(_layout_stack, 3)
+
+        _lay_col = QtWidgets.QVBoxLayout(); _lay_col.setSpacing(4)
+        _vtog = QtWidgets.QHBoxLayout(); _vtog.setSpacing(4)
+        btn_view_train = QtWidgets.QPushButton("Tren"); btn_view_train.setCheckable(True)
+        btn_view_ang = QtWidgets.QPushButton("Sondas (ángulos)"); btn_view_ang.setCheckable(True)
+        _vgrp = QtWidgets.QButtonGroup(pg_sensors); _vgrp.setExclusive(True)
+        for _b in (btn_view_train, btn_view_ang):
+            _b.setMaximumHeight(22); _b.setCursor(QtCore.Qt.PointingHandCursor)
+            _b.setStyleSheet("QPushButton{padding:2px 12px;font-size:11px;}"
+                             "QPushButton:checked{background:%s;color:white;font-weight:600;}" % NAVY)
+            _vgrp.addButton(_b); _vtog.addWidget(_b)
+        _vtog.addStretch(1)
+
+        def _set_layout_mode(premium):
+            _v = _layout_ui.get("viewer")
+            _layout_stack.setCurrentWidget(_v if (premium and _v is not None) else brg_plot)
+        btn_view_train.clicked.connect(lambda: _set_layout_mode(True))
+        btn_view_ang.clicked.connect(lambda: _set_layout_mode(False))
+
+        if _train_viewer is not None:
+            _layout_ui["btn_train"] = btn_view_train
+            _lay_col.addLayout(_vtog)                      # toggle solo si hay tren premium
+            btn_view_ang.setChecked(True)                  # arranca en sketch (sin construir aún)
+        else:
+            btn_view_train.hide(); btn_view_ang.hide()     # sin QtWebEngine → solo sketch
+        _lay_col.addWidget(_layout_stack, 1)
+        canv.addLayout(_lay_col, 3)
         sl.addLayout(canv, 1)
         r_sb = QtWidgets.QHBoxLayout()
         btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")
