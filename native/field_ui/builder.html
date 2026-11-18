@@ -318,6 +318,10 @@ body.viewer .stage{padding:10px 8px}
   .brgpill{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#0a141e;font-family:var(--mono);font-size:10px;font-weight:700;color:#fff}
   .selbox{fill:none;stroke:var(--cyan);stroke-width:2;stroke-dasharray:5 4;rx:8}
   .delx{cursor:pointer}
+  .auxchip{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--ink);background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:5px 11px}
+  .auxchip b{cursor:pointer;color:var(--zd);font-weight:700}
+  .auxchip b:hover{color:#fff}
+  body.viewer #auxHost{display:none!important}
 </style>
 <div class="wrap">
   <div class="topbar">
@@ -342,6 +346,7 @@ body.viewer .stage{padding:10px 8px}
         </div>
       </div>
       <div id="cfgHost" style="margin-top:14px"></div>
+      <div id="auxHost" style="margin-top:14px"></div>
     </div>
 
     <div class="pal">
@@ -371,9 +376,10 @@ body.viewer .stage{padding:10px 8px}
   };
   var ORDER=['motor','turb','steam','gear','coupling','gen','pump','pumpmulti','fan','comp','comprecip'];
 
-  var train=[];   // [{key,name,brg,bt,axial,bno:[]}]
+  var train=[];   // [{key,name,brg,bt,axial,axialBrg,casing,bno:[]}]
   var sel=-1;
   var trainKph=1; // nº de keyphasors del tren (0..2) — referencia de velocidad/fase
+  var aux=[];     // puntos auxiliares FUERA del tren [{name,k,count}] (bomba lube, motor aux…)
   var VIEWER=(location.hash||'').indexOf('view')>=0;  // read-only embebido en Sensors&layout
   if(VIEWER){ document.body.classList.add('viewer'); }
 
@@ -409,20 +415,34 @@ body.viewer .stage{padding:10px 8px}
   function sensorsOfComp(c){
     var s=[];
     (c.bno||[]).forEach(function(no){
+      // Radiales de EJE: prox X/Y (journal) o accel (rodamiento)
       if(c.bt==='journal'){ s.push({n:no+'XD',k:'prox',ang:'45°R'}); s.push({n:no+'YD',k:'prox',ang:'45°L'}); }
       else { s.push({n:no+'A',k:'accel',ang:'radial'}); }
+      // Sísmicos de CARCASA (accel H/V) — por cojinete, cualquier tipo. No chocan
+      // con X/Y porque la medición es distinta (carcasa, no eje relativo).
+      var cas=c.casing||0;
+      if(cas>=1) s.push({n:no+'HD',k:'accel',ang:'H carcasa'});
+      if(cas>=2) s.push({n:no+'VD',k:'accel',ang:'V carcasa'});
     });
-    // Sondas axiales (empuje) — solo journal con cojinete de empuje; prox axial.
+    // Sondas axiales (empuje) — pertenecen a UN cojinete elegido; par = sufijo a/b.
     var ax=c.axial||0;
     if(c.bt==='journal' && ax>0 && (c.bno||[]).length){
-      var first=c.bno[0];
-      for(var i=0;i<ax;i++){ s.push({n:first+'AX'+(i?(i+1):''),k:'prox',ang:'axial'}); }
+      var tb=c.axialBrg;
+      if(!tb || (c.bno||[]).indexOf(tb)<0) tb=c.bno[0];   // default: primer cojinete
+      if(ax===1){ s.push({n:tb+'ZD',k:'prox',ang:'axial'}); }
+      else { s.push({n:tb+'ZDa',k:'prox',ang:'axial'}); s.push({n:tb+'ZDb',k:'prox',ang:'axial'}); }
     }
     return s;
   }
   function allSensors(){
     var out=[]; train.forEach(function(c){ sensorsOfComp(c).forEach(function(x){ x.comp=c.name; out.push(x); }); });
     for(var i=0;i<trainKph;i++){ out.push({comp:'tren',n:i?'KPH'+(i+1):'KPH',k:'kph',ang:'1/rev'}); }
+    // Puntos AUXILIARES (fuera del tren): bomba de lube, motor aux, etc. No cuelgan
+    // de un cojinete del eje → lista aparte; igual se mapean al rack.
+    aux.forEach(function(a){
+      var c=a.count||1;
+      for(var j=0;j<c;j++){ out.push({comp:'Auxiliar',n:(c>1?a.name+(j+1):a.name),k:a.k,ang:'aux'}); }
+    });
     var ch=0; out.forEach(function(x){ x.rack='Mód '+String.fromCharCode(65+Math.floor(ch/4))+' Ch'+(ch%4); ch++; });
     return out;
   }
@@ -432,7 +452,7 @@ body.viewer .stage{padding:10px 8px}
     document.getElementById('emptyHint').style.display=train.length?'none':'block';
     document.getElementById('trainTag').textContent=train.length? (train.filter(function(c){return c.key!=='coupling';}).length+' máquinas · '+n+' cojinetes') : 'vacío';
     document.getElementById('btnBuild').disabled=!train.length;
-    renderTrain(n); renderCfg();
+    renderTrain(n); renderCfg(); renderAux();
     var sc=allSensors();
     document.getElementById('buildInfo').textContent=train.length? (sc.length+' sondas · mapeadas al rack'):'';
   }
@@ -486,9 +506,18 @@ body.viewer .stage{padding:10px 8px}
             '<div class="stepn"><button id="bm">−</button><span id="bv">'+c.brg+'</span><button id="bp">+</button></div></div>'+
           '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Tipo de cojinete</label>'+
             '<div class="seg"><button id="btj" class="'+(c.bt==='journal'?'on':'')+'">Plano / journal</button><button id="btr" class="'+(c.bt==='rolling'?'on':'')+'">Rodamiento</button></div></div>'+
+          '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Sísmicos de carcasa (H/V · accel)</label>'+
+            '<div class="stepn"><button id="cm">&minus;</button><span id="cv">'+(c.casing||0)+'</span><button id="cp">+</button></div>'+
+            '<div style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:4px">por cojinete · 1=H · 2=H+V</div></div>'+
           (c.bt==='journal'?
-          '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Sondas axiales (empuje)</label>'+
-            '<div class="stepn"><button id="am">&minus;</button><span id="av">'+(c.axial||0)+'</span><button id="ap">+</button></div></div>':'')+
+          '<div style="margin-bottom:14px"><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:6px;font-weight:500">Sondas axiales (empuje · Z)</label>'+
+            '<div class="stepn"><button id="am">&minus;</button><span id="av">'+(c.axial||0)+'</span><button id="ap">+</button></div>'+
+            ((c.axial||0)>0?
+            '<label style="display:block;font-size:11px;color:var(--mute);margin:10px 0 6px;font-weight:500">¿En qué cojinete?</label>'+
+            '<select id="axb" style="font-family:var(--mono);font-size:12px;background:#0a141e;color:var(--ink);border:1px solid var(--line2);border-radius:7px;padding:6px 9px">'+
+              (c.bno||[]).map(function(no){ var tb=c.axialBrg&&(c.bno||[]).indexOf(c.axialBrg)>=0?c.axialBrg:(c.bno||[])[0]; return '<option value="'+no+'"'+(no===tb?' selected':'')+'>Cojinete '+no+((c.axial||0)>1?' → '+no+'ZDa / '+no+'ZDb':' → '+no+'ZD')+'</option>'; }).join('')+
+            '</select>':'')+
+            '</div>':'')+
           '<div class="gen"><div class="t">Recomendado por norma &rarr; '+norm+'</div>'+rows+'</div>'+
           '<button class="btn" id="delc" style="margin-top:12px">Quitar equipo</button>'+
         '</div>'+
@@ -498,10 +527,50 @@ body.viewer .stage{padding:10px 8px}
     document.getElementById('bp').addEventListener('click',function(){ c.brg=Math.min(8,c.brg+1); render(); });
     document.getElementById('btj').addEventListener('click',function(){ c.bt='journal'; render(); });
     document.getElementById('btr').addEventListener('click',function(){ c.bt='rolling'; c.axial=0; render(); });
+    document.getElementById('cm').addEventListener('click',function(){ c.casing=Math.max(0,(c.casing||0)-1); render(); });
+    document.getElementById('cp').addEventListener('click',function(){ c.casing=Math.min(2,(c.casing||0)+1); render(); });
     var _am=document.getElementById('am');
     if(_am){ _am.addEventListener('click',function(){ c.axial=Math.max(0,(c.axial||0)-1); render(); });
              document.getElementById('ap').addEventListener('click',function(){ c.axial=Math.min(2,(c.axial||0)+1); render(); }); }
+    var _axb=document.getElementById('axb');
+    if(_axb){ _axb.addEventListener('change',function(){ c.axialBrg=parseInt(this.value,10); render(); }); }
     document.getElementById('delc').addEventListener('click',function(){ removeAt(sel); });
+  }
+
+  var auxDraft={name:'',k:'accel',count:1};
+  function renderAux(){
+    var host=document.getElementById('auxHost'); if(!host) return; host.innerHTML='';
+    var kinds=[['accel','Acelerómetro'],['prox','Proximidad'],['vel','Velocidad'],['kph','Keyphasor']];
+    var chips=aux.map(function(a,i){
+      var c=a.count||1, lbl=(c>1?a.name+'1…'+a.name+c:a.name);
+      return '<span class="auxchip">'+lbl+' · '+a.k+' ×'+c+' <b data-i="'+i+'" class="auxdel">&times;</b></span>';
+    }).join('') || '<span style="font-family:var(--mono);font-size:11px;color:var(--dim)">Sin puntos auxiliares. Ej: bomba de lubricación con 2 acelerómetros.</span>';
+    var opts=kinds.map(function(k){return '<option value="'+k[0]+'"'+(k[0]===auxDraft.k?' selected':'')+'>'+k[1]+'</option>';}).join('');
+    host.innerHTML=
+      '<div class="card"><div class="ch"><h2>Puntos auxiliares</h2><span class="tag">fuera del tren &middot; bomba lube, motor aux&hellip;</span></div>'+
+      '<div style="padding:14px 16px">'+
+        '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'+
+          '<div><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:5px;font-weight:500">Nombre / tag</label>'+
+            '<input id="auxName" value="'+auxDraft.name.replace(/"/g,'&quot;')+'" placeholder="LUBE" style="font-family:var(--mono);font-size:12px;background:#0a141e;color:var(--ink);border:1px solid var(--line2);border-radius:7px;padding:7px 10px;width:130px"></div>'+
+          '<div><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:5px;font-weight:500">Tipo</label>'+
+            '<select id="auxKind" style="font-family:var(--mono);font-size:12px;background:#0a141e;color:var(--ink);border:1px solid var(--line2);border-radius:7px;padding:7px 9px">'+opts+'</select></div>'+
+          '<div><label style="display:block;font-size:11px;color:var(--mute);margin-bottom:5px;font-weight:500">N&ordm; sensores</label>'+
+            '<div class="stepn"><button id="auxCm">&minus;</button><span id="auxCv">'+auxDraft.count+'</span><button id="auxCp">+</button></div></div>'+
+          '<button class="addbtn" id="auxAdd" style="padding:8px 12px">+ Agregar punto</button>'+
+        '</div>'+
+        '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">'+chips+'</div>'+
+      '</div></div>';
+    document.getElementById('auxName').addEventListener('input',function(){ auxDraft.name=this.value; });
+    document.getElementById('auxKind').addEventListener('change',function(){ auxDraft.k=this.value; });
+    document.getElementById('auxCm').addEventListener('click',function(){ auxDraft.count=Math.max(1,auxDraft.count-1); renderAux(); });
+    document.getElementById('auxCp').addEventListener('click',function(){ auxDraft.count=Math.min(8,auxDraft.count+1); renderAux(); });
+    document.getElementById('auxAdd').addEventListener('click',function(){
+      var nm=(auxDraft.name||'').trim().toUpperCase().replace(/\s+/g,'_'); if(!nm) return;
+      aux.push({name:nm,k:auxDraft.k,count:auxDraft.count}); auxDraft={name:'',k:auxDraft.k,count:1}; render();
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('.auxdel'),function(b){
+      b.addEventListener('click',function(){ aux.splice(parseInt(this.getAttribute('data-i'),10),1); render(); });
+    });
   }
 
   document.getElementById('btnClear').addEventListener('click',function(){ train=[]; sel=-1; render(); });
@@ -510,8 +579,9 @@ body.viewer .stage{padding:10px 8px}
   document.getElementById('kp').addEventListener('click',function(){ setKph(trainKph+1); });
   document.getElementById('btnBuild').addEventListener('click',function(){
     numberBearings();
-    var spec={machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return {type:c.key,name:c.name,bearings:c.brg,bearing_type:c.bt,axial:c.axial||0,bno:c.bno};}),
+    var spec={machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return {type:c.key,name:c.name,bearings:c.brg,bearing_type:c.bt,axial:c.axial||0,axial_brg:c.axialBrg||0,casing:c.casing||0,bno:c.bno};}),
               keyphasors:trainKph,
+              aux:aux.slice(),
               sensors:allSensors()};
     window.__wm_build=JSON.stringify(spec);   // Python lo recoge por polling
     document.getElementById('buildInfo').textContent='✓ enviado a Watermelon · '+spec.sensors.length+' sondas';
@@ -525,9 +595,10 @@ body.viewer .stage{padding:10px 8px}
     train=[];
     (s.machines||[]).forEach(function(m){
       if(train.length) train.push({key:'coupling',name:'Acople',brg:0,bt:'none'});
-      train.push({key:m.type,name:m.name,brg:m.bearings,bt:m.bearing_type,axial:m.axial||0});
+      train.push({key:m.type,name:m.name,brg:m.bearings,bt:m.bearing_type,axial:m.axial||0,axialBrg:m.axial_brg||0,casing:m.casing||0});
     });
     if(s.keyphasors!=null) trainKph=s.keyphasors;
+    aux=(s.aux||[]).slice();
     sel=-1; render();
   };
 
