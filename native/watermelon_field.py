@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.4"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.5"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1009,6 +1009,18 @@ def main() -> int:
             "keyphasor": dict(sens=1.0,   gap=0.0,  alarm=0.0, danger=0.0),
         }
         _KMAP = {"prox": "prox", "accel": "accel", "vel": "vel", "kph": "keyphasor"}
+        # El panel 'Sensors & layout' puebla esto (stack + visor premium). Al construir
+        # una máquina mostramos el MISMO tren premium ahí (no el sketch viejo).
+        _layout_ui = {}
+
+        def _show_premium_layout(spec=None):
+            _v = _layout_ui.get("viewer"); _st = _layout_ui.get("stack")
+            if _v is None or _st is None:
+                return
+            if spec is not None:
+                _v.load_spec(spec)
+            _st.setCurrentWidget(_v)
+
         try:
             from field_ui.builder import TrainBuilder
             _train_builder = TrainBuilder()
@@ -1038,12 +1050,14 @@ def main() -> int:
                     _nm = (_ms[0].get("name") if _ms else "Tren") or "Tren"
                     _m = SimMachine(name=_nm, fs=5120.0, sensors=_sspec, bearing_type=_bt, rpm=3000.0)
                     fill_form(_m)
-                    _unlock_all_tabs()          # construir = config completa → desbloquea todo
-                    cfg_tabs.setCurrentWidget(pg_sensors)
+                    _show_premium_layout(spec)  # mismo tren premium en 'Sensors & layout'
+                    # Construir = paso del flujo completo → avanza al siguiente paso
+                    # (Sensors & layout), sin saltarse el resto del flujo guiado.
+                    _unlock_upto(cfg_tabs.indexOf(pg_sensors), switch=True)
                     QtWidgets.QMessageBox.information(
                         win, "Máquina construida",
                         f"{len(_sspec)} sondas aplicadas a la configuración.\n"
-                        "Revisá en 'Sensors & layout' / 'Channel editor' y seguí a Validación.")
+                        "Revisá en 'Sensors & layout' y seguí el flujo con 'Continuar'.")
                 except Exception as _e2:  # noqa: BLE001
                     QtWidgets.QMessageBox.warning(win, "Constructor",
                                                   f"No se pudo aplicar la máquina:\n{_e2}")
@@ -1071,19 +1085,19 @@ def main() -> int:
                                         "Angle°", "Side", "Gap (V)", "Alarm", "Danger",
                                         "FullScale", "Active", "Coupling", "Unit", "Keyphasor",
                                         "Pair", "Plane"])
-        # En 'Sensors & layout' se ven SOLO 5 columnas esenciales: Channel/Type/BNC/Angle/Side.
-        # Sensit/Gap/Alarm/Danger + los avanzados se editan en 'Channel editor' → tabla limpia
-        # y más espacio para el diagrama.
-        for _c in (3, 6, 7, 8, _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR, _COL_PLANE):
+        # En 'Sensors & layout' se ven 6 columnas: Channel/Type/BNC/Sensit/Angle/Side.
+        # Sensit (mV/EU) ya es EDITABLE aquí (antes solo en 'Channel editor'). Gap/Alarm/
+        # Danger + los avanzados siguen en 'Channel editor' → tabla limpia y espacio al diagrama.
+        for _c in (6, 7, 8, _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR, _COL_PLANE):
             tblc.setColumnHidden(_c, True)
-        for _c in (0, 1, 2, 4, 5):
+        for _c in (0, 1, 2, 3, 4, 5):
             tblc.horizontalHeader().setSectionResizeMode(_c, QtWidgets.QHeaderView.Stretch)
         tblc.verticalHeader().setVisible(False)
         tblc.setAlternatingRowColors(True)
         tblc.setShowGrid(False)
         tblc.verticalHeader().setDefaultSectionSize(26)      # filas compactas (combos no gigantes)
         tblc.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        tblc.setMinimumHeight(240); tblc.setMaximumWidth(560)
+        tblc.setMinimumHeight(240); tblc.setMaximumWidth(660)
         canv.addWidget(tblc, 2)
         brg_plot = pg.PlotWidget(); brg_plot.setBackground(PANEL); brg_plot.setAspectLocked(True)
         brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
@@ -1096,7 +1110,19 @@ def main() -> int:
             brg_plot.getPlotItem().hideButtons()
         except Exception:  # noqa: BLE001
             pass
-        canv.addWidget(brg_plot, 3)
+        # Stack: tren premium (Constructor, read-only) como visual principal; el
+        # sketch pyqtgraph queda de fallback si aún no se construyó con la librería.
+        _layout_stack = QtWidgets.QStackedWidget()
+        _layout_stack.addWidget(brg_plot)                 # idx 0 = fallback (por defecto)
+        try:
+            from field_ui.builder import TrainViewer
+            _train_viewer = TrainViewer()
+            _layout_stack.addWidget(_train_viewer)        # idx 1 = tren premium
+            _layout_ui["viewer"] = _train_viewer
+        except Exception:  # noqa: BLE001
+            pass
+        _layout_ui["stack"] = _layout_stack
+        canv.addWidget(_layout_stack, 3)
         sl.addLayout(canv, 1)
         r_sb = QtWidgets.QHBoxLayout()
         btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")

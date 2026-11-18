@@ -69,6 +69,44 @@ class TrainBuilder(QtWidgets.QWidget):
             self.machineBuilt.emit(spec)
 
 
+class TrainViewer(QtWidgets.QWidget):
+    """Vista read-only del tren premium — MISMO render que el Constructor.
+
+    Carga `builder.html#view` (oculta librería/buildbar/config, solo el tren) y
+    expone `load_spec(spec)` que llama a `window.wmLoadSpec`. Se embebe en
+    'Sensors & layout' para que el dibujo sea idéntico al que armó el usuario.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.view = QWebEngineView(self)
+        lay.addWidget(self.view)
+        self._ready = False
+        self._pending = None
+        self.view.loadFinished.connect(self._on_load)
+        url = QtCore.QUrl.fromLocalFile(_builder_path())
+        url.setFragment("view")                 # modo visor read-only
+        self.view.load(url)
+
+    def _on_load(self, ok):
+        self._ready = bool(ok)
+        if self._ready and self._pending is not None:
+            self.load_spec(self._pending)
+            self._pending = None
+
+    def load_spec(self, spec: dict):
+        """Pinta el tren del spec. Si la página aún no cargó, lo deja pendiente."""
+        if not self._ready:
+            self._pending = spec
+            return
+        try:
+            self.view.page().runJavaScript("window.wmLoadSpec(" + json.dumps(spec) + ");")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     w = QtWidgets.QMainWindow()

@@ -56,6 +56,11 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
 .pit .t{font-size:12.5px;font-weight:600;line-height:1.15}
 .pit .s{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:1px}
 @media(max-width:860px){.grid{grid-template-columns:1fr}.cfgbody{grid-template-columns:1fr}}
+/* Modo visor (read-only): se embebe en 'Sensors & layout'. Solo el tren. */
+body.viewer .topbar,body.viewer .pal,body.viewer .buildbar,body.viewer #cfgHost,body.viewer .emptyhint{display:none!important}
+body.viewer .grid{grid-template-columns:1fr!important}
+body.viewer .wrap{max-width:none}
+body.viewer .stage{padding:10px 8px}
 </style>
 </head>
 <body>
@@ -369,6 +374,8 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
   var train=[];   // [{key,name,brg,bt,axial,bno:[]}]
   var sel=-1;
   var trainKph=1; // nº de keyphasors del tren (0..2) — referencia de velocidad/fase
+  var VIEWER=(location.hash||'').indexOf('view')>=0;  // read-only embebido en Sensors&layout
+  if(VIEWER){ document.body.classList.add('viewer'); }
 
   // --- construir la librería (panel derecho) ---
   (function buildLib(){
@@ -444,7 +451,7 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
       var w=p.w, h=w*0.66, yy=y0-h*0.52;
       var u=document.createElementNS(SVGNS,'use'); u.setAttribute('href','#'+LIB[p.c.key].sym);
       u.setAttribute('x',p.x); u.setAttribute('y',yy); u.setAttribute('width',w); u.setAttribute('height',h);
-      u.style.cursor='pointer'; u.addEventListener('click',function(){ sel=idx; render(); });
+      if(!VIEWER){ u.style.cursor='pointer'; u.addEventListener('click',function(){ sel=idx; render(); }); }
       svg.appendChild(u);
       // caja de selección
       if(idx===sel){ var r=document.createElementNS(SVGNS,'rect'); r.setAttribute('x',p.x+6);r.setAttribute('y',yy+4);r.setAttribute('width',w-12);r.setAttribute('height',h-8);r.setAttribute('rx',8);r.setAttribute('class','selbox'); svg.appendChild(r); }
@@ -509,6 +516,20 @@ body{font-family:var(--sans);color:var(--ink);background:var(--bg);padding:16px;
     window.__wm_build=JSON.stringify(spec);   // Python lo recoge por polling
     document.getElementById('buildInfo').textContent='✓ enviado a Watermelon · '+spec.sensors.length+' sondas';
   });
+
+  // Carga un spec (el mismo que emite 'Construir máquina') y pinta el tren.
+  // Lo usa el visor read-only embebido en 'Sensors & layout' (Python → runJavaScript).
+  window.wmLoadSpec=function(s){
+    try{ if(typeof s==='string') s=JSON.parse(s); }catch(e){ return; }
+    if(!s){ return; }
+    train=[];
+    (s.machines||[]).forEach(function(m){
+      if(train.length) train.push({key:'coupling',name:'Acople',brg:0,bt:'none'});
+      train.push({key:m.type,name:m.name,brg:m.bearings,bt:m.bearing_type,axial:m.axial||0});
+    });
+    if(s.keyphasors!=null) trainKph=s.keyphasors;
+    sel=-1; render();
+  };
 
   render();
 })();
