@@ -48,9 +48,27 @@ _SNAPSHOT_TYPE = "scl"
 # HELPERS internos (preservados de la versión anterior)
 # ============================================================
 
-def _new_scl_snapshot_id() -> str:
+def _new_scl_snapshot_id(when: Optional[datetime] = None) -> str:
     """Compat: el caller histórico usa este nombre. Delega a history_storage."""
-    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE)
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE, now=when)
+
+
+def _parse_capture_dt(captured_at: str) -> Optional[datetime]:
+    """Fecha REAL de la toma (del CSV) → datetime. Acepta ISO o el formato
+    System1 'M/D/YYYY h:mm:ss AM/PM' (columna Timestamp del gap/SCL)."""
+    s = (captured_at or "").strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:  # noqa: BLE001
+        pass
+    for _fmt in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(s, _fmt)
+        except Exception:  # noqa: BLE001
+            continue
+    return None
 
 
 def _safe_float(v) -> float:
@@ -74,6 +92,7 @@ def save_scl_snapshot(
     bearings_data: List[Dict[str, Any]],
     corrida_label: str = "",
     notes: str = "",
+    captured_at: str = "",
 ) -> str:
     """
     Guarda un snapshot del estado SCL de la instancia.
@@ -102,8 +121,9 @@ def save_scl_snapshot(
     if not bearings_data:
         raise ValueError("bearings_data vacío")
 
-    sid = _new_scl_snapshot_id()
-    ts_iso = datetime.now().isoformat(timespec="seconds")
+    _cap_dt = _parse_capture_dt(captured_at)
+    sid = _new_scl_snapshot_id(when=_cap_dt)
+    ts_iso = (_cap_dt or datetime.now()).isoformat(timespec="seconds")
     label = (corrida_label or "").strip() or ts_iso
 
     cleaned = []

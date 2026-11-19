@@ -71,6 +71,7 @@ class Sweep:
     phase: np.ndarray = field(default_factory=lambda: np.array([]))  # grados
     unit: str = ""
     source: str = ""
+    captured_at: str = ""   # ISO del Timestamp del CSV (fecha REAL de la toma, no de subida)
 
 
 @dataclass
@@ -240,10 +241,21 @@ def parse_sweep(name: str, data: bytes) -> Optional[Sweep]:
     if int(m.sum()) < 2:
         return None
     order = np.argsort(rpm[m])
-    unit = meta.get("y-axisunit", "") or ""
+    unit = meta.get("y-axisunit", "") or meta.get("ampunit", "") or ""
     label = meta.get("pointname", "") or name.rsplit(".", 1)[0]
+    # Fecha REAL de la toma: columna Timestamp del CSV (no la fecha de subida).
+    cap = ""
+    tcol = _find_col(df.columns, ["timestamp", "time", "date"])
+    if tcol is not None:
+        _ts = pd.to_datetime(df[tcol], errors="coerce",
+                             format="%m/%d/%Y %I:%M:%S %p")
+        if _ts.isna().all():
+            _ts = pd.to_datetime(df[tcol], errors="coerce")
+        _ts = _ts.dropna()
+        if len(_ts):
+            cap = _ts.iloc[0].to_pydatetime().isoformat(timespec="seconds")
     return Sweep(label=label, rpm=rpm[m][order], amp=amp[m][order],
-                 phase=ph[m][order], unit=unit, source=name)
+                 phase=ph[m][order], unit=unit, source=name, captured_at=cap)
 
 
 def parse_trend(name: str, data: bytes) -> Optional["Trend"]:

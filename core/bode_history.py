@@ -47,8 +47,19 @@ _SNAPSHOT_TYPE = "bode"
 MAX_BODE_SNAPSHOTS_PER_INSTANCE = history_storage.MAX_SNAPSHOTS_PER_TYPE
 
 
-def _new_bode_snapshot_id(sensor_id: str = "") -> str:
-    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE, sensor_id=sensor_id)
+def _new_bode_snapshot_id(sensor_id: str = "", when: Optional[datetime] = None) -> str:
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE, now=when, sensor_id=sensor_id)
+
+
+def _parse_capture_dt(captured_at: str) -> Optional[datetime]:
+    """ISO de la fecha REAL de la toma (del CSV) → datetime, o None."""
+    s = (captured_at or "").strip()
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _safe_float(v) -> float:
@@ -73,6 +84,7 @@ def save_bode_snapshot(
     corrida_label: str = "",
     notes: str = "",
     sensor_id: str = "",
+    captured_at: str = "",
 ) -> str:
     """
     Guarda un snapshot del estado Bode de la instancia.
@@ -100,8 +112,9 @@ def save_bode_snapshot(
     _inferred_sensor = sensor_id
     if not _inferred_sensor and len(sensors_data) == 1:
         _inferred_sensor = str(sensors_data[0].get("sensor_label") or "")
-    sid = _new_bode_snapshot_id(_inferred_sensor)
-    ts_iso = datetime.now().isoformat(timespec="seconds")
+    _cap_dt = _parse_capture_dt(captured_at)
+    sid = _new_bode_snapshot_id(_inferred_sensor, when=_cap_dt)
+    ts_iso = (_cap_dt or datetime.now()).isoformat(timespec="seconds")
     label = (corrida_label or "").strip() or ts_iso
 
     cleaned = []

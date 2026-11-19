@@ -279,7 +279,7 @@ st.caption(f"Registro · {rec.name}  ·  {len(rec.channels)} canal(es)  ·  "
 
 # ---- Guardar snapshot de la vista en una máquina (→ sección Arranque del reporte) ----
 def _save_snapshot_ui(build_fn, *, key: str, default_rpm: float = 0.0,
-                      help_txt: str = "") -> None:
+                      help_txt: str = "", default_label: str = "") -> None:
     """Popover: elegir máquina + etiqueta + rpm de operación y persistir el
     snapshot de la vista actual. `build_fn(iid, op_rpm, label) -> sid`. La máquina
     se preselecciona a la del histórico si aplica. El snapshot queda atado a la
@@ -294,9 +294,11 @@ def _save_snapshot_ui(build_fn, *, key: str, default_rpm: float = 0.0,
         tsel = st.selectbox("Máquina", tags, index=_def, key=f"sv_as_{key}",
                             help="A qué activo pertenece esta corrida.")
         iid = assets[tags.index(tsel)][0]
-        lbl = st.text_input("Etiqueta de la corrida", value=f"Arranque {_fecha}",
+        lbl = st.text_input("Etiqueta de la corrida",
+                            value=(default_label or f"Arranque {_fecha}"),
                             key=f"sv_lb_{key}",
-                            help="Ej. 'Arranque 2026-11-03'. Se muestra en el reporte.")
+                            help="Ej. 'Arranque 2026-11-03'. Se muestra en el reporte. "
+                                 "La fecha sale del Timestamp del CSV (la toma), no de hoy.")
         op = st.number_input("rpm de operación", min_value=0.0,
                              value=float(default_rpm or _rpm or 0.0), step=100.0,
                              key=f"sv_op_{key}")
@@ -2584,8 +2586,12 @@ elif view == "Shaft Centerline":
         with st.expander("📂 Ver snapshots guardados (histórico)"):
             _view_saved_scl("scl_hist_exp")
         if _is_gap:
+            _scl_tms = list(getattr(b.x, "times", None) or getattr(b.y, "times", None) or [])
+            _scl_cap = _scl_tms[0] if _scl_tms else ""
+
             def _mk_scl(_iid, _op, _lbl, _bl=b.name, _gx=gx_op, _gy=gy_op,
-                        _ec=eps, _at=_att, _cr=rad, _sp_=_sp, _px_=_px, _py_=_py):
+                        _ec=eps, _at=_att, _cr=rad, _sp_=_sp, _px_=_px, _py_=_py,
+                        _cap=_scl_cap):
                 from core.scl_history import save_scl_snapshot
                 bd = {"bearing_label": _bl, "x_gap_at_op": _gx, "y_gap_at_op": _gy,
                       "gap_unit": "µm", "eccentricity_ratio": _ec,
@@ -2596,8 +2602,15 @@ elif view == "Shaft Centerline":
                     bd["trajectory_x_gap"] = [float(v) for v in _px_]
                     bd["trajectory_y_gap"] = [float(v) for v in _py_]
                 return save_scl_snapshot(_iid, operating_speed_rpm=_op,
-                                         bearings_data=[bd], corrida_label=_lbl)
+                                         bearings_data=[bd], corrida_label=_lbl,
+                                         captured_at=_cap)
+            _scl_cap10 = ""
+            if _scl_cap:
+                from core.scl_history import _parse_capture_dt as _pcd
+                _d = _pcd(_scl_cap)
+                _scl_cap10 = _d.date().isoformat() if _d else ""
             _save_snapshot_ui(_mk_scl, key=f"scl_{_bid}",
+                              default_label=(f"Arranque {_scl_cap10}" if _scl_cap10 else ""),
                               default_rpm=float(b.x.rpm or 0.0),
                               help_txt="Guarda ESTE cojinete. Repetí por cojinete "
                                        "para el set completo del arranque.")
@@ -2870,8 +2883,11 @@ elif view == "Bode":
                 ent["q_factor"] = float(c0.get("q_factor", 0))
             return save_bode_snapshot(_iid, operating_speed_rpm=_op,
                                       sensors_data=[ent], corrida_label=_lbl,
-                                      sensor_id=_sw.label)
-        _save_snapshot_ui(_mk_bode, key=f"bode_{sw.label}", default_rpm=float(op))
+                                      sensor_id=_sw.label,
+                                      captured_at=getattr(_sw, "captured_at", ""))
+        _cap = (getattr(sw, "captured_at", "") or "")[:10]
+        _save_snapshot_ui(_mk_bode, key=f"bode_{sw.label}", default_rpm=float(op),
+                          default_label=(f"Arranque {_cap}" if _cap else ""))
         _diag_panel(diag, zone, zc)
 
 elif view == "Polar":
@@ -3077,8 +3093,11 @@ elif view == "Polar":
                 ent["q_factor"] = float(c0.get("q_factor", 0))
             return save_polar_snapshot(_iid, operating_speed_rpm=_op,
                                        sensors_data=[ent], corrida_label=_lbl,
-                                       sensor_id=_sw.label)
-        _save_snapshot_ui(_mk_polar, key=f"polar_{sw.label}", default_rpm=float(op))
+                                       sensor_id=_sw.label,
+                                       captured_at=getattr(_sw, "captured_at", ""))
+        _cap = (getattr(sw, "captured_at", "") or "")[:10]
+        _save_snapshot_ui(_mk_polar, key=f"polar_{sw.label}", default_rpm=float(op),
+                          default_label=(f"Arranque {_cap}" if _cap else ""))
         st.caption(f"Radio = amplitud ({unit}) · ángulo = fase · color = rpm · "
                    "anillos punteados = límites ISO 20816-2 (A/B/C).")
         _diag_panel(diag, zone, zc)
