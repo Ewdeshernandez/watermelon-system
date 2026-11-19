@@ -3158,6 +3158,24 @@ elif view == "Polar":
                     text=["alto (Ncrit)"], textposition="middle right",
                     textfont=dict(size=10, color="#e8890c"), hoverinfo="skip",
                     showlegend=False))
+        # Marcadores de operación y Ncrit (consistentes con el visor de snapshots).
+        if op and op > 0 and len(_rr) > 1:
+            _ioa = float(np.interp(op, _rr, _ar)); _iop = float(np.interp(op, _rp2, _pr))
+            fig.add_trace(go.Scatterpolar(
+                r=[_ioa], theta=[_iop], mode="markers+text",
+                marker=dict(color=_NAVY, size=11, symbol="circle"),
+                text=[f"op {op:.0f}"], textposition="top center",
+                textfont=dict(size=9, color=_NAVY), hoverinfo="skip", showlegend=False))
+        _crl0 = (s.get("criticals") or [])
+        if _crl0:
+            _cr0 = float(_crl0[0].get("rpm", 0) or 0)
+            if _cr0 > 0 and len(_rr) > 1:
+                _cma = float(np.interp(_cr0, _rr, _ar)); _cmp2 = float(np.interp(_cr0, _rp2, _pr))
+                fig.add_trace(go.Scatterpolar(
+                    r=[_cma], theta=[_cmp2], mode="markers+text",
+                    marker=dict(color="#dc3545", size=10, symbol="diamond"),
+                    text=[f"Ncrit {_cr0:.0f}"], textposition="bottom center",
+                    textfont=dict(size=9, color="#dc3545"), hoverinfo="skip", showlegend=False))
         fig.update_layout(template="plotly_white", height=560,
                           title=dict(text=f"Polar · {sw.label}", font=dict(size=15)),
                           font=dict(family="IBM Plex Sans"), showlegend=bool(_cmpp),
