@@ -599,6 +599,95 @@ def _view_saved_scl(key="scl_hist"):
                        f"· claro {float(bd.get('clearance_radial') or 0)*2:.0f} µm diametral")
 
 
+def _polar_orientation(iid, slab):
+    """Orientación física del polar (misma regla que el visor en vivo): 0° de fase
+    en el ángulo de la sonda (TDC=0°, R=+, L=−) y la fase de atraso creciendo
+    OPUESTA al giro. Giro por sección desde la config del activo; fallback SGT300
+    (1/2/3 CW, 4/5/6 CCW). Devuelve (rotation0, direction, axis, probe_angle, ccw)."""
+    import re as _rq  # noqa: PLC0415
+    bid = _bearing_id(slab)
+    mg = _rq.search(r"\d+\s*([XYxy])", str(slab or ""))
+    axis = (mg.group(1).upper() if mg else "X")
+    angx, angy, _z = _probe_angles(bid)
+    pang = (float(angx) if axis == "X" else -float(angy))
+    rot0 = (90.0 - pang) % 360.0
+    ccw = bid not in {"1", "2", "3"}
+    try:
+        if iid:
+            from core.instance_state import get_instance  # noqa: PLC0415
+            _ci = get_instance(iid)
+            _rd = (getattr(_ci, "rotation_driver", "") or "").upper().strip()
+            _rv = (getattr(_ci, "rotation_driven", "") or "").upper().strip()
+            _sec = _rd if bid in {"1", "2", "3"} else _rv
+            if _sec in ("CW", "CCW"):
+                ccw = (_sec == "CCW")
+    except Exception:  # noqa: BLE001
+        pass
+    return rot0, ("clockwise" if ccw else "counterclockwise"), axis, pang, ccw
+
+
+def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
+    """Polar de un snapshot con la MISMA riqueza del visor en vivo: orientación
+    física por sonda + sentido de giro, anillos ISO 20816-2 (A/B/C), trayectoria
+    1X y marcadores de operación y Ncrit. Antes el snapshot salía pelado."""
+    rot0, pdir, axis, pang, ccw = _polar_orientation(iid, slab)
+    s = {}
+    try:
+        _dg = _sweep_diag(tuple(np.asarray(r, float).tolist()),
+                          tuple(np.asarray(a, float).tolist()),
+                          tuple(np.asarray(p, float).tolist()),
+                          float(op or 0.0), "group2", "shaft_displacement",
+                          unit or "µm pp", "polar")
+        s = _dg.get("structured", {}) or {}
+    except Exception:  # noqa: BLE001
+        s = {}
+    rr, ar = _smooth_xy(r, a)
+    _, pr = _smooth_xy(r, p)
+    rad_hi = float(np.nanmax(ar)) if len(ar) else 1.0
+    fig = go.Figure()
+    th = list(range(0, 365, 5))
+    for z, b in [("A", s.get("iso_boundary_AB")), ("B", s.get("iso_boundary_BC")),
+                 ("C", s.get("iso_boundary_CD"))]:
+        if b:
+            fig.add_trace(go.Scatterpolar(r=[b] * len(th), theta=th, mode="lines",
+                          line=dict(color=_ISO[z], width=1, dash="dot"),
+                          hoverinfo="skip", showlegend=False))
+            rad_hi = max(rad_hi, float(b))
+    fig.add_trace(go.Scatterpolar(
+        r=ar, theta=pr, mode="lines",
+        line=dict(color=_NAVY, width=2.2, shape="spline", smoothing=1.0),
+        customdata=rr, name="1X",
+        hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
+    if op and op > 0 and len(rr) > 1:
+        _ia = float(np.interp(op, rr, ar)); _ip = float(np.interp(op, rr, pr))
+        fig.add_trace(go.Scatterpolar(r=[_ia], theta=[_ip], mode="markers+text",
+                      marker=dict(color=_NAVY, size=11, symbol="circle"),
+                      text=[f"op {op:.0f}"], textposition="top center",
+                      textfont=dict(size=9, color=_NAVY), hoverinfo="skip",
+                      showlegend=False))
+    if cs:
+        try:
+            _ca = float(np.interp(float(cs), rr, ar)); _cp = float(np.interp(float(cs), rr, pr))
+            fig.add_trace(go.Scatterpolar(r=[_ca], theta=[_cp], mode="markers+text",
+                          marker=dict(color="#dc3545", size=10, symbol="diamond"),
+                          text=[f"Ncrit {float(cs):.0f}"], textposition="bottom center",
+                          textfont=dict(size=9, color="#dc3545"), hoverinfo="skip",
+                          showlegend=False))
+        except Exception:  # noqa: BLE001
+            pass
+    fig.update_layout(
+        template="plotly_white", height=520, showlegend=False,
+        title=dict(text=title, font=dict(size=14)), font=dict(family="IBM Plex Sans"),
+        polar=dict(angularaxis=dict(direction=pdir, rotation=rot0, dtick=30),
+                   radialaxis=dict(range=[0, rad_hi * 1.15], angle=rot0, tickangle=rot0)),
+        margin=dict(l=40, r=40, t=56, b=40))
+    _side = "lado R" if axis == "X" else "lado L"
+    _cap = (f"Orientación física: 0° de fase en la sonda {axis} ({_side}, "
+            f"{abs(pang):.0f}° del tope) · fase de atraso opuesta al giro "
+            f"{'CCW' if ccw else 'CW'} · anillos ISO 20816-2 (A/B/C).")
+    return fig, _cap
+
+
 def _view_saved_bode(kind="bode", key="bode_hist"):
     """Visor de histórico: ver snapshots de Bode/Polar guardados SIN subir CSV.
     Espejo de _view_saved_scl (SCL ya lo tenía; Bode/Polar no → el usuario no
@@ -644,20 +733,12 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
             unit = se.get("amp_unit", "µm pp")
             rr, ar = _smooth_xy(r, a)
             cs = se.get("critical_speed_rpm")
+            _saved_cap = None
             if kind == "polar":
-                _, pr = _smooth_xy(r, p)
-                fig = go.Figure(go.Scatterpolar(
-                    r=ar, theta=pr, mode="lines",
-                    line=dict(color=_NAVY, width=2.2, shape="spline", smoothing=1.0),
-                    customdata=rr,
-                    hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}"
-                                  "<br>fase %{theta:.0f}°"))
-                fig.update_layout(
-                    template="plotly_white", height=500,
-                    title=dict(text=f"Polar · {slab} · {lbl}", font=dict(size=14)),
-                    polar=dict(angularaxis=dict(direction="clockwise", rotation=90),
-                               radialaxis=dict(range=[0, float(np.nanmax(ar)) * 1.15])),
-                    margin=dict(l=40, r=40, t=56, b=40))
+                _date = (snap.get("timestamp", "") or "")[:10]
+                _ttl = f"Polar · {slab}" + (f" · {_date}" if _date else "")
+                fig, _saved_cap = _build_saved_polar_fig(iid, slab, r, a, p, unit,
+                                                         op, cs, _ttl)
             else:
                 _, pwr = _smooth_xy(r, _unwrap_phase(r, p))
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
@@ -677,11 +758,15 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
                                  dtick=90, row=1, col=1)
                 fig.update_yaxes(title_text=f"amp ({unit})", row=2, col=1)
                 fig.update_xaxes(title_text="rpm", row=2, col=1)
+                _date = (snap.get("timestamp", "") or "")[:10]
                 fig.update_layout(
                     template="plotly_white", height=460, showlegend=False,
-                    title=dict(text=f"Bode · {slab} · {lbl}", font=dict(size=14)),
+                    title=dict(text=f"Bode · {slab}" + (f" · {_date}" if _date else ""),
+                               font=dict(size=14)),
                     font=dict(family="IBM Plex Sans"), margin=dict(l=56, r=30, t=54, b=44))
             st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+            if _saved_cap:
+                st.caption(_saved_cap)
             _a_op = se.get("amp_at_op"); _p_op = se.get("phase_at_op")
             _q = se.get("q_factor")
             _bits = []
