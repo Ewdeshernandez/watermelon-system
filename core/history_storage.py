@@ -61,7 +61,11 @@ log = logging.getLogger(__name__)
 
 BUCKET_NAME = "instance-history"
 BACKUP_BUCKET_NAME = "instance-history-backups"
-MAX_SNAPSHOTS_PER_TYPE = 10  # Hot tier — LRU rotation kicks in al #11
+MAX_SNAPSHOTS_PER_TYPE = 200  # Historial de diagnóstico: NO perder baseline.
+# Antes era 10 → al subir >10 snapshots de un tipo (ej. coj 1/2/4 × X/Y × 2 fechas)
+# el LRU borraba los más viejos, y como el snapshot_id codifica la fecha de CAPTURA,
+# los purgados eran justo los más antiguos (baseline "antes del fenómeno"). Son JSON
+# gzip diminutos → 200 por (máquina,tipo) es barato y preserva el histórico.
 
 # snapshot_id valid pattern.
 #   Legacy (pre v3.31.236): type_YYYYMMDD_HHMMSS
@@ -292,7 +296,7 @@ def _list_supabase(instance_id: str, snapshot_type: str) -> List[Dict[str, Any]]
     try:
         resp = client.storage.from_(BUCKET_NAME).list(
             path=prefix,
-            options={"limit": 100, "offset": 0, "sortBy": {"column": "name", "order": "desc"}},
+            options={"limit": 1000, "offset": 0, "sortBy": {"column": "name", "order": "desc"}},
         )
         items = []
         for entry in resp or []:
