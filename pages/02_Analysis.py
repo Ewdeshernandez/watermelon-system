@@ -2610,7 +2610,7 @@ elif view == "Shaft Centerline":
                 _d = _pcd(_scl_cap)
                 _scl_cap10 = _d.date().isoformat() if _d else ""
             _save_snapshot_ui(_mk_scl, key=f"scl_{_bid}",
-                              default_label=(f"Arranque {_scl_cap10}" if _scl_cap10 else ""),
+                              default_label=(f"{b.name} · {_scl_cap10}" if _scl_cap10 else ""),
                               default_rpm=float(b.x.rpm or 0.0),
                               help_txt="Guarda ESTE cojinete. Repetí por cojinete "
                                        "para el set completo del arranque.")
@@ -2887,7 +2887,7 @@ elif view == "Bode":
                                       captured_at=getattr(_sw, "captured_at", ""))
         _cap = (getattr(sw, "captured_at", "") or "")[:10]
         _save_snapshot_ui(_mk_bode, key=f"bode_{sw.label}", default_rpm=float(op),
-                          default_label=(f"Arranque {_cap}" if _cap else ""))
+                          default_label=(f"{sw.label} · {_cap}" if _cap else ""))
         _diag_panel(diag, zone, zc)
 
 elif view == "Polar":
@@ -3097,7 +3097,7 @@ elif view == "Polar":
                                        captured_at=getattr(_sw, "captured_at", ""))
         _cap = (getattr(sw, "captured_at", "") or "")[:10]
         _save_snapshot_ui(_mk_polar, key=f"polar_{sw.label}", default_rpm=float(op),
-                          default_label=(f"Arranque {_cap}" if _cap else ""))
+                          default_label=(f"{sw.label} · {_cap}" if _cap else ""))
         st.caption(f"Radio = amplitud ({unit}) · ángulo = fase · color = rpm · "
                    "anillos punteados = límites ISO 20816-2 (A/B/C).")
         _diag_panel(diag, zone, zc)
