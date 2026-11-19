@@ -591,9 +591,11 @@ def _view_saved_scl(key="scl_hist"):
         snap = load_scl_snapshot(iid, opts[lbl])
         if not snap:
             continue
+        _date = (snap.get("timestamp", "") or "")[:10]
         for bd in snap.get("bearings", []):
             fig, ecc = _render_saved_scl_fig(bd)
-            st.plotly_chart(_layout(fig, f"{bd.get('bearing_label','')} · {lbl}", h=500),
+            _ttl = f"{bd.get('bearing_label','')}" + (f" · {_date}" if _date else "")
+            st.plotly_chart(_layout(fig, _ttl, h=500),
                             use_container_width=True, config=_NOBAR)
             st.caption(f"ε≈{ecc:.2f} · actitud {float(bd.get('attitude_angle') or 0):.0f}° "
                        f"· claro {float(bd.get('clearance_radial') or 0)*2:.0f} µm diametral")
