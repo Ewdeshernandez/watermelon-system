@@ -660,8 +660,11 @@ def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
                           hoverinfo="skip", showlegend=False))
             rad_hi = max(rad_hi, float(b))
     fig.add_trace(go.Scatterpolar(
-        r=ar, theta=pr, mode="lines",
-        line=dict(color=_NAVY, width=1.5, shape="spline", smoothing=0.5),
+        r=ar, theta=pr, mode="lines+markers",
+        line=dict(color="rgba(120,140,170,0.5)", width=1.1, shape="spline", smoothing=0.5),
+        marker=dict(color=rr, colorscale="Turbo", size=4, showscale=True,
+                    colorbar=dict(title=dict(text="rpm", side="right"), thickness=10,
+                                  len=0.72, x=1.02)),
         customdata=rr, name="1X",
         hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
     if op and op > 0 and len(rr) > 1:
@@ -3062,8 +3065,11 @@ elif view == "Polar":
         _rp2, _pr = _smooth_xy(sw.rpm, _phc)
         _rad_hi = float(np.nanmax(_ar)) if len(_ar) else 1.0
         fig.add_trace(go.Scatterpolar(
-            r=_ar, theta=_pr, mode="lines",
-            line=dict(color=_NAVY, width=2.2, shape="spline", smoothing=1.0),
+            r=_ar, theta=_pr, mode="lines+markers",
+            line=dict(color="rgba(120,140,170,0.5)", width=1.1, shape="spline", smoothing=1.0),
+            marker=dict(color=_rr, colorscale="Turbo", size=4, showscale=True,
+                        colorbar=dict(title=dict(text="rpm", side="right"), thickness=10,
+                                      len=0.72, x=1.02)),
             customdata=_rr, name="Actual",
             hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
         _cmpp = _saved_sweeps("polar", sw.label, "polar")
