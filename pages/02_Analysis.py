@@ -628,6 +628,37 @@ def _polar_orientation(iid, slab):
     return rot0, ("clockwise" if ccw else "counterclockwise"), axis, pang, ccw
 
 
+def _polar_gradient_line(fig, amp, theta, rpm, width=1.8, maxseg=170):
+    """Traza polar como LÍNEA coloreada por rpm (gradiente Turbo), SIN puntos
+    marcados (el usuario no quiere dots). Segmentos cortos coloreados + barra de
+    color con marcadores invisibles (solo para la leyenda de velocidad y el hover)."""
+    import plotly.colors as _pcol  # noqa: PLC0415
+    amp = np.asarray(amp, float); theta = np.asarray(theta, float)
+    rpm = np.asarray(rpm, float)
+    n = amp.size
+    if n < 2:
+        return
+    if n > maxseg:
+        _ix = np.linspace(0, n - 1, maxseg).astype(int)
+        amp, theta, rpm = amp[_ix], theta[_ix], rpm[_ix]; n = amp.size
+    _rmin, _rmax = float(np.nanmin(rpm)), float(np.nanmax(rpm))
+    _rng = (_rmax - _rmin) or 1.0
+    for i in range(n - 1):
+        _t = min(1.0, max(0.0, (0.5 * (rpm[i] + rpm[i + 1]) - _rmin) / _rng))
+        _col = _pcol.sample_colorscale("Turbo", [_t])[0]
+        fig.add_trace(go.Scatterpolar(
+            r=[amp[i], amp[i + 1]], theta=[theta[i], theta[i + 1]], mode="lines",
+            line=dict(color=_col, width=width), hoverinfo="skip", showlegend=False))
+    # Barra de color (rpm) + hover, con marcadores invisibles (opacity 0).
+    fig.add_trace(go.Scatterpolar(
+        r=amp, theta=theta, mode="markers", customdata=rpm,
+        marker=dict(color=rpm, colorscale="Turbo", size=6, opacity=0, showscale=True,
+                    colorbar=dict(title=dict(text="rpm", side="right"), thickness=10,
+                                  len=0.72, x=1.02)),
+        hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°",
+        showlegend=False))
+
+
 def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
     """Polar de un snapshot con la MISMA riqueza del visor en vivo: orientación
     física por sonda + sentido de giro, anillos ISO 20816-2 (A/B/C), trayectoria
@@ -659,14 +690,7 @@ def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
                           line=dict(color=_ISO[z], width=1, dash="dot"),
                           hoverinfo="skip", showlegend=False))
             rad_hi = max(rad_hi, float(b))
-    fig.add_trace(go.Scatterpolar(
-        r=ar, theta=pr, mode="lines+markers",
-        line=dict(color="rgba(120,140,170,0.5)", width=1.1, shape="spline", smoothing=0.5),
-        marker=dict(color=rr, colorscale="Turbo", size=4, showscale=True,
-                    colorbar=dict(title=dict(text="rpm", side="right"), thickness=10,
-                                  len=0.72, x=1.02)),
-        customdata=rr, name="1X",
-        hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
+    _polar_gradient_line(fig, ar, pr, rr, width=1.8)
     if op and op > 0 and len(rr) > 1:
         _ia = float(np.interp(op, rr, ar)); _ip = float(np.interp(op, rr, pr))
         fig.add_trace(go.Scatterpolar(r=[_ia], theta=[_ip], mode="markers+text",
@@ -3064,14 +3088,7 @@ elif view == "Polar":
         _rr, _ar = _smooth_xy(sw.rpm, _ampc)
         _rp2, _pr = _smooth_xy(sw.rpm, _phc)
         _rad_hi = float(np.nanmax(_ar)) if len(_ar) else 1.0
-        fig.add_trace(go.Scatterpolar(
-            r=_ar, theta=_pr, mode="lines+markers",
-            line=dict(color="rgba(120,140,170,0.5)", width=1.1, shape="spline", smoothing=1.0),
-            marker=dict(color=_rr, colorscale="Turbo", size=4, showscale=True,
-                        colorbar=dict(title=dict(text="rpm", side="right"), thickness=10,
-                                      len=0.72, x=1.02)),
-            customdata=_rr, name="Actual",
-            hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
+        _polar_gradient_line(fig, _ar, _pr, _rr, width=1.9)
         _cmpp = _saved_sweeps("polar", sw.label, "polar")
         for _ci, _cs in enumerate(_cmpp):
             if _cs["rpm"].size < 3:
