@@ -694,6 +694,69 @@ def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
     return fig, _cap
 
 
+def _build_saved_bode_fig(iid, slab, r, a, p, unit, op, se, date=""):
+    """Bode de un snapshot con la MISMA estructura del visor en vivo: fase arriba
+    (invertida, spline ámbar) + amplitud abajo (spline navy), zona ISO, crítica
+    con anotación (fc · Q · margen), línea de operación y CAJA DE LECTURA
+    (Amp@op · Zona ISO · Ncrit/Q · Margen a op). Antes el guardado salía pelado."""
+    from plotly.subplots import make_subplots  # noqa: PLC0415
+    s = {}
+    try:
+        _dg = _sweep_diag(tuple(np.asarray(r, float).tolist()),
+                          tuple(np.asarray(a, float).tolist()),
+                          tuple(np.asarray(p, float).tolist()),
+                          float(op or 0.0), "group2", "shaft_displacement",
+                          unit or "µm pp", "Bode")
+        s = _dg.get("structured", {}) or {}
+    except Exception:  # noqa: BLE001
+        s = {}
+    zone = s.get("iso_zone", "—")
+    rr, ar = _smooth_xy(r, a)
+    _rp, pwr = _smooth_xy(r, _unwrap_phase(r, p))
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.42, 0.58], vertical_spacing=0.06)
+    fig.add_trace(go.Scatter(x=_rp, y=pwr, mode="lines", name="fase",
+                  line=dict(color=_AMBER, width=2.4, shape="spline", smoothing=0.6)),
+                  row=1, col=1)
+    fig.add_trace(go.Scatter(x=rr, y=ar, mode="lines", name="amp", showlegend=False,
+                  line=dict(color=_NAVY, width=2.4, shape="spline", smoothing=0.6)),
+                  row=2, col=1)
+    cs = se.get("critical_speed_rpm"); q = se.get("q_factor")
+    if cs:
+        fig.add_vline(x=float(cs), line=dict(color="#dc3545", width=1.2, dash="dash"),
+                      row=1, col=1)
+        fig.add_vline(x=float(cs), line=dict(color="#dc3545", width=1, dash="dash"),
+                      row=2, col=1)
+        fig.add_annotation(x=float(cs), yref="paper", y=1.0, xshift=4, xanchor="left",
+                           text=f"fc {float(cs):.0f}" + (f" · Q {float(q):.1f}" if q else ""),
+                           showarrow=False, font=dict(size=9.5, color="#dc3545"),
+                           row=1, col=1)
+    if op and op > 0:
+        fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"),
+                      annotation_text="op", annotation_position="top", row=1, col=1)
+        fig.add_vline(x=op, line=dict(color=_NAVY, width=1, dash="dot"), row=2, col=1)
+    fig.update_yaxes(title="Fase 1X (°) · lag", autorange="reversed", dtick=90, row=1, col=1)
+    fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
+    fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
+    _amp_op = se.get("amp_at_op")
+    if _amp_op in (None, 0) and len(rr):
+        _amp_op = float(np.interp(op, rr, ar)) if op else 0.0
+    _box = [f"<b>Amp @op</b> {float(_amp_op or 0):.1f} {unit}", f"<b>Zona ISO</b> {zone}"]
+    if cs:
+        _mg = (op - float(cs)) / op * 100.0 if op else 0.0
+        _box.append(f"<b>Ncrit</b> {float(cs):.0f} rpm" + (f" · Q {float(q):.1f}" if q else ""))
+        _box.append(f"<b>Margen a op</b> {_mg:+.0f}%")
+    else:
+        _box.append("<b>Ncrit</b> no resuelta en el rango")
+    _box.append("<b>Forma modal</b> → vista Deflexión del eje")
+    fig.add_annotation(xref="x2 domain", yref="y2 domain", x=0.99, y=0.97,
+                       xanchor="right", yanchor="top", align="left", showarrow=False,
+                       text="<br>".join(_box), font=dict(size=10, color="#1e293b"),
+                       bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0",
+                       borderwidth=1.2, borderpad=6)
+    return _layout(fig, f"Bode · {slab}" + (f" · {date}" if date else ""), h=560)
+
+
 def _view_saved_bode(kind="bode", key="bode_hist"):
     """Visor de histórico: ver snapshots de Bode/Polar guardados SIN subir CSV.
     Espejo de _view_saved_scl (SCL ya lo tenía; Bode/Polar no → el usuario no
@@ -746,30 +809,8 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
                 fig, _saved_cap = _build_saved_polar_fig(iid, slab, r, a, p, unit,
                                                          op, cs, _ttl)
             else:
-                _, pwr = _smooth_xy(r, _unwrap_phase(r, p))
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                                    row_heights=[0.42, 0.58], vertical_spacing=0.06)
-                fig.add_trace(go.Scatter(x=rr, y=pwr, mode="lines",
-                              line=dict(color="#e8890c", width=2)), row=1, col=1)
-                fig.add_trace(go.Scatter(x=rr, y=ar, mode="lines",
-                              line=dict(color=_NAVY, width=2)), row=2, col=1)
-                for _rw in (1, 2):
-                    if op > 0:
-                        fig.add_vline(x=op, line=dict(color="#64748b", width=1,
-                                      dash="dot"), row=_rw, col=1)
-                    if cs:
-                        fig.add_vline(x=float(cs), line=dict(color="#dc3545",
-                                      width=1.2, dash="dash"), row=_rw, col=1)
-                fig.update_yaxes(autorange="reversed", title_text="fase atraso (°)",
-                                 dtick=90, row=1, col=1)
-                fig.update_yaxes(title_text=f"amp ({unit})", row=2, col=1)
-                fig.update_xaxes(title_text="rpm", row=2, col=1)
                 _date = (snap.get("timestamp", "") or "")[:10]
-                fig.update_layout(
-                    template="plotly_white", height=460, showlegend=False,
-                    title=dict(text=f"Bode · {slab}" + (f" · {_date}" if _date else ""),
-                               font=dict(size=14)),
-                    font=dict(family="IBM Plex Sans"), margin=dict(l=56, r=30, t=54, b=44))
+                fig = _build_saved_bode_fig(iid, slab, r, a, p, unit, op, se, _date)
             st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
             if _saved_cap:
                 st.caption(_saved_cap)
