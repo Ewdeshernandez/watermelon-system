@@ -643,19 +643,23 @@ def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
         s = {}
     rr, ar = _smooth_xy(r, a)
     _, pr = _smooth_xy(r, p)
+    # La escala se fija a la DATA (igual que el visor en vivo); los anillos ISO que
+    # queden más grandes se RECORTAN y no inflan el radio (antes el generador, con
+    # límites ISO ~300µm vs data ~11µm, colapsaba la traza a un punto).
     rad_hi = float(np.nanmax(ar)) if len(ar) else 1.0
     fig = go.Figure()
     th = list(range(0, 365, 5))
     for z, b in [("A", s.get("iso_boundary_AB")), ("B", s.get("iso_boundary_BC")),
                  ("C", s.get("iso_boundary_CD"))]:
-        if b:
+        # Solo dibujar el anillo si está dentro de ~2.5× la data (si no, fuera de escala).
+        if b and float(b) <= rad_hi * 2.5:
             fig.add_trace(go.Scatterpolar(r=[b] * len(th), theta=th, mode="lines",
                           line=dict(color=_ISO[z], width=1, dash="dot"),
                           hoverinfo="skip", showlegend=False))
             rad_hi = max(rad_hi, float(b))
     fig.add_trace(go.Scatterpolar(
         r=ar, theta=pr, mode="lines",
-        line=dict(color=_NAVY, width=2.2, shape="spline", smoothing=1.0),
+        line=dict(color=_NAVY, width=1.5, shape="spline", smoothing=0.5),
         customdata=rr, name="1X",
         hovertemplate="rpm %{customdata:.0f}<br>amp %{r:.1f}<br>fase %{theta:.0f}°"))
     if op and op > 0 and len(rr) > 1:
