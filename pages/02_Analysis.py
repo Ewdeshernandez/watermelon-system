@@ -784,6 +784,91 @@ def _build_saved_bode_fig(iid, slab, r, a, p, unit, op, se, date=""):
     return _layout(fig, f"Bode · {slab}" + (f" · {date}" if date else ""), h=560)
 
 
+_CMP_COLORS = ["#12305e", "#D89B22", "#16A34A", "#8B5CF6", "#EF4444", "#06B6D4"]
+
+
+def _build_overlay_polar_fig(iid, items, title="Comparación"):
+    """Superpone hasta N trayectorias polares 1X en UNA gráfica para comparar
+    (ej. antes vs después del fenómeno). Color sólido por toma (sin gradiente ni
+    dots en la trayectoria) + un marcador de operación por toma. Orientación física
+    tomada de la primera sonda (deben ser el MISMO canal para que la comparación sea
+    legítima)."""
+    rot0 = pdir = axis = pang = ccw = None
+    rad_hi = 1.0
+    fig = go.Figure()
+    for idx, (lbl, se, op) in enumerate(items):
+        slab = se.get("sensor_label", "")
+        if rot0 is None:
+            rot0, pdir, axis, pang, ccw = _polar_orientation(iid, slab)
+        r = np.asarray(se.get("trajectory_speed") or [], float)
+        a = np.asarray(se.get("trajectory_amp") or [], float)
+        p = np.asarray(se.get("trajectory_phase") or [], float)
+        if r.size < 3 or a.size != r.size:
+            continue
+        rr, ar = _smooth_xy(r, a)
+        _, pr = _smooth_xy(r, p)
+        rad_hi = max(rad_hi, float(np.nanmax(ar)))
+        col = _CMP_COLORS[idx % len(_CMP_COLORS)]
+        fig.add_trace(go.Scatterpolar(
+            r=ar, theta=pr, mode="lines", name=lbl,
+            line=dict(color=col, width=2.2),
+            hovertemplate=f"{lbl}<br>amp %{{r:.1f}}<br>fase %{{theta:.0f}}°"))
+        op = float(op or 0.0)
+        if op > 0 and len(rr) > 1:
+            _ia = float(np.interp(op, rr, ar)); _ip = float(np.interp(op, rr, pr))
+            fig.add_trace(go.Scatterpolar(
+                r=[_ia], theta=[_ip], mode="markers",
+                marker=dict(color=col, size=11, symbol="circle",
+                            line=dict(color="#fff", width=1.4)),
+                showlegend=False, hoverinfo="skip"))
+    fig.update_layout(
+        template="plotly_white", height=580, showlegend=True,
+        legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center",
+                    font=dict(size=11)),
+        title=dict(text=title, font=dict(size=14)), font=dict(family="IBM Plex Sans"),
+        polar=dict(angularaxis=dict(direction=pdir or "clockwise",
+                                    rotation=rot0 or 0.0, dtick=30),
+                   radialaxis=dict(range=[0, rad_hi * 1.15], angle=rot0 or 0.0,
+                                   tickangle=rot0 or 0.0)),
+        margin=dict(l=40, r=40, t=56, b=70))
+    _side = "lado R" if axis == "X" else "lado L"
+    cap = (f"Comparación superpuesta · cada color = una toma · ● = punto de operación "
+           f"· orientación física 0° en la sonda {axis} ({_side}, {abs(pang or 0):.0f}° "
+           f"del tope) · fase opuesta al giro {'CCW' if ccw else 'CW'}.")
+    return fig, cap
+
+
+def _build_overlay_bode_fig(iid, items, title="Comparación"):
+    """Superpone hasta N Bode (fase arriba invertida + amplitud abajo) en UNA
+    gráfica para comparar antes vs después. Color sólido por toma, misma leyenda."""
+    from plotly.subplots import make_subplots  # noqa: PLC0415
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.42, 0.58], vertical_spacing=0.06)
+    unit = "µm pp"
+    for idx, (lbl, se, op) in enumerate(items):
+        r = np.asarray(se.get("trajectory_speed") or [], float)
+        a = np.asarray(se.get("trajectory_amp") or [], float)
+        p = np.asarray(se.get("trajectory_phase") or [], float)
+        if r.size < 3 or a.size != r.size:
+            continue
+        unit = se.get("amp_unit", unit)
+        rr, ar = _smooth_xy(r, a)
+        _rp, pwr = _smooth_xy(r, _unwrap_phase(r, p))
+        col = _CMP_COLORS[idx % len(_CMP_COLORS)]
+        fig.add_trace(go.Scatter(x=_rp, y=pwr, mode="lines", name=lbl,
+                      line=dict(color=col, width=2.2, shape="spline", smoothing=0.6)),
+                      row=1, col=1)
+        fig.add_trace(go.Scatter(x=rr, y=ar, mode="lines", name=lbl, showlegend=False,
+                      line=dict(color=col, width=2.2, shape="spline", smoothing=0.6)),
+                      row=2, col=1)
+    fig.update_yaxes(title="Fase 1X (°) · lag", autorange="reversed", dtick=90, row=1, col=1)
+    fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
+    fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
+    fig.update_layout(legend=dict(orientation="h", y=1.14, x=0.5, xanchor="center",
+                                  font=dict(size=11)))
+    return _layout(fig, title, h=600)
+
+
 def _view_saved_bode(kind="bode", key="bode_hist"):
     """Visor de histórico: ver snapshots de Bode/Polar guardados SIN subir CSV.
     Espejo de _view_saved_scl (SCL ya lo tenía; Bode/Polar no → el usuario no
@@ -814,6 +899,38 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
             f"{s.get('n_sensors', 0)} sensor(es)": s["snapshot_id"] for s in snaps}
     sel = c1.multiselect(f"Snapshot(s) de {_nm} guardados", list(opts),
                          default=list(opts)[:1], key=f"{key}_sel")
+    _cmp = st.toggle(
+        "📊 Comparar en un solo gráfico (superponer antes vs después)",
+        value=False, key=f"{key}_cmp",
+        help="Selecciona 2–3 tomas (ej. 3-nov antes y 17-nov después) y las dibuja "
+             "SUPERPUESTAS en la misma gráfica para ver el cambio.")
+    if _cmp and len(sel) >= 2:
+        items = []
+        for lbl in sel[:3]:
+            snap = _load(iid, opts[lbl])
+            if not snap:
+                continue
+            _date = (snap.get("timestamp", "") or "")[:10]
+            _op = float(snap.get("operating_speed_rpm") or 0.0)
+            for se in snap.get("sensors", []):
+                items.append((f"{se.get('sensor_label', '')} · {_date}", se, _op))
+        if len(sel) > 3:
+            st.caption("⚠ Máximo 3 tomas en la comparación — se usan las 3 primeras.")
+        if len(items) >= 2:
+            if kind == "polar":
+                fig, _cap = _build_overlay_polar_fig(iid, items,
+                                                     title=f"Comparación · {_nm} · {tsel}")
+                st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+                st.caption(_cap)
+            else:
+                fig = _build_overlay_bode_fig(iid, items,
+                                              title=f"Comparación · {_nm} · {tsel}")
+                st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+                st.caption("Comparación superpuesta · cada color = una toma · "
+                           "misma orientación de fase (arriba) y amplitud (abajo).")
+        else:
+            st.info("Selecciona al menos 2 tomas con datos para comparar.")
+        return
     for lbl in sel:
         snap = _load(iid, opts[lbl])
         if not snap:
