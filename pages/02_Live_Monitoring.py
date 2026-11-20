@@ -3730,35 +3730,8 @@ def render_history_chart(
     except Exception:  # noqa: BLE001
         _anns = []
 
-    # Modo NOTA: el control va ARRIBA del gráfico y una línea de VISTA PREVIA se
-    # mueve con el slider → el analista ve exactamente dónde caerá la nota ANTES
-    # de guardar (antes el picker vivía en un popover que tapaba la gráfica).
-    _note_on = st.toggle(
-        "📝 Nota — anclar un momento en la tendencia", value=False,
-        key="live_note_mode",
-        help="Al activar, mueve el slider y verás una línea de vista previa sobre "
-             "el gráfico. Escribe la nota (ej. 'antes de cambiar bomba') y guarda.")
-    _note_ts = None
-    if _note_on:
-        _ngt0 = pd.to_datetime(_from_iso); _ngt1 = pd.to_datetime(_now_iso)
-        if pd.notna(_ngt0) and pd.notna(_ngt1) and _ngt1 > _ngt0:
-            _ngrid = pd.date_range(_ngt0, _ngt1, periods=200)
-            _note_ts = st.select_slider(
-                "Momento de la nota", options=list(_ngrid), value=_ngrid[-1],
-                format_func=lambda t: t.strftime("%m-%d %H:%M"), key="live_note_ts")
-            _nc1, _nc2 = st.columns([4, 1])
-            _ntxt = _nc1.text_input(
-                "Nota (corta)", key="live_note_txt", label_visibility="collapsed",
-                placeholder="ej. antes de cambiar bomba de aceite")
-            if _nc2.button("Guardar", key="live_note_save", type="primary",
-                           use_container_width=True):
-                from core.trend_annotations import add_annotation  # noqa: PLC0415
-                _uid = (st.session_state.get("user_email", "") or "")
-                if add_annotation(instance_id, _note_ts.isoformat(), _ntxt, _uid):
-                    st.success("Nota guardada.")
-                    st.rerun()
-                else:
-                    st.error("No se pudo guardar (¿falta la tabla trend_annotations?).")
+    st.caption("💡 **Clic en un punto de la curva** para anclar una nota ahí (muestra "
+               "el valor y la fecha/hora de ese punto).")
 
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
@@ -3854,33 +3827,31 @@ def render_history_chart(
                 ),
             ))
 
-        # Cursores A/B verticales (comparar dos momentos).
+        # Líneas verticales (cursores + notas) con add_shape DIRECTO (xref=x,
+        # yref=paper) y x como ISO string. NO usar add_vline: su lógica de
+        # "spanning all axes" hace aritmética Timestamp±int que rompe en pandas 2.x
+        # (el gráfico caía al fallback feo).
+        def _vline(_x_iso, _color, _dash, _label, _width=1.3, _yanchor="bottom",
+                   _y=1.0, _xanchor="left"):
+            fig.add_shape(type="line", xref="x", yref="paper",
+                          x0=_x_iso, x1=_x_iso, y0=0, y1=1,
+                          line=dict(color=_color, width=_width, dash=_dash))
+            if _label:
+                fig.add_annotation(xref="x", yref="paper", x=_x_iso, y=_y,
+                                   text=_label, showarrow=False, yanchor=_yanchor,
+                                   xanchor=_xanchor,
+                                   font=dict(size=10, color=_color))
+
         if _ca is not None and _cb is not None:
             for _ct, _lab in ((_ca, "A"), (_cb, "B")):
-                fig.add_vline(x=_ct, line=dict(color="#0f172a", width=1.3, dash="dot"),
-                              annotation_text=_lab, annotation_position="top",
-                              annotation=dict(font=dict(size=12, color="#0f172a",
-                                                        family="monospace")))
+                _vline(pd.Timestamp(_ct).isoformat(), "#0f172a", "dot", _lab,
+                       _width=1.3, _xanchor="center")
 
-        # VISTA PREVIA de la nota nueva: línea verde gruesa semitransparente que se
-        # mueve con el slider → se ve dónde caerá la nota antes de guardar.
-        if _note_ts is not None:
-            _pvtxt = (st.session_state.get("live_note_txt", "") or "nueva nota")[:40]
-            fig.add_vline(x=_note_ts, line=dict(color="#15803d", width=2.4, dash="solid"),
-                          opacity=0.55,
-                          annotation_text=f"📝 {_pvtxt} ◀ aquí",
-                          annotation_position="top right",
-                          annotation=dict(font=dict(size=10.5, color="#15803d")))
-
-        # Notas/bitácora: línea vertical verde + etiqueta con el texto de la nota.
         for _an in (_anns or []):
             try:
-                _at = pd.to_datetime(_an.get("ts"), utc=True)
+                _x_iso = pd.to_datetime(_an.get("ts"), utc=True).isoformat()
                 _txt = str(_an.get("text") or "")[:40]
-                fig.add_vline(x=_at, line=dict(color="#15803d", width=1.1, dash="dash"),
-                              annotation_text=f"📝 {_txt}", annotation_position="bottom right",
-                              annotation=dict(font=dict(size=9.5, color="#15803d"),
-                                              textangle=-90))
+                _vline(_x_iso, "#15803d", "dash", f"📝 {_txt}", _width=1.3)
             except Exception:  # noqa: BLE001
                 continue
 
@@ -3909,10 +3880,58 @@ def render_history_chart(
             ),
             hovermode="x unified",
         )
-        # Sin barra de herramientas (cámara/lupa/casa) — tapaba la leyenda y se
-        # veía sucia sobre el gráfico. Limpio, tipo tablero industrial.
-        st.plotly_chart(fig, use_container_width=True,
-                        config={"displaylogo": False, "displayModeBar": False})
+        # Sin barra de herramientas (cámara/lupa/casa). on_select="rerun" →
+        # al hacer CLIC en un punto de la curva, devuelve su (x=tiempo, y=valor)
+        # para anclar una nota ahí.
+        _evt = st.plotly_chart(
+            fig, use_container_width=True, on_select="rerun",
+            selection_mode="points",
+            key=f"live_trend_evt_{instance_id}_{range_choice}",
+            config={"displaylogo": False, "displayModeBar": False})
+
+        # Caja de nota al CLIC en un punto: muestra valor + fecha/hora y permite
+        # escribir y guardar la nota anclada a ese instante.
+        _sel_pts = []
+        try:
+            _selobj = (_evt.get("selection") if isinstance(_evt, dict)
+                       else getattr(_evt, "selection", None))
+            _sel_pts = ((_selobj.get("points") if isinstance(_selobj, dict)
+                         else getattr(_selobj, "points", None)) or [])
+        except Exception:  # noqa: BLE001
+            _sel_pts = []
+        if _sel_pts:
+            _p = _sel_pts[-1]
+            _px = _p.get("x"); _py = _p.get("y"); _cn = int(_p.get("curve_number", 0) or 0)
+            try:
+                _pt = pd.to_datetime(_px)
+            except Exception:  # noqa: BLE001
+                _pt = None
+            _un = (sensor_data[_cn]["unit"] if 0 <= _cn < len(sensor_data)
+                   else (list(units)[0] if len(units) == 1 else ""))
+            if _pt is not None:
+                with st.container(border=True):
+                    _vtxt = (f"{float(_py):.2f} {_un}" if _py is not None else "—")
+                    st.markdown(f"📍 **{_pt:%Y-%m-%d %H:%M}**  ·  **{_vtxt}**  "
+                                f"_(punto seleccionado)_")
+                    _cc1, _cc2 = st.columns([4, 1])
+                    _ntext = _cc1.text_input(
+                        "Nota", key="live_click_note_txt", label_visibility="collapsed",
+                        placeholder="ej. antes de cambiar bomba de aceite")
+                    if _cc2.button("Guardar nota", key="live_click_note_save",
+                                   type="primary", use_container_width=True):
+                        from core.trend_annotations import add_annotation  # noqa: PLC0415
+                        _uid = (st.session_state.get("user_email", "") or "")
+                        _note_full = ((_ntext or "").strip()
+                                      + (f"  ·  {_vtxt}" if _py is not None else ""))
+                        if _ntext and add_annotation(instance_id, _pt.isoformat(),
+                                                     _note_full, _uid):
+                            st.success("Nota guardada.")
+                            st.rerun()
+                        elif not _ntext:
+                            st.warning("Escribe el texto de la nota.")
+                        else:
+                            st.error("No se pudo guardar (¿falta la tabla "
+                                     "trend_annotations?).")
 
         # Descarga PNG de la tendencia (mismo botón 🍉 que Rotodinámica). La imagen
         # ya incluye umbrales, cursores A/B y notas (todo va dibujado en la figura).
