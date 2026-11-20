@@ -628,6 +628,33 @@ def _polar_orientation(iid, slab):
     return rot0, ("clockwise" if ccw else "counterclockwise"), axis, pang, ccw
 
 
+def _bearing_section(iid, slab):
+    """Sección del tren para ESCALA RADIAL COMPARTIDA: driver (turbina, coj 1-3)
+    vs driven (generador, coj 4-6). Regla de análisis: todos los cojinetes de una
+    MISMA sección comparten la misma escala radial (la de su mayor amplitud); las
+    secciones pueden tener escalas distintas. Mismo corte que la orientación."""
+    bid = str(_bearing_id(slab))
+    return "driver" if bid in {"1", "2", "3"} else "driven"
+
+
+def _section_rad_max(iid, sweeps, section):
+    """Máxima amplitud 1X (suavizada) entre los barridos de la MISMA sección. Da
+    la escala radial que comparten todos los cojinetes de esa sección. Usa la
+    amplitud cruda del barrido (≈1X vs rpm) → techo seguro (≥ la trayectoria
+    mostrada, que puede ir compensada y algo menor)."""
+    hi = 0.0
+    for s in (sweeps or []):
+        try:
+            if _bearing_section(iid, getattr(s, "label", "")) != section:
+                continue
+            _, _a = _smooth_xy(getattr(s, "rpm", []), getattr(s, "amp", []))
+            if len(_a):
+                hi = max(hi, float(np.nanmax(_a)))
+        except Exception:  # noqa: BLE001
+            continue
+    return hi
+
+
 def _polar_gradient_line(fig, amp, theta, rpm, width=1.8, maxseg=170):
     """Traza polar como LÍNEA coloreada por rpm (gradiente Turbo), SIN puntos
     marcados (el usuario no quiere dots). Segmentos cortos coloreados + barra de
@@ -659,10 +686,16 @@ def _polar_gradient_line(fig, amp, theta, rpm, width=1.8, maxseg=170):
         showlegend=False))
 
 
-def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
+def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title, rad_override=0.0):
     """Polar de un snapshot con la MISMA riqueza del visor en vivo: orientación
     física por sonda + sentido de giro, anillos ISO 20816-2 (A/B/C), trayectoria
-    1X y marcadores de operación y Ncrit. Antes el snapshot salía pelado."""
+    1X y marcadores de operación y Ncrit.
+
+    rad_override (>0): escala radial impuesta (compartida por sección turbina/
+    generador). Si 0, se ajusta a la data de ESTE sensor (igual que el vivo).
+    IMPORTANTE: los anillos ISO NUNCA inflan la escala — se dibujan y Plotly los
+    recorta al rango (antes se expandía rad_hi por cada anillo → cascada → la
+    escala se iba a ~250µm con data de ~50µm)."""
     rot0, pdir, axis, pang, ccw = _polar_orientation(iid, slab)
     s = {}
     try:
@@ -676,20 +709,20 @@ def _build_saved_polar_fig(iid, slab, r, a, p, unit, op, cs, title):
         s = {}
     rr, ar = _smooth_xy(r, a)
     _, pr = _smooth_xy(r, p)
-    # La escala se fija a la DATA (igual que el visor en vivo); los anillos ISO que
-    # queden más grandes se RECORTAN y no inflan el radio (antes el generador, con
-    # límites ISO ~300µm vs data ~11µm, colapsaba la traza a un punto).
-    rad_hi = float(np.nanmax(ar)) if len(ar) else 1.0
+    # Escala = override de sección si viene; si no, la data de ESTE sensor. Los
+    # anillos ISO se DIBUJAN pero no cambian rad_hi (Plotly los recorta al rango),
+    # idéntico al visor en vivo.
+    _data_hi = float(np.nanmax(ar)) if len(ar) else 1.0
+    rad_hi = float(rad_override) if rad_override and rad_override > 0 else _data_hi
+    rad_hi = max(rad_hi, 1.0)
     fig = go.Figure()
     th = list(range(0, 365, 5))
     for z, b in [("A", s.get("iso_boundary_AB")), ("B", s.get("iso_boundary_BC")),
                  ("C", s.get("iso_boundary_CD"))]:
-        # Solo dibujar el anillo si está dentro de ~2.5× la data (si no, fuera de escala).
-        if b and float(b) <= rad_hi * 2.5:
+        if b:
             fig.add_trace(go.Scatterpolar(r=[b] * len(th), theta=th, mode="lines",
                           line=dict(color=_ISO[z], width=1, dash="dot"),
                           hoverinfo="skip", showlegend=False))
-            rad_hi = max(rad_hi, float(b))
     _polar_gradient_line(fig, ar, pr, rr, width=1.8)
     if op and op > 0 and len(rr) > 1:
         _ia = float(np.interp(op, rr, ar)); _ip = float(np.interp(op, rr, pr))
@@ -931,6 +964,27 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
+    # Escala radial COMPARTIDA por sección (turbina/generador): el máximo de
+    # amplitud entre TODOS los cojinetes de la misma sección en las tomas
+    # seleccionadas → todos los polares de una sección usan la MISMA escala
+    # (regla de análisis), distinta entre secciones. Pre-pasada barata.
+    _sec_scale = {}
+    if kind == "polar":
+        for _lbl in sel:
+            _sn = _load(iid, opts[_lbl])
+            if not _sn:
+                continue
+            for _se in _sn.get("sensors", []):
+                _rp = np.asarray(_se.get("trajectory_speed") or [], float)
+                _ap = np.asarray(_se.get("trajectory_amp") or [], float)
+                if _rp.size < 3 or _ap.size != _rp.size:
+                    continue
+                _, _aa = _smooth_xy(_rp, _ap)
+                if not len(_aa):
+                    continue
+                _seck = _bearing_section(iid, _se.get("sensor_label", ""))
+                _sec_scale[_seck] = max(_sec_scale.get(_seck, 0.0),
+                                        float(np.nanmax(_aa)))
     for lbl in sel:
         snap = _load(iid, opts[lbl])
         if not snap:
@@ -950,8 +1004,9 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
             if kind == "polar":
                 _date = (snap.get("timestamp", "") or "")[:10]
                 _ttl = f"Polar · {slab}" + (f" · {_date}" if _date else "")
+                _rov = _sec_scale.get(_bearing_section(iid, slab), 0.0)
                 fig, _saved_cap = _build_saved_polar_fig(iid, slab, r, a, p, unit,
-                                                         op, cs, _ttl)
+                                                         op, cs, _ttl, rad_override=_rov)
             else:
                 _date = (snap.get("timestamp", "") or "")[:10]
                 fig = _build_saved_bode_fig(iid, slab, r, a, p, unit, op, se, _date)
@@ -967,6 +1022,9 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
                 _bits.append(f"Ncrit {float(cs):.0f} rpm"
                              + (f" · Q {float(_q):.1f}" if _q else ""))
             _bits.append(f"op {op:.0f} rpm")
+            if kind == "polar" and _rov and _rov > 0:
+                _sx = "turbina" if _bearing_section(iid, slab) == "driver" else "generador"
+                _bits.append(f"escala sección {_sx} {_rov:.0f} {unit}")
             st.caption(" · ".join(_bits))
 
 
@@ -3204,7 +3262,13 @@ elif view == "Polar":
                               hoverinfo="skip", showlegend=False))
         _rr, _ar = _smooth_xy(sw.rpm, _ampc)
         _rp2, _pr = _smooth_xy(sw.rpm, _phc)
-        _rad_hi = float(np.nanmax(_ar)) if len(_ar) else 1.0
+        # Escala radial COMPARTIDA por sección (turbina/generador): máx amplitud
+        # entre todos los cojinetes de la misma sección en esta captura → 1XD y
+        # 2XD (turbina) comparten escala; 5/6 (generador) comparten la suya.
+        _sec = _bearing_section(cur_iid, sw.label)
+        _sec_hi = _section_rad_max(cur_iid, getattr(rec, "sweeps", []), _sec)
+        _data_hi = float(np.nanmax(_ar)) if len(_ar) else 0.0
+        _rad_hi = max(_sec_hi, _data_hi, 1.0)
         _polar_gradient_line(fig, _ar, _pr, _rr, width=1.9)
         _cmpp = _saved_sweeps("polar", sw.label, "polar")
         for _ci, _cs in enumerate(_cmpp):
@@ -3388,8 +3452,11 @@ elif view == "Polar":
         _cap = (getattr(sw, "captured_at", "") or "")[:10]
         _save_snapshot_ui(_mk_polar, key=f"polar_{sw.label}", default_rpm=float(op),
                           default_label=(f"{sw.label} · {_cap}" if _cap else ""))
+        _sec_txt = "turbina" if _sec == "driver" else "generador"
         st.caption(f"Radio = amplitud ({unit}) · ángulo = fase · color = rpm · "
-                   "anillos punteados = límites ISO 20816-2 (A/B/C).")
+                   "anillos punteados = límites ISO 20816-2 (A/B/C). Escala radial "
+                   f"**compartida por la sección {_sec_txt}** (máx {_rad_hi:.0f} "
+                   f"{unit}) → todos sus cojinetes se comparan a la misma escala.")
         _diag_panel(diag, zone, zc)
 
 elif view == "Waterfall":
