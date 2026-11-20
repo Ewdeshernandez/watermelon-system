@@ -908,10 +908,13 @@ def _build_overlay_polar_fig(iid, items, title="Comparación"):
 def _build_overlay_bode_fig(iid, items, title="Comparación"):
     """Superpone hasta N Bode (fase arriba invertida + amplitud abajo) en UNA
     gráfica para comparar antes vs después. Color sólido por toma, misma leyenda."""
+    import re as _rq  # noqa: PLC0415
     from plotly.subplots import make_subplots  # noqa: PLC0415
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                         row_heights=[0.42, 0.58], vertical_spacing=0.06)
     unit = "µm pp"
+    _op = 0.0
+    _by_date = []  # (date_str, amp_op, color) para la Δ antes→después
     for idx, (lbl, se, op) in enumerate(items):
         r = np.asarray(se.get("trajectory_speed") or [], float)
         a = np.asarray(se.get("trajectory_amp") or [], float)
@@ -928,14 +931,49 @@ def _build_overlay_bode_fig(iid, items, title="Comparación"):
         fig.add_trace(go.Scatter(x=rr, y=ar, mode="lines", name=lbl, showlegend=False,
                       line=dict(color=col, width=2.2, shape="spline", smoothing=0.6)),
                       row=2, col=1)
+        op = float(op or 0.0)
+        _op = max(_op, op)
+        _ao = se.get("amp_at_op")
+        if _ao in (None, 0) and op > 0 and len(rr):
+            _ao = float(np.interp(op, rr, ar))
+        _md = _rq.search(r"(\d{4}-\d{2}-\d{2})", str(lbl))
+        if _ao:
+            _by_date.append((_md.group(1) if _md else str(idx), float(_ao), col, op))
+    # Línea de velocidad de OPERACIÓN + marcador del valor amp@op por toma.
+    if _op > 0:
+        fig.add_vline(x=_op, line=dict(color="#334155", width=1.1, dash="dot"),
+                      row=1, col=1)
+        fig.add_vline(x=_op, line=dict(color="#334155", width=1.1, dash="dot"),
+                      annotation_text="op", annotation_position="top left",
+                      annotation_font=dict(size=10, color="#334155"), row=2, col=1)
+        for _d, _av, _c, _o in _by_date:
+            if _o > 0:
+                fig.add_trace(go.Scatter(x=[_o], y=[_av], mode="markers",
+                              marker=dict(color=_c, size=10, symbol="diamond",
+                                          line=dict(color="#fff", width=1.2)),
+                              showlegend=False, hoverinfo="skip"), row=2, col=1)
+    # Δ Amp@op antes→después (ordena por fecha; destaca el crecimiento, el titular).
+    _sd = sorted(_by_date, key=lambda x: x[0])
+    if len(_sd) >= 2:
+        _a0, _a1 = _sd[0][1], _sd[-1][1]
+        _dd = _a1 - _a0; _pc = (_dd / _a0 * 100.0) if _a0 else 0.0
+        fig.add_annotation(xref="x2 domain", yref="y2 domain", x=0.99, y=0.03,
+                           xanchor="right", yanchor="bottom", showarrow=False,
+                           text=f"<b>Δ Amp@op {_dd:+.1f} {unit}  ({_pc:+.0f}%)</b>",
+                           font=dict(size=12,
+                                     color="#dc3545" if _dd > 0 else "#1f9d55"),
+                           bgcolor="rgba(255,255,255,0.9)",
+                           bordercolor="#cbd5e1", borderwidth=1, borderpad=5)
     fig.update_yaxes(title="Fase 1X (°) · lag", autorange="reversed", dtick=90, row=1, col=1)
     fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
     fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
-    _layout(fig, title, h=600)
-    # _layout fuerza showlegend=False → reactivar DESPUÉS para que la leyenda
-    # (sensor · fecha de cada toma) sí aparezca en la comparación.
-    fig.update_layout(showlegend=True,
-                      legend=dict(orientation="h", y=1.14, x=0.5, xanchor="center",
+    _layout(fig, title, h=620)
+    # _layout fuerza showlegend=False → reactivar DESPUÉS. Leyenda ABAJO (antes
+    # chocaba con el título arriba) + margen superior para el título.
+    fig.update_layout(showlegend=True, margin=dict(l=62, r=24, t=64, b=86),
+                      title=dict(text=title, font=dict(size=15), x=0.5, xanchor="center",
+                                 y=0.98, yanchor="top"),
+                      legend=dict(orientation="h", y=-0.14, x=0.5, xanchor="center",
                                   font=dict(size=11)))
     return fig
 
