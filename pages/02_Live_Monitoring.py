@@ -3730,8 +3730,9 @@ def render_history_chart(
     except Exception:  # noqa: BLE001
         _anns = []
 
-    st.caption("💡 **Clic en un punto de la curva** para anclar una nota ahí (muestra "
-               "el valor y la fecha/hora de ese punto).")
+    st.caption("💡 Para anclar una nota: **clic en un punto de la curva**, o activa "
+               "los cursores y usa **📝 Nota en A** (anclar en el cursor A). Muestra "
+               "el valor y la fecha/hora.")
 
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
@@ -3817,11 +3818,8 @@ def render_history_chart(
             fig.add_trace(go.Scatter(
                 x=ds["captured_at"],
                 y=ds["value"],
-                # lines+markers: los marcadores (chicos) hacen la curva CLICKEABLE
-                # para anclar notas; sin ellos plotly no tiene punto que seleccionar.
-                mode="lines+markers",
+                mode="lines",  # línea LIMPIA (sin puntos visibles)
                 line=dict(color=color, width=1.6, shape="spline", smoothing=0.6),
-                marker=dict(color=color, size=4),
                 name=sd["display"],
                 hovertemplate=(
                     f"<b>{sd['label']} {sd['var']}</b><br>"
@@ -3829,6 +3827,15 @@ def render_history_chart(
                     f"%{{y:.3f}} {sd['unit']}<extra></extra>"
                 ),
             ))
+        # Capa CLICKEABLE invisible (marcadores opacity 0, área de hit grande): hace
+        # la curva seleccionable para anclar notas SIN ensuciar la línea con puntos.
+        _nlines = len(fig.data)
+        for i, sd in enumerate(sensor_data):
+            ds = _downsample(sd["df"])
+            fig.add_trace(go.Scatter(
+                x=ds["captured_at"], y=ds["value"], mode="markers",
+                marker=dict(size=16, color=palette[i % len(palette)], opacity=0),
+                name="", showlegend=False, hoverinfo="skip"))
 
         # Líneas verticales (cursores + notas) con add_shape DIRECTO (xref=x,
         # yref=paper) y x como ISO string. NO usar add_vline: su lógica de
@@ -3882,6 +3889,7 @@ def render_history_chart(
                 bgcolor="rgba(0,0,0,0)",
             ),
             hovermode="closest",
+            clickmode="event+select",
         )
         # Sin barra de herramientas (cámara/lupa/casa). on_select="rerun" →
         # al hacer CLIC en un punto de la curva, devuelve su (x=tiempo, y=valor)
@@ -3905,11 +3913,14 @@ def render_history_chart(
         if _sel_pts:
             _p = _sel_pts[-1]
             _px = _p.get("x"); _py = _p.get("y"); _cn = int(_p.get("curve_number", 0) or 0)
+            # El clic llega de la capa invisible (índices ≥ nº de líneas) → sensor
+            # por módulo del nº de canales.
+            _si = _cn % len(sensor_data) if sensor_data else 0
             try:
                 _pt = pd.to_datetime(_px)
             except Exception:  # noqa: BLE001
                 _pt = None
-            _un = (sensor_data[_cn]["unit"] if 0 <= _cn < len(sensor_data)
+            _un = (sensor_data[_si]["unit"] if 0 <= _si < len(sensor_data)
                    else (list(units)[0] if len(units) == 1 else ""))
             if _pt is not None:
                 with st.container(border=True):
@@ -3971,6 +3982,33 @@ def render_history_chart(
                               f"B {_cb:%Y-%m-%d %H:%M}")
             except Exception as _e:  # noqa: BLE001
                 st.caption(f"(lectura de cursores no disponible: {_e})")
+            # Vía FIABLE para anclar nota: en el cursor A (no depende del clic).
+            _nca1, _nca2 = st.columns([4, 1])
+            _natext = _nca1.text_input(
+                "Nota en A", key="live_noteA_txt", label_visibility="collapsed",
+                placeholder="escribe la nota para anclarla en el cursor A")
+            if _nca2.button("📝 Nota en A", key="live_noteA_save",
+                            use_container_width=True,
+                            help="Guarda la nota en la posición del cursor A."):
+                from core.trend_annotations import add_annotation  # noqa: PLC0415
+                _uid = (st.session_state.get("user_email", "") or "")
+                _av0 = None
+                try:
+                    _d0 = sensor_data[0]["df"].set_index("captured_at").sort_index()["value"]
+                    _p0 = _d0.index.get_indexer([_ca], method="nearest")[0]
+                    _av0 = float(_d0.iloc[_p0]) if _p0 >= 0 else None
+                except Exception:  # noqa: BLE001
+                    _av0 = None
+                _full = ((_natext or "").strip()
+                         + (f"  ·  {_av0:.2f} {sensor_data[0]['unit']}"
+                            if _av0 is not None else ""))
+                if _natext and add_annotation(instance_id, _ca.isoformat(), _full, _uid):
+                    st.success("Nota guardada en A.")
+                    st.rerun()
+                elif not _natext:
+                    st.warning("Escribe el texto de la nota.")
+                else:
+                    st.error("No se pudo guardar (¿falta la tabla trend_annotations?).")
         # Si no hay cursores pero hay notas, el PNG lleva la bitácora de notas.
         if _exp_rows is None and _anns:
             _exp_cols = ["Fecha/hora", "Nota"]
@@ -3989,7 +4027,7 @@ def render_history_chart(
             _dlkey = f"live_trend_dl_{instance_id}_{range_choice}"
             if _exp_rows:
                 _dlfigtab(fig, _exp_cols, _exp_rows, _fn, key=_dlkey,
-                          table_title=_exp_title, table_frac=0.82)
+                          table_title=_exp_title, table_frac=0.72)
             else:
                 _dlfig(fig, _fn, key=_dlkey)
         except Exception:  # noqa: BLE001
