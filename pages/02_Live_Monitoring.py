@@ -3721,6 +3721,15 @@ def render_history_chart(
                 format_func=lambda t: t.strftime("%m-%d %H:%M"),
                 key="live_trend_cursor_vals")
 
+    # Notas/bitácora (anotaciones persistentes ancladas a un instante de la máquina).
+    from datetime import datetime as _dtann, timezone as _tzann
+    _now_iso = _dtann.now(_tzann.utc).isoformat()
+    try:
+        from core.trend_annotations import list_annotations as _lann  # noqa: PLC0415
+        _anns = _lann(instance_id, _from_iso, _now_iso)
+    except Exception:  # noqa: BLE001
+        _anns = []
+
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
     alarms = {sd["alarm"] for sd in sensor_data}
@@ -3823,6 +3832,18 @@ def render_history_chart(
                               annotation=dict(font=dict(size=12, color="#0f172a",
                                                         family="monospace")))
 
+        # Notas/bitácora: línea vertical verde + etiqueta con el texto de la nota.
+        for _an in (_anns or []):
+            try:
+                _at = pd.to_datetime(_an.get("ts"), utc=True)
+                _txt = str(_an.get("text") or "")[:40]
+                fig.add_vline(x=_at, line=dict(color="#15803d", width=1.1, dash="dash"),
+                              annotation_text=f"📝 {_txt}", annotation_position="bottom right",
+                              annotation=dict(font=dict(size=9.5, color="#15803d"),
+                                              textangle=-90))
+            except Exception:  # noqa: BLE001
+                continue
+
         # Y-axis title: si todos comparten unit, mostrar; sino "valor"
         y_title = list(units)[0] if len(units) == 1 else "value"
 
@@ -3909,6 +3930,43 @@ def render_history_chart(
             df_one.columns = [sd["display"]]
             combined = combined.join(df_one, how="outer") if not combined.empty else df_one
         st.line_chart(combined, height=380)
+
+    # ----- Bitácora de notas (anotaciones persistentes sobre la tendencia) -----
+    with st.popover("📝 Notas / bitácora", use_container_width=False):
+        st.caption("Ancla una nota a un instante (ej. *antes de cambiar bomba*). "
+                   "Aparece como línea verde en la tendencia y queda de bitácora de "
+                   "intervenciones para auditoría.")
+        try:
+            _nt0 = pd.to_datetime(_from_iso); _nt1 = pd.to_datetime(_now_iso)
+            _ngrid = pd.date_range(_nt0, _nt1, periods=200)
+            _nts = st.select_slider(
+                "Momento de la nota", options=list(_ngrid), value=_ngrid[-1],
+                format_func=lambda t: t.strftime("%m-%d %H:%M"), key="live_note_ts")
+            _ntxt = st.text_input("Nota (corta)", key="live_note_txt",
+                                  placeholder="ej. antes de cambiar bomba de aceite")
+            if st.button("Guardar nota", key="live_note_save", type="primary"):
+                from core.trend_annotations import add_annotation  # noqa: PLC0415
+                _uid = (st.session_state.get("user_email", "") or "")
+                if add_annotation(instance_id, _nts.isoformat(), _ntxt, _uid):
+                    st.success("Nota guardada.")
+                    st.rerun()
+                else:
+                    st.error("No se pudo guardar. Falta crear la tabla en Supabase: "
+                             "`supabase/sql/trend_annotations.sql`.")
+        except Exception as _e:  # noqa: BLE001
+            st.caption(f"(no disponible: {_e})")
+        if _anns:
+            st.markdown("**Notas en el rango**")
+            for _an in _anns:
+                _c1, _c2 = st.columns([6, 1])
+                _tt = str(_an.get("ts", ""))[:16].replace("T", " ")
+                _c1.caption(f"📝 {_tt} · {_an.get('text', '')}"
+                            + (f" · _{_an.get('author')}_" if _an.get("author") else ""))
+                if _c2.button("🗑", key=f"del_note_{_an.get('id')}",
+                              help="Borrar nota"):
+                    from core.trend_annotations import delete_annotation  # noqa: PLC0415
+                    if delete_annotation(_an.get("id")):
+                        st.rerun()
 
 
 # ============================================================
