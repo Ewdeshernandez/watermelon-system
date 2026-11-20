@@ -155,7 +155,7 @@ def _diag_panel(diag, zone, zc):
 # =========================================================
 # 1) FUENTE — histórico automático (Supabase) o CSV manual
 # =========================================================
-src = st.radio("Fuente", ["Histórico del activo (automático)", "CSV manual (System1 / ADRE)"],
+src = st.radio("Fuente", ["Histórico del activo (automático)", "CSV manual (barrido / tendencia)"],
                horizontal=True, key="an_src")
 rec: AnalysisRecord | None = None
 hist_caps = None          # capturas del histórico (para Trends, solo en modo histórico)
@@ -176,8 +176,8 @@ if src.startswith("Histórico"):
         cur_asset = tsel
     caps = _list_caps(iid)
     if not caps:
-        st.info(f"**{tsel}** aún no tiene onda cruda en el histórico. El robot System1 "
-                "la sube automáticamente; en cuanto llegue, aparece aquí.")
+        st.info(f"**{tsel}** aún no tiene onda cruda en el histórico. El colector "
+                "automático la sube; en cuanto llegue, aparece aquí.")
         st.stop()
     hist_caps = caps                       # para la vista Trends
     from core.analysis.model import session_stamps
@@ -192,8 +192,8 @@ else:
     ups = st.file_uploader(
         "Registro CSV importado (uno o varios canales)", type=["csv"],
         accept_multiple_files=True,
-        help="Export de System1 (1yd.csv, 1xd.csv…), Bode/Polar de System1, o ADRE. "
-             "Sube el par X/Y de un cojinete para ver la órbita.")
+        help="CSV de onda cruda por canal (1yd.csv, 1xd.csv…) o CSV de barrido "
+             "Bode/Polar. Sube el par X/Y de un cojinete para ver la órbita.")
     if ups:
         SS["an_payload"] = [(f.name, f.getvalue()) for f in ups]
     payload = SS.get("an_payload")
@@ -211,7 +211,7 @@ if not rec.channels and rec.sweeps:
     st.info(f"Cargaste {len(rec.sweeps)} barrido(s) de Bode/Polar (sin onda cruda). "
             "Usá las vistas **Bode** y **Polar**; las demás necesitan el CSV de onda.")
 if not rec.channels and not rec.sweeps and rec.trends:
-    st.info(f"Cargaste {len(rec.trends)} tendencia(s) de alta tasa de System1. "
+    st.info(f"Cargaste {len(rec.trends)} tendencia(s) de alta tasa. "
             "Andá a la vista **Tendencias** para verlas con eje de tiempo.")
 
 _rpm = rec.rpm
@@ -359,7 +359,7 @@ def _pick_sweep(key):
     if not rec.sweeps:
         return None
     names = [s.label for s in rec.sweeps]
-    sel = st.selectbox("Barrido (Bode/Polar de System1)", names, key=key)
+    sel = st.selectbox("Barrido (Bode/Polar)", names, key=key)
     return rec.sweeps[names.index(sel)]
 
 
@@ -1514,8 +1514,8 @@ def _uploaded_trend_block():
     with _pop:
         off_h = st.number_input("Corrección de reloj (horas)", value=0.0, step=1.0,
                                 key="utr_off",
-                                help="El archivo trae la fecha/hora del RELOJ de "
-                                     "System1. Si estaba corrido, ajustá aquí "
+                                help="El archivo trae la fecha/hora del RELOJ del "
+                                     "colector. Si estaba corrido, ajustá aquí "
                                      "(ej +24 = un día adelante).")
         _shift = _dt.timedelta(hours=float(off_h))
         # Tiempos DESPLAZADOS por sensor (el crudo no se toca).
@@ -2445,7 +2445,7 @@ elif view == "Full Spectrum":
     _fbs = [bb for bb in rec.bearings if bb.has_xy]
     if not _fbs:
         st.warning("Full Spectrum: necesita el **par X/Y** de un cojinete (espectro "
-                   "direccional · precesión forward/backward · supera a System1).")
+                   "direccional · precesión forward/backward).")
     else:
         _fnames = [bb.name for bb in _fbs]
         _fbmap = {bb.name: bb for bb in _fbs}
@@ -2616,8 +2616,8 @@ elif view == "Órbita":
         _osel = st.multiselect("Cojinetes (órbitas)", _onames, default=[_onames[0]],
                                key="orb_sel",
                                help="Elegí uno o varios. Varias órbitas = MISMA escala para "
-                                    "comparar tamaños a ojo (como System1). Cada una usa el "
-                                    "ángulo de sonda de SU cojinete (gen 45° / turbina 135°).")
+                                    "comparar tamaños a ojo. Cada una usa el ángulo de sonda "
+                                    "de SU cojinete (gen 45° / turbina 135°).")
         _bsel = [_obrgs[_onames.index(n)] for n in _osel] or [_obrgs[0]]
         from core.ui_industrial import html_table  # noqa: PLC0415
         # Pass 1: data de cada órbita (ángulo POR cojinete) → escala GLOBAL (misma para todas)
@@ -2706,7 +2706,7 @@ elif view == "Órbita":
             html_table(_ocols, _orows_all)
         st.caption("Coordenadas de MÁQUINA (Vertical↑ / Horizontal→, sondas rotadas desde su "
                    "ángulo de montaje) · aspecto 1:1 real · promedio síncrono · punto verde = "
-                   "keyphasor (muestra 0), idéntico a System1. Base: Bently Nevada + Eisenmann.")
+                   "keyphasor (muestra 0). Base: Bently Nevada + Eisenmann.")
 
 elif view == "Deflexión del eje":
     # FORMA DE DEFLEXIÓN DEL EJE (Bently manual 3-8 / 9-4): se colocan las órbitas
@@ -2805,7 +2805,7 @@ elif view == "Shaft Centerline":
     _brgs = [bb for bb in rec.bearings if bb.has_xy]
     if not _brgs:
         st.warning("Shaft Centerline: necesita el **par X/Y** (gap DC de los proximitores). "
-                   "Sube el export **Gap** de System1 (par 1XD/1YD) o usa el histórico.")
+                   "Sube el export **Gap** (par 1XD/1YD) o usa el histórico.")
         st.markdown("#### 📂 Ver snapshots guardados")
         _view_saved_scl("scl_hist_nodata")
     else:
@@ -3117,13 +3117,13 @@ elif view == "Shaft Centerline":
                 f"<span class='sc-pill'>X <b>{gx_op:.1f}</b> · Y <b>{gy_op:.1f} µm</b></span>"
                 f"<span class='sc-pill'>ε≈<b>{eps:.2f}</b></span></div>"
                 f"<div class='sc-hint'>Sin gap DC: no es un centerline físico. "
-                f"Sube el export <b>Gap</b> de System1.</div>")
+                f"Sube el export <b>Gap</b>.</div>")
         st.markdown(_chips, unsafe_allow_html=True)
 
 elif view == "Bode":
     sw = _pick_sweep("bode_sw")
     if sw is None:
-        st.warning("Bode: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
+        st.warning("Bode: sube el **CSV de barrido Bode/Polar** (speed/rpm + "
                    "amplitude + phase) — o mira los guardados abajo.")
         st.markdown("#### 📂 Ver Bode guardados")
         _view_saved_bode("bode", "bode_hist_nodata")
@@ -3376,7 +3376,7 @@ elif view == "Polar":
     if sw is None:
         st.markdown("#### 📂 Ver Polar guardados")
         _view_saved_bode("polar", "polar_hist_nodata")
-        st.warning("Polar: sube el **CSV de Bode/Polar de System1** (speed/rpm + "
+        st.warning("Polar: sube el **CSV de barrido Bode/Polar** (speed/rpm + "
                    "amplitude + phase).")
     else:
         op, unit, diag, s, zone, _ampc, _phc = _sweep_controls(sw, "polar")
@@ -3640,14 +3640,11 @@ elif view == "Waterfall":
 elif view == "Cascada":
     # Espectros vs RPM (run-up / coast-down). Fuente: NI/ADRE run-up o barrido System1.
     if rec.sweeps:
-        st.info("Barrido de System1 cargado — la **Cascada** vive mejor en **Bode/Polar** "
+        st.info("Barrido cargado — la **Cascada** vive mejor en **Bode/Polar** "
                 "(amplitud y fase 1X vs rpm). La cascada por espectros completos vs rpm "
-                "llega con el run-up de NI 9229/9234.")
+                "llega con el run-up por adquisición propia.")
     else:
         st.info("**Cascada** — espectros vs **RPM** en arranque/parada (run-up/coast-down). "
                 "Separa resonancias (fijas en Hz) de órdenes (siguen la rpm) y revela las "
                 "velocidades críticas. Requiere captura transitoria continua — llega con la "
-                "adquisición directa **NI 9229/9234** o un run-up de ADRE 408.")
-
-st.caption("Rotodinámica · ingesta + 11 vistas sobre la misma captura o histórico. "
-           "Fuentes: histórico Supabase automático · CSV System1/ADRE · (NI en camino).")
+                "adquisición directa **NI 9229/9234**.")

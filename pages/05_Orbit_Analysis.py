@@ -1423,8 +1423,7 @@ else:
     st.checkbox("Invert X/Y (if the orbit comes out mirrored)",
                 key="orbit_invert_xy",
                 help="Swaps the X and Y axes of the pair. Use it if the orbit "
-                     "direction does not match System1 or the real shaft "
-                     "rotation.")
+                     "direction does not match the real shaft rotation.")
 
     scale_mode = st.selectbox("Scale", ["Auto", "Manual"], index=0)
     manual_scale_value = 2.0

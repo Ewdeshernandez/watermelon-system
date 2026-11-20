@@ -1518,7 +1518,7 @@ elif current == 2:
     else:
         st.caption(
             "💡 Pick a visual icon for the driver and driven above to see the "
-            "full coupled-train preview (System1 / AMS style)."
+            "full coupled-train preview."
         )
 
     col_nav = st.columns([1, 2, 1])
