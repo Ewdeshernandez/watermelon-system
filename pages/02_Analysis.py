@@ -658,17 +658,10 @@ def _view_saved_scl(key="scl_hist"):
             st.caption("Comparación superpuesta · cada color = una toma · ● = posición "
                        "del muñón en operación · círculos = claro (rojo 95% / azul 30%).")
             _sc_cols, _sc_rows = _render_overlay_scl_metrics(items)
-            _sc_sens = (items[0][0].split(" · ")[0] if items else "")
-            _sc_dts = sorted({m.group(1) for _it in items
-                              for m in [re.search(r"(\d{4}-\d{2}-\d{2})", _it[0])] if m})
-            _sc_rng = (f"{_sc_dts[0]} → {_sc_dts[-1]}" if len(_sc_dts) >= 2
-                       else (_sc_dts[0] if _sc_dts else ""))
             _download_fig_table_button(
                 fig, _sc_cols, _sc_rows,
                 _vfile(f"Comparacion Shaft Centerline {tsel}"), key=f"{key}_cmp_dl",
-                table_title="Lectura comparativa", table_frac=0.72,
-                header={"title": f"{tsel} · Comparación Shaft Centerline",
-                        "sub": f"Cojinete {_sc_sens} · tomas {_sc_rng} · generado {_fecha}"})
+                table_title="Lectura comparativa", table_frac=0.72)
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
@@ -1104,15 +1097,16 @@ def _render_overlay_metrics(iid, items, kind):
                 f"{float(a_op):.1f} {unit}" if a_op else "—",
                 f"{float(p_op):.0f}°" if p_op is not None else "—",
                 estado,
-                f"{float(cs):.0f}" if cs else "—",
-                f"{float(q):.1f}" if q else "—"]
+                f"{float(cs):.0f}" if cs else "—"]
+        # Q y Δφ solo en Bode (en Polar quedaban vacíos → columna colapsada/fea).
         if kind == "bode":
+            _row.append(f"{float(q):.1f}" if q else "—")
             _row.append(f"{float(dphi):.0f}°" if dphi else "—")
         _row.append(_mg)
         rows.append(_row)
-    cols = ["Toma", "Amp @op", "Fase @op", "Estado", "Ncrit rpm", "Q"]
+    cols = ["Toma", "Amp @op", "Fase @op", "Estado", "Ncrit rpm"]
     if kind == "bode":
-        cols.append("Δφ modo")
+        cols += ["Q", "Δφ modo"]
     cols.append("Margen a op")
     st.markdown("**Lectura comparativa** (antes vs después)")
     html_table(cols, rows)
@@ -1255,16 +1249,10 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
                 st.caption("Comparación superpuesta · cada color = una toma · "
                            "misma orientación de fase (arriba) y amplitud (abajo).")
             _cm_cols, _cm_rows = _render_overlay_metrics(iid, items, kind)
-            _sens = (items[0][0].split(" · ")[0] if items else "")
-            _dts = sorted({m.group(1) for _it in items
-                           for m in [re.search(r"(\d{4}-\d{2}-\d{2})", _it[0])] if m})
-            _rng = f"{_dts[0]} → {_dts[-1]}" if len(_dts) >= 2 else (_dts[0] if _dts else "")
             _download_fig_table_button(
                 fig, _cm_cols, _cm_rows,
                 _vfile(f"Comparacion {_nm} {tsel}"), key=f"{key}_cmp_dl",
-                table_title="Lectura comparativa", table_frac=0.72,
-                header={"title": f"{tsel} · Comparación {_nm}",
-                        "sub": f"Sensor {_sens} · tomas {_rng} · generado {_fecha}"})
+                table_title="Lectura comparativa", table_frac=0.72)
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
