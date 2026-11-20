@@ -3927,9 +3927,11 @@ def render_history_chart(
                     _vtxt = (f"{float(_py):.2f} {_un}" if _py is not None else "—")
                     st.markdown(f"📍 **{_pt:%Y-%m-%d %H:%M}**  ·  **{_vtxt}**  "
                                 f"_(punto seleccionado)_")
+                    _cl_nonce = st.session_state.get("noteClick_nonce", 0)
                     _cc1, _cc2 = st.columns([4, 1])
                     _ntext = _cc1.text_input(
-                        "Nota", key="live_click_note_txt", label_visibility="collapsed",
+                        "Nota", key=f"live_click_note_txt_{_cl_nonce}",
+                        label_visibility="collapsed",
                         placeholder="ej. antes de cambiar bomba de aceite")
                     if _cc2.button("Guardar nota", key="live_click_note_save",
                                    type="primary", use_container_width=True):
@@ -3939,7 +3941,8 @@ def render_history_chart(
                                       + (f"  ·  {_vtxt}" if _py is not None else ""))
                         if _ntext and add_annotation(instance_id, _pt.isoformat(),
                                                      _note_full, _uid):
-                            st.success("Nota guardada.")
+                            st.session_state["noteClick_nonce"] = _cl_nonce + 1
+                            st.success("Nota guardada. Clic en otro punto para otra.")
                             st.rerun()
                         elif not _ntext:
                             st.warning("Escribe el texto de la nota.")
@@ -3983,9 +3986,12 @@ def render_history_chart(
             except Exception as _e:  # noqa: BLE001
                 st.caption(f"(lectura de cursores no disponible: {_e})")
             # Vía FIABLE para anclar nota: en el cursor A (no depende del clic).
+            # key con nonce → tras guardar el campo queda VACÍO y listo para OTRA nota.
+            _na_nonce = st.session_state.get("noteA_nonce", 0)
             _nca1, _nca2 = st.columns([4, 1])
             _natext = _nca1.text_input(
-                "Nota en A", key="live_noteA_txt", label_visibility="collapsed",
+                "Nota en A", key=f"live_noteA_txt_{_na_nonce}",
+                label_visibility="collapsed",
                 placeholder="escribe la nota para anclarla en el cursor A")
             if _nca2.button("📝 Nota en A", key="live_noteA_save",
                             use_container_width=True,
@@ -4003,7 +4009,8 @@ def render_history_chart(
                          + (f"  ·  {_av0:.2f} {sensor_data[0]['unit']}"
                             if _av0 is not None else ""))
                 if _natext and add_annotation(instance_id, _ca.isoformat(), _full, _uid):
-                    st.success("Nota guardada en A.")
+                    st.session_state["noteA_nonce"] = _na_nonce + 1  # campo nuevo vacío
+                    st.success("Nota guardada en A. Puedes agregar otra (mueve A y repite).")
                     st.rerun()
                 elif not _natext:
                     st.warning("Escribe el texto de la nota.")
