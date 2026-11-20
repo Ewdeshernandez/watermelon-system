@@ -263,6 +263,50 @@ def _ch_setpoint(ch):
     return None
 
 
+def _setpoints_lut(iid):
+    """LUT (coj,eje,letra)→(alarma,danger,unidad) de los setpoints REALES de la
+    máquina `iid`. Base del límite por sensor, SECTION-SPECIFIC (turbina ≠
+    generador): sale de lo configurado en la máquina, no de una norma genérica."""
+    sensors_map, _al, _dg, _u = _inst_cfg(iid)
+    lut = {}
+    for s in (sensors_map or []):
+        t = _sp_tok(s.get("csv_match_pattern", ""))
+        a = float(s.get("alarm", 0.0) or 0.0); d = float(s.get("danger", 0.0) or 0.0)
+        if t and a > 0 and d > 0:
+            lut[t] = (a, d, str(s.get("unit_native", "") or ""))
+    return lut
+
+
+def _label_setpoint(iid, slab):
+    """(alarma, danger, unidad) configurados para un sensor por su ETIQUETA, con el
+    mismo fallback de letra que _ch_setpoint. None si la máquina no tiene setpoint
+    para ese sensor (entonces NO se inventa límite: se cae a la norma ISO)."""
+    k = _sp_tok(slab or "")
+    if not k:
+        return None
+    lut = _setpoints_lut(iid)
+    if k in lut:
+        return lut[k]
+    for _l in ("D", "A", "V", ""):
+        if (k[0], k[1], _l) in lut:
+            return lut[(k[0], k[1], _l)]
+    return None
+
+
+def _status_vs_setpoint(amp, sp):
+    """Estado del amp@op vs setpoint REAL de la máquina. Devuelve (texto, color).
+    Si no hay setpoint → None (el caller cae a la zona ISO de la norma)."""
+    if not sp or amp is None:
+        return None
+    al, dg, _u = sp
+    av = float(amp)
+    if av >= dg:
+        return (f"Danger (≥{dg:g})", "#dc3545")
+    if av >= al:
+        return (f"Alarma (≥{al:g})", "#e8890c")
+    return (f"OK (<{al:g})", "#1f9d55")
+
+
 # Keyphasor por tren: turbina (coj 1,2 + gbx) ~14000 · generador (coj 5,6) ~1800.
 _rpm_turb = next((c.rpm for c in rec.channels if c.bearing in ("1", "2") and c.rpm), None)
 _rpm_gen = next((c.rpm for c in rec.channels if c.bearing in ("5", "6") and c.rpm), None)
@@ -614,10 +658,17 @@ def _view_saved_scl(key="scl_hist"):
             st.caption("Comparación superpuesta · cada color = una toma · ● = posición "
                        "del muñón en operación · círculos = claro (rojo 95% / azul 30%).")
             _sc_cols, _sc_rows = _render_overlay_scl_metrics(items)
+            _sc_sens = (items[0][0].split(" · ")[0] if items else "")
+            _sc_dts = sorted({m.group(1) for _it in items
+                              for m in [re.search(r"(\d{4}-\d{2}-\d{2})", _it[0])] if m})
+            _sc_rng = (f"{_sc_dts[0]} → {_sc_dts[-1]}" if len(_sc_dts) >= 2
+                       else (_sc_dts[0] if _sc_dts else ""))
             _download_fig_table_button(
                 fig, _sc_cols, _sc_rows,
                 _vfile(f"Comparacion Shaft Centerline {tsel}"), key=f"{key}_cmp_dl",
-                table_title=f"Comparación · Shaft Centerline · {tsel} · Lectura comparativa")
+                table_title="Lectura comparativa", table_frac=0.72,
+                header={"title": f"{tsel} · Comparación Shaft Centerline",
+                        "sub": f"Cojinete {_sc_sens} · tomas {_sc_rng} · generado {_fecha}"})
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
@@ -890,6 +941,18 @@ def _build_overlay_polar_fig(iid, items, title="Comparación"):
                 text=[f" {_ia:.1f} "], textposition="top center",
                 textfont=dict(size=11, color=col),
                 showlegend=False, hoverinfo="skip"))
+    # Anillos de LÍMITE REALES de la máquina (alarma/danger del sensor; NO ISO
+    # genérico). Solo si la máquina los tiene configurados.
+    _sp = _label_setpoint(iid, items[0][1].get("sensor_label", "")) if items else None
+    if _sp:
+        _th = list(range(0, 365, 5))
+        for _val, _c in ((_sp[0], "#e8890c"), (_sp[1], "#dc3545")):
+            if _val and _val > 0:
+                fig.add_trace(go.Scatterpolar(
+                    r=[float(_val)] * len(_th), theta=_th, mode="lines",
+                    line=dict(color=_c, width=1.1, dash="dash"), hoverinfo="skip",
+                    showlegend=False))
+        rad_hi = max(rad_hi, float(_sp[1] or 0.0))
     fig.update_layout(
         template="plotly_white", height=580, showlegend=True,
         legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center",
@@ -916,6 +979,7 @@ def _build_overlay_bode_fig(iid, items, title="Comparación"):
                         row_heights=[0.42, 0.58], vertical_spacing=0.06)
     unit = "µm pp"
     _op = 0.0
+    _ampmax = 0.0
     _by_date = []  # (date_str, amp_op, color) para la Δ antes→después
     for idx, (lbl, se, op) in enumerate(items):
         r = np.asarray(se.get("trajectory_speed") or [], float)
@@ -925,6 +989,7 @@ def _build_overlay_bode_fig(iid, items, title="Comparación"):
             continue
         unit = se.get("amp_unit", unit)
         rr, ar = _smooth_xy(r, a)
+        _ampmax = max(_ampmax, float(np.nanmax(ar)) if len(ar) else 0.0)
         _rp, pwr = _smooth_xy(r, _unwrap_phase(r, p))
         col = _CMP_COLORS[idx % len(_CMP_COLORS)]
         fig.add_trace(go.Scatter(x=_rp, y=pwr, mode="lines", name=lbl,
@@ -972,8 +1037,24 @@ def _build_overlay_bode_fig(iid, items, title="Comparación"):
                                      color="#dc3545" if _dd > 0 else "#1f9d55"),
                            bgcolor="rgba(255,255,255,0.9)",
                            bordercolor="#cbd5e1", borderwidth=1, borderpad=5)
+    # Líneas de LÍMITE REALES de la máquina (alarma/danger configurados para ESTE
+    # sensor; section-specific turbina≠generador). NO se inventa: si la máquina no
+    # tiene setpoint para el sensor, no se dibuja línea (cae a la zona ISO en la tabla).
+    _sp = _label_setpoint(iid, items[0][1].get("sensor_label", "")) if items else None
+    _ymax = _ampmax
+    if _sp:
+        for _val, _c, _nm in ((_sp[0], "#e8890c", "Alarma"), (_sp[1], "#dc3545", "Danger")):
+            if _val and _val > 0:
+                fig.add_hline(y=float(_val), line=dict(color=_c, width=1.3, dash="dash"),
+                              annotation_text=f"{_nm} {float(_val):g}",
+                              annotation_position="top left",
+                              annotation_font=dict(size=9.5, color=_c), row=2, col=1)
+        _ymax = max(_ymax, float(_sp[1] or 0.0))
     fig.update_yaxes(title="Fase 1X (°) · lag", autorange="reversed", dtick=90, row=1, col=1)
-    fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
+    if _ymax > 0:
+        fig.update_yaxes(title=f"Amplitud ({unit})", range=[0, _ymax * 1.12], row=2, col=1)
+    else:
+        fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
     fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
     _layout(fig, title, h=620)
     # _layout fuerza showlegend=False → reactivar DESPUÉS. Leyenda ABAJO (antes
@@ -986,51 +1067,64 @@ def _build_overlay_bode_fig(iid, items, title="Comparación"):
     return fig
 
 
-def _render_overlay_metrics(items, kind):
-    """Tabla de métricas VITALES por toma para la comparación (lo que las cajas
-    del visor en vivo muestran, pero en tabla antes-vs-después): amp@op, fase@op,
-    zona ISO, Ncrit, Q, Δφ del modo (Bode) y margen a operación. Así la comparación
-    no es solo visual: se leen los números lado a lado."""
+def _render_overlay_metrics(iid, items, kind):
+    """Tabla de métricas VITALES por toma para la comparación. La columna de
+    severidad usa el LÍMITE REAL de la máquina (alarma/danger configurados para
+    ese sensor, section-specific turbina≠generador); solo si la máquina no tiene
+    setpoint cae a la zona ISO de la norma (marcada '(ISO)')."""
     from core.ui_industrial import html_table  # noqa: PLC0415
     rows = []
+    _used_sp = False
     for lbl, se, op in items:
         unit = se.get("amp_unit", "µm pp")
         a_op = se.get("amp_at_op"); p_op = se.get("phase_at_op")
         cs = se.get("critical_speed_rpm"); q = se.get("q_factor")
         dphi = (se.get("critical_speed_phase_delta")
                 or se.get("critical_speed_phase") or 0.0)
-        r = se.get("trajectory_speed") or []; a = se.get("trajectory_amp") or []
-        p = se.get("trajectory_phase") or []
-        zone = "—"
-        try:
-            _dg = _sweep_diag(tuple(float(v) for v in r), tuple(float(v) for v in a),
-                              tuple(float(v) for v in p), float(op or 0.0),
-                              "group2", "shaft_displacement", unit,
-                              "Bode" if kind == "bode" else "polar")
-            zone = (_dg.get("structured", {}) or {}).get("iso_zone", "—") or "—"
-        except Exception:  # noqa: BLE001
-            pass
+        # Severidad: PRIMERO el setpoint real de la máquina; si no hay, zona ISO.
+        _sp = _label_setpoint(iid, se.get("sensor_label", ""))
+        _st = _status_vs_setpoint(a_op, _sp)
+        if _st:
+            estado = _st[0]; _used_sp = True
+        else:
+            r = se.get("trajectory_speed") or []; a = se.get("trajectory_amp") or []
+            p = se.get("trajectory_phase") or []
+            zone = "—"
+            try:
+                _dg = _sweep_diag(tuple(float(v) for v in r), tuple(float(v) for v in a),
+                                  tuple(float(v) for v in p), float(op or 0.0),
+                                  "group2", "shaft_displacement", unit,
+                                  "Bode" if kind == "bode" else "polar")
+                zone = (_dg.get("structured", {}) or {}).get("iso_zone", "—") or "—"
+            except Exception:  # noqa: BLE001
+                pass
+            estado = f"{zone} (ISO)"
         _mg = f"{(op - float(cs)) / op * 100.0:+.0f}%" if (op and cs) else "—"
         _row = [lbl,
                 f"{float(a_op):.1f} {unit}" if a_op else "—",
                 f"{float(p_op):.0f}°" if p_op is not None else "—",
-                zone,
+                estado,
                 f"{float(cs):.0f}" if cs else "—",
                 f"{float(q):.1f}" if q else "—"]
         if kind == "bode":
             _row.append(f"{float(dphi):.0f}°" if dphi else "—")
         _row.append(_mg)
         rows.append(_row)
-    cols = ["Toma", "Amp @op", "Fase @op", "Zona ISO", "Ncrit rpm", "Q"]
+    cols = ["Toma", "Amp @op", "Fase @op", "Estado", "Ncrit rpm", "Q"]
     if kind == "bode":
         cols.append("Δφ modo")
     cols.append("Margen a op")
     st.markdown("**Lectura comparativa** (antes vs después)")
     html_table(cols, rows)
+    _notas = []
+    if _used_sp:
+        _notas.append("Estado vs **límite configurado de la máquina** (alarma/danger "
+                      "por sensor; turbina y generador tienen límites distintos).")
     if kind == "bode":
-        st.caption("Δφ modo = giro de fase en la crítica (≈180° ideal; menor → "
-                   "amortiguamiento alto o precarga). Forma modal del rotor → vista "
-                   "**Deflexión del eje**.")
+        _notas.append("Δφ modo = giro de fase en la crítica (≈180° ideal; menor → "
+                      "amortiguamiento alto o precarga).")
+    if _notas:
+        st.caption(" · ".join(_notas))
     return cols, rows
 
 
@@ -1160,11 +1254,17 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
                 st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
                 st.caption("Comparación superpuesta · cada color = una toma · "
                            "misma orientación de fase (arriba) y amplitud (abajo).")
-            _cm_cols, _cm_rows = _render_overlay_metrics(items, kind)
+            _cm_cols, _cm_rows = _render_overlay_metrics(iid, items, kind)
+            _sens = (items[0][0].split(" · ")[0] if items else "")
+            _dts = sorted({m.group(1) for _it in items
+                           for m in [re.search(r"(\d{4}-\d{2}-\d{2})", _it[0])] if m})
+            _rng = f"{_dts[0]} → {_dts[-1]}" if len(_dts) >= 2 else (_dts[0] if _dts else "")
             _download_fig_table_button(
                 fig, _cm_cols, _cm_rows,
                 _vfile(f"Comparacion {_nm} {tsel}"), key=f"{key}_cmp_dl",
-                table_title=f"Comparación · {_nm} · {tsel} · Lectura comparativa")
+                table_title="Lectura comparativa", table_frac=0.72,
+                header={"title": f"{tsel} · Comparación {_nm}",
+                        "sub": f"Sensor {_sens} · tomas {_rng} · generado {_fecha}"})
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
@@ -2046,13 +2146,19 @@ def _round_png(png_bytes, radius=18, border="#e2e8f2", border_w=2):
     return buf.getvalue()
 
 
-def _combine_vertical(png_top, png_bottom, gap=22):
-    """Apila dos PNG verticalmente (centrados, fondo blanco) → un solo PNG."""
+def _combine_vertical(png_top, png_bottom, gap=22, bottom_frac=1.0):
+    """Apila dos PNG verticalmente (centrados, fondo blanco) → un solo PNG.
+    bottom_frac<1 reduce el de abajo a esa fracción del ANCHO del de arriba (la
+    tabla es informativa → secundaria; el gráfico manda)."""
     import io
 
     from PIL import Image
     a = Image.open(io.BytesIO(png_top)).convert("RGB")
     b = Image.open(io.BytesIO(png_bottom)).convert("RGB")
+    if bottom_frac and bottom_frac < 1.0 and b.width > 1:
+        _nw = max(1, int(a.width * bottom_frac))
+        _nh = max(1, int(b.height * _nw / b.width))
+        b = b.resize((_nw, _nh), Image.LANCZOS)
     w = max(a.width, b.width)
     out = Image.new("RGB", (w, a.height + gap + b.height), "white")
     out.paste(a, ((w - a.width) // 2, 0))
@@ -2062,12 +2168,46 @@ def _combine_vertical(png_top, png_bottom, gap=22):
     return buf.getvalue()
 
 
-def _download_fig_table_button(fig, cols, rows, filename, key, table_title=""):
-    """Descarga el gráfico + una tabla de métricas apilados en una sola imagen."""
+def _report_header_png(title, sub, width_px):
+    """Banda de encabezado report-grade (navy + título + subtítulo + marca
+    Watermelon) al ancho del gráfico, para encabezar la imagen exportada."""
+    import io
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    _dpi = 200
+    _w = max(int(width_px), 600) / _dpi
+    fig = plt.figure(figsize=(_w, 0.64), dpi=_dpi)
+    fig.patch.set_facecolor("#12305e")
+    fig.text(0.015, 0.64, title, color="white", fontsize=12.5, fontweight="bold",
+             va="center", ha="left")
+    if sub:
+        fig.text(0.015, 0.25, sub, color="#aac4e6", fontsize=8.5, va="center", ha="left")
+    fig.text(0.985, 0.5, "🍉 Watermelon System", color="#9fe0b4", fontsize=10.5,
+             fontweight="bold", va="center", ha="right")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor="#12305e")
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def _download_fig_table_button(fig, cols, rows, filename, key, table_title="",
+                               table_frac=1.0, header=None):
+    """Descarga el gráfico + tabla apilados en una sola imagen. header (dict con
+    title/sub) antepone una banda de encabezado; table_frac<1 achica la tabla."""
     try:
+        import io
+
         import plotly.io as _pio
+        from PIL import Image
         top = _fig_png_cached(_pio.to_json(fig))
-        combined = _combine_vertical(top, _table_png(cols, rows, table_title))
+        if header:
+            _tw = Image.open(io.BytesIO(top)).width
+            _hd = _report_header_png(header.get("title", ""), header.get("sub", ""), _tw)
+            top = _combine_vertical(_hd, top, gap=0)
+        combined = _combine_vertical(top, _table_png(cols, rows, table_title),
+                                     bottom_frac=table_frac)
     except Exception:  # noqa: BLE001
         _download_fig_button(fig, filename, key)
         return
