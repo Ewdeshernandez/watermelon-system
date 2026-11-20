@@ -884,9 +884,11 @@ def _build_overlay_polar_fig(iid, items, title="Comparación"):
         if op > 0 and len(rr) > 1:
             _ia = float(np.interp(op, rr, ar)); _ip = float(np.interp(op, rr, pr))
             fig.add_trace(go.Scatterpolar(
-                r=[_ia], theta=[_ip], mode="markers",
-                marker=dict(color=col, size=11, symbol="circle",
+                r=[_ia], theta=[_ip], mode="markers+text",
+                marker=dict(color=col, size=12, symbol="circle",
                             line=dict(color="#fff", width=1.4)),
+                text=[f" {_ia:.1f} "], textposition="top center",
+                textfont=dict(size=11, color=col),
                 showlegend=False, hoverinfo="skip"))
     fig.update_layout(
         template="plotly_white", height=580, showlegend=True,
@@ -946,11 +948,17 @@ def _build_overlay_bode_fig(iid, items, title="Comparación"):
         fig.add_vline(x=_op, line=dict(color="#334155", width=1.1, dash="dot"),
                       annotation_text="op", annotation_position="top left",
                       annotation_font=dict(size=10, color="#334155"), row=2, col=1)
+        _amax = max((_v for _, _v, _, _ in _by_date), default=0.0)
         for _d, _av, _c, _o in _by_date:
             if _o > 0:
-                fig.add_trace(go.Scatter(x=[_o], y=[_av], mode="markers",
-                              marker=dict(color=_c, size=10, symbol="diamond",
+                # Valor amp@op etiquetado (a la IZQUIERDA del diamante para no
+                # cortarse en el borde); el de mayor amplitud arriba, el otro abajo.
+                _tp = "top left" if _av >= _amax else "bottom left"
+                fig.add_trace(go.Scatter(x=[_o], y=[_av], mode="markers+text",
+                              marker=dict(color=_c, size=11, symbol="diamond",
                                           line=dict(color="#fff", width=1.2)),
+                              text=[f" {_av:.1f} "], textposition=_tp,
+                              textfont=dict(size=11, color=_c),
                               showlegend=False, hoverinfo="skip"), row=2, col=1)
     # Δ Amp@op antes→después (ordena por fecha; destaca el crecimiento, el titular).
     _sd = sorted(_by_date, key=lambda x: x[0])
@@ -1980,19 +1988,22 @@ def _table_png(cols, rows, title=""):
     import matplotlib.pyplot as plt
     ncol, nrow = len(cols), len(rows)
     fig_w = min(1.2 * ncol + 1.0, 16)
-    fig_h = 0.5 * nrow + (0.85 if title else 0.35)
+    # Más alto por fila + base → la última fila NO se recorta (antes el bbox
+    # pegaba a y=0 y cortaba el borde inferior). Margen inferior (_bot) explícito.
+    fig_h = 0.56 * nrow + (0.95 if title else 0.45)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=200)
     ax.axis("off")
     ax.set_position([0, 0, 1, 1])
-    _top = 1.0
+    _bot = 0.06 / fig_h * 6.0          # ~6% de margen inferior relativo
+    _bot = min(max(_bot, 0.04), 0.12)
+    _top = 1.0 - (0.40 / fig_h if title else 0.02)
     if title:
-        _top = 1.0 - 0.42 / fig_h
-        fig.text(0.010, 0.97, title, fontsize=9.5, fontweight="normal",
+        fig.text(0.010, 0.985, title, fontsize=9, fontweight="normal",
                  color="#5a6b85", va="top", ha="left")      # chico, suave, discreto
     tbl = ax.table(cellText=rows, colLabels=cols, cellLoc="center",
-                   bbox=[0.006, 0.0, 0.988, _top])
+                   bbox=[0.006, _bot, 0.988, _top - _bot])
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(9.5)
+    tbl.set_fontsize(8.4)
     for j in range(ncol):
         h = tbl[0, j]
         h.set_facecolor("#12305e")
