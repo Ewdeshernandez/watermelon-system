@@ -322,8 +322,12 @@ def _save_snapshot_ui(build_fn, *, key: str, default_rpm: float = 0.0,
 VIEWS = ["Tabular", "Tendencias", "Forma de Onda", "Espectro", "Full Spectrum",
          "Órbita", "Deflexión del eje", "Shaft Centerline", "Bode", "Polar",
          "Waterfall", "Cascada"]
-view = st.segmented_control("Vista", VIEWS, default="Tabular",
-                            selection_mode="single") or "Tabular"
+# key= PERSISTE la vista en session_state. Sin key, el rerun que dispara el botón
+# "Guardar snapshot" devolvía None → caía a "Tabular" (había que volver a Bode/Polar
+# y guardar otra vez). Con key, el rerun conserva la vista elegida.
+view = (st.segmented_control("Vista", VIEWS, default="Tabular",
+                             selection_mode="single", key="rd_view")
+        or st.session_state.get("rd_view") or "Tabular")
 
 
 def _layout(fig, title, h=440):
@@ -587,6 +591,32 @@ def _view_saved_scl(key="scl_hist"):
             for s in snaps}
     sel = c1.multiselect("Snapshot(s) guardados", list(opts),
                          default=list(opts)[:1], key=f"{key}_sel")
+    _cmp = st.toggle(
+        "📊 Comparar en un solo gráfico (superponer antes vs después)",
+        value=False, key=f"{key}_cmp",
+        help="Selecciona 2–3 tomas y superpone los puntos de operación en el mismo "
+             "círculo de claro para ver cómo se movió el muñón.")
+    if _cmp and len(sel) >= 2:
+        items = []
+        for lbl in sel[:3]:
+            snap = load_scl_snapshot(iid, opts[lbl])
+            if not snap:
+                continue
+            _date = (snap.get("timestamp", "") or "")[:10]
+            for bd in snap.get("bearings", []):
+                items.append((f"{bd.get('bearing_label', '')} · {_date}", bd))
+        if len(sel) > 3:
+            st.caption("⚠ Máximo 3 tomas en la comparación — se usan las 3 primeras.")
+        if len(items) >= 2:
+            fig = _build_overlay_scl_fig(iid, items,
+                                         title=f"Comparación · Shaft Centerline · {tsel}")
+            st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
+            st.caption("Comparación superpuesta · cada color = una toma · ● = posición "
+                       "del muñón en operación · círculos = claro (rojo 95% / azul 30%).")
+            _render_overlay_scl_metrics(items)
+        else:
+            st.info("Selecciona al menos 2 tomas con datos para comparar.")
+        return
     for lbl in sel:
         snap = load_scl_snapshot(iid, opts[lbl])
         if not snap:
@@ -897,9 +927,125 @@ def _build_overlay_bode_fig(iid, items, title="Comparación"):
     fig.update_yaxes(title="Fase 1X (°) · lag", autorange="reversed", dtick=90, row=1, col=1)
     fig.update_yaxes(title=f"Amplitud ({unit})", rangemode="tozero", row=2, col=1)
     fig.update_xaxes(title="Velocidad (rpm)", row=2, col=1)
-    fig.update_layout(legend=dict(orientation="h", y=1.14, x=0.5, xanchor="center",
+    _layout(fig, title, h=600)
+    # _layout fuerza showlegend=False → reactivar DESPUÉS para que la leyenda
+    # (sensor · fecha de cada toma) sí aparezca en la comparación.
+    fig.update_layout(showlegend=True,
+                      legend=dict(orientation="h", y=1.14, x=0.5, xanchor="center",
                                   font=dict(size=11)))
-    return _layout(fig, title, h=600)
+    return fig
+
+
+def _render_overlay_metrics(items, kind):
+    """Tabla de métricas VITALES por toma para la comparación (lo que las cajas
+    del visor en vivo muestran, pero en tabla antes-vs-después): amp@op, fase@op,
+    zona ISO, Ncrit, Q, Δφ del modo (Bode) y margen a operación. Así la comparación
+    no es solo visual: se leen los números lado a lado."""
+    from core.ui_industrial import html_table  # noqa: PLC0415
+    rows = []
+    for lbl, se, op in items:
+        unit = se.get("amp_unit", "µm pp")
+        a_op = se.get("amp_at_op"); p_op = se.get("phase_at_op")
+        cs = se.get("critical_speed_rpm"); q = se.get("q_factor")
+        dphi = (se.get("critical_speed_phase_delta")
+                or se.get("critical_speed_phase") or 0.0)
+        r = se.get("trajectory_speed") or []; a = se.get("trajectory_amp") or []
+        p = se.get("trajectory_phase") or []
+        zone = "—"
+        try:
+            _dg = _sweep_diag(tuple(float(v) for v in r), tuple(float(v) for v in a),
+                              tuple(float(v) for v in p), float(op or 0.0),
+                              "group2", "shaft_displacement", unit,
+                              "Bode" if kind == "bode" else "polar")
+            zone = (_dg.get("structured", {}) or {}).get("iso_zone", "—") or "—"
+        except Exception:  # noqa: BLE001
+            pass
+        _mg = f"{(op - float(cs)) / op * 100.0:+.0f}%" if (op and cs) else "—"
+        _row = [lbl,
+                f"{float(a_op):.1f} {unit}" if a_op else "—",
+                f"{float(p_op):.0f}°" if p_op is not None else "—",
+                zone,
+                f"{float(cs):.0f}" if cs else "—",
+                f"{float(q):.1f}" if q else "—"]
+        if kind == "bode":
+            _row.append(f"{float(dphi):.0f}°" if dphi else "—")
+        _row.append(_mg)
+        rows.append(_row)
+    cols = ["Toma", "Amp @op", "Fase @op", "Zona ISO", "Ncrit rpm", "Q"]
+    if kind == "bode":
+        cols.append("Δφ modo")
+    cols.append("Margen a op")
+    st.markdown("**Lectura comparativa** (antes vs después)")
+    html_table(cols, rows)
+    if kind == "bode":
+        st.caption("Δφ modo = giro de fase en la crítica (≈180° ideal; menor → "
+                   "amortiguamiento alto o precarga). Forma modal del rotor → vista "
+                   "**Deflexión del eje**.")
+
+
+def _build_overlay_scl_fig(iid, items, title="Comparación"):
+    """Superpone los puntos de operación (y trayectorias) de varios Shaft
+    Centerline en UN círculo de claro para comparar posición del muñón antes vs
+    después. Color sólido por toma + leyenda con fecha."""
+    rad = 1.0
+    for _lbl, bd in items:
+        _r = float(bd.get("clearance_radial") or 0.0)
+        if _r <= 0:
+            _tx = np.asarray(bd.get("trajectory_x_gap") or [], float)
+            _ty = np.asarray(bd.get("trajectory_y_gap") or [], float)
+            _r = (max(float(np.nanmax(np.hypot(_tx, _ty))) if _tx.size else
+                      float(bd.get("y_gap_at_op") or 0.0), 1.0) * 1.3)
+        rad = max(rad, _r)
+    fig = go.Figure(); th = np.linspace(0, 2 * np.pi, 180)
+    fig.add_trace(go.Scatter(x=rad * np.cos(th), y=rad * np.sin(th), mode="lines",
+                  line=dict(color="#334155", width=1.6), hoverinfo="skip",
+                  showlegend=False))
+    for frac, c in [(0.95, "#dc3545"), (0.30, "#0ea5e9")]:
+        fig.add_trace(go.Scatter(x=rad * frac * np.cos(th), y=rad * frac * np.sin(th),
+                      mode="lines", line=dict(color=c, width=1, dash="dot"),
+                      hoverinfo="skip", showlegend=False))
+    fig.add_trace(go.Scatter(x=[0], y=[-rad], mode="markers+text",
+                  marker=dict(color="#64748b", size=9, symbol="circle-open",
+                              line=dict(color="#334155", width=2)),
+                  text=["reposo"], textposition="bottom center", hoverinfo="skip",
+                  showlegend=False))
+    for idx, (lbl, bd) in enumerate(items):
+        col = _CMP_COLORS[idx % len(_CMP_COLORS)]
+        gx = float(bd.get("x_gap_at_op") or 0.0); gy = float(bd.get("y_gap_at_op") or 0.0)
+        tx = np.asarray(bd.get("trajectory_x_gap") or [], float)
+        ty = np.asarray(bd.get("trajectory_y_gap") or [], float)
+        if tx.size and ty.size:
+            fig.add_trace(go.Scatter(x=tx, y=ty, mode="lines",
+                          line=dict(color=col, width=1.2), hoverinfo="skip",
+                          showlegend=False, opacity=0.5))
+        fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers", name=lbl,
+                      marker=dict(color=col, size=15, line=dict(color="#fff", width=1.5))))
+    _axr = rad * 1.4
+    unit = (items[0][1].get("gap_unit", "µm") if items else "µm") or "µm"
+    fig.update_xaxes(title=f"Horizontal H ({unit})", scaleanchor="y", scaleratio=1,
+                     zeroline=True, range=[-_axr, _axr])
+    fig.update_yaxes(title=f"Vertical V ({unit}) · arriba +", zeroline=True,
+                     range=[-_axr, _axr])
+    _layout(fig, title, h=560)
+    fig.update_layout(showlegend=True,
+                      legend=dict(orientation="h", y=-0.14, x=0.5, xanchor="center",
+                                  font=dict(size=11)))
+    return fig
+
+
+def _render_overlay_scl_metrics(items):
+    """Tabla comparativa de Shaft Centerline: ε (excentricidad), ángulo de actitud
+    y claro diametral por toma."""
+    from core.ui_industrial import html_table  # noqa: PLC0415
+    rows = []
+    for lbl, bd in items:
+        ecc = float(bd.get("eccentricity_ratio") or 0.0)
+        att = float(bd.get("attitude_angle") or 0.0)
+        cl = float(bd.get("clearance_radial") or 0.0) * 2
+        rows.append([lbl, f"{ecc:.2f}", f"{att:.0f}°",
+                     f"{cl:.0f} µm" if cl else "—"])
+    st.markdown("**Lectura comparativa** (antes vs después)")
+    html_table(["Toma", "ε excentricidad", "Ángulo actitud", "Claro diametral"], rows)
 
 
 def _view_saved_bode(kind="bode", key="bode_hist"):
@@ -961,6 +1107,7 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
                 st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
                 st.caption("Comparación superpuesta · cada color = una toma · "
                            "misma orientación de fase (arriba) y amplitud (abajo).")
+            _render_overlay_metrics(items, kind)
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
