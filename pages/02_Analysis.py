@@ -1148,19 +1148,43 @@ def _build_overlay_scl_fig(iid, items, title="Comparación"):
                               line=dict(color="#334155", width=2)),
                   text=["reposo"], textposition="bottom center", hoverinfo="skip",
                   showlegend=False))
+    import re as _rq  # noqa: PLC0415
+    unit = (items[0][1].get("gap_unit", "µm") if items else "µm") or "µm"
+    _by_date = []  # (date, ecc, gx, gy) para la Δ antes→después
+    _emax = max((float(bd.get("eccentricity_ratio") or 0.0) for _, bd in items),
+                default=0.0)
     for idx, (lbl, bd) in enumerate(items):
         col = _CMP_COLORS[idx % len(_CMP_COLORS)]
         gx = float(bd.get("x_gap_at_op") or 0.0); gy = float(bd.get("y_gap_at_op") or 0.0)
+        ecc = float(bd.get("eccentricity_ratio") or 0.0)
         tx = np.asarray(bd.get("trajectory_x_gap") or [], float)
         ty = np.asarray(bd.get("trajectory_y_gap") or [], float)
         if tx.size and ty.size:
             fig.add_trace(go.Scatter(x=tx, y=ty, mode="lines",
                           line=dict(color=col, width=1.2), hoverinfo="skip",
                           showlegend=False, opacity=0.5))
-        fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers", name=lbl,
-                      marker=dict(color=col, size=15, line=dict(color="#fff", width=1.5))))
+        # Punto de operación + VALOR ε etiquetado (como amp@op en bode/polar);
+        # el de mayor ε arriba, el otro abajo, para no solaparse.
+        _tp = "top center" if ecc >= _emax else "bottom center"
+        fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text", name=lbl,
+                      marker=dict(color=col, size=15, line=dict(color="#fff", width=1.5)),
+                      text=[f" ε {ecc:.2f} "], textposition=_tp,
+                      textfont=dict(size=10.5, color=col)))
+        _md = _rq.search(r"(\d{4}-\d{2}-\d{2})", str(lbl))
+        _by_date.append((_md.group(1) if _md else str(idx), ecc, gx, gy))
+    # Δ ε + cuánto se MOVIÓ el muñón antes→después (el titular del centerline).
+    _sd = sorted(_by_date, key=lambda x: x[0])
+    if len(_sd) >= 2:
+        _de = _sd[-1][1] - _sd[0][1]
+        _mov = float(np.hypot(_sd[-1][2] - _sd[0][2], _sd[-1][3] - _sd[0][3]))
+        fig.add_annotation(xref="paper", yref="paper", x=0.99, y=0.02,
+                           xanchor="right", yanchor="bottom", showarrow=False,
+                           text=f"<b>Δε {_de:+.2f} · muñón movió {_mov:.0f} {unit}</b>",
+                           font=dict(size=12,
+                                     color="#dc3545" if _de > 0 else "#1f9d55"),
+                           bgcolor="rgba(255,255,255,0.9)",
+                           bordercolor="#cbd5e1", borderwidth=1, borderpad=5)
     _axr = rad * 1.4
-    unit = (items[0][1].get("gap_unit", "µm") if items else "µm") or "µm"
     fig.update_xaxes(title=f"Horizontal H ({unit})", scaleanchor="y", scaleratio=1,
                      zeroline=True, range=[-_axr, _axr])
     fig.update_yaxes(title=f"Vertical V ({unit}) · arriba +", zeroline=True,
@@ -1172,20 +1196,34 @@ def _build_overlay_scl_fig(iid, items, title="Comparación"):
     return fig
 
 
+def _scl_status(ecc):
+    """Estado del muñón por ε = excentricidad / CLARO REAL del cojinete (el claro
+    sale del dossier de la máquina). ε→1 = muñón contra el metal. Umbrales de
+    práctica de cojinete hidrodinámico (API/Bently): ≥0.90 danger, ≥0.75 alarma."""
+    if ecc >= 0.90:
+        return "Danger (ε≥0.90)"
+    if ecc >= 0.75:
+        return "Alarma (ε≥0.75)"
+    return "OK (ε<0.75)"
+
+
 def _render_overlay_scl_metrics(items):
-    """Tabla comparativa de Shaft Centerline: ε (excentricidad), ángulo de actitud
-    y claro diametral por toma."""
+    """Tabla comparativa de Shaft Centerline: estado por ε + ε, ángulo de actitud
+    y claro diametral por toma. ε es fracción del claro REAL → estado con respaldo."""
     from core.ui_industrial import html_table  # noqa: PLC0415
     rows = []
     for lbl, bd in items:
         ecc = float(bd.get("eccentricity_ratio") or 0.0)
         att = float(bd.get("attitude_angle") or 0.0)
         cl = float(bd.get("clearance_radial") or 0.0) * 2
-        rows.append([lbl, f"{ecc:.2f}", f"{att:.0f}°",
+        rows.append([lbl, _scl_status(ecc), f"{ecc:.2f}", f"{att:.0f}°",
                      f"{cl:.0f} µm" if cl else "—"])
-    _cols = ["Toma", "ε excentricidad", "Ángulo actitud", "Claro diametral"]
+    _cols = ["Toma", "Estado", "ε excentricidad", "Ángulo actitud", "Claro diametral"]
     st.markdown("**Lectura comparativa** (antes vs después)")
     html_table(_cols, rows)
+    st.caption("Estado por **ε = excentricidad / claro real** del cojinete (umbrales "
+               "de cojinete hidrodinámico: ε≥0.90 danger, ≥0.75 alarma). ε→1 = muñón "
+               "contra el metal.")
     return _cols, rows
 
 
