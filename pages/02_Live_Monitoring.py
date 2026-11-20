@@ -3702,6 +3702,25 @@ def render_history_chart(
         _render_trend_tiles(sensor_data, range_choice)
         return
 
+    # Cursores A/B — comparar dos momentos (ej. antes/después de una intervención).
+    _cur_on = st.toggle(
+        "📍 Cursores — comparar dos momentos (A / B)", value=False,
+        key="live_trend_cursors",
+        help="Fija dos líneas en el tiempo y lee el valor de cada canal en A, en B y "
+             "su diferencia. Útil para ver el efecto de un cambio (ej. antes/después "
+             "de cambiar una bomba).")
+    _ca = _cb = None
+    if _cur_on:
+        _allt = pd.to_datetime(pd.concat([sd["df"]["captured_at"] for sd in sensor_data]))
+        _t0, _t1 = _allt.min(), _allt.max()
+        if pd.notna(_t0) and pd.notna(_t1) and _t1 > _t0:
+            _grid = pd.date_range(_t0, _t1, periods=200)
+            _ca, _cb = st.select_slider(
+                "Cursores  A ◀——▶ B", options=list(_grid),
+                value=(_grid[66], _grid[133]),
+                format_func=lambda t: t.strftime("%m-%d %H:%M"),
+                key="live_trend_cursor_vals")
+
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
     alarms = {sd["alarm"] for sd in sensor_data}
@@ -3738,6 +3757,24 @@ def render_history_chart(
             fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
                           annotation_text="Alarm", annotation_position="top left",
                           annotation=dict(font=dict(color="#d97706", size=10, family="monospace"), xshift=-44))
+        elif len(sensor_data) <= 4:
+            # Unidades mixtas → no hay banda común, pero igual mostramos el límite
+            # de CADA sensor como línea punteada en SU color (alarma + danger), para
+            # que el analista vea contra qué compara cada punto.
+            _pal0 = ["#1e40af", "#0891b2", "#7c3aed", "#be185d",
+                     "#15803d", "#b45309", "#475569", "#dc2626"]
+            for _i, _sd in enumerate(sensor_data):
+                _c = _pal0[_i % len(_pal0)]
+                _al = float(_sd.get("alarm") or 0.0); _dg = float(_sd.get("danger") or 0.0)
+                _tag = f"{_sd['label']}{_sd.get('var', '')}"
+                if _al > 0:
+                    fig.add_hline(y=_al, line=dict(color=_c, width=1, dash="dot"),
+                                  annotation_text=f"{_tag} alarm", annotation_position="right",
+                                  annotation=dict(font=dict(color=_c, size=8.5, family="monospace")))
+                if _dg > 0:
+                    fig.add_hline(y=_dg, line=dict(color=_c, width=1, dash="dashdot"),
+                                  annotation_text=f"{_tag} danger", annotation_position="right",
+                                  annotation=dict(font=dict(color=_c, size=8.5, family="monospace")))
 
         # Downsampling por buckets de tiempo (Ciclo 23.145) — clave para
         # que NO se vea un "blob" de color. Con miles de lecturas crudas las
@@ -3778,6 +3815,14 @@ def render_history_chart(
                 ),
             ))
 
+        # Cursores A/B verticales (comparar dos momentos).
+        if _ca is not None and _cb is not None:
+            for _ct, _lab in ((_ca, "A"), (_cb, "B")):
+                fig.add_vline(x=_ct, line=dict(color="#0f172a", width=1.3, dash="dot"),
+                              annotation_text=_lab, annotation_position="top",
+                              annotation=dict(font=dict(size=12, color="#0f172a",
+                                                        family="monospace")))
+
         # Y-axis title: si todos comparten unit, mostrar; sino "valor"
         y_title = list(units)[0] if len(units) == 1 else "value"
 
@@ -3808,15 +3853,53 @@ def render_history_chart(
         st.plotly_chart(fig, use_container_width=True,
                         config={"displaylogo": False, "displayModeBar": False})
 
+        # Lectura de los cursores: valor de cada canal en A, en B y su diferencia.
+        if _ca is not None and _cb is not None:
+            try:
+                from core.ui_industrial import html_table as _htab  # noqa: PLC0415
+                _crows = []
+                for _sd in sensor_data:
+                    _d = _sd["df"].set_index("captured_at").sort_index()["value"]
+                    def _val_at(_t, _dd=_d):
+                        try:
+                            _pos = _dd.index.get_indexer([_t], method="nearest")[0]
+                            return float(_dd.iloc[_pos]) if _pos >= 0 else None
+                        except Exception:  # noqa: BLE001
+                            return None
+                    _va = _val_at(_ca); _vb = _val_at(_cb)
+                    _u = _sd["unit"]
+                    if _va is not None and _vb is not None:
+                        _dd2 = _vb - _va
+                        _pc = (_dd2 / _va * 100.0) if _va else 0.0
+                        _dtxt = f"{_dd2:+.2f} {_u} ({_pc:+.0f}%)"
+                    else:
+                        _dtxt = "—"
+                    _crows.append([
+                        _sd["display"],
+                        f"{_va:.2f} {_u}" if _va is not None else "—",
+                        f"{_vb:.2f} {_u}" if _vb is not None else "—",
+                        _dtxt])
+                st.caption(f"**A** {_ca:%Y-%m-%d %H:%M}  ·  **B** {_cb:%Y-%m-%d %H:%M}")
+                _htab(["Canal", "Valor @A", "Valor @B", "Δ (B − A)"], _crows)
+            except Exception as _e:  # noqa: BLE001
+                st.caption(f"(lectura de cursores no disponible: {_e})")
+
         # Caption si bands omitidas
         if not show_bands and len(sensor_data) > 1:
             mixed_units = ", ".join(sorted(units))
-            st.caption(
-                f"📐 Severity bands omitted — the selected sensors "
-                f"have mixed units ({mixed_units}) or different thresholds. "
-                f"Select sensors of the same type (all `g pk`, all `in/s pk`, "
-                f"all `mil pp`) to see the bands."
-            )
+            if len(sensor_data) <= 4:
+                st.caption(
+                    f"📐 Unidades mixtas ({mixed_units}): sin banda común, pero el "
+                    "límite de **cada sensor** se muestra como línea punteada en su "
+                    "color (alarm · danger). Para una banda compartida, elige sensores "
+                    "del mismo tipo (todos `g pk`, `in/s pk` o `mil pp`)."
+                )
+            else:
+                st.caption(
+                    f"📐 Severity lines omitted — {len(sensor_data)} sensores con "
+                    f"unidades mixtas ({mixed_units}). Selecciona ≤4 del mismo tipo "
+                    "para ver los límites."
+                )
     except Exception as e:
         # Fallback a st.line_chart si plotly falla
         st.caption(f"(plotly not available — fallback: {e})")
