@@ -613,7 +613,11 @@ def _view_saved_scl(key="scl_hist"):
             st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
             st.caption("Comparación superpuesta · cada color = una toma · ● = posición "
                        "del muñón en operación · círculos = claro (rojo 95% / azul 30%).")
-            _render_overlay_scl_metrics(items)
+            _sc_cols, _sc_rows = _render_overlay_scl_metrics(items)
+            _download_fig_table_button(
+                fig, _sc_cols, _sc_rows,
+                _vfile(f"Comparacion Shaft Centerline {tsel}"), key=f"{key}_cmp_dl",
+                table_title=f"Comparación · Shaft Centerline · {tsel} · Lectura comparativa")
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
@@ -981,6 +985,7 @@ def _render_overlay_metrics(items, kind):
         st.caption("Δφ modo = giro de fase en la crítica (≈180° ideal; menor → "
                    "amortiguamiento alto o precarga). Forma modal del rotor → vista "
                    "**Deflexión del eje**.")
+    return cols, rows
 
 
 def _build_overlay_scl_fig(iid, items, title="Comparación"):
@@ -1044,8 +1049,10 @@ def _render_overlay_scl_metrics(items):
         cl = float(bd.get("clearance_radial") or 0.0) * 2
         rows.append([lbl, f"{ecc:.2f}", f"{att:.0f}°",
                      f"{cl:.0f} µm" if cl else "—"])
+    _cols = ["Toma", "ε excentricidad", "Ángulo actitud", "Claro diametral"]
     st.markdown("**Lectura comparativa** (antes vs después)")
-    html_table(["Toma", "ε excentricidad", "Ángulo actitud", "Claro diametral"], rows)
+    html_table(_cols, rows)
+    return _cols, rows
 
 
 def _view_saved_bode(kind="bode", key="bode_hist"):
@@ -1107,7 +1114,11 @@ def _view_saved_bode(kind="bode", key="bode_hist"):
                 st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
                 st.caption("Comparación superpuesta · cada color = una toma · "
                            "misma orientación de fase (arriba) y amplitud (abajo).")
-            _render_overlay_metrics(items, kind)
+            _cm_cols, _cm_rows = _render_overlay_metrics(items, kind)
+            _download_fig_table_button(
+                fig, _cm_cols, _cm_rows,
+                _vfile(f"Comparacion {_nm} {tsel}"), key=f"{key}_cmp_dl",
+                table_title=f"Comparación · {_nm} · {tsel} · Lectura comparativa")
         else:
             st.info("Selecciona al menos 2 tomas con datos para comparar.")
         return
