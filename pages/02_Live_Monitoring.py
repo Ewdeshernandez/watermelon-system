@@ -3730,6 +3730,36 @@ def render_history_chart(
     except Exception:  # noqa: BLE001
         _anns = []
 
+    # Modo NOTA: el control va ARRIBA del gráfico y una línea de VISTA PREVIA se
+    # mueve con el slider → el analista ve exactamente dónde caerá la nota ANTES
+    # de guardar (antes el picker vivía en un popover que tapaba la gráfica).
+    _note_on = st.toggle(
+        "📝 Nota — anclar un momento en la tendencia", value=False,
+        key="live_note_mode",
+        help="Al activar, mueve el slider y verás una línea de vista previa sobre "
+             "el gráfico. Escribe la nota (ej. 'antes de cambiar bomba') y guarda.")
+    _note_ts = None
+    if _note_on:
+        _ngt0 = pd.to_datetime(_from_iso); _ngt1 = pd.to_datetime(_now_iso)
+        if pd.notna(_ngt0) and pd.notna(_ngt1) and _ngt1 > _ngt0:
+            _ngrid = pd.date_range(_ngt0, _ngt1, periods=200)
+            _note_ts = st.select_slider(
+                "Momento de la nota", options=list(_ngrid), value=_ngrid[-1],
+                format_func=lambda t: t.strftime("%m-%d %H:%M"), key="live_note_ts")
+            _nc1, _nc2 = st.columns([4, 1])
+            _ntxt = _nc1.text_input(
+                "Nota (corta)", key="live_note_txt", label_visibility="collapsed",
+                placeholder="ej. antes de cambiar bomba de aceite")
+            if _nc2.button("Guardar", key="live_note_save", type="primary",
+                           use_container_width=True):
+                from core.trend_annotations import add_annotation  # noqa: PLC0415
+                _uid = (st.session_state.get("user_email", "") or "")
+                if add_annotation(instance_id, _note_ts.isoformat(), _ntxt, _uid):
+                    st.success("Nota guardada.")
+                    st.rerun()
+                else:
+                    st.error("No se pudo guardar (¿falta la tabla trend_annotations?).")
+
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
     alarms = {sd["alarm"] for sd in sensor_data}
@@ -3831,6 +3861,16 @@ def render_history_chart(
                               annotation_text=_lab, annotation_position="top",
                               annotation=dict(font=dict(size=12, color="#0f172a",
                                                         family="monospace")))
+
+        # VISTA PREVIA de la nota nueva: línea verde gruesa semitransparente que se
+        # mueve con el slider → se ve dónde caerá la nota antes de guardar.
+        if _note_ts is not None:
+            _pvtxt = (st.session_state.get("live_note_txt", "") or "nueva nota")[:40]
+            fig.add_vline(x=_note_ts, line=dict(color="#15803d", width=2.4, dash="solid"),
+                          opacity=0.55,
+                          annotation_text=f"📝 {_pvtxt} ◀ aquí",
+                          annotation_position="top right",
+                          annotation=dict(font=dict(size=10.5, color="#15803d")))
 
         # Notas/bitácora: línea vertical verde + etiqueta con el texto de la nota.
         for _an in (_anns or []):
@@ -3941,32 +3981,9 @@ def render_history_chart(
             combined = combined.join(df_one, how="outer") if not combined.empty else df_one
         st.line_chart(combined, height=380)
 
-    # ----- Bitácora de notas (anotaciones persistentes sobre la tendencia) -----
-    with st.popover("📝 Notas / bitácora", use_container_width=False):
-        st.caption("Ancla una nota a un instante (ej. *antes de cambiar bomba*). "
-                   "Aparece como línea verde en la tendencia y queda de bitácora de "
-                   "intervenciones para auditoría.")
-        try:
-            _nt0 = pd.to_datetime(_from_iso); _nt1 = pd.to_datetime(_now_iso)
-            _ngrid = pd.date_range(_nt0, _nt1, periods=200)
-            _nts = st.select_slider(
-                "Momento de la nota", options=list(_ngrid), value=_ngrid[-1],
-                format_func=lambda t: t.strftime("%m-%d %H:%M"), key="live_note_ts")
-            _ntxt = st.text_input("Nota (corta)", key="live_note_txt",
-                                  placeholder="ej. antes de cambiar bomba de aceite")
-            if st.button("Guardar nota", key="live_note_save", type="primary"):
-                from core.trend_annotations import add_annotation  # noqa: PLC0415
-                _uid = (st.session_state.get("user_email", "") or "")
-                if add_annotation(instance_id, _nts.isoformat(), _ntxt, _uid):
-                    st.success("Nota guardada.")
-                    st.rerun()
-                else:
-                    st.error("No se pudo guardar. Falta crear la tabla en Supabase: "
-                             "`supabase/sql/trend_annotations.sql`.")
-        except Exception as _e:  # noqa: BLE001
-            st.caption(f"(no disponible: {_e})")
-        if _anns:
-            st.markdown("**Notas en el rango**")
+    # ----- Bitácora: lista de notas del rango (agregar notas = toggle de arriba) -----
+    if _anns:
+        with st.expander(f"📝 Bitácora — {len(_anns)} nota(s) en el rango", expanded=False):
             for _an in _anns:
                 _c1, _c2 = st.columns([6, 1])
                 _tt = str(_an.get("ts", ""))[:16].replace("T", " ")
