@@ -3874,6 +3874,16 @@ def render_history_chart(
         st.plotly_chart(fig, use_container_width=True,
                         config={"displaylogo": False, "displayModeBar": False})
 
+        # Descarga PNG de la tendencia (mismo botón 🍉 que Rotodinámica). La imagen
+        # ya incluye umbrales, cursores A/B y notas (todo va dibujado en la figura).
+        try:
+            from core.fig_export import download_fig_button as _dlfig  # noqa: PLC0415
+            _fn = (f"Tendencia {instance_id} {range_choice} "
+                   f"{_now_iso[:16].replace(':', '')}.png")
+            _dlfig(fig, _fn, key=f"live_trend_dl_{instance_id}_{range_choice}")
+        except Exception:  # noqa: BLE001
+            pass
+
         # Lectura de los cursores: valor de cada canal en A, en B y su diferencia.
         if _ca is not None and _cb is not None:
             try:
