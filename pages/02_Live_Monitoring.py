@@ -3817,8 +3817,11 @@ def render_history_chart(
             fig.add_trace(go.Scatter(
                 x=ds["captured_at"],
                 y=ds["value"],
-                mode="lines",
+                # lines+markers: los marcadores (chicos) hacen la curva CLICKEABLE
+                # para anclar notas; sin ellos plotly no tiene punto que seleccionar.
+                mode="lines+markers",
                 line=dict(color=color, width=1.6, shape="spline", smoothing=0.6),
+                marker=dict(color=color, size=4),
                 name=sd["display"],
                 hovertemplate=(
                     f"<b>{sd['label']} {sd['var']}</b><br>"
@@ -3878,7 +3881,7 @@ def render_history_chart(
                 font=dict(size=11),
                 bgcolor="rgba(0,0,0,0)",
             ),
-            hovermode="x unified",
+            hovermode="closest",
         )
         # Sin barra de herramientas (cámara/lupa/casa). on_select="rerun" →
         # al hacer CLIC en un punto de la curva, devuelve su (x=tiempo, y=valor)
@@ -3933,17 +3936,8 @@ def render_history_chart(
                             st.error("No se pudo guardar (¿falta la tabla "
                                      "trend_annotations?).")
 
-        # Descarga PNG de la tendencia (mismo botón 🍉 que Rotodinámica). La imagen
-        # ya incluye umbrales, cursores A/B y notas (todo va dibujado en la figura).
-        try:
-            from core.fig_export import download_fig_button as _dlfig  # noqa: PLC0415
-            _fn = (f"Tendencia {instance_id} {range_choice} "
-                   f"{_now_iso[:16].replace(':', '')}.png")
-            _dlfig(fig, _fn, key=f"live_trend_dl_{instance_id}_{range_choice}")
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Lectura de los cursores: valor de cada canal en A, en B y su diferencia.
+        # Lectura de cursores A/B — se muestra en pantalla Y se adjunta al PNG.
+        _exp_cols = _exp_rows = None; _exp_title = ""
         if _ca is not None and _cb is not None:
             try:
                 from core.ui_industrial import html_table as _htab  # noqa: PLC0415
@@ -3971,8 +3965,35 @@ def render_history_chart(
                         _dtxt])
                 st.caption(f"**A** {_ca:%Y-%m-%d %H:%M}  ·  **B** {_cb:%Y-%m-%d %H:%M}")
                 _htab(["Canal", "Valor @A", "Valor @B", "Δ (B − A)"], _crows)
+                _exp_cols = ["Canal", "Valor @A", "Valor @B", "Δ (B − A)"]
+                _exp_rows = _crows
+                _exp_title = (f"Lectura · A {_ca:%Y-%m-%d %H:%M} vs "
+                              f"B {_cb:%Y-%m-%d %H:%M}")
             except Exception as _e:  # noqa: BLE001
                 st.caption(f"(lectura de cursores no disponible: {_e})")
+        # Si no hay cursores pero hay notas, el PNG lleva la bitácora de notas.
+        if _exp_rows is None and _anns:
+            _exp_cols = ["Fecha/hora", "Nota"]
+            _exp_rows = [[str(_a.get("ts", ""))[:16].replace("T", " "),
+                          str(_a.get("text", ""))[:60]] for _a in _anns]
+            _exp_title = "Bitácora de notas en el rango"
+
+        # Descarga PNG (gráfico + tabla con la info si la hay) — mismo botón 🍉 que
+        # Rotodinámica. La figura ya trae umbrales, cursores A/B y notas dibujados.
+        try:
+            from core.fig_export import (  # noqa: PLC0415
+                download_fig_button as _dlfig,
+                download_fig_table_button as _dlfigtab)
+            _fn = (f"Tendencia {instance_id} {range_choice} "
+                   f"{_now_iso[:16].replace(':', '')}.png")
+            _dlkey = f"live_trend_dl_{instance_id}_{range_choice}"
+            if _exp_rows:
+                _dlfigtab(fig, _exp_cols, _exp_rows, _fn, key=_dlkey,
+                          table_title=_exp_title, table_frac=0.82)
+            else:
+                _dlfig(fig, _fn, key=_dlkey)
+        except Exception:  # noqa: BLE001
+            pass
 
         # Caption si bands omitidas
         if not show_bands and len(sensor_data) > 1:
