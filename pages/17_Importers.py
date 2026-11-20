@@ -95,7 +95,7 @@ with tab_import:
 
         st.caption({
             "csi2140": "Machinery Health Analyzer exports (AMS Suite). Time or spectrum.",
-            "adre408": "ADREsoftware exports (System1 predecessor). Time or spectrum.",
+            "adre408": "ADRE 408 exports (ASCII CSV). Time or spectrum.",
             "uff":     "SDRC/IDEAS dataset 58 standard (ASCII). Time response or spectrum.",
         }[vendor])
 
