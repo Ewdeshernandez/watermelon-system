@@ -3702,28 +3702,35 @@ def render_history_chart(
         _render_trend_tiles(sensor_data, range_choice)
         return
 
-    # Cursores A/B — comparar dos momentos (ej. antes/después de una intervención).
+    # Cursores A/B estilo System1: SIN sliders. El usuario elige qué puntero mover
+    # (A o B) y hace CLIC en el gráfico para colocarlo donde quiera. Las posiciones
+    # viven en session_state y se mueven con cada clic.
     _cur_on = st.toggle(
-        "📍 Cursores A / B — leer y comparar dos momentos", value=False,
+        "📍 Cursores A / B — clic en el gráfico para colocarlos", value=False,
         key="live_trend_cursors",
-        help="Fija dos líneas en el tiempo y lee el valor de cada canal en A, en B y "
-             "su diferencia. Útil para ver el efecto de un cambio (ej. antes/después "
-             "de cambiar una bomba).")
+        help="Enciende dos punteros (A naranja, B verde). Elige cuál mover y haz "
+             "CLIC en el gráfico para colocarlo; vuelve a hacer clic para moverlo. "
+             "Abajo lees el valor en A, en B y su diferencia.")
     _ca = _cb = None
+    _arm = "A"
     if _cur_on:
         _allt = pd.to_datetime(pd.concat([sd["df"]["captured_at"] for sd in sensor_data]))
         _t0, _t1 = _allt.min(), _allt.max()
         if pd.notna(_t0) and pd.notna(_t1) and _t1 > _t0:
-            # Dos cursores INDEPENDIENTES (estilo System1: coloco A, coloco B).
-            _grid = list(pd.date_range(_t0, _t1, periods=240))
-            _fmt = lambda t: t.strftime("%m-%d %H:%M")  # noqa: E731
-            _cua, _cub = st.columns(2)
-            _ca = _cua.select_slider(
-                "⬤ Cursor A (negro)", options=_grid, value=_grid[40],
-                format_func=_fmt, key="live_trend_cursor_a")
-            _cb = _cub.select_slider(
-                "⬤ Cursor B (negro)", options=_grid, value=_grid[200],
-                format_func=_fmt, key="live_trend_cursor_b")
+            _span = _t1 - _t0
+            # Posición inicial: A ~20% desde el inicio, B ~85% (tz-aware local).
+            if "cur_A_ts" not in st.session_state:
+                st.session_state["cur_A_ts"] = (_t0 + _span * 0.2).isoformat()
+            if "cur_B_ts" not in st.session_state:
+                st.session_state["cur_B_ts"] = (_t0 + _span * 0.85).isoformat()
+            try:
+                _ca = pd.to_datetime(st.session_state["cur_A_ts"])
+                _cb = pd.to_datetime(st.session_state["cur_B_ts"])
+            except Exception:  # noqa: BLE001
+                _ca, _cb = _t0 + _span * 0.2, _t0 + _span * 0.85
+            _arm = (st.segmented_control(
+                "Mover puntero (luego clic en el gráfico)",
+                ["🟠 A", "🟢 B"], default="🟠 A", key="cur_arm") or "🟠 A")
 
     # Notas/bitácora (anotaciones persistentes ancladas a un instante de la máquina).
     from datetime import datetime as _dtann, timezone as _tzann
@@ -3734,9 +3741,14 @@ def render_history_chart(
     except Exception:  # noqa: BLE001
         _anns = []
 
-    st.caption("💡 Para anclar una nota: **clic en un punto de la curva**, o activa "
-               "los cursores y usa **📝 Nota en A** (anclar en el cursor A). Muestra "
-               "el valor y la fecha/hora.")
+    if _cur_on:
+        st.caption("💡 Cursores encendidos: elige **🟠 A** o **🟢 B** y haz **clic en "
+                   "el gráfico** para colocar ese puntero. Para una nota, usa el botón "
+                   "**📝 Nota en A** de abajo.")
+    else:
+        st.caption("💡 Para anclar una nota: **clic en un punto de la curva** (muestra "
+                   "valor + fecha/hora). Para comparar dos momentos, enciende los "
+                   "**cursores A / B**.")
 
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
@@ -3863,12 +3875,13 @@ def render_history_chart(
                 font=dict(size=11, color=_fg, family="monospace"),
                 bgcolor=_bg, bordercolor=_fg, borderwidth=1, borderpad=3)
 
-        # Cursores A/B — línea punteada navy + pastilla A/B arriba (estilo System1).
+        # Cursores A/B — línea SÓLIDA de color (A naranja, B verde) + pastilla arriba.
+        # Punteros vivos estilo System1 (el usuario los mueve con clic).
         if _ca is not None and _cb is not None:
-            for _ct, _lab in ((_ca, "A"), (_cb, "B")):
+            for _ct, _lab, _cc in ((_ca, "A", "#ea580c"), (_cb, "B", "#16a34a")):
                 _xi = pd.Timestamp(_ct).isoformat()
-                _vline(_xi, "#0f172a", "dot", _width=1.4)
-                _pill(_xi, f" {_lab} ", "#ffffff", "#0f172a", 0.985, "top")
+                _vline(_xi, _cc, "solid", _width=2.0)
+                _pill(_xi, f" {_lab} ", "#ffffff", _cc, 0.985, "top")
 
         # Notas — línea verde dashed + pastilla NUMERADA abajo (📝1, 📝2…). El texto
         # completo va en la bitácora + en el hover de un marcador invisible sobre la
@@ -3892,6 +3905,12 @@ def render_history_chart(
         # Y-axis title: si todos comparten unit, mostrar; sino "valor"
         y_title = list(units)[0] if len(units) == 1 else "value"
 
+        # Rango X FIJO al extensión real de la data → la curva toca el eje Y a la
+        # izquierda y el borde derecho (sin padding). Antes Plotly dejaba un hueco
+        # al inicio y al final (se veía "flotando"). Clase System1.
+        _allx = pd.concat([sd["df"]["captured_at"] for sd in sensor_data])
+        _xr0, _xr1 = _allx.min(), _allx.max()
+
         fig.update_layout(
             margin=dict(l=62, r=18, t=58, b=24),
             height=520,
@@ -3899,7 +3918,8 @@ def render_history_chart(
             paper_bgcolor="white",
             font=dict(family="-apple-system, system-ui, sans-serif", size=11, color="#475569"),
             xaxis=dict(showgrid=True, gridcolor="#f1f5f9", title="",
-                       showline=True, linecolor="#e5edf7", zeroline=False),
+                       showline=True, linecolor="#e5edf7", zeroline=False,
+                       range=[_xr0, _xr1], autorange=False),
             yaxis=dict(showgrid=True, gridcolor="#f1f5f9",
                        title=dict(text=y_title, font=dict(family="monospace", size=11)),
                        showline=True, linecolor="#e5edf7", zeroline=False,
@@ -3942,11 +3962,20 @@ def render_history_chart(
             _si = _cn % len(sensor_data) if sensor_data else 0
             try:
                 _pt = pd.to_datetime(_px)
+                if _pt is not None and _pt.tzinfo is None:
+                    _pt = _pt.tz_localize(_local_tz())  # clic llega en hora local naive
             except Exception:  # noqa: BLE001
                 _pt = None
             _un = (sensor_data[_si]["unit"] if 0 <= _si < len(sensor_data)
                    else (list(units)[0] if len(units) == 1 else ""))
-            if _pt is not None:
+            # MODO CURSOR: el clic MUEVE el puntero armado (A o B). No abre nota.
+            if _cur_on and _pt is not None:
+                _ckey = "cur_B_ts" if "B" in _arm else "cur_A_ts"
+                _niso = _pt.isoformat()
+                if st.session_state.get(_ckey) != _niso:
+                    st.session_state[_ckey] = _niso
+                    st.rerun()
+            elif _pt is not None:
                 with st.container(border=True):
                     _vtxt = (f"{float(_py):.2f} {_un}" if _py is not None else "—")
                     st.markdown(f"📍 **{_pt:%Y-%m-%d %H:%M}**  ·  **{_vtxt}**  "
