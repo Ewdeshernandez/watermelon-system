@@ -3516,15 +3516,21 @@ _TREND_JS_TEMPLATE = r"""
     }
     function fdt(ms){var d=new Date(ms);var p=function(n){return(''+n).padStart(2,'0');};
       return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
+    function fdur(ms){ ms=Math.abs(ms); var m=Math.round(ms/60000);
+      var d=Math.floor(m/1440); m-=d*1440; var h=Math.floor(m/60); m-=h*60;
+      if(d>0)return d+'d '+('' +h).padStart(2,'0')+'h';
+      if(h>0)return h+'h '+('' +m).padStart(2,'0')+'m';
+      return m+'m'; }
     function roText(){
       var p=S[0]; var ia=nearest(p,tA), ib=nearest(p,tB);
       var va=p.y[ia], vb=p.y[ib];
       if(va==null||vb==null)return '';
-      var d=vb-va; var pc=va?(d/va*100):0;
+      var d=vb-va; var pc=va?(d/va*100):0; var dc=(d>0?'#b91c1c':'#15803d');  // sube vib=malo rojo
       return '<span style="color:#ea580c"><b>Cursor A</b></span>   '+va.toFixed(2)+' '+p.unit+'   '+fdt(tA)
         +'<br><span style="color:#16a34a"><b>Cursor B</b></span>   '+vb.toFixed(2)+' '+p.unit+'   '+fdt(tB)
-        +'<br><b>Δ (B − A)</b>   <span style="color:#b91c1c">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
-        +' ('+(pc>=0?'+':'')+pc.toFixed(0)+'%)</span>';
+        +'<br><b>Δ (B − A)</b>   <span style="color:'+dc+'">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
+        +' ('+(pc>=0?'+':'')+pc.toFixed(0)+'%)</span>'
+        +'<br><b>Δt</b>          <span style="color:#64748b">'+fdur(tB-tA)+'</span>';
     }
 
     var data=[];
@@ -3552,6 +3558,10 @@ _TREND_JS_TEMPLATE = r"""
     }
     if(C.cursorsOn){
       var sA=new Date(tA).toISOString(), sB=new Date(tB).toISOString();
+      // [0] banda sombreada del intervalo A↔B (detrás de la curva, estilo System1)
+      shapes.push({type:'rect',xref:'x',yref:'paper',x0:sA,x1:sB,y0:0,y1:1,layer:'below',
+        fillcolor:'rgba(37,99,235,0.055)',line:{width:0}});
+      // [1] cursor A  [2] cursor B (líneas finas punteadas)
       shapes.push({type:'line',xref:'x',yref:'paper',x0:sA,x1:sA,y0:0,y1:1,
         line:{color:'#ea580c',width:1.5,dash:'dash'}});
       shapes.push({type:'line',xref:'x',yref:'paper',x0:sB,x1:sB,y0:0,y1:1,
@@ -3559,10 +3569,10 @@ _TREND_JS_TEMPLATE = r"""
     }
 
     var layout={
-      margin:{l:62,r:18,t:30,b:28},height:520,plot_bgcolor:'white',paper_bgcolor:'white',
+      margin:{l:62,r:18,t:30,b:46},height:520,plot_bgcolor:'white',paper_bgcolor:'white',
       font:{family:'-apple-system,system-ui,sans-serif',size:11,color:'#475569'},
       xaxis:{type:'date',showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',
-        zeroline:false,range:[C.xr0,C.xr1]},
+        zeroline:false,range:[C.xr0,C.xr1],tickfont:{size:9.5,family:'monospace'}},
       yaxis:{showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',zeroline:false,
         title:{text:C.yTitle,font:{family:'monospace',size:11}},tickfont:{family:'monospace'}},
       showlegend:true,legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'right',x:1,
@@ -3575,8 +3585,9 @@ _TREND_JS_TEMPLATE = r"""
     function updateRO(){ if(ro){ro.style.display='block'; ro.innerHTML=roText();} }
     function setShapes(){
       var sa=new Date(tA).toISOString(), sb=new Date(tB).toISOString();
-      var u={}; u['shapes[0].x0']=sa; u['shapes[0].x1']=sa;
-      u['shapes[1].x0']=sb; u['shapes[1].x1']=sb;
+      var u={}; u['shapes[0].x0']=sa; u['shapes[0].x1']=sb;   // banda A↔B
+      u['shapes[1].x0']=sa; u['shapes[1].x1']=sa;             // cursor A
+      u['shapes[2].x0']=sb; u['shapes[2].x1']=sb;             // cursor B
       return Plotly.relayout(div,u);
     }
 
@@ -3609,6 +3620,7 @@ _TREND_JS_TEMPLATE = r"""
         // interpolamos linealmente sobre el área del plot. Robusto, sin parsear strings.
         var frac=(px-off)/len; var xv=xr0+frac*(xr1-xr0);        // ms
         if(!isFinite(xv))return;
+        if(S[0]&&S[0].ms&&S[0].ms.length){var si=nearest(S[0],xv); xv=S[0].ms[si];}  // snap al dato
         if(Math.abs(xv-tA)<=Math.abs(xv-tB))tA=xv; else tB=xv;
         if(tA>tB){var t=tA; tA=tB; tB=t;}   // A siempre antes que B
         setShapes(); updateRO();
