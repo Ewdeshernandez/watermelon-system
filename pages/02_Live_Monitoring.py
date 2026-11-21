@@ -3492,85 +3492,88 @@ _TREND_JS_TEMPLATE = r"""
       'o recarga la página.</div>';
     return;
   }
-  var S=__SERIES__, C=__CFG__;
-  var toMs=function(iso){return new Date(iso).getTime();};
-  S.forEach(function(s){s.ms=s.x.map(toMs);});
-  var xr0=toMs(C.xr0), xr1=toMs(C.xr1);
-  var XR=[new Date(xr0),new Date(xr1)];
-  var tA=xr0+(xr1-xr0)*0.20, tB=xr0+(xr1-xr0)*0.85;
-
-  function nearest(s,t){
-    var a=s.ms, lo=0, hi=a.length-1;
-    if(t<=a[0])return 0; if(t>=a[hi])return hi;
-    while(lo<=hi){var m=(lo+hi)>>1; if(a[m]<t)lo=m+1; else hi=m-1;}
-    var i=lo; if(i>0&&Math.abs(a[i-1]-t)<=Math.abs(a[i]-t))i--; return i;
+  function showErr(msg){
+    div.innerHTML='<div style="padding:20px;color:#b91c1c;font-size:12px;'+
+      'font-family:monospace;white-space:pre-wrap;">'+msg+'</div>';
   }
-  function fdt(ms){var d=new Date(ms);var p=function(n){return(''+n).padStart(2,'0');};
-    return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
-  function roText(){
-    var p=S[0]; var ia=nearest(p,tA), ib=nearest(p,tB);
-    var va=p.y[ia], vb=p.y[ib];
-    if(va==null||vb==null)return '';
-    var d=vb-va; var pc=va?(d/va*100):0;
-    return '<span style="color:#ea580c"><b>Cursor A</b></span>   '+va.toFixed(2)+' '+p.unit+'   '+fdt(tA)
-      +'<br><span style="color:#16a34a"><b>Cursor B</b></span>   '+vb.toFixed(2)+' '+p.unit+'   '+fdt(tB)
-      +'<br><b>Δ (B − A)</b>   <span style="color:#b91c1c">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
-      +' ('+(pc>=0?'+':'')+pc.toFixed(0)+'%)</span>';
-  }
-
-  var data=[];
-  if(C.showBands){
-    data.push({x:[XR[0],XR[1],XR[1],XR[0]],y:[C.danger,C.danger,C.yMax*1.03,C.yMax*1.03],
-      mode:'lines',fill:'toself',fillcolor:'rgba(239,68,68,0.05)',line:{width:0},
-      hoverinfo:'skip',showlegend:false});
-    data.push({x:XR,y:[C.danger,C.danger],mode:'lines',line:{color:'#dc2626',width:1.4,dash:'dash'},
-      name:'Danger',hoverinfo:'skip',showlegend:false});
-    data.push({x:XR,y:[C.alarm,C.alarm],mode:'lines',line:{color:'#d97706',width:1.4,dash:'dash'},
-      name:'Alarm',hoverinfo:'skip',showlegend:false});
-  }
-  S.forEach(function(s){
-    data.push({type:'scatter',mode:'lines',name:s.name,
-      x:s.x.map(function(t){return new Date(t);}),y:s.y,
-      line:{color:s.color,width:1.8,shape:'spline',smoothing:0.6},
-      hovertemplate:'%{x|%Y-%m-%d %H:%M}<br>%{y:.3f} '+s.unit+'<extra>'+s.name+'</extra>'});
-  });
-
-  var shapes=[], annos=[];
-  if(C.showBands){
-    annos.push({xref:'paper',yref:'y',x:0,xanchor:'right',y:C.danger,text:'Danger ',
-      showarrow:false,font:{color:'#dc2626',size:10,family:'monospace'}});
-    annos.push({xref:'paper',yref:'y',x:0,xanchor:'right',y:C.alarm,text:'Alarm ',
-      showarrow:false,font:{color:'#d97706',size:10,family:'monospace'}});
-  }
-  if(C.cursorsOn){
-    shapes.push({type:'line',xref:'x',yref:'paper',x0:new Date(tA),x1:new Date(tA),
-      y0:0,y1:1,line:{color:'#ea580c',width:2}});
-    shapes.push({type:'line',xref:'x',yref:'paper',x0:new Date(tB),x1:new Date(tB),
-      y0:0,y1:1,line:{color:'#16a34a',width:2}});
-    annos.push({xref:'paper',yref:'paper',x:0.995,y:0.98,xanchor:'right',yanchor:'top',
-      align:'left',text:roText(),showarrow:false,
-      font:{family:'monospace',size:12,color:'#0f172a'},
-      bgcolor:'rgba(255,255,255,0.94)',bordercolor:'#cbd5e1',borderwidth:1,borderpad:9});
-  }
-
-  var layout={
-    margin:{l:62,r:18,t:30,b:28},height:520,plot_bgcolor:'white',paper_bgcolor:'white',
-    font:{family:'-apple-system,system-ui,sans-serif',size:11,color:'#475569'},
-    xaxis:{type:'date',showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',
-      zeroline:false,range:[XR[0],XR[1]]},
-    yaxis:{showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',zeroline:false,
-      title:{text:C.yTitle,font:{family:'monospace',size:11}},tickfont:{family:'monospace'}},
-    showlegend:true,legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'right',x:1,
-      font:{size:11},bgcolor:'rgba(0,0,0,0)'},
-    hovermode:'closest',shapes:shapes,annotations:annos,dragmode:false
-  };
-  var cfg={displaylogo:false,displayModeBar:false,edits:{shapePosition:true},responsive:true};
-
   try{
+    var S=__SERIES__, C=__CFG__;
+    var toMs=function(iso){return new Date(iso).getTime();};
+    S.forEach(function(s){s.ms=s.x.map(toMs);});
+    var xr0=toMs(C.xr0), xr1=toMs(C.xr1);
+    var tA=xr0+(xr1-xr0)*0.20, tB=xr0+(xr1-xr0)*0.85;
+
+    function nearest(s,t){
+      var a=s.ms, lo=0, hi=a.length-1;
+      if(t<=a[0])return 0; if(t>=a[hi])return hi;
+      while(lo<=hi){var m=(lo+hi)>>1; if(a[m]<t)lo=m+1; else hi=m-1;}
+      var i=lo; if(i>0&&Math.abs(a[i-1]-t)<=Math.abs(a[i]-t))i--; return i;
+    }
+    function fdt(ms){var d=new Date(ms);var p=function(n){return(''+n).padStart(2,'0');};
+      return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
+    function roText(){
+      var p=S[0]; var ia=nearest(p,tA), ib=nearest(p,tB);
+      var va=p.y[ia], vb=p.y[ib];
+      if(va==null||vb==null)return '';
+      var d=vb-va; var pc=va?(d/va*100):0;
+      return '<span style="color:#ea580c"><b>Cursor A</b></span>   '+va.toFixed(2)+' '+p.unit+'   '+fdt(tA)
+        +'<br><span style="color:#16a34a"><b>Cursor B</b></span>   '+vb.toFixed(2)+' '+p.unit+'   '+fdt(tB)
+        +'<br><b>D (B-A)</b>   <span style="color:#b91c1c">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
+        +' ('+(pc>=0?'+':'')+pc.toFixed(0)+'%)</span>';
+    }
+
+    var data=[];
+    if(C.showBands){
+      data.push({x:[C.xr0,C.xr1,C.xr1,C.xr0],y:[C.danger,C.danger,C.yMax*1.03,C.yMax*1.03],
+        mode:'lines',fill:'toself',fillcolor:'rgba(239,68,68,0.05)',line:{width:0},
+        hoverinfo:'skip',showlegend:false});
+      data.push({x:[C.xr0,C.xr1],y:[C.danger,C.danger],mode:'lines',
+        line:{color:'#dc2626',width:1.4,dash:'dash'},name:'Danger',hoverinfo:'skip',showlegend:false});
+      data.push({x:[C.xr0,C.xr1],y:[C.alarm,C.alarm],mode:'lines',
+        line:{color:'#d97706',width:1.4,dash:'dash'},name:'Alarm',hoverinfo:'skip',showlegend:false});
+    }
+    S.forEach(function(s){
+      data.push({type:'scatter',mode:'lines',name:s.name,x:s.x,y:s.y,
+        line:{color:s.color,width:1.8,shape:'spline',smoothing:0.6},
+        hovertemplate:'%{x|%Y-%m-%d %H:%M}<br>%{y:.3f} '+s.unit+'<extra>'+s.name+'</extra>'});
+    });
+
+    var shapes=[], annos=[];
+    if(C.showBands){
+      annos.push({xref:'paper',yref:'y',x:0,xanchor:'right',y:C.danger,text:'Danger ',
+        showarrow:false,font:{color:'#dc2626',size:10,family:'monospace'}});
+      annos.push({xref:'paper',yref:'y',x:0,xanchor:'right',y:C.alarm,text:'Alarm ',
+        showarrow:false,font:{color:'#d97706',size:10,family:'monospace'}});
+    }
+    if(C.cursorsOn){
+      var sA=new Date(tA).toISOString(), sB=new Date(tB).toISOString();
+      shapes.push({type:'line',xref:'x',yref:'paper',x0:sA,x1:sA,y0:0,y1:1,
+        line:{color:'#ea580c',width:2}});
+      shapes.push({type:'line',xref:'x',yref:'paper',x0:sB,x1:sB,y0:0,y1:1,
+        line:{color:'#16a34a',width:2}});
+      annos.push({xref:'paper',yref:'paper',x:0.995,y:0.98,xanchor:'right',yanchor:'top',
+        align:'left',text:roText(),showarrow:false,
+        font:{family:'monospace',size:12,color:'#0f172a'},
+        bgcolor:'rgba(255,255,255,0.94)',bordercolor:'#cbd5e1',borderwidth:1,borderpad:9});
+    }
+
+    var layout={
+      margin:{l:62,r:18,t:30,b:28},height:520,plot_bgcolor:'white',paper_bgcolor:'white',
+      font:{family:'-apple-system,system-ui,sans-serif',size:11,color:'#475569'},
+      xaxis:{type:'date',showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',
+        zeroline:false,range:[C.xr0,C.xr1]},
+      yaxis:{showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',zeroline:false,
+        title:{text:C.yTitle,font:{family:'monospace',size:11}},tickfont:{family:'monospace'}},
+      showlegend:true,legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'right',x:1,
+        font:{size:11},bgcolor:'rgba(0,0,0,0)'},
+      hovermode:'closest',shapes:shapes,annotations:annos
+    };
+    var cfg={displaylogo:false,displayModeBar:false,edits:{shapePosition:true},responsive:true};
+
     Plotly.newPlot(div,data,layout,cfg).then(function(){
-      setTimeout(function(){try{Plotly.Plots.resize(div);}catch(e){}},80);
+      setTimeout(function(){try{Plotly.Plots.resize(div);}catch(e){}},100);
       if(!C.cursorsOn)return;
-      var busy=false;
+      var ri=annos.length-1, busy=false;
       div.on('plotly_relayout',function(ev){
         if(busy)return; var ch=false;
         for(var k in ev){
@@ -3578,18 +3581,18 @@ _TREND_JS_TEMPLATE = r"""
           if(m){var idx=+m[1], xv=new Date(ev[k]).getTime();
             if(idx===0){tA=xv;ch=true;} if(idx===1){tB=xv;ch=true;}}
         }
-        if(ch){busy=true; Plotly.relayout(div,{'annotations['+(annos.length-1)+'].text':roText()})
-          .then(function(){busy=false;});}
+        if(ch){busy=true; var rl={}; rl['annotations['+ri+'].text']=roText();
+          Plotly.relayout(div,rl).then(function(){busy=false;});}
       });
-    });
+    }).catch(function(err){showErr('newPlot: '+(err&&err.message?err.message:err));});
+
+    window.addEventListener('resize',function(){try{Plotly.Plots.resize(div);}catch(e){}});
+    document.getElementById('dl').onclick=function(){
+      try{Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});}catch(e){}
+    };
   }catch(err){
-    div.innerHTML='<div style="padding:24px;color:#b91c1c;font-size:12px;">'+
-      'Error al dibujar el gráfico: '+(err&&err.message?err.message:err)+'</div>';
+    showErr('JS: '+(err&&err.message?err.message:err));
   }
-  window.addEventListener('resize',function(){try{Plotly.Plots.resize(div);}catch(e){}});
-  document.getElementById('dl').onclick=function(){
-    try{Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});}catch(e){}
-  };
 })();
 </script>
 """
