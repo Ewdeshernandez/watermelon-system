@@ -3475,6 +3475,11 @@ def _render_trend_tiles(sensor_data: List[Dict[str, Any]], range_choice: str) ->
 _TREND_JS_TEMPLATE = r"""
 <div id="wrap" style="position:relative;font-family:-apple-system,system-ui,sans-serif;">
   <div id="chart" style="width:100%;height:520px;"></div>
+  <div id="readout" style="position:absolute;top:14px;right:24px;display:none;
+    background:rgba(255,255,255,0.86);backdrop-filter:blur(2px);border:1px solid #e2e8f0;
+    border-radius:12px;padding:11px 15px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12.5px;line-height:1.55;color:#0f172a;box-shadow:0 4px 14px rgba(11,31,58,.12);
+    pointer-events:none;white-space:pre;"></div>
   <div style="text-align:right;margin-top:8px;">
     <button id="dl" style="display:inline-flex;align-items:center;gap:8px;
       background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;border:1px solid #0e2547;
@@ -3518,7 +3523,7 @@ _TREND_JS_TEMPLATE = r"""
       var d=vb-va; var pc=va?(d/va*100):0;
       return '<span style="color:#ea580c"><b>Cursor A</b></span>   '+va.toFixed(2)+' '+p.unit+'   '+fdt(tA)
         +'<br><span style="color:#16a34a"><b>Cursor B</b></span>   '+vb.toFixed(2)+' '+p.unit+'   '+fdt(tB)
-        +'<br><b>D (B-A)</b>   <span style="color:#b91c1c">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
+        +'<br><b>Δ (B − A)</b>   <span style="color:#b91c1c">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
         +' ('+(pc>=0?'+':'')+pc.toFixed(0)+'%)</span>';
     }
 
@@ -3548,13 +3553,9 @@ _TREND_JS_TEMPLATE = r"""
     if(C.cursorsOn){
       var sA=new Date(tA).toISOString(), sB=new Date(tB).toISOString();
       shapes.push({type:'line',xref:'x',yref:'paper',x0:sA,x1:sA,y0:0,y1:1,
-        line:{color:'#ea580c',width:2}});
+        line:{color:'#ea580c',width:2.5}});
       shapes.push({type:'line',xref:'x',yref:'paper',x0:sB,x1:sB,y0:0,y1:1,
-        line:{color:'#16a34a',width:2}});
-      annos.push({xref:'paper',yref:'paper',x:0.995,y:0.98,xanchor:'right',yanchor:'top',
-        align:'left',text:roText(),showarrow:false,
-        font:{family:'monospace',size:12,color:'#0f172a'},
-        bgcolor:'rgba(255,255,255,0.94)',bordercolor:'#cbd5e1',borderwidth:1,borderpad:9});
+        line:{color:'#16a34a',width:2.5}});
     }
 
     var layout={
@@ -3570,10 +3571,21 @@ _TREND_JS_TEMPLATE = r"""
     };
     var cfg={displaylogo:false,displayModeBar:false,edits:{shapePosition:true},responsive:true};
 
+    var ro=document.getElementById('readout');
+    function updateRO(){ if(ro){ro.style.display='block'; ro.innerHTML=roText();} }
+    function setShapes(){
+      var sa=new Date(tA).toISOString(), sb=new Date(tB).toISOString();
+      var u={}; u['shapes[0].x0']=sa; u['shapes[0].x1']=sa;
+      u['shapes[1].x0']=sb; u['shapes[1].x1']=sb;
+      return Plotly.relayout(div,u);
+    }
+
     Plotly.newPlot(div,data,layout,cfg).then(function(){
       setTimeout(function(){try{Plotly.Plots.resize(div);}catch(e){}},100);
       if(!C.cursorsOn)return;
-      var ri=annos.length-1, busy=false;
+      updateRO();
+      var busy=false, downX=null;
+      // Arrastre nativo de las líneas (bonus si el navegador lo permite).
       div.on('plotly_relayout',function(ev){
         if(busy)return; var ch=false;
         for(var k in ev){
@@ -3581,14 +3593,36 @@ _TREND_JS_TEMPLATE = r"""
           if(m){var idx=+m[1], xv=new Date(ev[k]).getTime();
             if(idx===0){tA=xv;ch=true;} if(idx===1){tB=xv;ch=true;}}
         }
-        if(ch){busy=true; var rl={}; rl['annotations['+ri+'].text']=roText();
-          Plotly.relayout(div,rl).then(function(){busy=false;});}
+        if(ch)updateRO();
+      });
+      // CLIC en el gráfico → mueve el cursor MÁS CERCANO a ese tiempo (fiable).
+      div.addEventListener('mousedown',function(e){downX=e.clientX;});
+      div.addEventListener('click',function(e){
+        if(downX!=null && Math.abs(e.clientX-downX)>4){downX=null;return;}  // fue arrastre
+        var dl=div.querySelector('.nsewdrag'); if(!dl)return;
+        var bb=dl.getBoundingClientRect();
+        if(e.clientX<bb.left||e.clientX>bb.right||e.clientY<bb.top||e.clientY>bb.bottom)return;
+        var xa=div._fullLayout.xaxis; var xv=xa.p2d(e.clientX-bb.left);
+        if(xv==null)return;
+        if(Math.abs(xv-tA)<=Math.abs(xv-tB))tA=xv; else tB=xv;
+        busy=true; setShapes().then(function(){busy=false;}); updateRO();
       });
     }).catch(function(err){showErr('newPlot: '+(err&&err.message?err.message:err));});
 
     window.addEventListener('resize',function(){try{Plotly.Plots.resize(div);}catch(e){}});
     document.getElementById('dl').onclick=function(){
-      try{Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});}catch(e){}
+      try{
+        if(!C.cursorsOn){Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});return;}
+        // Para el PNG metemos el recuadro como anotación (el div HTML no sale en la imagen).
+        var base=layout.annotations||[];
+        var box={xref:'paper',yref:'paper',x:0.995,y:0.98,xanchor:'right',yanchor:'top',
+          align:'left',text:roText(),showarrow:false,
+          font:{family:'monospace',size:12,color:'#0f172a'},
+          bgcolor:'rgba(255,255,255,0.95)',bordercolor:'#cbd5e1',borderwidth:1,borderpad:9};
+        Plotly.relayout(div,{annotations:base.concat([box])}).then(function(){
+          return Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});
+        }).then(function(){Plotly.relayout(div,{annotations:base});});
+      }catch(e){}
     };
   }catch(err){
     showErr('JS: '+(err&&err.message?err.message:err));
@@ -3849,11 +3883,11 @@ def render_history_chart(
         and sensor_data[0]["danger"] > sensor_data[0]["alarm"])
 
     _cur_on = st.toggle(
-        "\U0001F4CD Cursores A / B \u2014 arr\u00e1stralos sobre el gr\u00e1fico", value=False,
+        "\U0001F4CD Cursores A / B \u2014 clic en el gr\u00e1fico para colocarlos", value=False,
         key="live_trend_cursors",
-        help="Enciende dos punteros (A naranja, B verde) y arr\u00e1stralos sobre el "
-             "gr\u00e1fico. El recuadro muestra el valor en A, en B y su diferencia, en "
-             "vivo. Estilo System1.")
+        help="Enciende dos punteros (A naranja, B verde). Haz CLIC en el gr\u00e1fico y "
+             "se mueve el cursor m\u00e1s cercano a ese punto (o arr\u00e1stralo). El recuadro "
+             "muestra el valor en A, en B y su diferencia, en vivo. Estilo System1.")
 
     def _ds_js(_df, _n=300):
         if len(_df) <= _n:
