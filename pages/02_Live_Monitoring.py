@@ -3591,11 +3591,17 @@ _TREND_JS_TEMPLATE = r"""
       // corrompa → antes 'sólo movía B' porque tA quedaba NaN).
       div.addEventListener('mousedown',function(e){downX=e.clientX;});
       div.addEventListener('click',function(e){
-        if(downX!=null && Math.abs(e.clientX-downX)>4){downX=null;return;}  // fue arrastre/zoom
-        var dl=div.querySelector('.nsewdrag'); if(!dl)return;
-        var bb=dl.getBoundingClientRect();
-        if(e.clientX<bb.left||e.clientX>bb.right||e.clientY<bb.top||e.clientY>bb.bottom)return;
-        var xa=div._fullLayout.xaxis; var xv=xa.p2d(e.clientX-bb.left);
+        if(downX!=null && Math.abs(e.clientX-downX)>4){downX=null;return;}  // fue arrastre
+        // Pixel → tiempo usando los márgenes del plot (NO .nsewdrag, que con
+        // dragmode:false no existe → antes el clic no hacía nada).
+        var fl=div._fullLayout; if(!fl||!fl._size)return;
+        var rect=div.getBoundingClientRect();
+        var sx=rect.width/((fl.width)||rect.width);  if(!sx)sx=1;
+        var sy=rect.height/((fl.height)||rect.height); if(!sy)sy=1;
+        var px=(e.clientX-rect.left)/sx - fl._size.l;
+        var py=(e.clientY-rect.top)/sy - fl._size.t;
+        if(px<0||px>fl._size.w||py<0||py>fl._size.h)return;  // sólo dentro del plot
+        var xv=fl.xaxis.p2d(px);
         if(xv==null||isNaN(xv))return;
         if(Math.abs(xv-tA)<=Math.abs(xv-tB))tA=xv; else tB=xv;
         if(tA>tB){var t=tA; tA=tB; tB=t;}   // A siempre antes que B
