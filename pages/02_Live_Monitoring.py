@@ -3482,11 +3482,17 @@ _TREND_JS_TEMPLATE = r"""
       font-family:inherit;box-shadow:0 2px 6px rgba(11,31,58,.18);">⬇ Descargar PNG</button>
   </div>
 </div>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
 <script>
 (function(){
-  var S=__SERIES__, C=__CFG__;
   var div=document.getElementById('chart');
+  if(typeof Plotly==='undefined'){
+    div.innerHTML='<div style="padding:24px;color:#b91c1c;font-size:13px;">'+
+      'No se pudo cargar la librería del gráfico (plotly.js). Revisa la conexión '+
+      'o recarga la página.</div>';
+    return;
+  }
+  var S=__SERIES__, C=__CFG__;
   var toMs=function(iso){return new Date(iso).getTime();};
   S.forEach(function(s){s.ms=s.x.map(toMs);});
   var xr0=toMs(C.xr0), xr1=toMs(C.xr1);
@@ -3560,22 +3566,29 @@ _TREND_JS_TEMPLATE = r"""
   };
   var cfg={displaylogo:false,displayModeBar:false,edits:{shapePosition:true},responsive:true};
 
-  Plotly.newPlot(div,data,layout,cfg).then(function(){
-    if(!C.cursorsOn)return;
-    var busy=false;
-    div.on('plotly_relayout',function(ev){
-      if(busy)return; var ch=false;
-      for(var k in ev){
-        var m=k.match(/^shapes\[(\d+)\]\.x0$/);
-        if(m){var idx=+m[1], xv=new Date(ev[k]).getTime();
-          if(idx===0){tA=xv;ch=true;} if(idx===1){tB=xv;ch=true;}}
-      }
-      if(ch){busy=true; Plotly.relayout(div,{'annotations['+(annos.length-1)+'].text':roText()})
-        .then(function(){busy=false;});}
+  try{
+    Plotly.newPlot(div,data,layout,cfg).then(function(){
+      setTimeout(function(){try{Plotly.Plots.resize(div);}catch(e){}},80);
+      if(!C.cursorsOn)return;
+      var busy=false;
+      div.on('plotly_relayout',function(ev){
+        if(busy)return; var ch=false;
+        for(var k in ev){
+          var m=k.match(/^shapes\[(\d+)\]\.x0$/);
+          if(m){var idx=+m[1], xv=new Date(ev[k]).getTime();
+            if(idx===0){tA=xv;ch=true;} if(idx===1){tB=xv;ch=true;}}
+        }
+        if(ch){busy=true; Plotly.relayout(div,{'annotations['+(annos.length-1)+'].text':roText()})
+          .then(function(){busy=false;});}
+      });
     });
-  });
+  }catch(err){
+    div.innerHTML='<div style="padding:24px;color:#b91c1c;font-size:12px;">'+
+      'Error al dibujar el gráfico: '+(err&&err.message?err.message:err)+'</div>';
+  }
+  window.addEventListener('resize',function(){try{Plotly.Plots.resize(div);}catch(e){}});
   document.getElementById('dl').onclick=function(){
-    Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});
+    try{Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});}catch(e){}
   };
 })();
 </script>
