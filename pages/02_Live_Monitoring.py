@@ -3530,14 +3530,26 @@ _TREND_JS_TEMPLATE = r"""
         +'<br><span style="color:#16a34a"><b>Cursor B</b></span>   '+vb.toFixed(2)+' '+p.unit+'   '+fdt(tB)
         +'<br><b>Δ (B − A)</b>   <span style="color:'+dc+'">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
         +' ('+(pc>=0?'+':'')+pc.toFixed(0)+'%)</span>'
-        +'<br><b>Δt</b>          <span style="color:#64748b">'+fdur(tB-tA)+'</span>';
+        +'<br><b>Δt</b>          <span style="color:#64748b">'+fdur(tB-tA)+'</span>'
+        +slopeLine(d,tB-tA,p.unit);
+    }
+    function slopeLine(d,dms,unit){
+      var days=Math.abs(dms)/86400000; if(days<0.02)return '';   // <~30min: sin tasa
+      var sl=d/days; var sc=(sl>0?'#b91c1c':'#15803d');          // sube=rojo baja=verde
+      return '<br><b>tasa</b>        <span style="color:'+sc+'">'
+        +(sl>=0?'+':'')+sl.toFixed(2)+' '+unit+'/día</span>';
     }
 
     var data=[];
+    function zone(y0,y1,col){ data.push({x:[C.xr0,C.xr1,C.xr1,C.xr0],y:[y0,y0,y1,y1],
+        mode:'lines',fill:'toself',fillcolor:col,line:{width:0},hoverinfo:'skip',showlegend:false}); }
     if(C.showBands){
+      // Zonas ISO derivadas de los umbrales configurados: verde OK, ámbar alerta, rojo peligro.
+      zone(0,C.alarm,'rgba(22,163,74,0.045)');          // 0 → Alarm  (OK)
+      zone(C.alarm,C.danger,'rgba(217,119,6,0.06)');    // Alarm → Danger (alerta)
       data.push({x:[C.xr0,C.xr1,C.xr1,C.xr0],y:[C.danger,C.danger,C.yMax*1.03,C.yMax*1.03],
-        mode:'lines',fill:'toself',fillcolor:'rgba(239,68,68,0.05)',line:{width:0},
-        hoverinfo:'skip',showlegend:false});
+        mode:'lines',fill:'toself',fillcolor:'rgba(239,68,68,0.07)',line:{width:0},
+        hoverinfo:'skip',showlegend:false});          // Danger → tope (peligro)
       data.push({x:[C.xr0,C.xr1],y:[C.danger,C.danger],mode:'lines',
         line:{color:'#dc2626',width:1.4,dash:'dash'},name:'Danger',hoverinfo:'skip',showlegend:false});
       data.push({x:[C.xr0,C.xr1],y:[C.alarm,C.alarm],mode:'lines',
@@ -3572,14 +3584,17 @@ _TREND_JS_TEMPLATE = r"""
       margin:{l:62,r:18,t:30,b:46},height:520,plot_bgcolor:'white',paper_bgcolor:'white',
       font:{family:'-apple-system,system-ui,sans-serif',size:11,color:'#475569'},
       xaxis:{type:'date',showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',
-        zeroline:false,range:[C.xr0,C.xr1],tickfont:{size:9.5,family:'monospace'}},
+        zeroline:false,range:[C.xr0,C.xr1],tickfont:{size:9.5,family:'monospace'},
+        showspikes:true,spikemode:'across',spikethickness:1,spikedash:'dot',
+        spikecolor:'#94a3b8',spikesnap:'cursor'},
       yaxis:{showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',zeroline:false,
-        title:{text:C.yTitle,font:{family:'monospace',size:11}},tickfont:{family:'monospace'}},
+        title:{text:C.yTitle,font:{family:'monospace',size:11}},tickfont:{family:'monospace'},
+        showspikes:true,spikemode:'across',spikethickness:1,spikedash:'dot',spikecolor:'#94a3b8'},
       showlegend:true,legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'right',x:1,
         font:{size:11},bgcolor:'rgba(0,0,0,0)'},
       hovermode:'closest',shapes:shapes,annotations:annos,dragmode:false
     };
-    var cfg={displaylogo:false,displayModeBar:false,responsive:true};
+    var cfg={displaylogo:false,displayModeBar:false,responsive:true,doubleClick:false};
 
     var ro=document.getElementById('readout');
     function updateRO(){ if(ro){ro.style.display='block'; ro.innerHTML=roText();} }
@@ -3623,6 +3638,12 @@ _TREND_JS_TEMPLATE = r"""
         if(S[0]&&S[0].ms&&S[0].ms.length){var si=nearest(S[0],xv); xv=S[0].ms[si];}  // snap al dato
         if(Math.abs(xv-tA)<=Math.abs(xv-tB))tA=xv; else tB=xv;
         if(tA>tB){var t=tA; tA=tB; tB=t;}   // A siempre antes que B
+        setShapes(); updateRO();
+      });
+      // DOBLE-CLIC → resetea cursores a su posición inicial (20% / 85% del rango).
+      div.addEventListener('dblclick',function(e){
+        tA=xr0+(xr1-xr0)*0.20; tB=xr0+(xr1-xr0)*0.85;
+        if(S[0]&&S[0].ms&&S[0].ms.length){tA=S[0].ms[nearest(S[0],tA)]; tB=S[0].ms[nearest(S[0],tB)];}
         setShapes(); updateRO();
       });
     }).catch(function(err){showErr('newPlot: '+(err&&err.message?err.message:err));});
