@@ -3553,9 +3553,9 @@ _TREND_JS_TEMPLATE = r"""
     if(C.cursorsOn){
       var sA=new Date(tA).toISOString(), sB=new Date(tB).toISOString();
       shapes.push({type:'line',xref:'x',yref:'paper',x0:sA,x1:sA,y0:0,y1:1,
-        line:{color:'#ea580c',width:2.5}});
+        line:{color:'#ea580c',width:1.5,dash:'dash'}});
       shapes.push({type:'line',xref:'x',yref:'paper',x0:sB,x1:sB,y0:0,y1:1,
-        line:{color:'#16a34a',width:2.5}});
+        line:{color:'#16a34a',width:1.5,dash:'dash'}});
     }
 
     var layout={
@@ -3567,9 +3567,9 @@ _TREND_JS_TEMPLATE = r"""
         title:{text:C.yTitle,font:{family:'monospace',size:11}},tickfont:{family:'monospace'}},
       showlegend:true,legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'right',x:1,
         font:{size:11},bgcolor:'rgba(0,0,0,0)'},
-      hovermode:'closest',shapes:shapes,annotations:annos
+      hovermode:'closest',shapes:shapes,annotations:annos,dragmode:false
     };
-    var cfg={displaylogo:false,displayModeBar:false,edits:{shapePosition:true},responsive:true};
+    var cfg={displaylogo:false,displayModeBar:false,responsive:true};
 
     var ro=document.getElementById('readout');
     function updateRO(){ if(ro){ro.style.display='block'; ro.innerHTML=roText();} }
@@ -3584,28 +3584,22 @@ _TREND_JS_TEMPLATE = r"""
       setTimeout(function(){try{Plotly.Plots.resize(div);}catch(e){}},100);
       if(!C.cursorsOn)return;
       updateRO();
-      var busy=false, downX=null;
-      // Arrastre nativo de las líneas (bonus si el navegador lo permite).
-      div.on('plotly_relayout',function(ev){
-        if(busy)return; var ch=false;
-        for(var k in ev){
-          var m=k.match(/^shapes\[(\d+)\]\.x0$/);
-          if(m){var idx=+m[1], xv=new Date(ev[k]).getTime();
-            if(idx===0){tA=xv;ch=true;} if(idx===1){tB=xv;ch=true;}}
-        }
-        if(ch)updateRO();
-      });
-      // CLIC en el gráfico → mueve el cursor MÁS CERCANO a ese tiempo (fiable).
+      var downX=null;
+      // CLIC en el gráfico → mueve el cursor MÁS CERCANO a ese tiempo. A y B se
+      // mantienen ordenados (A siempre ANTES que B) → la diferencia es siempre
+      // A → B (B − A). tA/tB sólo se tocan aquí (sin handler de arrastre que los
+      // corrompa → antes 'sólo movía B' porque tA quedaba NaN).
       div.addEventListener('mousedown',function(e){downX=e.clientX;});
       div.addEventListener('click',function(e){
-        if(downX!=null && Math.abs(e.clientX-downX)>4){downX=null;return;}  // fue arrastre
+        if(downX!=null && Math.abs(e.clientX-downX)>4){downX=null;return;}  // fue arrastre/zoom
         var dl=div.querySelector('.nsewdrag'); if(!dl)return;
         var bb=dl.getBoundingClientRect();
         if(e.clientX<bb.left||e.clientX>bb.right||e.clientY<bb.top||e.clientY>bb.bottom)return;
         var xa=div._fullLayout.xaxis; var xv=xa.p2d(e.clientX-bb.left);
-        if(xv==null)return;
+        if(xv==null||isNaN(xv))return;
         if(Math.abs(xv-tA)<=Math.abs(xv-tB))tA=xv; else tB=xv;
-        busy=true; setShapes().then(function(){busy=false;}); updateRO();
+        if(tA>tB){var t=tA; tA=tB; tB=t;}   // A siempre antes que B
+        setShapes(); updateRO();
       });
     }).catch(function(err){showErr('newPlot: '+(err&&err.message?err.message:err));});
 
