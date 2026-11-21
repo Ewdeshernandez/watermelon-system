@@ -3594,14 +3594,17 @@ _TREND_JS_TEMPLATE = r"""
         if(downX!=null && Math.abs(e.clientX-downX)>4){downX=null;return;}  // fue arrastre
         // Pixel → tiempo usando los márgenes del plot (NO .nsewdrag, que con
         // dragmode:false no existe → antes el clic no hacía nada).
-        var fl=div._fullLayout; if(!fl||!fl._size)return;
+        var fl=div._fullLayout; if(!fl||!fl.xaxis)return;
         var rect=div.getBoundingClientRect();
         var sx=rect.width/((fl.width)||rect.width);  if(!sx)sx=1;
         var sy=rect.height/((fl.height)||rect.height); if(!sy)sy=1;
-        var px=(e.clientX-rect.left)/sx - fl._size.l;
-        var py=(e.clientY-rect.top)/sy - fl._size.t;
-        if(px<0||px>fl._size.w||py<0||py>fl._size.h)return;  // sólo dentro del plot
-        var xv=fl.xaxis.p2d(px);
+        // pixel DESDE el borde izq del div (p2d resta el _offset del eje SOLO).
+        var px=(e.clientX-rect.left)/sx;
+        var py=(e.clientY-rect.top)/sy;
+        var ax=fl.xaxis, off=ax._offset, len=ax._length;         // área del plot en X
+        var ty=fl._size.t, hy=fl._size.h;                        // área del plot en Y
+        if(px<off||px>off+len||py<ty||py>ty+hy)return;           // sólo dentro del plot
+        var xv=ax.p2d(px);
         if(xv==null||isNaN(xv))return;
         if(Math.abs(xv-tA)<=Math.abs(xv-tB))tA=xv; else tB=xv;
         if(tA>tB){var t=tA; tA=tB; tB=t;}   // A siempre antes que B
