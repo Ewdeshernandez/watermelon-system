@@ -3598,14 +3598,17 @@ _TREND_JS_TEMPLATE = r"""
         var rect=div.getBoundingClientRect();
         var sx=rect.width/((fl.width)||rect.width);  if(!sx)sx=1;
         var sy=rect.height/((fl.height)||rect.height); if(!sy)sy=1;
-        // pixel DESDE el borde izq del div (p2d resta el _offset del eje SOLO).
-        var px=(e.clientX-rect.left)/sx;
+        var px=(e.clientX-rect.left)/sx;                         // pixel desde borde izq del div
         var py=(e.clientY-rect.top)/sy;
         var ax=fl.xaxis, off=ax._offset, len=ax._length;         // área del plot en X
         var ty=fl._size.t, hy=fl._size.h;                        // área del plot en Y
         if(px<off||px>off+len||py<ty||py>ty+hy)return;           // sólo dentro del plot
-        var xv=ax.p2d(px);
-        if(xv==null||isNaN(xv))return;
+        // ⚠️ NO usar ax.p2d(px): en eje 'date' devuelve un STRING ('2026-11-15 12:28')
+        // → isNaN(string)=true → el handler SIEMPRE hacía return → el cursor nunca se
+        // movía (bug en TODOS los intentos). Como el rango está fijo (xr0..xr1 en ms),
+        // interpolamos linealmente sobre el área del plot. Robusto, sin parsear strings.
+        var frac=(px-off)/len; var xv=xr0+frac*(xr1-xr0);        // ms
+        if(!isFinite(xv))return;
         if(Math.abs(xv-tA)<=Math.abs(xv-tB))tA=xv; else tB=xv;
         if(tA>tB){var t=tA; tA=tB; tB=t;}   // A siempre antes que B
         setShapes(); updateRO();
