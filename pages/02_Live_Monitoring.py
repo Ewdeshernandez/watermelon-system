@@ -3833,96 +3833,72 @@ def render_history_chart(
                     f"%{{y:.3f}} {sd['unit']}<extra></extra>"
                 ),
             ))
-        # ---- Capa CLICKEABLE invisible (opacity 0) ----
-        # MODO CURSOR: rejilla que cubre TODO el plot → el clic en cualquier parte
-        # devuelve un x y el puntero se mueve ahí (antes sólo corría si pegabas
-        # justo en la curva → "no se dejaba correr").
-        # MODO NOTA: marcadores sobre la curva → el clic da el punto real (x, valor).
+        # ---- Capa CLICKEABLE invisible SOBRE la curva (ambos modos) ----
+        # El clic devuelve el punto real de la curva (x, valor). En modo cursor el
+        # puntero salta a ese punto (vive SOBRE la línea); en modo nota abre la caja.
+        # (Antes usaba una rejilla invisible que Streamlit NO registraba al clic →
+        # "lo muevo y no funciona". Los marcadores sobre la curva SÍ se clickean.)
         _nlines = len(fig.data)
-        if _cur_on:
-            _gx = pd.concat([sd["df"]["captured_at"] for sd in sensor_data])
-            _gxs = list(pd.date_range(_gx.min(), _gx.max(), periods=200))
-            _vlo = float(all_values.min()); _vhi = float(all_values.max())
-            if show_bands:
-                _vhi = max(_vhi, float(sensor_data[0]["danger"]))
-            _pad = (_vhi - _vlo) * 0.12 + 1e-6
-            _cx = []; _cy = []
-            for _k in range(8):
-                _yy = _vlo - _pad + (_vhi - _vlo + 2 * _pad) * _k / 7.0
-                _cx.extend(_gxs); _cy.extend([_yy] * len(_gxs))
+        for i, sd in enumerate(sensor_data):
+            ds = _downsample(sd["df"])
             fig.add_trace(go.Scatter(
-                x=_cx, y=_cy, mode="markers",
-                marker=dict(size=38, color="rgba(0,0,0,0)", opacity=0),
+                x=ds["captured_at"], y=ds["value"], mode="markers",
+                marker=dict(size=18, color=palette[i % len(palette)], opacity=0),
                 name="", showlegend=False, hoverinfo="skip"))
-        else:
-            for i, sd in enumerate(sensor_data):
-                ds = _downsample(sd["df"])
-                fig.add_trace(go.Scatter(
-                    x=ds["captured_at"], y=ds["value"], mode="markers",
-                    marker=dict(size=16, color=palette[i % len(palette)], opacity=0),
-                    name="", showlegend=False, hoverinfo="skip"))
 
-        # Líneas verticales (cursores + notas) con add_shape DIRECTO (xref=x,
-        # yref=paper) y x como ISO string. NO usar add_vline: su lógica de
-        # "spanning all axes" hace aritmética Timestamp±int que rompe en pandas 2.x
-        # (el gráfico caía al fallback feo).
-        # Línea vertical (cursor o nota). add_shape DIRECTO (xref=x, yref=paper,
-        # x ISO string) — NO add_vline (su aritmética Timestamp±int rompe en
-        # pandas 2.x → el gráfico caía al fallback feo).
-        def _vline(_x_iso, _color, _dash, _width=1.3):
-            fig.add_shape(type="line", xref="x", yref="paper",
-                          x0=_x_iso, x1=_x_iso, y0=0, y1=1,
-                          line=dict(color=_color, width=_width, dash=_dash))
+        # Serie primaria (canal superior) para "pegar" cursores y notas a la curva.
+        _prim = (sensor_data[0]["df"].set_index("captured_at").sort_index()["value"])
+        _primu = sensor_data[0]["unit"]
 
-        # Etiqueta tipo "pastilla" (fondo + borde) para que se lea sobre la curva
-        # sin ensuciarla. Cursores A/B arriba-dentro (bajo la leyenda); notas
-        # numeradas abajo-dentro. Así NADA se amontona en el borde superior.
-        def _pill(_x_iso, _text, _fg, _bg, _y, _yanchor):
-            fig.add_annotation(
-                xref="x", yref="paper", x=_x_iso, y=_y, text=_text,
-                showarrow=False, yanchor=_yanchor, xanchor="center",
-                font=dict(size=11, color=_fg, family="monospace"),
-                bgcolor=_bg, bordercolor=_fg, borderwidth=1, borderpad=3)
+        def _snap(_t):
+            """Punto de la curva primaria más cercano a _t → (x_en_curva, valor)."""
+            try:
+                _p = _prim.index.get_indexer([_t], method="nearest")[0]
+                if _p < 0:
+                    return None, None
+                return _prim.index[_p], float(_prim.iloc[_p])
+            except Exception:  # noqa: BLE001
+                return None, None
 
-        # Cursores A/B — línea DISCRETA de color (A naranja, B verde) + pastilla
-        # arriba CON EL VALOR del canal primario en ese instante (info sobre el
-        # gráfico, estilo System1). El usuario los mueve con clic.
+        # Cursores A/B — ESTRELLA sobre la curva (A naranja, B verde) + etiqueta con
+        # el VALOR justo encima. Sin línea de lado a lado. El usuario mueve el cursor
+        # haciendo clic en la curva.
         if _ca is not None and _cb is not None:
-            _d0 = (sensor_data[0]["df"].set_index("captured_at")
-                   .sort_index()["value"])
-            _u0 = sensor_data[0]["unit"]
+            for _ct, _lab, _cc in ((_ca, "A", "#ea580c"), (_cb, "B", "#16a34a")):
+                _xs, _vv = _snap(_ct)
+                if _xs is None:
+                    continue
+                fig.add_trace(go.Scatter(
+                    x=[_xs], y=[_vv], mode="markers",
+                    marker=dict(size=18, color=_cc, symbol="star",
+                                line=dict(color="#ffffff", width=1.5)),
+                    name="", showlegend=False,
+                    hovertemplate=f"{_lab} · %{{x|%Y-%m-%d %H:%M}} · "
+                                  f"{_vv:.2f} {_primu}<extra></extra>"))
+                fig.add_annotation(
+                    x=_xs, y=_vv, xref="x", yref="y",
+                    text=f" {_lab} · {_vv:.2f} {_primu} ", showarrow=False,
+                    yshift=20, font=dict(size=11, color="#ffffff", family="monospace"),
+                    bgcolor=_cc, bordercolor=_cc, borderwidth=1, borderpad=3)
 
-            def _nearest_val(_t, _dd=_d0):
-                try:
-                    _p = _dd.index.get_indexer([_t], method="nearest")[0]
-                    return float(_dd.iloc[_p]) if _p >= 0 else None
-                except Exception:  # noqa: BLE001
-                    return None
-            for _ct, _lab, _cc, _cl in (
-                    (_ca, "A", "#ea580c", "rgba(234,88,12,0.65)"),
-                    (_cb, "B", "#16a34a", "rgba(22,163,74,0.65)")):
-                _xi = pd.Timestamp(_ct).isoformat()
-                _vv = _nearest_val(_ct)
-                _lbl = (f" {_lab} · {_vv:.2f} {_u0} " if _vv is not None
-                        else f" {_lab} ")
-                _vline(_xi, _cl, "solid", _width=1.4)   # línea discreta (translúcida)
-                _pill(_xi, _lbl, "#ffffff", _cc, 0.985, "top")  # pastilla sólida
-
-        # Notas — marcador SUTIL en el eje inferior (triángulo verde + número), SIN
-        # la línea vertical de altura completa que ensuciaba el gráfico. Hover =
-        # texto completo; la lista editable va en la bitácora de abajo.
+        # Notas — DIAMANTE sobre la curva + número y texto corto (info visible, ya no
+        # una flechita vacía). Hover = texto completo; edición en la bitácora de abajo.
         for _ni, _an in enumerate(_anns or [], start=1):
             try:
                 _xloc = pd.to_datetime(_an.get("ts"), utc=True).tz_convert(_local_tz())
             except Exception:  # noqa: BLE001
                 continue
             _full = str(_an.get("text") or "")
+            _nxs, _nyv = _snap(_xloc)
+            if _nxs is None:
+                _nxs, _nyv = _xloc, 0.0
+            _short = _full if len(_full) <= 18 else _full[:17] + "…"
             fig.add_trace(go.Scatter(
-                x=[_xloc], y=[0], mode="markers+text",
-                marker=dict(size=12, color="#15803d", symbol="triangle-up",
-                            line=dict(color="#ffffff", width=1)),
-                text=[f"{_ni}"], textposition="bottom center",
-                textfont=dict(size=9, color="#15803d", family="monospace"),
+                x=[_nxs], y=[_nyv], mode="markers+text",
+                marker=dict(size=13, color="#15803d", symbol="diamond",
+                            line=dict(color="#ffffff", width=1.2)),
+                text=[f"📝{_ni} {_short}"], textposition="top center",
+                textfont=dict(size=9.5, color="#15803d", family="monospace"),
                 name="", showlegend=False, cliponaxis=False,
                 hovertemplate=f"📝 {_ni}: {_full}<extra></extra>"))
 
