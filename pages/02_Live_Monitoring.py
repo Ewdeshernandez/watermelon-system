@@ -3467,6 +3467,121 @@ def _render_trend_tiles(sensor_data: List[Dict[str, Any]], range_choice: str) ->
                                 config={"displaylogo": False, "displayModeBar": False})
 
 
+# Plantilla del gráfico de tendencia como componente plotly.js NATIVO (iframe).
+# Cursores A/B ARRASTRABLES (edits.shapePosition) + recuadro de lectura vivo que
+# se actualiza al arrastrar y queda incrustado en el PNG. Streamlit no deja
+# arrastrar ni leer bien el clic en su plotly, por eso se hace directo en JS.
+# __SERIES__ y __CFG__ se reemplazan con JSON desde Python.
+_TREND_JS_TEMPLATE = r"""
+<div id="wrap" style="position:relative;font-family:-apple-system,system-ui,sans-serif;">
+  <div id="chart" style="width:100%;height:520px;"></div>
+  <div style="text-align:right;margin-top:8px;">
+    <button id="dl" style="display:inline-flex;align-items:center;gap:8px;
+      background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;border:1px solid #0e2547;
+      border-radius:10px;padding:9px 16px;font-weight:600;font-size:13px;cursor:pointer;
+      font-family:inherit;box-shadow:0 2px 6px rgba(11,31,58,.18);">⬇ Descargar PNG</button>
+  </div>
+</div>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(function(){
+  var S=__SERIES__, C=__CFG__;
+  var div=document.getElementById('chart');
+  var toMs=function(iso){return new Date(iso).getTime();};
+  S.forEach(function(s){s.ms=s.x.map(toMs);});
+  var xr0=toMs(C.xr0), xr1=toMs(C.xr1);
+  var XR=[new Date(xr0),new Date(xr1)];
+  var tA=xr0+(xr1-xr0)*0.20, tB=xr0+(xr1-xr0)*0.85;
+
+  function nearest(s,t){
+    var a=s.ms, lo=0, hi=a.length-1;
+    if(t<=a[0])return 0; if(t>=a[hi])return hi;
+    while(lo<=hi){var m=(lo+hi)>>1; if(a[m]<t)lo=m+1; else hi=m-1;}
+    var i=lo; if(i>0&&Math.abs(a[i-1]-t)<=Math.abs(a[i]-t))i--; return i;
+  }
+  function fdt(ms){var d=new Date(ms);var p=function(n){return(''+n).padStart(2,'0');};
+    return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
+  function roText(){
+    var p=S[0]; var ia=nearest(p,tA), ib=nearest(p,tB);
+    var va=p.y[ia], vb=p.y[ib];
+    if(va==null||vb==null)return '';
+    var d=vb-va; var pc=va?(d/va*100):0;
+    return '<span style="color:#ea580c"><b>Cursor A</b></span>   '+va.toFixed(2)+' '+p.unit+'   '+fdt(tA)
+      +'<br><span style="color:#16a34a"><b>Cursor B</b></span>   '+vb.toFixed(2)+' '+p.unit+'   '+fdt(tB)
+      +'<br><b>Δ (B − A)</b>   <span style="color:#b91c1c">'+(d>=0?'+':'')+d.toFixed(2)+' '+p.unit
+      +' ('+(pc>=0?'+':'')+pc.toFixed(0)+'%)</span>';
+  }
+
+  var data=[];
+  if(C.showBands){
+    data.push({x:[XR[0],XR[1],XR[1],XR[0]],y:[C.danger,C.danger,C.yMax*1.03,C.yMax*1.03],
+      mode:'lines',fill:'toself',fillcolor:'rgba(239,68,68,0.05)',line:{width:0},
+      hoverinfo:'skip',showlegend:false});
+    data.push({x:XR,y:[C.danger,C.danger],mode:'lines',line:{color:'#dc2626',width:1.4,dash:'dash'},
+      name:'Danger',hoverinfo:'skip',showlegend:false});
+    data.push({x:XR,y:[C.alarm,C.alarm],mode:'lines',line:{color:'#d97706',width:1.4,dash:'dash'},
+      name:'Alarm',hoverinfo:'skip',showlegend:false});
+  }
+  S.forEach(function(s){
+    data.push({type:'scatter',mode:'lines',name:s.name,
+      x:s.x.map(function(t){return new Date(t);}),y:s.y,
+      line:{color:s.color,width:1.8,shape:'spline',smoothing:0.6},
+      hovertemplate:'%{x|%Y-%m-%d %H:%M}<br>%{y:.3f} '+s.unit+'<extra>'+s.name+'</extra>'});
+  });
+
+  var shapes=[], annos=[];
+  if(C.showBands){
+    annos.push({xref:'paper',yref:'y',x:0,xanchor:'right',y:C.danger,text:'Danger ',
+      showarrow:false,font:{color:'#dc2626',size:10,family:'monospace'}});
+    annos.push({xref:'paper',yref:'y',x:0,xanchor:'right',y:C.alarm,text:'Alarm ',
+      showarrow:false,font:{color:'#d97706',size:10,family:'monospace'}});
+  }
+  if(C.cursorsOn){
+    shapes.push({type:'line',xref:'x',yref:'paper',x0:new Date(tA),x1:new Date(tA),
+      y0:0,y1:1,line:{color:'#ea580c',width:2}});
+    shapes.push({type:'line',xref:'x',yref:'paper',x0:new Date(tB),x1:new Date(tB),
+      y0:0,y1:1,line:{color:'#16a34a',width:2}});
+    annos.push({xref:'paper',yref:'paper',x:0.995,y:0.98,xanchor:'right',yanchor:'top',
+      align:'left',text:roText(),showarrow:false,
+      font:{family:'monospace',size:12,color:'#0f172a'},
+      bgcolor:'rgba(255,255,255,0.94)',bordercolor:'#cbd5e1',borderwidth:1,borderpad:9});
+  }
+
+  var layout={
+    margin:{l:62,r:18,t:30,b:28},height:520,plot_bgcolor:'white',paper_bgcolor:'white',
+    font:{family:'-apple-system,system-ui,sans-serif',size:11,color:'#475569'},
+    xaxis:{type:'date',showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',
+      zeroline:false,range:[XR[0],XR[1]]},
+    yaxis:{showgrid:true,gridcolor:'#f1f5f9',showline:true,linecolor:'#e5edf7',zeroline:false,
+      title:{text:C.yTitle,font:{family:'monospace',size:11}},tickfont:{family:'monospace'}},
+    showlegend:true,legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'right',x:1,
+      font:{size:11},bgcolor:'rgba(0,0,0,0)'},
+    hovermode:'closest',shapes:shapes,annotations:annos,dragmode:false
+  };
+  var cfg={displaylogo:false,displayModeBar:false,edits:{shapePosition:true},responsive:true};
+
+  Plotly.newPlot(div,data,layout,cfg).then(function(){
+    if(!C.cursorsOn)return;
+    var busy=false;
+    div.on('plotly_relayout',function(ev){
+      if(busy)return; var ch=false;
+      for(var k in ev){
+        var m=k.match(/^shapes\[(\d+)\]\.x0$/);
+        if(m){var idx=+m[1], xv=new Date(ev[k]).getTime();
+          if(idx===0){tA=xv;ch=true;} if(idx===1){tB=xv;ch=true;}}
+      }
+      if(ch){busy=true; Plotly.relayout(div,{'annotations['+(annos.length-1)+'].text':roText()})
+        .then(function(){busy=false;});}
+    });
+  });
+  document.getElementById('dl').onclick=function(){
+    Plotly.downloadImage(div,{format:'png',scale:2,filename:C.fn});
+  };
+})();
+</script>
+"""
+
+
 def render_history_chart(
     instance_id: str,
     latest: List[Dict[str, Any]],
@@ -3702,442 +3817,73 @@ def render_history_chart(
         _render_trend_tiles(sensor_data, range_choice)
         return
 
-    # Cursores A/B estilo System1: SIN sliders. Fila COMPACTA (una sola línea):
-    # toggle + selector A/B + ayuda corta. El clic en el gráfico mueve el puntero
-    # elegido (rejilla invisible → se mueve haga clic DONDE sea, no sólo en la curva).
-    _ca = _cb = None
-    _arm = "🟠 A"
-    _ctl = st.columns([2.0, 2.2, 4.0])
-    _cur_on = _ctl[0].toggle(
-        "📍 Cursores A / B", value=False, key="live_trend_cursors",
-        help="Dos punteros (A naranja, B verde). Elige A o B y haz clic en el "
-             "gráfico para colocarlo/moverlo. Lee A, B y su diferencia abajo.")
-    if _cur_on:
-        _allt = pd.to_datetime(pd.concat([sd["df"]["captured_at"] for sd in sensor_data]))
-        _t0, _t1 = _allt.min(), _allt.max()
-        if pd.notna(_t0) and pd.notna(_t1) and _t1 > _t0:
-            _span = _t1 - _t0
-            if "cur_A_ts" not in st.session_state:
-                st.session_state["cur_A_ts"] = (_t0 + _span * 0.2).isoformat()
-            if "cur_B_ts" not in st.session_state:
-                st.session_state["cur_B_ts"] = (_t0 + _span * 0.85).isoformat()
-            try:
-                _ca = pd.to_datetime(st.session_state["cur_A_ts"])
-                _cb = pd.to_datetime(st.session_state["cur_B_ts"])
-            except Exception:  # noqa: BLE001
-                _ca, _cb = _t0 + _span * 0.2, _t0 + _span * 0.85
-            _arm = (_ctl[1].segmented_control(
-                "Mover", ["🟠 A", "🟢 B"], default="🟠 A", key="cur_arm",
-                label_visibility="collapsed") or "🟠 A")
-            _ctl[2].caption("↑ elige puntero · clic en el gráfico lo mueve")
+    # ---- Cursores A / B estilo System1: overlay como componente plotly.js con
+    # cursores ARRASTRABLES + recuadro de lectura vivo (tambien sale en el PNG).
+    # Streamlit no deja arrastrar ni leer bien el clic en su plotly; por eso el
+    # overlay se dibuja directo en plotly.js (iframe). Las notas se quitaron.
+    import json as _json
+    import streamlit.components.v1 as _components
 
-    # Notas/bitácora (anotaciones persistentes ancladas a un instante de la máquina).
-    from datetime import datetime as _dtann, timezone as _tzann
-    _now_iso = _dtann.now(_tzann.utc).isoformat()
-    try:
-        from core.trend_annotations import list_annotations as _lann  # noqa: PLC0415
-        _anns = _lann(instance_id, _from_iso, _now_iso)
-    except Exception:  # noqa: BLE001
-        _anns = []
-
-    # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
     alarms = {sd["alarm"] for sd in sensor_data}
     dangers = {sd["danger"] for sd in sensor_data}
     show_bands = (
-        len(sensor_data) >= 1
-        and len(units) == 1
-        and len(alarms) == 1
-        and len(dangers) == 1
-        and sensor_data[0]["alarm"] > 0
-        and sensor_data[0]["danger"] > sensor_data[0]["alarm"]
-    )
+        len(sensor_data) >= 1 and len(units) == 1 and len(alarms) == 1
+        and len(dangers) == 1 and sensor_data[0]["alarm"] > 0
+        and sensor_data[0]["danger"] > sensor_data[0]["alarm"])
 
-    # Plotly chart multi-trace
-    try:
-        import plotly.graph_objects as go
+    _cur_on = st.toggle(
+        "\U0001F4CD Cursores A / B \u2014 arr\u00e1stralos sobre el gr\u00e1fico", value=False,
+        key="live_trend_cursors",
+        help="Enciende dos punteros (A naranja, B verde) y arr\u00e1stralos sobre el "
+             "gr\u00e1fico. El recuadro muestra el valor en A, en B y su diferencia, en "
+             "vivo. Estilo System1.")
 
-        fig = go.Figure()
+    def _ds_js(_df, _n=300):
+        if len(_df) <= _n:
+            return _df
+        _d = _df.set_index("captured_at").sort_index()
+        _secs = max((_d.index.max() - _d.index.min()).total_seconds(), 1.0)
+        _b = max(int(_secs / _n), 1)
+        _agg = _d["value"].resample(f"{_b}s").median().dropna()
+        return _agg.reset_index()
 
-        # Umbrales como LÍNEAS PUNTEADAS (no rellenos opacos) — convención
-        # System1/AMS. Líneas finas horizontales con etiqueta a la derecha,
-        # mucho más limpias y legibles que las bandas de color rellenas.
-        if show_bands:
-            alarm = sensor_data[0]["alarm"]
-            danger = sensor_data[0]["danger"]
-            y_max = max(all_values.max(), danger * 1.08)
-            # Sombreado MUY sutil solo de la zona danger (apenas un tinte)
-            fig.add_hrect(y0=danger, y1=y_max * 1.05,
-                          fillcolor="#ef4444", opacity=0.05, line_width=0, layer="below")
-            # Líneas de umbral punteadas
-            fig.add_hline(y=danger, line=dict(color="#dc2626", width=1.2, dash="dash"),
-                          annotation_text="Danger", annotation_position="top left",
-                          annotation=dict(font=dict(color="#dc2626", size=10, family="monospace"), xshift=-44))
-            fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
-                          annotation_text="Alarm", annotation_position="top left",
-                          annotation=dict(font=dict(color="#d97706", size=10, family="monospace"), xshift=-44))
-        elif len(sensor_data) <= 4:
-            # Unidades mixtas → no hay banda común, pero igual mostramos el límite
-            # de CADA sensor como línea punteada en SU color (alarma + danger), para
-            # que el analista vea contra qué compara cada punto.
-            _pal0 = ["#1e40af", "#0891b2", "#7c3aed", "#be185d",
-                     "#15803d", "#b45309", "#475569", "#dc2626"]
-            for _i, _sd in enumerate(sensor_data):
-                _c = _pal0[_i % len(_pal0)]
-                _al = float(_sd.get("alarm") or 0.0); _dg = float(_sd.get("danger") or 0.0)
-                _tag = f"{_sd['label']}{_sd.get('var', '')}"
-                if _al > 0:
-                    fig.add_hline(y=_al, line=dict(color=_c, width=1, dash="dot"),
-                                  annotation_text=f"{_tag} alarm", annotation_position="right",
-                                  annotation=dict(font=dict(color=_c, size=8.5, family="monospace")))
-                if _dg > 0:
-                    fig.add_hline(y=_dg, line=dict(color=_c, width=1, dash="dashdot"),
-                                  annotation_text=f"{_tag} danger", annotation_position="right",
-                                  annotation=dict(font=dict(color=_c, size=8.5, family="monospace")))
+    _pal = ["#1e40af", "#0891b2", "#7c3aed", "#be185d",
+            "#15803d", "#b45309", "#475569", "#dc2626"]
+    _series = []
+    for _i, _sd in enumerate(sensor_data):
+        _dd = _ds_js(_sd["df"])
+        _series.append({
+            "name": _sd["display"], "color": _pal[_i % len(_pal)],
+            "x": [t.isoformat() for t in _dd["captured_at"]],
+            "y": [None if pd.isna(v) else float(v) for v in _dd["value"]],
+            "unit": _sd["unit"],
+        })
 
-        # Downsampling por buckets de tiempo (Ciclo 23.145) — clave para
-        # que NO se vea un "blob" de color. Con miles de lecturas crudas las
-        # líneas se amontonan y forman manchas. System1/AMS agregan la serie
-        # en buckets y muestran una línea de tendencia suave. Apuntamos a
-        # ~240 puntos por canal: ancho de bucket = rango_temporal / 240.
-        TARGET_POINTS = 240
+    _allx = pd.concat([sd["df"]["captured_at"] for sd in sensor_data])
+    _ymax = float(all_values.max())
+    if show_bands:
+        _ymax = max(_ymax, float(sensor_data[0]["danger"]) * 1.08)
+    _cfg = {
+        "showBands": bool(show_bands),
+        "alarm": float(sensor_data[0]["alarm"]) if show_bands else 0.0,
+        "danger": float(sensor_data[0]["danger"]) if show_bands else 0.0,
+        "yMax": _ymax,
+        "yTitle": (list(units)[0] if len(units) == 1 else "value"),
+        "cursorsOn": bool(_cur_on),
+        "xr0": _allx.min().isoformat(), "xr1": _allx.max().isoformat(),
+        "fn": f"Tendencia {instance_id} {range_choice}",
+    }
 
-        def _downsample(df_one: pd.DataFrame) -> pd.DataFrame:
-            if len(df_one) <= TARGET_POINTS:
-                return df_one
-            d = df_one.set_index("captured_at").sort_index()
-            span = d.index.max() - d.index.min()
-            secs = max(span.total_seconds(), 1.0)
-            bucket = max(int(secs / TARGET_POINTS), 1)
-            # mediana por bucket = robusto a outliers, traza limpia
-            agg = (d["value"].resample(f"{bucket}s").median().dropna())
-            return agg.reset_index().rename(columns={"value": "value"})
+    _html = (_TREND_JS_TEMPLATE
+             .replace("__SERIES__", _json.dumps(_series))
+             .replace("__CFG__", _json.dumps(_cfg)))
+    _components.html(_html, height=600, scrolling=False)
 
-        # Paleta corporativa (navy + accent variants — coherente con el design system)
-        palette = [
-            "#1e40af", "#0891b2", "#7c3aed", "#be185d",
-            "#15803d", "#b45309", "#475569", "#dc2626",
-        ]
-        for i, sd in enumerate(sensor_data):
-            color = palette[i % len(palette)]
-            ds = _downsample(sd["df"])
-            fig.add_trace(go.Scatter(
-                x=ds["captured_at"],
-                y=ds["value"],
-                mode="lines",  # línea LIMPIA (sin puntos visibles)
-                line=dict(color=color, width=1.6, shape="spline", smoothing=0.6),
-                name=sd["display"],
-                hovertemplate=(
-                    f"<b>{sd['label']} {sd['var']}</b><br>"
-                    "%{x|%Y-%m-%d %H:%M:%S}<br>"
-                    f"%{{y:.3f}} {sd['unit']}<extra></extra>"
-                ),
-            ))
-        # ---- Capa CLICKEABLE invisible SOBRE la curva (ambos modos) ----
-        # El clic devuelve el punto real de la curva (x, valor). En modo cursor el
-        # puntero salta a ese punto (vive SOBRE la línea); en modo nota abre la caja.
-        # (Antes usaba una rejilla invisible que Streamlit NO registraba al clic →
-        # "lo muevo y no funciona". Los marcadores sobre la curva SÍ se clickean.)
-        _nlines = len(fig.data)
-        for i, sd in enumerate(sensor_data):
-            ds = _downsample(sd["df"])
-            fig.add_trace(go.Scatter(
-                x=ds["captured_at"], y=ds["value"], mode="markers",
-                marker=dict(size=18, color=palette[i % len(palette)], opacity=0),
-                name="", showlegend=False, hoverinfo="skip"))
-
-        # Serie primaria (canal superior) para "pegar" cursores y notas a la curva.
-        _prim = (sensor_data[0]["df"].set_index("captured_at").sort_index()["value"])
-        _primu = sensor_data[0]["unit"]
-
-        def _snap(_t):
-            """Punto de la curva primaria más cercano a _t → (x_en_curva, valor)."""
-            try:
-                _p = _prim.index.get_indexer([_t], method="nearest")[0]
-                if _p < 0:
-                    return None, None
-                return _prim.index[_p], float(_prim.iloc[_p])
-            except Exception:  # noqa: BLE001
-                return None, None
-
-        # Cursores A/B — ESTRELLA sobre la curva (A naranja, B verde) + etiqueta con
-        # el VALOR justo encima. Sin línea de lado a lado. El usuario mueve el cursor
-        # haciendo clic en la curva.
-        if _ca is not None and _cb is not None:
-            for _ct, _lab, _cc in ((_ca, "A", "#ea580c"), (_cb, "B", "#16a34a")):
-                _xs, _vv = _snap(_ct)
-                if _xs is None:
-                    continue
-                fig.add_trace(go.Scatter(
-                    x=[_xs], y=[_vv], mode="markers",
-                    marker=dict(size=18, color=_cc, symbol="star",
-                                line=dict(color="#ffffff", width=1.5)),
-                    name="", showlegend=False,
-                    hovertemplate=f"{_lab} · %{{x|%Y-%m-%d %H:%M}} · "
-                                  f"{_vv:.2f} {_primu}<extra></extra>"))
-                fig.add_annotation(
-                    x=_xs, y=_vv, xref="x", yref="y",
-                    text=f" {_lab} · {_vv:.2f} {_primu} ", showarrow=False,
-                    yshift=20, font=dict(size=11, color="#ffffff", family="monospace"),
-                    bgcolor=_cc, bordercolor=_cc, borderwidth=1, borderpad=3)
-
-        # Notas — DIAMANTE sobre la curva + número y texto corto (info visible, ya no
-        # una flechita vacía). Hover = texto completo; edición en la bitácora de abajo.
-        for _ni, _an in enumerate(_anns or [], start=1):
-            try:
-                _xloc = pd.to_datetime(_an.get("ts"), utc=True).tz_convert(_local_tz())
-            except Exception:  # noqa: BLE001
-                continue
-            _full = str(_an.get("text") or "")
-            _nxs, _nyv = _snap(_xloc)
-            if _nxs is None:
-                _nxs, _nyv = _xloc, 0.0
-            _short = _full if len(_full) <= 18 else _full[:17] + "…"
-            fig.add_trace(go.Scatter(
-                x=[_nxs], y=[_nyv], mode="markers+text",
-                marker=dict(size=13, color="#15803d", symbol="diamond",
-                            line=dict(color="#ffffff", width=1.2)),
-                text=[f"📝{_ni} {_short}"], textposition="top center",
-                textfont=dict(size=9.5, color="#15803d", family="monospace"),
-                name="", showlegend=False, cliponaxis=False,
-                hovertemplate=f"📝 {_ni}: {_full}<extra></extra>"))
-
-        # Y-axis title: si todos comparten unit, mostrar; sino "valor"
-        y_title = list(units)[0] if len(units) == 1 else "value"
-
-        # Rango X FIJO al extensión real de la data → la curva toca el eje Y a la
-        # izquierda y el borde derecho (sin padding). Antes Plotly dejaba un hueco
-        # al inicio y al final (se veía "flotando"). Clase System1.
-        _allx = pd.concat([sd["df"]["captured_at"] for sd in sensor_data])
-        _xr0, _xr1 = _allx.min(), _allx.max()
-
-        fig.update_layout(
-            margin=dict(l=62, r=18, t=58, b=24),
-            height=520,
-            plot_bgcolor="white",
-            paper_bgcolor="white",
-            font=dict(family="-apple-system, system-ui, sans-serif", size=11, color="#475569"),
-            xaxis=dict(showgrid=True, gridcolor="#f1f5f9", title="",
-                       showline=True, linecolor="#e5edf7", zeroline=False,
-                       range=[_xr0, _xr1], autorange=False),
-            yaxis=dict(showgrid=True, gridcolor="#f1f5f9",
-                       title=dict(text=y_title, font=dict(family="monospace", size=11)),
-                       showline=True, linecolor="#e5edf7", zeroline=False,
-                       tickfont=dict(family="monospace")),
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom", y=1.04,
-                xanchor="right", x=1,
-                font=dict(size=11),
-                bgcolor="rgba(0,0,0,0)",
-            ),
-            hovermode="closest",
-            clickmode="event+select",
-        )
-        # Sin barra de herramientas (cámara/lupa/casa). on_select="rerun" →
-        # al hacer CLIC en un punto de la curva, devuelve su (x=tiempo, y=valor)
-        # para anclar una nota ahí.
-        # El key lleva un NONCE que se incrementa cada vez que movemos un cursor.
-        # Así, tras el rerun, el chart es NUEVO y su selección queda VACÍA → no hay
-        # "eco" de la selección anterior (antes el eco obligaba a un dedupe pegajoso
-        # que impedía volver a mover el cursor → "lo muevo y no funciona").
-        _evt_nonce = st.session_state.get("trend_evt_nonce", 0)
-        _evt = st.plotly_chart(
-            fig, use_container_width=True, on_select="rerun",
-            selection_mode="points",
-            key=f"live_trend_evt_{instance_id}_{range_choice}_{_evt_nonce}",
-            config={"displaylogo": False, "displayModeBar": False})
-
-        # Caja de nota al CLIC en un punto: muestra valor + fecha/hora y permite
-        # escribir y guardar la nota anclada a ese instante.
-        _sel_pts = []
-        try:
-            _selobj = (_evt.get("selection") if isinstance(_evt, dict)
-                       else getattr(_evt, "selection", None))
-            _sel_pts = ((_selobj.get("points") if isinstance(_selobj, dict)
-                         else getattr(_selobj, "points", None)) or [])
-        except Exception:  # noqa: BLE001
-            _sel_pts = []
-        if _sel_pts:
-            _p = _sel_pts[-1]
-            _px = _p.get("x"); _py = _p.get("y"); _cn = int(_p.get("curve_number", 0) or 0)
-            # El clic llega de la capa invisible (índices ≥ nº de líneas) → sensor
-            # por módulo del nº de canales.
-            _si = _cn % len(sensor_data) if sensor_data else 0
-            try:
-                _pt = pd.to_datetime(_px)
-                if _pt is not None and _pt.tzinfo is None:
-                    _pt = _pt.tz_localize(_local_tz())  # clic llega en hora local naive
-            except Exception:  # noqa: BLE001
-                _pt = None
-            _un = (sensor_data[_si]["unit"] if 0 <= _si < len(sensor_data)
-                   else (list(units)[0] if len(units) == 1 else ""))
-            # MODO CURSOR: el clic MUEVE el puntero armado (A o B). No abre nota.
-            # El nonce del key vacía la selección tras el rerun → no hay eco, así que
-            # NO hace falta dedupe: cada clic mueve, incluso al mismo sitio.
-            if _cur_on and _pt is not None:
-                _ckey = "cur_B_ts" if "B" in _arm else "cur_A_ts"
-                st.session_state[_ckey] = _pt.isoformat()
-                st.session_state["trend_evt_nonce"] = _evt_nonce + 1
-                st.rerun()
-            elif _pt is not None:
-                with st.container(border=True):
-                    _vtxt = (f"{float(_py):.2f} {_un}" if _py is not None else "—")
-                    st.markdown(f"📍 **{_pt:%Y-%m-%d %H:%M}**  ·  **{_vtxt}**  "
-                                f"_(punto seleccionado)_")
-                    _cl_nonce = st.session_state.get("noteClick_nonce", 0)
-                    _cc1, _cc2 = st.columns([4, 1])
-                    _ntext = _cc1.text_input(
-                        "Nota", key=f"live_click_note_txt_{_cl_nonce}",
-                        label_visibility="collapsed",
-                        placeholder="ej. antes de cambiar bomba de aceite")
-                    if _cc2.button("Guardar nota", key="live_click_note_save",
-                                   type="primary", use_container_width=True):
-                        from core.trend_annotations import add_annotation  # noqa: PLC0415
-                        _uid = (st.session_state.get("user_email", "") or "")
-                        _note_full = ((_ntext or "").strip()
-                                      + (f"  ·  {_vtxt}" if _py is not None else ""))
-                        if _ntext and add_annotation(instance_id, _pt.isoformat(),
-                                                     _note_full, _uid):
-                            st.session_state["noteClick_nonce"] = _cl_nonce + 1
-                            st.success("Nota guardada. Clic en otro punto para otra.")
-                            st.rerun()
-                        elif not _ntext:
-                            st.warning("Escribe el texto de la nota.")
-                        else:
-                            st.error("No se pudo guardar (¿falta la tabla "
-                                     "trend_annotations?).")
-
-        # Lectura de cursores A/B — se muestra en pantalla Y se adjunta al PNG.
-        _exp_cols = _exp_rows = None; _exp_title = ""
-        if _ca is not None and _cb is not None:
-            try:
-                from core.ui_industrial import html_table as _htab  # noqa: PLC0415
-                _crows = []
-                for _sd in sensor_data:
-                    _d = _sd["df"].set_index("captured_at").sort_index()["value"]
-                    def _val_at(_t, _dd=_d):
-                        try:
-                            _pos = _dd.index.get_indexer([_t], method="nearest")[0]
-                            return float(_dd.iloc[_pos]) if _pos >= 0 else None
-                        except Exception:  # noqa: BLE001
-                            return None
-                    _va = _val_at(_ca); _vb = _val_at(_cb)
-                    _u = _sd["unit"]
-                    if _va is not None and _vb is not None:
-                        _dd2 = _vb - _va
-                        _pc = (_dd2 / _va * 100.0) if _va else 0.0
-                        _dtxt = f"{_dd2:+.2f} {_u} ({_pc:+.0f}%)"
-                    else:
-                        _dtxt = "—"
-                    _crows.append([
-                        _sd["display"],
-                        f"{_va:.2f} {_u}" if _va is not None else "—",
-                        f"{_vb:.2f} {_u}" if _vb is not None else "—",
-                        _dtxt])
-                st.caption(f"**A** {_ca:%Y-%m-%d %H:%M}  ·  **B** {_cb:%Y-%m-%d %H:%M}")
-                _htab(["Canal", "Valor @A", "Valor @B", "Δ (B − A)"], _crows)
-                _exp_cols = ["Canal", "Valor @A", "Valor @B", "Δ (B − A)"]
-                _exp_rows = _crows
-                _exp_title = (f"Lectura · A {_ca:%Y-%m-%d %H:%M} vs "
-                              f"B {_cb:%Y-%m-%d %H:%M}")
-            except Exception as _e:  # noqa: BLE001
-                st.caption(f"(lectura de cursores no disponible: {_e})")
-            # Vía FIABLE para anclar nota: en el cursor A (no depende del clic).
-            # key con nonce → tras guardar el campo queda VACÍO y listo para OTRA nota.
-            _na_nonce = st.session_state.get("noteA_nonce", 0)
-            _nca1, _nca2 = st.columns([4, 1])
-            _natext = _nca1.text_input(
-                "Nota en A", key=f"live_noteA_txt_{_na_nonce}",
-                label_visibility="collapsed",
-                placeholder="escribe la nota para anclarla en el cursor A")
-            if _nca2.button("📝 Nota en A", key="live_noteA_save",
-                            use_container_width=True,
-                            help="Guarda la nota en la posición del cursor A."):
-                from core.trend_annotations import add_annotation  # noqa: PLC0415
-                _uid = (st.session_state.get("user_email", "") or "")
-                _av0 = None
-                try:
-                    _d0 = sensor_data[0]["df"].set_index("captured_at").sort_index()["value"]
-                    _p0 = _d0.index.get_indexer([_ca], method="nearest")[0]
-                    _av0 = float(_d0.iloc[_p0]) if _p0 >= 0 else None
-                except Exception:  # noqa: BLE001
-                    _av0 = None
-                _full = ((_natext or "").strip()
-                         + (f"  ·  {_av0:.2f} {sensor_data[0]['unit']}"
-                            if _av0 is not None else ""))
-                if _natext and add_annotation(instance_id, _ca.isoformat(), _full, _uid):
-                    st.session_state["noteA_nonce"] = _na_nonce + 1  # campo nuevo vacío
-                    st.success("Nota guardada en A. Puedes agregar otra (mueve A y repite).")
-                    st.rerun()
-                elif not _natext:
-                    st.warning("Escribe el texto de la nota.")
-                else:
-                    st.error("No se pudo guardar (¿falta la tabla trend_annotations?).")
-        # Si no hay cursores pero hay notas, el PNG lleva la bitácora de notas.
-        if _exp_rows is None and _anns:
-            _exp_cols = ["Fecha/hora", "Nota"]
-            _exp_rows = [[str(_a.get("ts", ""))[:16].replace("T", " "),
-                          str(_a.get("text", ""))[:60]] for _a in _anns]
-            _exp_title = "Bitácora de notas en el rango"
-
-        # Descarga PNG (gráfico + tabla con la info si la hay) — mismo botón 🍉 que
-        # Rotodinámica. La figura ya trae umbrales, cursores A/B y notas dibujados.
-        try:
-            from core.fig_export import (  # noqa: PLC0415
-                download_fig_button as _dlfig,
-                download_fig_table_button as _dlfigtab)
-            _fn = (f"Tendencia {instance_id} {range_choice} "
-                   f"{_now_iso[:16].replace(':', '')}.png")
-            _dlkey = f"live_trend_dl_{instance_id}_{range_choice}"
-            if _exp_rows:
-                _dlfigtab(fig, _exp_cols, _exp_rows, _fn, key=_dlkey,
-                          table_title=_exp_title, table_frac=0.72)
-            else:
-                _dlfig(fig, _fn, key=_dlkey)
-        except Exception:  # noqa: BLE001
-            pass
-
-        # Caption si bands omitidas
-        if not show_bands and len(sensor_data) > 1:
-            mixed_units = ", ".join(sorted(units))
-            if len(sensor_data) <= 4:
-                st.caption(
-                    f"📐 Unidades mixtas ({mixed_units}): sin banda común, pero el "
-                    "límite de **cada sensor** se muestra como línea punteada en su "
-                    "color (alarm · danger). Para una banda compartida, elige sensores "
-                    "del mismo tipo (todos `g pk`, `in/s pk` o `mil pp`)."
-                )
-            else:
-                st.caption(
-                    f"📐 Severity lines omitted — {len(sensor_data)} sensores con "
-                    f"unidades mixtas ({mixed_units}). Selecciona ≤4 del mismo tipo "
-                    "para ver los límites."
-                )
-    except Exception as e:
-        # Fallback a st.line_chart si plotly falla
-        st.caption(f"(plotly not available — fallback: {e})")
-        combined = pd.DataFrame()
-        for sd in sensor_data:
-            df_one = sd["df"].set_index("captured_at")[["value"]].copy()
-            df_one.columns = [sd["display"]]
-            combined = combined.join(df_one, how="outer") if not combined.empty else df_one
-        st.line_chart(combined, height=380)
-
-    # ----- Bitácora: lista de notas del rango (agregar notas = toggle de arriba) -----
-    if _anns:
-        with st.expander(f"📝 Bitácora — {len(_anns)} nota(s) en el rango", expanded=False):
-            for _an in _anns:
-                _c1, _c2 = st.columns([6, 1])
-                _tt = str(_an.get("ts", ""))[:16].replace("T", " ")
-                _c1.caption(f"📝 {_tt} · {_an.get('text', '')}"
-                            + (f" · _{_an.get('author')}_" if _an.get("author") else ""))
-                if _c2.button("🗑", key=f"del_note_{_an.get('id')}",
-                              help="Borrar nota"):
-                    from core.trend_annotations import delete_annotation  # noqa: PLC0415
-                    if delete_annotation(_an.get("id")):
-                        st.rerun()
+    if not show_bands and len(sensor_data) > 1:
+        st.caption("\U0001F4D0 Unidades mixtas: sin banda de alarma com\u00fan. Elige "
+                   "sensores del mismo tipo (todos `g pk`, `in/s pk` o `mil pp`) para "
+                   "ver l\u00edmites.")
 
 
 # ============================================================
