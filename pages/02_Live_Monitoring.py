@@ -3704,7 +3704,7 @@ def render_history_chart(
 
     # Cursores A/B — comparar dos momentos (ej. antes/después de una intervención).
     _cur_on = st.toggle(
-        "📍 Cursores — comparar dos momentos (A / B)", value=False,
+        "📍 Cursores A / B — leer y comparar dos momentos", value=False,
         key="live_trend_cursors",
         help="Fija dos líneas en el tiempo y lee el valor de cada canal en A, en B y "
              "su diferencia. Útil para ver el efecto de un cambio (ej. antes/después "
@@ -3714,12 +3714,16 @@ def render_history_chart(
         _allt = pd.to_datetime(pd.concat([sd["df"]["captured_at"] for sd in sensor_data]))
         _t0, _t1 = _allt.min(), _allt.max()
         if pd.notna(_t0) and pd.notna(_t1) and _t1 > _t0:
-            _grid = pd.date_range(_t0, _t1, periods=200)
-            _ca, _cb = st.select_slider(
-                "Cursores  A ◀——▶ B", options=list(_grid),
-                value=(_grid[66], _grid[133]),
-                format_func=lambda t: t.strftime("%m-%d %H:%M"),
-                key="live_trend_cursor_vals")
+            # Dos cursores INDEPENDIENTES (estilo System1: coloco A, coloco B).
+            _grid = list(pd.date_range(_t0, _t1, periods=240))
+            _fmt = lambda t: t.strftime("%m-%d %H:%M")  # noqa: E731
+            _cua, _cub = st.columns(2)
+            _ca = _cua.select_slider(
+                "⬤ Cursor A (negro)", options=_grid, value=_grid[40],
+                format_func=_fmt, key="live_trend_cursor_a")
+            _cb = _cub.select_slider(
+                "⬤ Cursor B (negro)", options=_grid, value=_grid[200],
+                format_func=_fmt, key="live_trend_cursor_b")
 
     # Notas/bitácora (anotaciones persistentes ancladas a un instante de la máquina).
     from datetime import datetime as _dtann, timezone as _tzann
@@ -3841,36 +3845,56 @@ def render_history_chart(
         # yref=paper) y x como ISO string. NO usar add_vline: su lógica de
         # "spanning all axes" hace aritmética Timestamp±int que rompe en pandas 2.x
         # (el gráfico caía al fallback feo).
-        def _vline(_x_iso, _color, _dash, _label, _width=1.3, _yanchor="bottom",
-                   _y=1.0, _xanchor="left"):
+        # Línea vertical (cursor o nota). add_shape DIRECTO (xref=x, yref=paper,
+        # x ISO string) — NO add_vline (su aritmética Timestamp±int rompe en
+        # pandas 2.x → el gráfico caía al fallback feo).
+        def _vline(_x_iso, _color, _dash, _width=1.3):
             fig.add_shape(type="line", xref="x", yref="paper",
                           x0=_x_iso, x1=_x_iso, y0=0, y1=1,
                           line=dict(color=_color, width=_width, dash=_dash))
-            if _label:
-                fig.add_annotation(xref="x", yref="paper", x=_x_iso, y=_y,
-                                   text=_label, showarrow=False, yanchor=_yanchor,
-                                   xanchor=_xanchor,
-                                   font=dict(size=10, color=_color))
 
+        # Etiqueta tipo "pastilla" (fondo + borde) para que se lea sobre la curva
+        # sin ensuciarla. Cursores A/B arriba-dentro (bajo la leyenda); notas
+        # numeradas abajo-dentro. Así NADA se amontona en el borde superior.
+        def _pill(_x_iso, _text, _fg, _bg, _y, _yanchor):
+            fig.add_annotation(
+                xref="x", yref="paper", x=_x_iso, y=_y, text=_text,
+                showarrow=False, yanchor=_yanchor, xanchor="center",
+                font=dict(size=11, color=_fg, family="monospace"),
+                bgcolor=_bg, bordercolor=_fg, borderwidth=1, borderpad=3)
+
+        # Cursores A/B — línea punteada navy + pastilla A/B arriba (estilo System1).
         if _ca is not None and _cb is not None:
             for _ct, _lab in ((_ca, "A"), (_cb, "B")):
-                _vline(pd.Timestamp(_ct).isoformat(), "#0f172a", "dot", _lab,
-                       _width=1.3, _xanchor="center")
+                _xi = pd.Timestamp(_ct).isoformat()
+                _vline(_xi, "#0f172a", "dot", _width=1.4)
+                _pill(_xi, f" {_lab} ", "#ffffff", "#0f172a", 0.985, "top")
 
-        for _an in (_anns or []):
+        # Notas — línea verde dashed + pastilla NUMERADA abajo (📝1, 📝2…). El texto
+        # completo va en la bitácora + en el hover de un marcador invisible sobre la
+        # línea (antes el texto largo se escribía arriba y chocaba con la leyenda).
+        _ymid = (float(all_values.max()) * 0.5) if len(all_values) else 0.0
+        for _ni, _an in enumerate(_anns or [], start=1):
             try:
-                _x_iso = pd.to_datetime(_an.get("ts"), utc=True).isoformat()
-                _txt = str(_an.get("text") or "")[:40]
-                _vline(_x_iso, "#15803d", "dash", f"📝 {_txt}", _width=1.3)
+                _ts_utc = pd.to_datetime(_an.get("ts"), utc=True)
+                _x_iso = _ts_utc.isoformat()
             except Exception:  # noqa: BLE001
                 continue
+            _full = str(_an.get("text") or "")
+            _vline(_x_iso, "#15803d", "dash", _width=1.3)
+            _pill(_x_iso, f"📝{_ni}", "#15803d", "#ecfdf5", 0.04, "bottom")
+            fig.add_trace(go.Scatter(
+                x=[_ts_utc.tz_convert(_local_tz())], y=[_ymid],
+                mode="markers", marker=dict(size=18, color="#15803d", opacity=0),
+                name="", showlegend=False,
+                hovertemplate=f"📝 {_ni}: {_full}<extra></extra>"))
 
         # Y-axis title: si todos comparten unit, mostrar; sino "valor"
         y_title = list(units)[0] if len(units) == 1 else "value"
 
         fig.update_layout(
-            margin=dict(l=60, r=20, t=40, b=10),
-            height=420,
+            margin=dict(l=62, r=18, t=58, b=24),
+            height=520,
             plot_bgcolor="white",
             paper_bgcolor="white",
             font=dict(family="-apple-system, system-ui, sans-serif", size=11, color="#475569"),
@@ -3883,7 +3907,7 @@ def render_history_chart(
             showlegend=True,
             legend=dict(
                 orientation="h",
-                yanchor="bottom", y=1.02,
+                yanchor="bottom", y=1.04,
                 xanchor="right", x=1,
                 font=dict(size=11),
                 bgcolor="rgba(0,0,0,0)",
