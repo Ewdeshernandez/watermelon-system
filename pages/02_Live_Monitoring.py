@@ -3702,23 +3702,21 @@ def render_history_chart(
         _render_trend_tiles(sensor_data, range_choice)
         return
 
-    # Cursores A/B estilo System1: SIN sliders. El usuario elige qué puntero mover
-    # (A o B) y hace CLIC en el gráfico para colocarlo donde quiera. Las posiciones
-    # viven en session_state y se mueven con cada clic.
-    _cur_on = st.toggle(
-        "📍 Cursores A / B — clic en el gráfico para colocarlos", value=False,
-        key="live_trend_cursors",
-        help="Enciende dos punteros (A naranja, B verde). Elige cuál mover y haz "
-             "CLIC en el gráfico para colocarlo; vuelve a hacer clic para moverlo. "
-             "Abajo lees el valor en A, en B y su diferencia.")
+    # Cursores A/B estilo System1: SIN sliders. Fila COMPACTA (una sola línea):
+    # toggle + selector A/B + ayuda corta. El clic en el gráfico mueve el puntero
+    # elegido (rejilla invisible → se mueve haga clic DONDE sea, no sólo en la curva).
     _ca = _cb = None
-    _arm = "A"
+    _arm = "🟠 A"
+    _ctl = st.columns([2.0, 2.2, 4.0])
+    _cur_on = _ctl[0].toggle(
+        "📍 Cursores A / B", value=False, key="live_trend_cursors",
+        help="Dos punteros (A naranja, B verde). Elige A o B y haz clic en el "
+             "gráfico para colocarlo/moverlo. Lee A, B y su diferencia abajo.")
     if _cur_on:
         _allt = pd.to_datetime(pd.concat([sd["df"]["captured_at"] for sd in sensor_data]))
         _t0, _t1 = _allt.min(), _allt.max()
         if pd.notna(_t0) and pd.notna(_t1) and _t1 > _t0:
             _span = _t1 - _t0
-            # Posición inicial: A ~20% desde el inicio, B ~85% (tz-aware local).
             if "cur_A_ts" not in st.session_state:
                 st.session_state["cur_A_ts"] = (_t0 + _span * 0.2).isoformat()
             if "cur_B_ts" not in st.session_state:
@@ -3728,9 +3726,10 @@ def render_history_chart(
                 _cb = pd.to_datetime(st.session_state["cur_B_ts"])
             except Exception:  # noqa: BLE001
                 _ca, _cb = _t0 + _span * 0.2, _t0 + _span * 0.85
-            _arm = (st.segmented_control(
-                "Mover puntero (luego clic en el gráfico)",
-                ["🟠 A", "🟢 B"], default="🟠 A", key="cur_arm") or "🟠 A")
+            _arm = (_ctl[1].segmented_control(
+                "Mover", ["🟠 A", "🟢 B"], default="🟠 A", key="cur_arm",
+                label_visibility="collapsed") or "🟠 A")
+            _ctl[2].caption("↑ elige puntero · clic en el gráfico lo mueve")
 
     # Notas/bitácora (anotaciones persistentes ancladas a un instante de la máquina).
     from datetime import datetime as _dtann, timezone as _tzann
@@ -3740,15 +3739,6 @@ def render_history_chart(
         _anns = _lann(instance_id, _from_iso, _now_iso)
     except Exception:  # noqa: BLE001
         _anns = []
-
-    if _cur_on:
-        st.caption("💡 Cursores encendidos: elige **🟠 A** o **🟢 B** y haz **clic en "
-                   "el gráfico** para colocar ese puntero. Para una nota, usa el botón "
-                   "**📝 Nota en A** de abajo.")
-    else:
-        st.caption("💡 Para anclar una nota: **clic en un punto de la curva** (muestra "
-                   "valor + fecha/hora). Para comparar dos momentos, enciende los "
-                   "**cursores A / B**.")
 
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
@@ -3843,15 +3833,34 @@ def render_history_chart(
                     f"%{{y:.3f}} {sd['unit']}<extra></extra>"
                 ),
             ))
-        # Capa CLICKEABLE invisible (marcadores opacity 0, área de hit grande): hace
-        # la curva seleccionable para anclar notas SIN ensuciar la línea con puntos.
+        # ---- Capa CLICKEABLE invisible (opacity 0) ----
+        # MODO CURSOR: rejilla que cubre TODO el plot → el clic en cualquier parte
+        # devuelve un x y el puntero se mueve ahí (antes sólo corría si pegabas
+        # justo en la curva → "no se dejaba correr").
+        # MODO NOTA: marcadores sobre la curva → el clic da el punto real (x, valor).
         _nlines = len(fig.data)
-        for i, sd in enumerate(sensor_data):
-            ds = _downsample(sd["df"])
+        if _cur_on:
+            _gx = pd.concat([sd["df"]["captured_at"] for sd in sensor_data])
+            _gxs = list(pd.date_range(_gx.min(), _gx.max(), periods=200))
+            _vlo = float(all_values.min()); _vhi = float(all_values.max())
+            if show_bands:
+                _vhi = max(_vhi, float(sensor_data[0]["danger"]))
+            _pad = (_vhi - _vlo) * 0.12 + 1e-6
+            _cx = []; _cy = []
+            for _k in range(8):
+                _yy = _vlo - _pad + (_vhi - _vlo + 2 * _pad) * _k / 7.0
+                _cx.extend(_gxs); _cy.extend([_yy] * len(_gxs))
             fig.add_trace(go.Scatter(
-                x=ds["captured_at"], y=ds["value"], mode="markers",
-                marker=dict(size=16, color=palette[i % len(palette)], opacity=0),
+                x=_cx, y=_cy, mode="markers",
+                marker=dict(size=38, color="rgba(0,0,0,0)", opacity=0),
                 name="", showlegend=False, hoverinfo="skip"))
+        else:
+            for i, sd in enumerate(sensor_data):
+                ds = _downsample(sd["df"])
+                fig.add_trace(go.Scatter(
+                    x=ds["captured_at"], y=ds["value"], mode="markers",
+                    marker=dict(size=16, color=palette[i % len(palette)], opacity=0),
+                    name="", showlegend=False, hoverinfo="skip"))
 
         # Líneas verticales (cursores + notas) con add_shape DIRECTO (xref=x,
         # yref=paper) y x como ISO string. NO usar add_vline: su lógica de
@@ -3883,23 +3892,22 @@ def render_history_chart(
                 _vline(_xi, _cc, "solid", _width=2.0)
                 _pill(_xi, f" {_lab} ", "#ffffff", _cc, 0.985, "top")
 
-        # Notas — línea verde dashed + pastilla NUMERADA abajo (📝1, 📝2…). El texto
-        # completo va en la bitácora + en el hover de un marcador invisible sobre la
-        # línea (antes el texto largo se escribía arriba y chocaba con la leyenda).
-        _ymid = (float(all_values.max()) * 0.5) if len(all_values) else 0.0
+        # Notas — marcador SUTIL en el eje inferior (triángulo verde + número), SIN
+        # la línea vertical de altura completa que ensuciaba el gráfico. Hover =
+        # texto completo; la lista editable va en la bitácora de abajo.
         for _ni, _an in enumerate(_anns or [], start=1):
             try:
-                _ts_utc = pd.to_datetime(_an.get("ts"), utc=True)
-                _x_iso = _ts_utc.isoformat()
+                _xloc = pd.to_datetime(_an.get("ts"), utc=True).tz_convert(_local_tz())
             except Exception:  # noqa: BLE001
                 continue
             _full = str(_an.get("text") or "")
-            _vline(_x_iso, "#15803d", "dash", _width=1.3)
-            _pill(_x_iso, f"📝{_ni}", "#15803d", "#ecfdf5", 0.04, "bottom")
             fig.add_trace(go.Scatter(
-                x=[_ts_utc.tz_convert(_local_tz())], y=[_ymid],
-                mode="markers", marker=dict(size=18, color="#15803d", opacity=0),
-                name="", showlegend=False,
+                x=[_xloc], y=[0], mode="markers+text",
+                marker=dict(size=12, color="#15803d", symbol="triangle-up",
+                            line=dict(color="#ffffff", width=1)),
+                text=[f"{_ni}"], textposition="bottom center",
+                textfont=dict(size=9, color="#15803d", family="monospace"),
+                name="", showlegend=False, cliponaxis=False,
                 hovertemplate=f"📝 {_ni}: {_full}<extra></extra>"))
 
         # Y-axis title: si todos comparten unit, mostrar; sino "valor"
@@ -3969,11 +3977,14 @@ def render_history_chart(
             _un = (sensor_data[_si]["unit"] if 0 <= _si < len(sensor_data)
                    else (list(units)[0] if len(units) == 1 else ""))
             # MODO CURSOR: el clic MUEVE el puntero armado (A o B). No abre nota.
+            # Dedupe por x del clic: la selección queda "pegada" tras el rerun; sin
+            # esto, cambiar de A a B movería B al punto viejo de A.
             if _cur_on and _pt is not None:
-                _ckey = "cur_B_ts" if "B" in _arm else "cur_A_ts"
-                _niso = _pt.isoformat()
-                if st.session_state.get(_ckey) != _niso:
-                    st.session_state[_ckey] = _niso
+                _pxs = str(_px)
+                if st.session_state.get("_trend_last_click") != _pxs:
+                    st.session_state["_trend_last_click"] = _pxs
+                    _ckey = "cur_B_ts" if "B" in _arm else "cur_A_ts"
+                    st.session_state[_ckey] = _pt.isoformat()
                     st.rerun()
             elif _pt is not None:
                 with st.container(border=True):
