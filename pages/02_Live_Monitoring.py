@@ -3884,13 +3884,29 @@ def render_history_chart(
                 font=dict(size=11, color=_fg, family="monospace"),
                 bgcolor=_bg, bordercolor=_fg, borderwidth=1, borderpad=3)
 
-        # Cursores A/B — línea SÓLIDA de color (A naranja, B verde) + pastilla arriba.
-        # Punteros vivos estilo System1 (el usuario los mueve con clic).
+        # Cursores A/B — línea DISCRETA de color (A naranja, B verde) + pastilla
+        # arriba CON EL VALOR del canal primario en ese instante (info sobre el
+        # gráfico, estilo System1). El usuario los mueve con clic.
         if _ca is not None and _cb is not None:
-            for _ct, _lab, _cc in ((_ca, "A", "#ea580c"), (_cb, "B", "#16a34a")):
+            _d0 = (sensor_data[0]["df"].set_index("captured_at")
+                   .sort_index()["value"])
+            _u0 = sensor_data[0]["unit"]
+
+            def _nearest_val(_t, _dd=_d0):
+                try:
+                    _p = _dd.index.get_indexer([_t], method="nearest")[0]
+                    return float(_dd.iloc[_p]) if _p >= 0 else None
+                except Exception:  # noqa: BLE001
+                    return None
+            for _ct, _lab, _cc, _cl in (
+                    (_ca, "A", "#ea580c", "rgba(234,88,12,0.65)"),
+                    (_cb, "B", "#16a34a", "rgba(22,163,74,0.65)")):
                 _xi = pd.Timestamp(_ct).isoformat()
-                _vline(_xi, _cc, "solid", _width=2.0)
-                _pill(_xi, f" {_lab} ", "#ffffff", _cc, 0.985, "top")
+                _vv = _nearest_val(_ct)
+                _lbl = (f" {_lab} · {_vv:.2f} {_u0} " if _vv is not None
+                        else f" {_lab} ")
+                _vline(_xi, _cl, "solid", _width=1.4)   # línea discreta (translúcida)
+                _pill(_xi, _lbl, "#ffffff", _cc, 0.985, "top")  # pastilla sólida
 
         # Notas — marcador SUTIL en el eje inferior (triángulo verde + número), SIN
         # la línea vertical de altura completa que ensuciaba el gráfico. Hover =
@@ -3946,10 +3962,15 @@ def render_history_chart(
         # Sin barra de herramientas (cámara/lupa/casa). on_select="rerun" →
         # al hacer CLIC en un punto de la curva, devuelve su (x=tiempo, y=valor)
         # para anclar una nota ahí.
+        # El key lleva un NONCE que se incrementa cada vez que movemos un cursor.
+        # Así, tras el rerun, el chart es NUEVO y su selección queda VACÍA → no hay
+        # "eco" de la selección anterior (antes el eco obligaba a un dedupe pegajoso
+        # que impedía volver a mover el cursor → "lo muevo y no funciona").
+        _evt_nonce = st.session_state.get("trend_evt_nonce", 0)
         _evt = st.plotly_chart(
             fig, use_container_width=True, on_select="rerun",
             selection_mode="points",
-            key=f"live_trend_evt_{instance_id}_{range_choice}",
+            key=f"live_trend_evt_{instance_id}_{range_choice}_{_evt_nonce}",
             config={"displaylogo": False, "displayModeBar": False})
 
         # Caja de nota al CLIC en un punto: muestra valor + fecha/hora y permite
@@ -3977,15 +3998,13 @@ def render_history_chart(
             _un = (sensor_data[_si]["unit"] if 0 <= _si < len(sensor_data)
                    else (list(units)[0] if len(units) == 1 else ""))
             # MODO CURSOR: el clic MUEVE el puntero armado (A o B). No abre nota.
-            # Dedupe por x del clic: la selección queda "pegada" tras el rerun; sin
-            # esto, cambiar de A a B movería B al punto viejo de A.
+            # El nonce del key vacía la selección tras el rerun → no hay eco, así que
+            # NO hace falta dedupe: cada clic mueve, incluso al mismo sitio.
             if _cur_on and _pt is not None:
-                _pxs = str(_px)
-                if st.session_state.get("_trend_last_click") != _pxs:
-                    st.session_state["_trend_last_click"] = _pxs
-                    _ckey = "cur_B_ts" if "B" in _arm else "cur_A_ts"
-                    st.session_state[_ckey] = _pt.isoformat()
-                    st.rerun()
+                _ckey = "cur_B_ts" if "B" in _arm else "cur_A_ts"
+                st.session_state[_ckey] = _pt.isoformat()
+                st.session_state["trend_evt_nonce"] = _evt_nonce + 1
+                st.rerun()
             elif _pt is not None:
                 with st.container(border=True):
                     _vtxt = (f"{float(_py):.2f} {_un}" if _py is not None else "—")
