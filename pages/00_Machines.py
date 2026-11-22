@@ -369,6 +369,36 @@ with right:
                 st.markdown(_diff_html({"added": mdiff["added"], "removed": mdiff["removed"],
                                         "changed": mdiff["changed"], "machine": [],
                                         "source": mdiff["gateway"]}), unsafe_allow_html=True)
+        # Transición: Live / Machine Map / reportes aún leen `instances`.
+        sync_live = False
+        if work.instance_id:
+            try:
+                from core.instance_state import get_instance
+                from core.remote_monitoring.instance_sync import sync_sensors_from_setup
+                _inst = get_instance(work.instance_id)
+                _, srep = sync_sensors_from_setup(_inst.sensors if _inst else [], work)
+                lines = []
+                if _inst is None:
+                    lines.append(f'<span class="a">+ new Live asset “{work.instance_id}”</span>')
+                lines += [f'<span class="a">+ {display_label(x)}</span>' for x in srep["added"]]
+                lines += [f'<span class="c">~ {display_label(x)} limits / angle</span>' for x in srep["updated"]]
+                lines += [f'<span class="r">label check: {x}</span>' for x in srep["label_mismatch"]]
+                st.markdown('<div class="bf-label">Live asset (Machinery Library) on publish</div>',
+                            unsafe_allow_html=True)
+                st.markdown('<div class="mc-diff">' + ("<br>".join(lines) or "No changes — already in sync")
+                            + '</div>', unsafe_allow_html=True)
+                sync_live = st.checkbox("Also update the Live asset (adds / updates only, never deletes)",
+                                        value=bool(lines), key=f"mc_sync::{sid}")
+            except Exception as _e:  # noqa: BLE001
+                st.caption(f"Live asset preview unavailable: {_e}")
+
+        def _after_publish(setup_obj: AcqSetup) -> None:
+            if not sync_live:
+                return
+            from core.remote_monitoring.instance_sync import sync_instance
+            r = sync_instance(setup_obj)
+            st.toast("Live asset updated" if r.get("ok") else f"Live asset not updated: {r.get('reason')}")
+
         note = st.text_input("Change note", key=f"mc_note::{sid}",
                              placeholder="e.g. added lube-pump accelerometer LB0011")
         b1, b2, _ = st.columns([1.2, 1.4, 3])
@@ -382,6 +412,8 @@ with right:
             if res.get("ok"):
                 pr = sv.publish(sid, res["version"], by=USER)
                 st.toast(f"Published v{res['version']}" if pr.get("ok") else f"Not published: {pr.get('reason')}")
+                if pr.get("ok"):
+                    _after_publish(work)
             else:
                 st.toast(f"Not saved: {res.get('reason')}")
             _refresh()
@@ -404,6 +436,8 @@ with right:
                                  type="primary", disabled=bool(why)):
                         pr = sv.publish(sid, v["version"], by=USER)
                         st.toast("Published" if pr.get("ok") else pr.get("reason"))
+                        if pr.get("ok"):
+                            _after_publish(setup_from_dict(v["spec"]))
                         st.session_state.pop(_work_key(sid), None)
                         _refresh()
                         st.rerun()
