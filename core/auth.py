@@ -34,6 +34,10 @@ NAV_GROUPS = [
         "section": "Overview",
         "items": [
             {"label": "◉  Home", "page": "pages/_landing.py"},
+            # 2026-11-22 — Machines: config ÚNICA de máquina (constructor de tren
+            # del campo + versiones + origen Modbus/NI). Reemplazará Machinery
+            # Library + Crear activo cuando la doble escritura a `instances` esté.
+            {"label": "⚙  Machines", "page": "pages/00_Machines.py"},
             {"label": "▣  Machinery Library", "page": "pages/00_Machinery_Library.py"},
             # Crear activo (wizard): crea máquinas nuevas (no es ingesta de datos).
             {"label": "✦  Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
@@ -171,6 +175,7 @@ NAV_ITEMS = [item for g in NAV_GROUPS for item in g["items"]]
 # "acceso denegado" si role=client (defensa en profundidad).
 
 CLIENT_BLOCKED_PAGES = {
+    "pages/00_Machines.py",
     "pages/00_Machinery_Library.py",
     "pages/01_Load_Data.py",
     # pages/15_Diagnostics.py removido del producto en Ciclo 17.33.

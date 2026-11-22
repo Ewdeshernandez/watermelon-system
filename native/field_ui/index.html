@@ -1,0 +1,64 @@
+<!doctype html>
+<!--
+  Componente Streamlit "wm_machine_builder" (web · Machines).
+  Envuelve el MISMO builder.html del campo (fuente única) y traduce su puente
+  postMessage {wm:size|build|state} ↔ protocolo de componentes Streamlit.
+  El campo (PySide6) NO usa este archivo: carga builder.html directo.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0;background:transparent;overflow:hidden}
+  iframe{border:0;width:100%;height:900px;display:block}
+</style>
+</head>
+<body>
+<iframe id="b" title="Machine train builder"></iframe>
+<script>
+(function(){
+  var fr = document.getElementById('b');
+  var ready = false, pending = null, lastNonce = null, skin = null;
+
+  function toST(type, extra){
+    var m = {isStreamlitMessage: true, apiVersion: 1, type: type};
+    for (var k in (extra || {})) m[k] = extra[k];
+    window.parent.postMessage(m, '*');
+  }
+  function sendLoad(){
+    if (ready && pending){ fr.contentWindow.postMessage({wm: 'load', spec: pending}, '*'); pending = null; }
+  }
+  fr.addEventListener('load', function(){ ready = true; sendLoad(); });
+
+  window.addEventListener('message', function(e){
+    var d = e.data || {};
+    if (e.source === fr.contentWindow){
+      if (d.wm === 'size' && d.h){
+        var h = Math.max(520, Math.ceil(d.h));
+        fr.style.height = h + 'px';
+        toST('streamlit:setFrameHeight', {height: h});
+      } else if (d.wm === 'build'){
+        toST('streamlit:setComponentValue', {value: {spec: d.spec, ts: Date.now()}, dataType: 'json'});
+      }
+      return;
+    }
+    if (d.type === 'streamlit:render'){
+      var a = d.args || {};
+      var want = (a.skin === 'dark' ? 'dark' : 'light');
+      if (want !== skin){
+        skin = want; ready = false;
+        fr.src = 'builder.html#' + (want === 'light' ? 'light-embed' : 'embed');
+        lastNonce = null;
+      }
+      if (a.nonce !== lastNonce){
+        lastNonce = a.nonce;
+        if (a.spec && a.spec.machines && a.spec.machines.length){ pending = a.spec; sendLoad(); }
+      }
+    }
+  });
+  toST('streamlit:componentReady');
+  toST('streamlit:setFrameHeight', {height: 900});
+})();
+</script>
+</body>
+</html>

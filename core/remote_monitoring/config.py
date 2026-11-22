@@ -236,6 +236,9 @@ class AcqSetup:
     # Gateway Modbus + parámetros del collector (server_ip, port, unit_id,
     # byte_order, poll/read interval, aggregate, notas...). Vacío = sin Modbus.
     modbus_gateway: Dict[str, Any] = field(default_factory=dict)
+    # Spec del constructor de tren (builder.html) → re-dibujar el tren en web
+    # y campo. {} = máquina sin tren dibujado (ej. importada de un mapa Modbus).
+    layout: Dict[str, Any] = field(default_factory=dict)
 
     def keyphasor_row(self) -> Optional[ChannelRow]:
         for ch in self.channels:
@@ -584,7 +587,8 @@ def setup_to_dict(setup: "AcqSetup") -> Dict[str, Any]:
             "instance_id": setup.instance_id,
             "mode": setup.mode,
             "source": setup.source,
-            "modbus_gateway": dict(setup.modbus_gateway or {})}
+            "modbus_gateway": dict(setup.modbus_gateway or {}),
+            "layout": dict(setup.layout or {})}
 
 
 def setup_from_dict(data: Dict[str, Any]) -> "AcqSetup":
@@ -601,7 +605,8 @@ def setup_from_dict(data: Dict[str, Any]) -> "AcqSetup":
                     instance_id=str(data.get("instance_id") or ""),
                     mode=mode if mode in ("spot", "online") else "spot",
                     source=source if source in ("ni", "modbus") else "ni",
-                    modbus_gateway=dict(data.get("modbus_gateway") or {}))
+                    modbus_gateway=dict(data.get("modbus_gateway") or {}),
+                    layout=dict(data.get("layout") or {}))
 
 
 def _rm_client():

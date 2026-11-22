@@ -322,6 +322,29 @@ body.viewer .stage{padding:10px 8px}
   .auxchip b{cursor:pointer;color:var(--zd);font-weight:700}
   .auxchip b:hover{color:#fff}
   body.viewer #auxHost{display:none!important}
+  /* ===== Embebido en la web (Machines): sin topbar propio ===== */
+  body.embed{padding:0}
+  body.embed .topbar{display:none}
+  body.embed .wrap{max-width:none}
+  /* ===== Piel CLARA (web). El escenario del tren queda oscuro = "caja de luz"
+     donde los equipos metálicos se ven como render de producto. ===== */
+  body.light{--bg:#ffffff;--bg2:#ffffff;--panel:#ffffff;--panel2:#eef3f9;--line:#dde4ee;--line2:#cad5e2;
+    --ink:#0f1b2d;--mute:#4f6177;--dim:#8494a8;--steel:#2b6ca6;--cyan:#1c79b4}
+  body.light .card{background:var(--panel);box-shadow:0 1px 2px rgba(15,27,45,.05)}
+  body.light .card .stage{background:radial-gradient(120% 150% at 50% 0%,#1a2e45 0%,#0c1726 72%)}
+  body.light .emptyhint{color:#8aa0b6}
+  body.light .seg,body.light .stepn{background:#f3f6fa}
+  body.light .stepn button{background:#fff;color:var(--ink)}
+  body.light .seg button.on{background:linear-gradient(180deg,#3479b4,#24598c)}
+  body.light .gen{background:rgba(28,121,180,.06);border-color:rgba(28,121,180,.28)}
+  body.light .pal{background:var(--panel)}
+  body.light .pal .search{background:#f3f6fa}
+  body.light .pit:hover,body.light .pit.sel{background:#eef3f9}
+  body.light .pit .ic{background:radial-gradient(130% 130% at 50% -10%,#1d3248,#0b1522);border-color:#1d3248}
+  body.light .addbtn{color:#1c79b4;background:rgba(28,121,180,.08);border-color:rgba(28,121,180,.35)}
+  body.light .pit:hover .addbtn{background:#1c79b4;color:#fff}
+  body.light select,body.light input{background:#fff!important;color:var(--ink)!important}
+  body.light .auxchip b:hover{color:#b91c1c}
 </style>
 <div class="wrap">
   <div class="topbar">
@@ -382,6 +405,12 @@ body.viewer .stage{padding:10px 8px}
   var aux=[];     // puntos auxiliares FUERA del tren [{name,k,count}] (bomba lube, motor aux…)
   var VIEWER=(location.hash||'').indexOf('view')>=0;  // read-only embebido en Sensors&layout
   if(VIEWER){ document.body.classList.add('viewer'); }
+  var _H=(location.hash||'');
+  if(_H.indexOf('light')>=0) document.body.classList.add('light');
+  if(_H.indexOf('embed')>=0) document.body.classList.add('embed');
+  // ---- Puente web (postMessage): el mismo contrato que usaría el componente
+  // Streamlit. builder → web: size/state/build. web → builder: load spec.
+  function wmPost(m){ try{ if(window.parent&&window.parent!==window) window.parent.postMessage(m,'*'); }catch(e){} }
 
   // --- construir la librería (panel derecho) ---
   (function buildLib(){
@@ -461,6 +490,7 @@ body.viewer .stage{padding:10px 8px}
     renderTrain(n); renderCfg(); renderAux();
     var sc=allSensors();
     document.getElementById('buildInfo').textContent=train.length? (sc.length+' sondas · mapeadas al rack'):'';
+    wmPost({wm:'state',machines:train.filter(function(c){return c.key!=='coupling';}).map(function(c){return c.name;}),bearings:n,sensors:sc});
   }
 
   function renderTrain(n){
@@ -610,6 +640,7 @@ body.viewer .stage{padding:10px 8px}
               aux:aux.slice(),
               sensors:allSensors()};
     window.__wm_build=JSON.stringify(spec);   // Python lo recoge por polling
+    wmPost({wm:'build',spec:spec});
     document.getElementById('buildInfo').textContent='✓ enviado a Watermelon · '+spec.sensors.length+' sondas';
   });
 
@@ -627,6 +658,13 @@ body.viewer .stage{padding:10px 8px}
     aux=(s.aux||[]).slice();
     sel=-1; render();
   };
+
+  var _lastH=0;
+  setInterval(function(){ var h=document.documentElement.scrollHeight; if(Math.abs(h-_lastH)>2){ _lastH=h; wmPost({wm:'size',h:h}); } },250);
+  window.addEventListener('message',function(e){
+    var d=e.data||{};
+    if(d.wm==='load'){ window.wmLoadSpec(d.spec); if(d.sel!=null && d.sel<train.length){ sel=d.sel; render(); } }
+  });
 
   render();
 })();
