@@ -143,6 +143,18 @@ class ChannelRow:
     notch_type: str = ""           # keyphasor: muesca | proyección | rueda dentada
     keyphasor_ref: str = ""        # punto keyphasor asociado (referencia de fase 1X)
     pair_ref: str = ""             # punto par X/Y para la órbita
+    # --- Identidad estable en Live / histórico ---------------------------
+    # Contrato que NO cambia al migrar de origen (Modbus Bently → NI):
+    # instance_id + point_label(=sensor_label) + metric + variable.
+    # history_for_metric filtra por `variable` → el nodo NI debe postear el
+    # MISMO string que hoy postea el collector Modbus.
+    variable: str = ""             # ej. "1YD Turbina DE" ("" = point_label)
+    location: str = ""             # ej. "Turbina DE"
+    direction: str = ""            # X | Y | A | ...
+    # --- ORIGEN Modbus (rack de protección existente, ej. Bently 3500/92) ---
+    # metric → {"register": int, "unit", "encoding", "kind", ...extras}.
+    # El mapa del collector se GENERA desde aquí (modbus_binding.py).
+    modbus: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def is_keyphasor(self) -> bool:
         if self.sensor_type == "keyphasor":
@@ -217,6 +229,13 @@ class AcqSetup:
     # una máquina mixta prox+accel usa bandas distintas.
     acquisition_by_type: Dict[str, AcquisitionParams] = field(
         default_factory=lambda: {t: default_acq_for_type(t) for t in SPECTRAL_TYPES})
+    # --- Enlace con Live / origen de la señal ----------------------------
+    instance_id: str = ""          # id en live_readings / instances ("" = slug del nombre)
+    mode: str = "spot"             # spot (medición puntual) | online (monitoreo en línea)
+    source: str = "ni"             # origen ACTIVO: ni | modbus
+    # Gateway Modbus + parámetros del collector (server_ip, port, unit_id,
+    # byte_order, poll/read interval, aggregate, notas...). Vacío = sin Modbus.
+    modbus_gateway: Dict[str, Any] = field(default_factory=dict)
 
     def keyphasor_row(self) -> Optional[ChannelRow]:
         for ch in self.channels:
@@ -508,10 +527,7 @@ def save_setup(setup: AcqSetup) -> Path:
     d = _setups_dir()
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{_slug(setup.machine.name)}.json"
-    payload = {"machine": asdict(setup.machine),
-               "channels": [asdict(c) for c in setup.channels],
-               "acquisition": asdict(setup.acquisition),
-               "acquisition_by_type": {t: asdict(p) for t, p in setup.acquisition_by_type.items()}}
+    payload = setup_to_dict(setup)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
@@ -528,16 +544,7 @@ def load_setup(name: str) -> Optional[AcqSetup]:
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
-    machine = MachineConfig(**_filter_fields(MachineConfig, data.get("machine", {})))
-    channels = [ChannelRow(**_filter_fields(ChannelRow, c)) for c in data.get("channels", [])]
-    acq = AcquisitionParams(**_filter_fields(AcquisitionParams, data.get("acquisition", {})))
-    # Por tipo: back-compat → si no está, defaults por tipo
-    raw_bt = data.get("acquisition_by_type") or {}
-    by_type = {t: default_acq_for_type(t) for t in SPECTRAL_TYPES}
-    for t, p in raw_bt.items():
-        by_type[t] = AcquisitionParams(**_filter_fields(AcquisitionParams, p))
-    return AcqSetup(machine=machine, channels=channels, acquisition=acq,
-                    acquisition_by_type=by_type)
+    return setup_from_dict(data)
 
 
 def list_setups() -> List[str]:
@@ -573,7 +580,11 @@ def setup_to_dict(setup: "AcqSetup") -> Dict[str, Any]:
     return {"machine": asdict(setup.machine),
             "channels": [asdict(c) for c in setup.channels],
             "acquisition": asdict(setup.acquisition),
-            "acquisition_by_type": {t: asdict(p) for t, p in setup.acquisition_by_type.items()}}
+            "acquisition_by_type": {t: asdict(p) for t, p in setup.acquisition_by_type.items()},
+            "instance_id": setup.instance_id,
+            "mode": setup.mode,
+            "source": setup.source,
+            "modbus_gateway": dict(setup.modbus_gateway or {})}
 
 
 def setup_from_dict(data: Dict[str, Any]) -> "AcqSetup":
@@ -584,7 +595,13 @@ def setup_from_dict(data: Dict[str, Any]) -> "AcqSetup":
     by_type = {t: default_acq_for_type(t) for t in SPECTRAL_TYPES}
     for t, p in (data.get("acquisition_by_type") or {}).items():
         by_type[t] = AcquisitionParams(**_filter_fields(AcquisitionParams, p))
-    return AcqSetup(machine=machine, channels=channels, acquisition=acq, acquisition_by_type=by_type)
+    mode = str(data.get("mode") or "spot")
+    source = str(data.get("source") or "ni")
+    return AcqSetup(machine=machine, channels=channels, acquisition=acq, acquisition_by_type=by_type,
+                    instance_id=str(data.get("instance_id") or ""),
+                    mode=mode if mode in ("spot", "online") else "spot",
+                    source=source if source in ("ni", "modbus") else "ni",
+                    modbus_gateway=dict(data.get("modbus_gateway") or {}))
 
 
 def _rm_client():
@@ -638,4 +655,24 @@ def load_setup_cloud(name_or_slug: str) -> Optional["AcqSetup"]:
             return setup_from_dict(res.data["metadata"])
     except Exception:  # noqa: BLE001
         return None
+    return None
+
+
+def find_setup_cloud_by_instance(instance_id: str, client: Any = None) -> Optional[Dict[str, Any]]:
+    """Busca la máquina cuyo `instance_id` (enlace con Live) coincide.
+    Devuelve {id, name, updated_at, setup} o None. Tabla pequeña → filtro en
+    Python (instance_id vive dentro del jsonb `metadata`). `client` opcional
+    (la API FastAPI pasa el suyo: SUPABASE_URL/SUPABASE_SERVICE_KEY)."""
+    client = client or _rm_client()
+    if client is None or not instance_id:
+        return None
+    try:
+        res = client.table(_RM_SETUPS_TABLE).select("id, name, updated_at, metadata").execute()
+    except Exception:  # noqa: BLE001
+        return None
+    for row in res.data or []:
+        meta = row.get("metadata") or {}
+        if str(meta.get("instance_id") or "") == instance_id:
+            return {"id": row.get("id"), "name": row.get("name"),
+                    "updated_at": row.get("updated_at"), "setup": setup_from_dict(meta)}
     return None
