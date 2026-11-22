@@ -118,23 +118,23 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
     # (wm-live-table, etc). Verificado en navegador real (origen nulo, sin taint).
     html = """
 <div id="__EID___cap" style="position:absolute;left:-10000px;top:0;"></div>
-<button id="__EID__" style="display:inline-flex;align-items:center;gap:9px;border:none;
-   font-family:system-ui,-apple-system,sans-serif;font-weight:600;font-size:13.5px;
-   background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;padding:10px 18px;
-   border-radius:10px;border:1px solid #0e2547;box-shadow:0 2px 6px rgba(11,31,58,.18);
-   transition:transform .08s ease,box-shadow .15s ease;cursor:pointer">
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8890c"
+<button id="__EID__" title="Descargar PNG" style="display:inline-flex;align-items:center;gap:6px;
+   font-family:system-ui,-apple-system,sans-serif;font-weight:600;font-size:11px;letter-spacing:.03em;
+   background:transparent;color:#93a6c0;padding:5px 11px;
+   border-radius:8px;border:1px solid #e1e8f2;cursor:pointer;
+   transition:background .15s ease,color .15s ease,border-color .15s ease">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
-  Descargar PNG
+  PNG
 </button>
 <script>
 (function(){
   var cap=document.getElementById('__EID___cap');
   try{ cap.innerHTML=decodeURIComponent(escape(atob('__B64__'))); }catch(e){ cap.textContent='err'; }
   var b=document.getElementById('__EID__');
-  b.onmouseenter=function(){b.style.transform='translateY(-1px)';b.style.boxShadow='0 6px 16px rgba(11,31,58,.28)';};
-  b.onmouseleave=function(){b.style.transform='none';b.style.boxShadow='0 2px 6px rgba(11,31,58,.18)';};
+  b.onmouseenter=function(){b.style.background='#12305e';b.style.color='#fff';b.style.borderColor='#12305e';};
+  b.onmouseleave=function(){b.style.background='transparent';b.style.color='#93a6c0';b.style.borderColor='#e1e8f2';};
   function wmMelons(){
     for(var i=0;i<24;i++){
       var m=document.createElement('div'); m.textContent='\\uD83C\\uDF49';
@@ -191,7 +191,7 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
 """
     html = (html.replace("__EID__", eid).replace("__B64__", b64)
             .replace("__FN__", fn))
-    _components.html(html, height=60)
+    _components.html(html, height=38)
 
 
 def download_fig_button(fig, filename: str, key: str) -> None:
