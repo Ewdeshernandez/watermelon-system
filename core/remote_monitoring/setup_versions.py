@@ -98,6 +98,8 @@ def diff_specs(old: Optional[Dict[str, Any]], new: Dict[str, Any]) -> Dict[str, 
               for f in ("source", "mode", "instance_id") if old.get(f) != new.get(f)]
     if (old.get("modbus_gateway") or {}) != (new.get("modbus_gateway") or {}):
         source.append("gateway Modbus")
+    if (old.get("layout") or {}) != (new.get("layout") or {}):
+        source.append("train drawing")
     return {"added": added, "removed": removed, "changed": changed,
             "machine": machine, "source": source}
 
@@ -143,13 +145,14 @@ def versions_available(client: Any = None) -> bool:
 
 def save_draft(setup: AcqSetup, origin: str = "web", author: str = "",
                base_version: Optional[int] = None, note: str = "",
-               client: Any = None) -> Dict[str, Any]:
+               client: Any = None, setup_id: str = "") -> Dict[str, Any]:
     """Guarda una NUEVA versión borrador. base_version = versión publicada de la
-    que parte (None = la publicada actual)."""
+    que parte (None = la publicada actual). `setup_id` fijo: renombrar la
+    máquina NO cambia su identidad (default: slug del nombre, máquina nueva)."""
     client = client or _rm_client()
     if client is None:
         return {"ok": False, "reason": "offline"}
-    sid = setup_id_for(setup)
+    sid = setup_id or setup_id_for(setup)
     rows = list_versions(sid, client)
     if base_version is None:
         pub = published_row(rows)
