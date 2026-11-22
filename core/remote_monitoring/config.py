@@ -239,6 +239,11 @@ class AcqSetup:
     # Spec del constructor de tren (builder.html) → re-dibujar el tren en web
     # y campo. {} = máquina sin tren dibujado (ej. importada de un mapa Modbus).
     layout: Dict[str, Any] = field(default_factory=dict)
+    # --- Campos de la pestaña Machine/Acquisition del campo (config.html) ---
+    op_mode: str = "estable"       # estable | arranque | parada | arranque_parada
+    sampling_hz: float = 0.0       # muestreo DAQ por canal (0 = auto por RPM)
+    # Banda de MEDICIÓN del Direct por familia (prox/vel/accel) → [fmin, fmax] Hz.
+    measure_band: Dict[str, List[float]] = field(default_factory=dict)
 
     def keyphasor_row(self) -> Optional[ChannelRow]:
         for ch in self.channels:
@@ -588,7 +593,10 @@ def setup_to_dict(setup: "AcqSetup") -> Dict[str, Any]:
             "mode": setup.mode,
             "source": setup.source,
             "modbus_gateway": dict(setup.modbus_gateway or {}),
-            "layout": dict(setup.layout or {})}
+            "layout": dict(setup.layout or {}),
+            "op_mode": setup.op_mode,
+            "sampling_hz": float(setup.sampling_hz or 0.0),
+            "measure_band": {k: list(v) for k, v in (setup.measure_band or {}).items()}}
 
 
 def setup_from_dict(data: Dict[str, Any]) -> "AcqSetup":
@@ -606,7 +614,11 @@ def setup_from_dict(data: Dict[str, Any]) -> "AcqSetup":
                     mode=mode if mode in ("spot", "online") else "spot",
                     source=source if source in ("ni", "modbus") else "ni",
                     modbus_gateway=dict(data.get("modbus_gateway") or {}),
-                    layout=dict(data.get("layout") or {}))
+                    layout=dict(data.get("layout") or {}),
+                    op_mode=str(data.get("op_mode") or "estable"),
+                    sampling_hz=float(data.get("sampling_hz") or 0.0),
+                    measure_band={k: [float(x) for x in v][:2]
+                                  for k, v in (data.get("measure_band") or {}).items()})
 
 
 def _rm_client():

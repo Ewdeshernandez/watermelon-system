@@ -15,7 +15,7 @@ protocolo de componentes de Streamlit.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import streamlit.components.v1 as components
 
@@ -27,4 +27,14 @@ def machine_builder(spec: Optional[Dict[str, Any]], nonce: str, key: str,
                     skin: str = "light") -> Optional[Dict[str, Any]]:
     """Dibuja el constructor. `spec` = tren a cargar (layout guardado); se
     re-carga solo cuando cambia `nonce` (máquina / versión seleccionada)."""
-    return _component(spec=spec or {}, nonce=nonce, skin=skin, key=key, default=None)
+    return _component(page="builder.html", spec=spec or {}, nonce=nonce, skin=skin,
+                      key=key, default=None)
+
+
+def machine_config(msgs: List[Dict[str, Any]], nonce: str, key: str,
+                   skin: str = "light") -> Optional[Dict[str, Any]]:
+    """Dibuja la configuración de 7 pasos (native/field_ui/config.html) —
+    la MISMA del campo. `msgs` (host→página, ver config_bridge) se entregan
+    cuando cambia `nonce`. Devuelve la última acción {wm:'action', name, setup, ..., ts}."""
+    return _component(page="config.html", msgs=msgs, nonce=nonce, skin=skin,
+                      key=key, default=None)
