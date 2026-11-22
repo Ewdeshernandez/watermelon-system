@@ -2889,7 +2889,8 @@ def _evt_pill(status: str) -> str:
             f'{_EVT_EN.get(status, status)}</span>')
 
 
-def render_event_timeline(instance_id: str, user_email: Optional[str] = None) -> None:
+def render_event_timeline(instance_id: str, user_email: Optional[str] = None,
+                          asset_label: str = "") -> None:
     """Event log PERSISTENTE (tabla severity_events) — estilo System1 Event List:
     historial de cruces con duración en estado, evento vigente resaltado y ack."""
     from core.severity_events import list_recent, ack_event
@@ -2946,15 +2947,26 @@ def render_event_timeline(instance_id: str, user_email: Optional[str] = None) ->
     hdr = f"Event log · {len(evs)} crossings"
     if n_active:
         hdr += f" · {n_active} active"
-    st.markdown(
+    _log_html = (
         '<div style="background:#fff;border:1px solid #e5edf7;border-radius:12px;'
         'overflow:hidden;margin:4px 0 10px 0;">'
         f'<div style="padding:9px 14px;background:#f8fafc;'
         'border-bottom:1px solid #e5edf7;font-size:10px;font-weight:700;color:#475569;'
         f'text-transform:uppercase;letter-spacing:.08em;">{hdr}</div>'
-        + "".join(rows) + '</div>',
-        unsafe_allow_html=True,
+        + "".join(rows) + '</div>'
     )
+    st.markdown(_log_html, unsafe_allow_html=True)
+    try:
+        from datetime import datetime as _dt
+        from core.fig_export import download_html_png_button
+        _lbl = asset_label or instance_id
+        _ts = _dt.now().strftime("%Y-%m-%d_%H%M")
+        download_html_png_button(
+            _log_html, f"event_log_{_lbl}_{_ts}.png", key=f"evlog_{instance_id}",
+            title=f"Event log · {_lbl} · {_dt.now().strftime('%Y-%m-%d %H:%M')}",
+            width=1000)
+    except Exception:  # noqa: BLE001
+        pass
     # Acknowledge de eventos vigentes sin reconocer
     actives = [e for e in evs if e.get("_active") and not e.get("ack_by") and e.get("id") is not None]
     if actives and user_email:
@@ -3228,6 +3240,17 @@ def render_api670_table(
         '</tr></thead><tbody>' + "\n".join(body) + '</tbody></table></div>'
     )
     st.markdown(table_html, unsafe_allow_html=True)
+    try:
+        from datetime import datetime as _dt
+        from core.fig_export import download_html_png_button
+        _lbl = (getattr(instance_obj, "tag", None) or "machine")
+        _ts = _dt.now().strftime("%Y-%m-%d_%H%M")
+        download_html_png_button(
+            table_html, f"tabular_list_{_lbl}_{_ts}.png", key=f"tabpng_{_lbl}",
+            title=f"Tabular List · {_lbl} · {_dt.now().strftime('%Y-%m-%d %H:%M')} · ISO 20816 / API 670",
+            width=1320)
+    except Exception:  # noqa: BLE001
+        pass
     st.caption(
         "Zone = ISO 20816 (A new · B acceptable · C alarm · D danger) · "
         "% alarm = Overall vs alarm setpoint (mark = alarm on the bar) · "
@@ -4588,7 +4611,9 @@ def main() -> None:
         logging.warning("record_events failed: %s", e)
     try:
         with st.expander("Event log — threshold crossings", expanded=False):
-            render_event_timeline(instance_id, _current_email)
+            render_event_timeline(
+                instance_id, _current_email,
+                asset_label=(getattr(instance_obj, "tag", None) or instance_id))
     except Exception as e:
         import logging
         logging.warning("event timeline (overview) failed: %s", e)

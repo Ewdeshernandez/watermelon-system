@@ -64,6 +64,103 @@ function wmMelons(){
     _components.html(html, height=58)
 
 
+# CSS de la tabla densa de Live Monitoring (vive en el <style> de la página, que
+# NO llega al iframe del componente) → lo embebemos para que el PNG salga igual.
+_LIVE_TABLE_CSS = """<style>
+table.wm-live-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;
+ background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5edf7;font-variant-numeric:tabular-nums;}
+table.wm-live-table thead tr{background:#f8fafc;}
+table.wm-live-table thead th{text-align:left;color:#475569;font-weight:800;font-size:10px;
+ text-transform:uppercase;letter-spacing:.08em;padding:11px 14px;border-bottom:2px solid #d9e8fb;}
+table.wm-live-table tbody td{padding:11px 14px;border-bottom:1px solid #f1f5f9;color:#0f172a;}
+table.wm-live-table tbody tr:last-child td{border-bottom:none;}
+table.wm-live-table tbody tr.row-alarm{background:#fff8e7;}
+table.wm-live-table tbody tr.row-danger{background:#fef2f2;}
+table.wm-live-table tbody tr.row-danger td:first-child{border-left:3px solid #ef4444;}
+table.wm-live-table tbody tr.row-alarm td:first-child{border-left:3px solid #f59e0b;}
+table.wm-live-table .col-num{text-align:right;font-weight:700;font-family:'SF Mono',Menlo,Consolas,monospace;}
+table.wm-live-table .col-mono{font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12px;color:#475569;}
+table.wm-live-table .col-spark{width:100px;padding:6px 14px;}
+</style>"""
+
+
+def download_html_png_button(inner_html: str, filename: str, key: str,
+                             title: str = "", extra_css: str = "",
+                             width: int = 1200) -> None:
+    """Captura un bloque HTML (tabla, event log…) a PNG con html2canvas y lo baja
+    directo (nombre correcto + lluvia de sandías), para que CUALQUIER sección de
+    Live Monitoring se pueda descargar/enviar igual que el trend. Fidelidad
+    pixel-perfect a lo que ve el cliente: pills, sparklines SVG, glifos, colores.
+
+    - inner_html: el MISMO HTML que se pinta en pantalla (con sus estilos inline).
+    - title: encabezado opcional arriba del PNG (ej. tag de la máquina + fecha).
+    - extra_css: <style>…</style> adicional si el HTML usa clases.
+    """
+    import base64
+    import html as _h
+    import re as _re2
+
+    import streamlit.components.v1 as _components
+    eid = "wmh_" + _re2.sub(r"[^a-zA-Z0-9]", "", str(key))[:24]
+    hdr = (f'<div style="font:700 14px -apple-system,system-ui,sans-serif;color:#0f172a;'
+           f'margin:0 0 12px 0;">{_h.escape(title)}</div>') if title else ""
+    cap_html = (_LIVE_TABLE_CSS + (extra_css or "")
+                + f'<div style="width:{int(width)}px;background:#fff;padding:16px 18px;box-sizing:border-box;'
+                f'font-family:-apple-system,system-ui,sans-serif;">' + hdr + inner_html + '</div>')
+    b64 = base64.b64encode(cap_html.encode("utf-8")).decode()
+    fn = _h.escape(filename, quote=True)
+    html = """
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600&display=swap" rel="stylesheet">
+<div id="__EID___cap" style="position:absolute;left:-10000px;top:0;"></div>
+<button id="__EID__" style="display:inline-flex;align-items:center;gap:9px;border:none;
+   font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:600;font-size:13.5px;
+   background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;padding:10px 18px;
+   border-radius:10px;border:1px solid #0e2547;box-shadow:0 2px 6px rgba(11,31,58,.18);
+   transition:transform .08s ease,box-shadow .15s ease;cursor:pointer">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8890c"
+       stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
+  Descargar PNG
+</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+(function(){
+  var cap=document.getElementById('__EID___cap');
+  try{ cap.innerHTML=decodeURIComponent(escape(atob('__B64__'))); }catch(e){ cap.textContent='err'; }
+  var b=document.getElementById('__EID__');
+  b.onmouseenter=function(){b.style.transform='translateY(-1px)';b.style.boxShadow='0 6px 16px rgba(11,31,58,.28)';};
+  b.onmouseleave=function(){b.style.transform='none';b.style.boxShadow='0 2px 6px rgba(11,31,58,.18)';};
+  function wmMelons(){
+    for(var i=0;i<24;i++){
+      var m=document.createElement('div'); m.textContent='\\uD83C\\uDF49';
+      m.style.cssText='position:fixed;left:'+(Math.random()*100)+'vw;top:-24px;'+
+        'font-size:'+(15+Math.random()*20)+'px;z-index:99999;pointer-events:none;'+
+        'transition:transform '+(1.3+Math.random()*1.1)+'s ease-in,opacity .5s ease-out';
+      document.body.appendChild(m);
+      (function(mm){requestAnimationFrame(function(){mm.style.transform='translateY(130vh) rotate('+(Math.random()*720-360)+'deg)';});
+        setTimeout(function(){mm.style.opacity='0';},1400); setTimeout(function(){mm.remove();},2600);})(m);
+    }
+  }
+  b.onclick=async function(){
+    if(typeof html2canvas==='undefined'){b.textContent='Cargando…';return;}
+    var target=cap.firstElementChild; if(!target)return;
+    b.disabled=true; var old=b.innerHTML; b.innerHTML='Generando…';
+    try{
+      var canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true});
+      var link=document.createElement('a');
+      link.href=canvas.toDataURL('image/png'); link.download='__FN__';
+      document.body.appendChild(link); link.click(); link.remove(); wmMelons();
+    }catch(e){ b.textContent='Error PNG'; setTimeout(function(){b.innerHTML=old;b.disabled=false;},1500); return; }
+    b.innerHTML=old; b.disabled=false;
+  };
+})();
+</script>
+"""
+    html = (html.replace("__EID__", eid).replace("__B64__", b64)
+            .replace("__FN__", fn))
+    _components.html(html, height=60)
+
+
 def download_fig_button(fig, filename: str, key: str) -> None:
     """Descarga una figura Plotly como PNG con el botón+sandías. Cacheado por
     contenido → no re-renderiza en cada interacción (kaleido es lento)."""
