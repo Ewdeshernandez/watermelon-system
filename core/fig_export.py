@@ -145,12 +145,23 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
     if(typeof html2canvas==='undefined'){b.textContent='Cargando…';return;}
     var target=cap.firstElementChild; if(!target)return;
     b.disabled=true; var old=b.innerHTML; b.innerHTML='Generando…';
+    // html2canvas 1.4.1 rinde un canvas de 0px si el nodo está muy fuera de
+    // pantalla (left:-10000) → PNG de 0 bytes. Traer el nodo a 0,0 SOLO durante
+    // la captura (queda recortado por el iframe de 60px, casi no se ve) y pasar
+    // dimensiones explícitas. Luego restaurar.
+    cap.style.left='0'; cap.style.top='0';
+    await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
+    var w=Math.ceil(target.scrollWidth), h=Math.ceil(target.scrollHeight);
     try{
-      var canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true});
+      var canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',logging:false,
+        useCORS:true,width:w,height:h,windowWidth:w,windowHeight:h,scrollX:0,scrollY:0});
+      cap.style.left='-10000px';
+      if(!canvas.width||!canvas.height){throw new Error('canvas 0');}
       var link=document.createElement('a');
       link.href=canvas.toDataURL('image/png'); link.download='__FN__';
       document.body.appendChild(link); link.click(); link.remove(); wmMelons();
-    }catch(e){ b.textContent='Error PNG'; setTimeout(function(){b.innerHTML=old;b.disabled=false;},1500); return; }
+    }catch(e){ cap.style.left='-10000px'; b.textContent='Error PNG';
+      setTimeout(function(){b.innerHTML=old;b.disabled=false;},1500); return; }
     b.innerHTML=old; b.disabled=false;
   };
 })();
