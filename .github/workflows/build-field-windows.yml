@@ -81,6 +81,7 @@ jobs:
             --add-data "assets/fonts;assets/fonts" \
             --add-data "native/field_ui/skin.html;field_ui" \
             --add-data "native/field_ui/builder.html;field_ui" \
+            --add-data "native/field_ui/config.html;field_ui" \
             --icon "assets/watermelon.ico" \
             --collect-all nidaqmx \
             --collect-all nitypes \

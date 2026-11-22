@@ -107,6 +107,73 @@ class TrainViewer(QtWidgets.QWidget):
             pass
 
 
+def _config_path() -> str:
+    return os.path.join(os.path.dirname(_builder_path()), "config.html")
+
+
+class ConfigView(QtWidgets.QWidget):
+    """Configuración de máquina de 7 pasos — `config.html`, el MISMO archivo que
+    la web (pages/00_Machines.py). Python es el host: recibe acciones por
+    `message(dict)` y responde con `send(msg)` (window.wmReceive). La lógica
+    compartida vive en core.remote_monitoring.config_bridge."""
+
+    message = QtCore.Signal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.view = QWebEngineView(self)
+        lay.addWidget(self.view)
+        self._ready = False
+        self._queue = []
+        self.view.loadFinished.connect(self._on_load)
+        self.view.load(QtCore.QUrl.fromLocalFile(_config_path()))
+        # JS -> Python: la página encola en window.__wm_out (sin qwebchannel.js)
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._poll)
+        self._timer.start(150)
+
+    def _on_load(self, ok):
+        self._ready = bool(ok)
+        if self._ready:
+            q, self._queue = self._queue, []
+            for m in q:
+                self.send(m)
+
+    def send(self, msg: dict):
+        if not self._ready:
+            self._queue.append(msg)
+            return
+        try:
+            self.view.page().runJavaScript("window.wmReceive(" + json.dumps(msg) + ");")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _poll(self):
+        try:
+            self.view.page().runJavaScript(
+                "(function(){var q=window.__wm_out||[];window.__wm_out=[];return JSON.stringify(q);})()",
+                self._got)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _got(self, s):
+        if not s or s == "[]":
+            return
+        try:
+            items = json.loads(s)
+        except Exception:  # noqa: BLE001
+            return
+        for it in items:
+            try:
+                m = json.loads(it) if isinstance(it, str) else it
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(m, dict):
+                self.message.emit(m)
+
+
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     w = QtWidgets.QMainWindow()

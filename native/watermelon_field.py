@@ -21,7 +21,7 @@ import threading
 
 import numpy as np
 
-__version__ = "0.11.12"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
+__version__ = "0.11.13"   # debe coincidir con el tag field-vX.Y.Z del release (auto-update)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -2564,7 +2564,9 @@ def main() -> int:
         def _export_config():
             import json as _json
             from dataclasses import asdict as _asdict
-            setup = _form_to_setup()                   # captura TODO el formulario (AcqSetup)
+            # Con config.html activo, su setup es la fuente COMPLETA (incluye enlace Live,
+            # origen Modbus y tren); si no, se captura del formulario Qt.
+            setup = (_cfg_current_setup() if _cfg.get("view") is not None else None) or _form_to_setup()
             nch = len(setup.channels)
             if nch == 0:
                 _r = QtWidgets.QMessageBox.question(
@@ -2582,12 +2584,8 @@ def main() -> int:
                 return
             if not path.lower().endswith((".wmmachine", ".json")):
                 path += ".wmmachine"
-            payload = {"wm_format": "acqsetup",
-                       "machine": _asdict(setup.machine),
-                       "channels": [_asdict(c) for c in setup.channels],
-                       "acquisition": _asdict(setup.acquisition),
-                       "acquisition_by_type": {t: _asdict(p) for t, p in
-                                               (getattr(setup, "acquisition_by_type", {}) or {}).items()}}
+            from core.remote_monitoring.config import setup_to_dict as _std
+            payload = {"wm_format": "acqsetup", **_std(setup)}
             try:
                 with open(path, "w", encoding="utf-8") as f:
                     _json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -2621,11 +2619,13 @@ def main() -> int:
                     from core.remote_monitoring.config import setup_from_dict
                     setup = setup_from_dict(data)
                     _apply_setup(setup)
+                    _cfg["imported"] = setup           # config.html recibe la config COMPLETA
                     nch = len(setup.channels); mc = setup.machine
                     name, tagv, clientv, locv = mc.name, mc.tag, mc.client, mc.location
                     rot, rpm = mc.rotation, mc.rpm_nominal
                 else:                              # formato viejo (SimMachine) — compat
                     m = SimMachine.load(path); fill_form(m)
+                    _cfg["imported"] = _form_to_setup()
                     nch = len(m.sensors); name, tagv, clientv, locv = m.name, m.tag, m.client, m.location
                     rot, rpm = m.rotation, m.rpm
                 _unlock_all_tabs()
@@ -2668,6 +2668,312 @@ def main() -> int:
             _apply_gate()
             _sync_next_btn()
         _init_gate()
+
+        # ====== config.html — configuración de 7 pasos, MISMO archivo que la web ======
+        # La pantalla de Configuración pasa a ser native/field_ui/config.html (idéntica a
+        # pages/00_Machines.py). Las pestañas Qt quedan OCULTAS como modelo interno: la
+        # adquisición sigue leyendo read_form()/widgets → nada cambia al medir. Python es
+        # el host (core.remote_monitoring.config_bridge). Escape: WM_LEGACY_CONFIG=1.
+        _cfg = {"view": None, "setup": None, "sid": None, "imported": None, "tok": 0}
+
+        def _cfg_current_setup():
+            from core.remote_monitoring.config import setup_from_dict as _sfd
+            return _sfd(_cfg["setup"]) if _cfg.get("setup") else None
+
+        def _cfg_extras_apply(setup):
+            """Lo que _apply_setup no cubre: modo de operación, muestreo, bandas por
+            tipo, banda del Direct, canal activo, tipo de monitoreo y spec del tren."""
+            def _t(fn):
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001
+                    pass
+            _t(lambda: cb_mode.setCurrentText(MODE_LABELS.get(setup.op_mode, MODE_LABELS["estable"])))
+            _t(lambda: sp_avg.setValue(int(setup.acquisition.averages)))      # tras el modo
+            if setup.sampling_hz:
+                _t(lambda: sp_fs.setValue(int(setup.sampling_hz)))           # tras las RPM
+            for _ty in ("proximity", "velometer", "accelerometer"):
+                _bp = (setup.acquisition_by_type or {}).get(_ty)
+                if _bp is None:
+                    continue
+                _fx, _fn, _ln = acq_band[_ty]
+                _t(lambda w=_fx, v=_bp.fmax_hz: w.setValue(float(v)))
+                _t(lambda w=_fn, v=_bp.fmin_hz: w.setValue(float(v)))
+                _t(lambda w=_ln, v=_bp.lines: w.setCurrentText(str(int(v))))
+            for _k, (_wmn, _wmx) in meas_band.items():
+                _v = (setup.measure_band or {}).get(_k)
+                if _v and len(_v) >= 2:
+                    _t(lambda w=_wmn, x=_v[0]: w.setValue(float(x)))
+                    _t(lambda w=_wmx, x=_v[1]: w.setValue(float(x)))
+            _act = {c.point_label: c.active for c in setup.channels}
+            for _r in range(tblc.rowCount()):
+                _it = tblc.item(_r, 0)
+                if _it is not None and _it.text() in _act:
+                    _t(lambda r=_r, a=_act[_it.text()]: tblc.setItem(
+                        r, _COL_ACT, QtWidgets.QTableWidgetItem("1" if a else "0")))
+            _t(lambda: cb_montype.setCurrentIndex(1 if setup.mode == "online" else 0))
+            if setup.layout and setup.layout.get("machines"):
+                _layout_ui["spec"] = setup.layout
+                _built["ok"] = True
+
+        def _cfg_sync_widgets():
+            setup = _cfg_current_setup()
+            if setup is None:
+                return
+            try:
+                _apply_setup(setup)
+                _cfg_extras_apply(setup)
+            except Exception as _e:  # noqa: BLE001
+                print("config.html → widgets:", _e)
+
+        def _cfg_sync_later():
+            _cfg["tok"] += 1
+            _tok = _cfg["tok"]
+            QtCore.QTimer.singleShot(1200, lambda: _cfg_sync_widgets() if _tok == _cfg["tok"] else None)
+
+        def _cfg_library():
+            items = []
+            try:
+                from core.remote_monitoring.config import list_setups as _ls_local
+                for _n in _ls_local():
+                    items.append({"id": f"acq:{_n}", "label": f"{_n}  ·  this PC"})
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                _have = {i["label"].split("  ·  ")[0] for i in items}
+                for _n in (list_machines() or []):
+                    if _n not in _have:
+                        items.append({"id": f"lib:{_n}", "label": f"{_n}  ·  this PC (library)"})
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                from core.remote_monitoring.config import _rm_client, _RM_SETUPS_TABLE
+                _c = _rm_client()
+                if _c is not None:
+                    _res = _c.table(_RM_SETUPS_TABLE).select("id, name, metadata").execute()
+                    for _r in _res.data or []:
+                        _m = _r.get("metadata") or {}
+                        _v = _m.get("_version")
+                        items.append({"id": f"cloud:{_r['id']}",
+                                      "label": f"☁ {_r.get('name') or _r['id']}  ·  "
+                                               f"{('v' + str(_v)) if _v else 'unversioned'}  ·  "
+                                               f"{'online' if _m.get('mode') == 'online' else 'spot'}"})
+            except Exception:  # noqa: BLE001
+                pass
+            return items
+
+        def _cfg_versions(sid):
+            if not sid:
+                return []
+            try:
+                from core.remote_monitoring import setup_versions as _sv
+                return _sv.list_versions(sid)
+            except Exception:  # noqa: BLE001
+                return []
+
+        def _cfg_send_init(setup, *, sid=None, unlocked=None, step=0, built=None, toast=""):
+            from core.remote_monitoring import config_bridge as _cb
+            _cfg["setup"] = _cb.normalize(setup)
+            _cfg["sid"] = sid
+            msg = _cb.init_message(setup, host="field", library=_cfg_library(),
+                                   versions=_cfg_versions(sid), current_id=(f"cloud:{sid}" if sid else ""),
+                                   unlocked=unlocked, step=step)
+            if built is not None:
+                msg["built"] = built
+            if toast:
+                msg["toast"] = toast
+            _cfg["view"].send(msg)
+
+        def _cfg_load(item_id):
+            from core.remote_monitoring.config import setup_from_dict as _sfd, load_setup as _lsl
+            kind, _, key = (item_id or "").partition(":")
+            setup, sid = None, None
+            try:
+                if kind == "cloud":
+                    from core.remote_monitoring.config import _rm_client, _RM_SETUPS_TABLE
+                    _res = (_rm_client().table(_RM_SETUPS_TABLE).select("metadata")
+                            .eq("id", key).single().execute())
+                    _m = dict((_res.data or {}).get("metadata") or {})
+                    _m.pop("_version", None)
+                    setup, sid = _sfd(_m), key
+                elif kind == "acq":
+                    setup = _lsl(key)
+                elif kind == "lib":
+                    fill_form(load_from_library(key))
+                    setup = _form_to_setup()
+            except Exception as _e:  # noqa: BLE001
+                _cfg["view"].send({"wm": "toast", "text": f"Could not load: {_e}"})
+                return
+            if setup is None:
+                _cfg["view"].send({"wm": "toast", "text": "Could not load that machine"})
+                return
+            _cfg_send_init(setup, sid=sid, unlocked=6, step=0, toast=f"Loaded {setup.machine.name}")
+            _cfg_sync_widgets()
+            try:
+                _unlock_all_tabs()
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _cfg_save_cloud():
+            setup = _cfg_current_setup()
+            if setup is None or not setup.channels:
+                _cfg["view"].send({"wm": "toast", "text": "Add at least one sensor before saving"})
+                return
+            from core.remote_monitoring.config import _slug, save_setup as _save_local
+            sid = _cfg.get("sid") or _slug(setup.machine.name or "Machine")
+            try:
+                import getpass as _gp
+                _author = _gp.getuser()
+            except Exception:  # noqa: BLE001
+                _author = "field"
+            res = {}
+
+            def _work():
+                try:
+                    from core.remote_monitoring import setup_versions as _sv
+                    from core.remote_monitoring.config import save_setup_cloud
+                    if _sv.versions_available():
+                        rows = _sv.list_versions(sid)
+                        pub = _sv.published_row(rows)
+                        d = _sv.save_draft(setup, origin="field", author=_author, setup_id=sid,
+                                           note="from field app")
+                        if not d.get("ok"):
+                            res.update(d)
+                        elif setup.mode == "online" and pub is not None:
+                            # En línea: lo del campo entra como BORRADOR → se acepta en la web.
+                            res.update({"ok": True, "text": f"Uploaded as draft v{d['version']} — "
+                                                            f"review and publish it on the web"})
+                        else:
+                            p = _sv.publish(sid, d["version"], by=_author)
+                            res.update({"ok": bool(p.get("ok")),
+                                        "text": f"Saved to Watermelon System as v{d['version']}"
+                                        if p.get("ok") else f"Draft v{d['version']} saved — {p.get('reason')}"})
+                    else:
+                        r = save_setup_cloud(setup)
+                        res.update({"ok": r.get("ok"), "reason": r.get("reason"),
+                                    "text": "Saved to Watermelon System"})
+                except Exception as _e:  # noqa: BLE001
+                    res.update({"ok": False, "reason": f"{type(_e).__name__}: {_e}"})
+                res["done"] = True
+            threading.Thread(target=_work, daemon=True).start()
+
+            def _check():
+                if not res.get("done"):
+                    QtCore.QTimer.singleShot(400, _check)
+                    return
+                if res.get("ok"):
+                    _cfg["sid"] = sid
+                    from core.remote_monitoring import config_bridge as _cb
+                    _cfg["view"].send({"wm": "versions", "versions": _cb.versions_view(_cfg_versions(sid)),
+                                       "toast": res.get("text", "Saved")})
+                else:
+                    try:
+                        _save_local(setup)                     # offline-first: queda en este PC
+                    except Exception:  # noqa: BLE001
+                        pass
+                    _cfg["view"].send({"wm": "toast", "text": "No cloud connection — saved on this PC. "
+                                       "Press again when online." if res.get("reason") == "offline"
+                                       else f"Could not save to the cloud: {res.get('reason')}"})
+            QtCore.QTimer.singleShot(300, _check)
+
+        def _cfg_on_message(m):
+            from core.remote_monitoring import config_bridge as _cb
+            wm = m.get("wm")
+            if m.get("setup"):
+                _cfg["setup"] = m["setup"]
+            if wm == "changed":
+                _cfg_sync_later()
+                return
+            if wm != "action":
+                return
+            name = m.get("name")
+            if name == "load":
+                _cfg_load(m.get("id"))
+            elif name == "new":
+                from core.remote_monitoring.config import AcqSetup as _AS, MachineConfig as _MC
+                _cfg_send_init(_AS(machine=_MC(name="", rpm_nominal=3000.0)), unlocked=0, step=0,
+                               built=False, toast="New machine — fill the asset record, then Continuar")
+                _built["ok"] = False
+            elif name == "build":
+                out = _cb.handle_build(_cfg["setup"] or {}, m.get("spec") or {})
+                _cfg["setup"] = out["setup"]
+                _built["ok"] = True
+                _layout_ui["spec"] = m.get("spec") or {}
+                _cfg["view"].send(out)
+                _cfg_sync_later()
+            elif name == "validate":
+                _cfg_sync_widgets()
+                try:
+                    _run_validation()                      # gating de Iniciar (0 errores)
+                except Exception:  # noqa: BLE001
+                    pass
+                _cfg["view"].send({"wm": "findings", "findings": _cb.findings(_cfg["setup"] or {})})
+            elif name == "apply":
+                _cfg_sync_widgets()
+            elif name == "save_cloud":
+                _cfg_save_cloud()
+            elif name == "save_local":
+                _cfg_sync_widgets()
+                try:
+                    from core.remote_monitoring.config import save_setup as _save_local
+                    _save_local(_cfg_current_setup())     # AcqSetup completo (Live, Modbus, tren)
+                except Exception:  # noqa: BLE001
+                    pass
+                do_save_lib()
+            elif name == "save_file":
+                _cfg_sync_widgets()
+                _export_config()
+            elif name == "open_file":
+                _cfg["imported"] = None
+                _import_config()
+                if _cfg.get("imported") is not None:
+                    _cfg_send_init(_cfg["imported"], unlocked=6, step=0, toast="File loaded")
+                    _cfg_extras_apply(_cfg["imported"])
+            elif name == "apply_measure":
+                fs = _cb.findings(_cfg["setup"] or {})
+                if _cb.n_errors(fs):
+                    _cfg["view"].send({"wm": "findings", "findings": fs,
+                                       "toast": "Fix Validation errors before measuring"})
+                    return
+                _cfg_sync_widgets()
+                do_apply()
+
+        if not os.environ.get("WM_LEGACY_CONFIG"):
+            try:
+                from field_ui.builder import ConfigView
+                _cfg["view"] = ConfigView()
+                _cfg["view"].message.connect(_cfg_on_message)
+                # La pantalla nueva reemplaza rail + pestañas + botonera Qt (quedan ocultos
+                # como modelo interno de la adquisición).
+                for _w in (cfg_rail, cfg_tabs, btn_refresh, btn_next, btn_cloud, btn_savefile,
+                           btn_save, btn_apply):
+                    _w.hide()
+                cfg_ol.insertWidget(1, _cfg["view"], 1)
+                # El layout oculto (rail + pestañas) ya no reserva alto: todo para config.html.
+                for _i in range(cfg_ol.count()):
+                    if cfg_ol.itemAt(_i) is not None and cfg_ol.itemAt(_i).layout() is _cfg_body:
+                        cfg_ol.setStretch(_i, 0)
+                _start = _form_to_setup()
+                if (_start.machine.name or "") in _GENERIC_MACHINE:
+                    _start.machine.name = ""
+                # El flujo arranca bloqueado (igual que antes): hay que construir el tren.
+                _cfg_send_init(_start, unlocked=0, step=0, built=False)
+            except Exception as _ce:  # noqa: BLE001
+                print("config.html no disponible — configuración Qt clásica:", _ce)
+                _cfg["view"] = None
+
+        # Dev: captura de la ventana para verificar la UI sin control de pantalla.
+        if os.environ.get("WM_DEV_SNAPSHOT"):
+            def _dev_snap():
+                try:
+                    tabs.setCurrentWidget(cfg_outer)
+                    if os.environ.get("WM_DEV_JS") and _cfg.get("view") is not None:
+                        _cfg["view"].view.page().runJavaScript(os.environ["WM_DEV_JS"])
+                    QtCore.QTimer.singleShot(int(os.environ.get("WM_DEV_SNAP_DELAY", "2500")), lambda: (
+                        win.grab().save(os.environ["WM_DEV_SNAPSHOT"]), print("DEV_SNAPSHOT saved")))
+                except Exception as _se:  # noqa: BLE001
+                    print("DEV_SNAPSHOT failed:", _se)
+            QtCore.QTimer.singleShot(6000, _dev_snap)
 
         # Entrada de Config = Machine (paso 1 del flujo: identificar la máquina,
         # después el Constructor arma el tren/sondas).
