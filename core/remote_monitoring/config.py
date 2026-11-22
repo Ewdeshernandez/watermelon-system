@@ -674,5 +674,6 @@ def find_setup_cloud_by_instance(instance_id: str, client: Any = None) -> Option
         meta = row.get("metadata") or {}
         if str(meta.get("instance_id") or "") == instance_id:
             return {"id": row.get("id"), "name": row.get("name"),
-                    "updated_at": row.get("updated_at"), "setup": setup_from_dict(meta)}
+                    "updated_at": row.get("updated_at"), "version": meta.get("_version"),
+                    "setup": setup_from_dict(meta)}
     return None
