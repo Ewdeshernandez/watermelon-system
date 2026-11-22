@@ -2962,7 +2962,7 @@ def render_event_timeline(instance_id: str, user_email: Optional[str] = None,
         _lbl = asset_label or instance_id
         _ts = _dt.now().strftime("%Y-%m-%d_%H%M")
         download_html_png_button(
-            _log_html, f"event_log_{_lbl}_{_ts}.png", key=f"evlog_{instance_id}",
+            _log_html, f"Event log {_lbl}.png", key=f"evlog_{instance_id}",
             title=f"Event log · {_lbl} · {_dt.now().strftime('%Y-%m-%d %H:%M')}",
             width=1000)
     except Exception:  # noqa: BLE001
@@ -3246,7 +3246,7 @@ def render_api670_table(
         _lbl = (getattr(instance_obj, "tag", None) or "machine")
         _ts = _dt.now().strftime("%Y-%m-%d_%H%M")
         download_html_png_button(
-            table_html, f"tabular_list_{_lbl}_{_ts}.png", key=f"tabpng_{_lbl}",
+            table_html, f"Tabular List {_lbl}.png", key=f"tabpng_{_lbl}",
             title=f"Tabular List · {_lbl} · {_dt.now().strftime('%Y-%m-%d %H:%M')} · ISO 20816 / API 670",
             width=1320)
     except Exception:  # noqa: BLE001
@@ -3984,7 +3984,7 @@ def render_history_chart(
         "yTitle": (list(units)[0] if len(units) == 1 else "value"),
         "cursorsOn": bool(_cur_on),
         "xr0": _allx.min().isoformat(), "xr1": _allx.max().isoformat(),
-        "fn": f"Tendencia {instance_id} {range_choice}",
+        "fn": f"Tendencia {(getattr(instance_obj, 'tag', None) or instance_id)} {range_choice}",
     }
 
     _html = (_TREND_JS_TEMPLATE
