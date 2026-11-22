@@ -150,11 +150,15 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
     b.disabled=true; var old=b.innerHTML; b.innerHTML='Generando…';
     try{
       // Mover style + contenido a un div XHTML (namespace) para serializar válido.
+      // IMPORTANTE: el posicionamiento offscreen va en un HOST aparte, NUNCA en wrap:
+      // si wrap lleva left:-10000 inline, ese estilo se serializa dentro del
+      // foreignObject y el contenido se pinta 10000px a la izquierda → PNG en blanco.
+      var host=document.createElement('div');
+      host.style.cssText='position:absolute;left:-10000px;top:0;';
       var wrap=document.createElement('div');
       wrap.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
       for(var i=0;i<cap.childNodes.length;i++)wrap.appendChild(cap.childNodes[i].cloneNode(true));
-      wrap.style.position='absolute'; wrap.style.left='-10000px'; wrap.style.top='0';
-      document.body.appendChild(wrap);
+      host.appendChild(wrap); document.body.appendChild(host);
       var target=wrap.querySelector('div')||wrap;
       await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
       var w=Math.ceil(target.scrollWidth)||1000, h=Math.ceil(target.scrollHeight)||100;
@@ -172,12 +176,13 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
       ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
       ctx.scale(sc,sc); ctx.drawImage(img,0,0);
       var url=canvas.toDataURL('image/png');            // lanza si el canvas está tainted
-      wrap.remove();
+      host.remove();
       if(!canvas.width||!canvas.height||url.length<256){throw new Error('canvas vacio');}
       var link=document.createElement('a');
       link.href=url; link.download='__FN__';
       document.body.appendChild(link); link.click(); link.remove(); wmMelons();
-    }catch(e){ b.textContent='Error: '+((e&&e.message)||'PNG');
+    }catch(e){ try{if(typeof host!=='undefined'&&host)host.remove();}catch(_){}
+      b.textContent='Error: '+((e&&e.message)||'PNG');
       setTimeout(function(){b.innerHTML=old;b.disabled=false;},2200); return; }
     b.innerHTML=old; b.disabled=false;
   };
