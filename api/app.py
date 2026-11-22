@@ -377,6 +377,12 @@ def create_app() -> "FastAPI":
         except Exception:
             base_time = _dt.now(tz=_tz.utc)
 
+        # Origen de la señal (modbus | ni) en CADA lectura → permite el periodo
+        # en paralelo Modbus vs NI y marcar el corte en el histórico. Los
+        # collectors Modbus viejos (≤1.1.0) no lo mandan → "modbus".
+        batch_meta = payload.metadata or {}
+        batch_source = str(batch_meta.get("source") or "modbus")
+
         rows: List[LiveReading] = []
         for r in payload.readings:
             try:
@@ -396,7 +402,7 @@ def create_app() -> "FastAPI":
                 captured_at=rt,
                 register=r.register,
                 quality=r.quality or "good",
-                metadata=r.metadata or {},
+                metadata={"source": batch_source, **(r.metadata or {})},
             ))
 
         n = ingest_batch(rows)
@@ -409,6 +415,31 @@ def create_app() -> "FastAPI":
             "instance_id": payload.instance_id,
             "received": len(rows),
         }
+
+    # =========================================================
+    # Mapa Modbus GENERADO desde la config de la máquina (Machines /
+    # rm_setups). El collector lo descarga al arrancar y cada N min; si
+    # falla, sigue con su copia local. Fase 1 migración Modbus → NI.
+    # =========================================================
+    @app.get("/v1/collector/map/{instance_id}", tags=["ingest"],
+             summary="Mapa Modbus del collector generado desde la config de la máquina")
+    def collector_map(instance_id: str, api_key_hash: str = Depends(_api_key_dependency)):
+        from core.live_readings import _get_supabase_client
+        from core.remote_monitoring.config import find_setup_cloud_by_instance
+        from core.remote_monitoring.modbus_binding import modbus_map_from_setup
+
+        found = find_setup_cloud_by_instance(instance_id, client=_get_supabase_client())
+        if not found:
+            raise HTTPException(status_code=404, detail="No machine config for this instance")
+        setup = found["setup"]
+        if not any(c.modbus for c in setup.channels):
+            raise HTTPException(status_code=404, detail="Machine has no Modbus source configured")
+        out = modbus_map_from_setup(setup)
+        out["_config"] = {"setup_id": found.get("id"), "updated_at": found.get("updated_at"),
+                          "source": setup.source}
+        log.info("collector_map: instance=%s regs=%d caller_hash=%s",
+                 instance_id, len(out.get("registers") or {}), api_key_hash)
+        return out
 
     # =========================================================
     # Figuras — FUENTE ÚNICA (core.figure_series). Web, reportes y app

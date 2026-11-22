@@ -68,7 +68,10 @@ except ImportError:
     sys.exit(1)
 
 
-COLLECTOR_VERSION = "1.1.0"   # 1.1.0: peak-hold en el borde (lee 1Hz, POST pico/ventana)
+COLLECTOR_VERSION = "1.2.0"   # 1.1.0: peak-hold en el borde (lee 1Hz, POST pico/ventana)
+# 1.2.0: mapa Modbus REMOTO opcional ("remote_map": true) — se descarga del API
+#        (generado desde la config de la máquina en Machines), refresco cada
+#        map_refresh_sec; si falla, sigue con la copia local. Marca source=modbus.
 
 
 # =============================================================================
@@ -230,6 +233,10 @@ class RegisterDef:
 
 def load_modbus_map(path: str) -> Tuple[ModbusConfig, List[RegisterDef], Dict[str, Any]]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return parse_modbus_map(raw)
+
+
+def parse_modbus_map(raw: Dict[str, Any]) -> Tuple[ModbusConfig, List[RegisterDef], Dict[str, Any]]:
     mb = raw.get("modbus", {})
     cfg = ModbusConfig(
         server_ip=str(mb.get("server_ip", "127.0.0.1")),
@@ -325,6 +332,62 @@ def post_batch(api: ApiConfig, payload: Dict[str, Any], log: logging.Logger) -> 
         return False
 
 
+def _map_signature(raw: Dict[str, Any]) -> str:
+    """Firma estable del mapa (ignora metadatos `_config` del API)."""
+    core = {k: v for k, v in raw.items() if k != "_config"}
+    return json.dumps(core, sort_keys=True, ensure_ascii=False)
+
+
+def fetch_remote_map(
+    api: ApiConfig,
+    instance_id: str,
+    cache_path: str,
+    log: logging.Logger,
+) -> Optional[Dict[str, Any]]:
+    """Descarga el mapa generado desde la config de la máquina
+    (GET /v1/collector/map/{instance_id}). Si es válido lo escribe en
+    `cache_path` (atómico, guarda .prev) y lo devuelve. Cualquier falla →
+    None y el collector sigue con la copia local que ya tiene."""
+    url = api.base_url.rstrip("/") + f"/v1/collector/map/{instance_id}"
+    try:
+        resp = requests.get(url, headers={"Authorization": f"Bearer {api.api_key}"},
+                            timeout=api.timeout_sec)
+    except requests.RequestException as e:
+        log.warning("remote map: fetch failed (%s) — keeping local map", e)
+        return None
+    if resp.status_code != 200:
+        log.warning("remote map: status=%d body=%s — keeping local map",
+                    resp.status_code, resp.text[:200])
+        return None
+    try:
+        raw = resp.json()
+        _, regs, _ = parse_modbus_map(raw)
+    except Exception as e:  # noqa: BLE001
+        log.warning("remote map: invalid payload (%s) — keeping local map", e)
+        return None
+    if not regs or str(raw.get("instance_id") or "") != instance_id:
+        log.warning("remote map: empty or instance mismatch — keeping local map")
+        return None
+    try:
+        dst = Path(cache_path)
+        if dst.exists():
+            old = dst.read_text(encoding="utf-8")
+            try:
+                if _map_signature(json.loads(old)) == _map_signature(raw):
+                    return raw  # sin cambios: no reescribir
+            except Exception:  # noqa: BLE001
+                pass
+            dst.with_suffix(dst.suffix + ".prev").write_text(old, encoding="utf-8")
+        tmp = dst.with_suffix(dst.suffix + ".tmp")
+        tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, dst)
+        log.info("remote map: saved %d registers (config %s)",
+                 len(regs), (raw.get("_config") or {}).get("updated_at"))
+    except OSError as e:
+        log.warning("remote map: could not write cache (%s) — using in memory", e)
+    return raw
+
+
 # =============================================================================
 # Main loop
 # =============================================================================
@@ -378,8 +441,31 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
     log.info("=== wm_collector v%s starting ===", COLLECTOR_VERSION)
     log.info("config: %s", config_path)
 
-    mb_cfg, regs, raw_map = load_modbus_map(cfg["modbus_map"])
-    instance_id = raw_map.get("instance_id") or cfg.get("instance_id") or "unknown"
+    api = ApiConfig(
+        base_url=cfg.get("api_url", "https://watermelon-api-bpv4.onrender.com"),
+        api_key=cfg["api_key"],
+        timeout_sec=float(cfg.get("api_timeout_sec", 15.0)),
+    )
+
+    # Mapa REMOTO (opt-in): la config de la máquina en Machines es la fuente
+    # de verdad; la copia local es el respaldo si no hay red / API.
+    remote_map = bool(cfg.get("remote_map", False))
+    map_refresh = float(cfg.get("map_refresh_sec", 600))
+    map_path = cfg["modbus_map"]
+    local_raw: Dict[str, Any] = {}
+    if Path(map_path).exists():
+        local_raw = json.loads(Path(map_path).read_text(encoding="utf-8"))
+    instance_id = cfg.get("instance_id") or local_raw.get("instance_id") or "unknown"
+    if remote_map:
+        got = fetch_remote_map(api, instance_id, map_path, log)
+        if got is None and not local_raw:
+            raise RuntimeError("remote map unavailable and no local map at " + map_path)
+        mb_cfg, regs, raw_map = parse_modbus_map(got or local_raw)
+    else:
+        mb_cfg, regs, raw_map = load_modbus_map(map_path)
+        instance_id = raw_map.get("instance_id") or cfg.get("instance_id") or "unknown"
+    map_sig = _map_signature(raw_map)
+    last_map_check = time.time()
     poll = int(raw_map.get("poll_interval_seconds") or cfg.get("poll_interval_seconds", 10))
     # Peak-hold: tasa de LECTURA Modbus dentro de cada ventana de POST. El Bently
     # 3500 refresca sus escalares ~1/seg → 1.0s es la resolución útil. Captura
@@ -388,16 +474,10 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
                           or cfg.get("read_interval_seconds", 1.0))
     agg_mode = str(raw_map.get("aggregate") or cfg.get("aggregate", "peak")).lower()
 
-    log.info("instance_id=%s registers=%d poll=%ds read=%.1fs agg=%s",
-             instance_id, len(regs), poll, read_interval, agg_mode)
+    log.info("instance_id=%s registers=%d poll=%ds read=%.1fs agg=%s remote_map=%s",
+             instance_id, len(regs), poll, read_interval, agg_mode, remote_map)
     log.info("Modbus target: %s:%d unit=%d byte_order=%s",
              mb_cfg.server_ip, mb_cfg.port, mb_cfg.unit_id, mb_cfg.byte_order)
-
-    api = ApiConfig(
-        base_url=cfg.get("api_url", "https://watermelon-api-bpv4.onrender.com"),
-        api_key=cfg["api_key"],
-        timeout_sec=float(cfg.get("api_timeout_sec", 15.0)),
-    )
 
     buf = Buffer(cfg.get("buffer_db", "wm_collector_buffer.sqlite"))
     host_label = cfg.get("host_label") or socket.gethostname()
@@ -407,6 +487,28 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
     while True:
         cycle_start = time.time()
         captured_at = datetime.now(timezone.utc)
+
+        # Refresco del mapa remoto: un cambio publicado en Machines llega al
+        # collector sin tocar el servidor del sitio.
+        if remote_map and not dry_run and cycle_start - last_map_check >= map_refresh:
+            last_map_check = cycle_start
+            got = fetch_remote_map(api, instance_id, map_path, log)
+            if got is not None and _map_signature(got) != map_sig:
+                old_target = (mb_cfg.server_ip, mb_cfg.port)
+                mb_cfg, regs, raw_map = parse_modbus_map(got)
+                map_sig = _map_signature(raw_map)
+                poll = int(raw_map.get("poll_interval_seconds") or cfg.get("poll_interval_seconds", 10))
+                read_interval = float(raw_map.get("read_interval_seconds")
+                                      or cfg.get("read_interval_seconds", 1.0))
+                agg_mode = str(raw_map.get("aggregate") or cfg.get("aggregate", "peak")).lower()
+                log.info("remote map APPLIED: registers=%d poll=%ds target=%s:%d",
+                         len(regs), poll, mb_cfg.server_ip, mb_cfg.port)
+                if (mb_cfg.server_ip, mb_cfg.port) != old_target:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                    client = ModbusTcpClient(host=mb_cfg.server_ip, port=mb_cfg.port, timeout=8.0)
 
         # Asegurar conexión al gateway
         if not client.connect():
@@ -463,6 +565,10 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
         )
         payload["metadata"]["aggregate"] = agg_mode
         payload["metadata"]["window_reads"] = reads
+        payload["metadata"]["source"] = "modbus"
+        cfg_meta = raw_map.get("_config") or {}
+        if cfg_meta.get("updated_at"):
+            payload["metadata"]["map_config"] = cfg_meta.get("updated_at")
 
         if dry_run:
             log.info("DRY RUN — payload preview:")
