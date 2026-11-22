@@ -109,11 +109,17 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
                 f'font-family:-apple-system,system-ui,sans-serif;">' + hdr + inner_html + '</div>')
     b64 = base64.b64encode(cap_html.encode("utf-8")).decode()
     fn = _h.escape(filename, quote=True)
+    # NO html2canvas: el iframe de components.html es de ORIGEN NULO (sandbox sin
+    # allow-same-origin), y html2canvas clona el DOM a un iframe propio que en ese
+    # contexto es cross-origin → SecurityError → "Error PNG". En su lugar:
+    # serializar el nodo a XHTML, meterlo en un <svg><foreignObject>, cargarlo como
+    # <img> y pintarlo en un canvas. No clona iframes → funciona en origen nulo.
+    # El <style> va DENTRO del foreignObject para que apliquen las clases
+    # (wm-live-table, etc). Verificado en navegador real (origen nulo, sin taint).
     html = """
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600&display=swap" rel="stylesheet">
 <div id="__EID___cap" style="position:absolute;left:-10000px;top:0;"></div>
 <button id="__EID__" style="display:inline-flex;align-items:center;gap:9px;border:none;
-   font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:600;font-size:13.5px;
+   font-family:system-ui,-apple-system,sans-serif;font-weight:600;font-size:13.5px;
    background:linear-gradient(135deg,#12305e,#274b7d);color:#fff;padding:10px 18px;
    border-radius:10px;border:1px solid #0e2547;box-shadow:0 2px 6px rgba(11,31,58,.18);
    transition:transform .08s ease,box-shadow .15s ease;cursor:pointer">
@@ -122,7 +128,6 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
     <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/></svg>
   Descargar PNG
 </button>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
 (function(){
   var cap=document.getElementById('__EID___cap');
@@ -142,26 +147,38 @@ def download_html_png_button(inner_html: str, filename: str, key: str,
     }
   }
   b.onclick=async function(){
-    if(typeof html2canvas==='undefined'){b.textContent='Cargando…';return;}
-    var target=cap.firstElementChild; if(!target)return;
     b.disabled=true; var old=b.innerHTML; b.innerHTML='Generando…';
-    // html2canvas 1.4.1 rinde un canvas de 0px si el nodo está muy fuera de
-    // pantalla (left:-10000) → PNG de 0 bytes. Traer el nodo a 0,0 SOLO durante
-    // la captura (queda recortado por el iframe de 60px, casi no se ve) y pasar
-    // dimensiones explícitas. Luego restaurar.
-    cap.style.left='0'; cap.style.top='0';
-    await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
-    var w=Math.ceil(target.scrollWidth), h=Math.ceil(target.scrollHeight);
     try{
-      var canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',logging:false,
-        useCORS:true,width:w,height:h,windowWidth:w,windowHeight:h,scrollX:0,scrollY:0});
-      cap.style.left='-10000px';
-      if(!canvas.width||!canvas.height){throw new Error('canvas 0');}
+      // Mover style + contenido a un div XHTML (namespace) para serializar válido.
+      var wrap=document.createElement('div');
+      wrap.setAttribute('xmlns','http://www.w3.org/1999/xhtml');
+      for(var i=0;i<cap.childNodes.length;i++)wrap.appendChild(cap.childNodes[i].cloneNode(true));
+      wrap.style.position='absolute'; wrap.style.left='-10000px'; wrap.style.top='0';
+      document.body.appendChild(wrap);
+      var target=wrap.querySelector('div')||wrap;
+      await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
+      var w=Math.ceil(target.scrollWidth)||1000, h=Math.ceil(target.scrollHeight)||100;
+      var xhtml=new XMLSerializer().serializeToString(wrap);
+      var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'">'+
+              '<foreignObject x="0" y="0" width="'+w+'" height="'+h+'">'+xhtml+'</foreignObject></svg>';
+      var img=new Image();
+      await new Promise(function(res,rej){
+        img.onload=res; img.onerror=function(){rej(new Error('svg img load'));};
+        img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+      });
+      var sc=2;
+      var canvas=document.createElement('canvas'); canvas.width=w*sc; canvas.height=h*sc;
+      var ctx=canvas.getContext('2d');
+      ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.scale(sc,sc); ctx.drawImage(img,0,0);
+      var url=canvas.toDataURL('image/png');            // lanza si el canvas está tainted
+      wrap.remove();
+      if(!canvas.width||!canvas.height||url.length<256){throw new Error('canvas vacio');}
       var link=document.createElement('a');
-      link.href=canvas.toDataURL('image/png'); link.download='__FN__';
+      link.href=url; link.download='__FN__';
       document.body.appendChild(link); link.click(); link.remove(); wmMelons();
-    }catch(e){ cap.style.left='-10000px'; b.textContent='Error PNG';
-      setTimeout(function(){b.innerHTML=old;b.disabled=false;},1500); return; }
+    }catch(e){ b.textContent='Error: '+((e&&e.message)||'PNG');
+      setTimeout(function(){b.innerHTML=old;b.disabled=false;},2200); return; }
     b.innerHTML=old; b.disabled=false;
   };
 })();
