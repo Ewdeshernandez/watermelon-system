@@ -436,7 +436,7 @@ def create_app() -> "FastAPI":
             raise HTTPException(status_code=404, detail="Machine has no Modbus source configured")
         out = modbus_map_from_setup(setup)
         out["_config"] = {"setup_id": found.get("id"), "updated_at": found.get("updated_at"),
-                          "source": setup.source}
+                          "version": found.get("version"), "source": setup.source}
         log.info("collector_map: instance=%s regs=%d caller_hash=%s",
                  instance_id, len(out.get("registers") or {}), api_key_hash)
         return out

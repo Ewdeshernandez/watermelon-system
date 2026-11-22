@@ -569,6 +569,8 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
         cfg_meta = raw_map.get("_config") or {}
         if cfg_meta.get("updated_at"):
             payload["metadata"]["map_config"] = cfg_meta.get("updated_at")
+        if cfg_meta.get("version") is not None:
+            payload["metadata"]["map_version"] = cfg_meta.get("version")
 
         if dry_run:
             log.info("DRY RUN — payload preview:")
