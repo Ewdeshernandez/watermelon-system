@@ -39,8 +39,9 @@ NAV_GROUPS = [
             # Library + Crear activo cuando la doble escritura a `instances` esté.
             {"label": "⚙  Machines", "page": "pages/00_Machines.py"},
             {"label": "▣  Machinery Library", "page": "pages/00_Machinery_Library.py"},
-            # Crear activo (wizard): crea máquinas nuevas (no es ingesta de datos).
-            {"label": "✦  Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
+            # 2026-11-23: "Crear activo (wizard)" retirado del nav — Machines lo
+            # reemplaza (+ New machine → Publish crea también el activo de Live).
+            # pages/_machinery_wizard.py sigue en el repo (abre por URL).
             # 2026-10-23: Tabular List retirado del nav — la vista Tabular vive
             # en Rotodinámica. La página 01__Tabular_List.py sigue en el repo
             # (la usan reportes + snapshots cliente por URL/programático).
@@ -62,8 +63,9 @@ NAV_GROUPS = [
             # (maleta NI 9178 + 9234 / simulado) → rotordinámica completa.
             # Herramienta de analista (admin/specialist), bloqueada a cliente.
             {"label": "⇄  Remote Monitoring", "page": "pages/02_Remote_Monitoring.py"},
-            # Ciclo 15.1 — Machine Map (heatmap de severidad por sensor)
-            {"label": "⌖  Machine Map", "page": "pages/01b_Machine_Map.py"},
+            # 2026-11-23: Machine Map retirado del nav — Live Monitoring muestra el
+            # tren de Machines en vivo con la severidad por sonda (lo mismo, mejor).
+            # pages/01b_Machine_Map.py sigue en el repo (abre por URL).
         ],
     },
     {
