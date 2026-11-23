@@ -2558,8 +2558,8 @@ def render_asset_header(
         health_block = (
             f'<div style="display:flex; align-items:center; gap:10px; '
             f'background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.16); border-radius:10px; '
-            f'padding:5px 12px 5px 8px;">'
-            f'{health_gauge_svg(_score, _zcolor)}'
+            f'padding:2px 10px 2px 4px;">'
+            f'{health_gauge_svg(_score, _zcolor, size=46)}'
             f'<div style="display:flex; flex-direction:column; gap:2px;">'
             f'<span style="font-size:9px; color:#64748b; font-weight:700; '
             f'letter-spacing:0.1em; text-transform:uppercase; color:#9fc0e6;">Asset health</span>'
@@ -2613,11 +2613,11 @@ def render_asset_header(
             @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&family=IBM+Plex+Sans+Condensed:wght@700&family=IBM+Plex+Mono:wght@500;600&display=swap');
             .wm-hb {{
                 position: sticky; top: 56px; z-index: 50;
-                border-radius: 16px; padding: 16px 22px; margin: 4px 0 10px 0;
+                border-radius: 12px; padding: 8px 18px 8px 16px; margin: 4px 0 8px 0;
                 background: linear-gradient(120deg,#0e2547 0%,#12305e 46%,#274b7d 100%);
                 color: #eaf1fb; overflow: hidden;
                 box-shadow: 0 10px 30px rgba(12,32,78,.22);
-                display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center;
+                display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: center;
                 font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
             }}
             .wm-hb::after {{ content:""; position:absolute; inset:0; pointer-events:none;
@@ -2627,9 +2627,10 @@ def render_asset_header(
             .wm-hb > * {{ position: relative; z-index: 1; }}
             .wm-hb .k {{ font: 600 10.5px 'IBM Plex Mono', monospace; letter-spacing:.14em;
                 text-transform: uppercase; color:#9fc0e6; }}
-            .wm-hb h1 {{ margin: 2px 0 0; font: 700 26px 'IBM Plex Sans Condensed','IBM Plex Sans',sans-serif;
-                letter-spacing:.01em; color:#ffffff; line-height:1.1; }}
-            .wm-hb .sub {{ margin: 2px 0 0; color:#b9cbe2; font-size: 12.5px; }}
+            .wm-hb .id {{ display:flex; align-items:center; gap:12px; min-width:0; }}
+            .wm-hb h1 {{ margin: 0; padding: 0; font: 700 21px 'IBM Plex Sans Condensed','IBM Plex Sans',sans-serif;
+                letter-spacing:.01em; color:#ffffff; line-height:1.1; white-space:nowrap; }}
+            .wm-hb .sub {{ margin: 1px 0 0; color:#9fb6d3; font-size: 11px; white-space:nowrap; }}
             .wm-hb .pill {{ display:inline-flex; align-items:center; gap:7px;
                 font: 700 11px 'IBM Plex Mono', monospace; letter-spacing:.08em; text-transform:uppercase;
                 padding: 5px 11px; border-radius: 999px; background:{_conn_bg}; color:{_conn_fg}; }}
@@ -2637,13 +2638,13 @@ def render_asset_header(
                 animation: wm-hb-pulse 1.6s infinite; }}
             @keyframes wm-hb-pulse {{ 0%,100% {{ opacity:1 }} 50% {{ opacity:.25 }} }}
             @media (prefers-reduced-motion: reduce) {{ .wm-hb .pill i {{ animation:none; }} }}
-            .wm-hb .kpis {{ display:flex; flex-wrap:wrap; gap: 20px; margin-left:auto; align-items:center; }}
-            .wm-hb-kpi .n {{ font: 700 22px 'IBM Plex Sans', sans-serif; font-variant-numeric: tabular-nums;
-                color:#ffffff; line-height:1.1; }}
+            .wm-hb .kpis {{ display:flex; flex-wrap:wrap; gap: 4px 18px; margin-left:auto; align-items:center; }}
+            .wm-hb-kpi .n {{ font: 700 17px 'IBM Plex Sans', sans-serif; font-variant-numeric: tabular-nums;
+                color:#ffffff; line-height:1.15; white-space:nowrap; }}
             .wm-hb-kpi .n small {{ font: 500 11px 'IBM Plex Mono', monospace; color:#9fc0e6; margin-left:4px; }}
             .wm-hb-kpi .l {{ font: 600 10px 'IBM Plex Mono', monospace; letter-spacing:.1em;
                 text-transform: uppercase; color:#9fc0e6; }}
-            .wm-hb .status {{ display:inline-flex; align-items:center; gap:7px; padding: 7px 13px;
+            .wm-hb .status {{ display:inline-flex; align-items:center; gap:7px; padding: 5px 11px;
                 border-radius: 8px; font: 700 11px 'IBM Plex Mono', monospace; letter-spacing:.1em;
                 text-transform: uppercase; background:{_st_dark[0]}; color:{_st_dark[1]};
                 border: 1px solid {_st_dark[2]}; }}
@@ -2654,12 +2655,13 @@ def render_asset_header(
                 margin-right:6px; text-transform:uppercase; }}
             </style>
             <div class="wm-hb"><span class="strip"></span>
-                <div>
-                    <div class="k">Live Monitoring · Machine</div>
-                    <h1>{title_text}</h1>
-                    <div class="sub">{class_label} · ISO 20816 / API 670{_cfg_v}</div>
+                <div class="id">
+                    <span class="pill"><i></i>{_conn_txt}</span>
+                    <div>
+                        <h1>{title_text}</h1>
+                        <div class="sub">{class_label} · ISO 20816 / API 670{_cfg_v}</div>
+                    </div>
                 </div>
-                <span class="pill"><i></i>{_conn_txt}</span>
                 <div class="kpis">
                     <div class="wm-hb-kpi"><div class="n">{speed_txt}<small>rpm</small></div>
                         <div class="l">{"Turbine" if _speed_extra else "Speed"}</div></div>{_gen_kpi}

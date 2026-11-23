@@ -42,9 +42,30 @@ def _sev_colors(status: str):
     s = (status or "").lower()
     if "danger" in s or "crít" in s or "crit" in s:
         return _RED, _RED_BG
-    if "alarma" in s or "alert" in s:
+    if "alarma" in s or "alert" in s or "atenci" in s or "attention" in s:
         return _AMBER, _AMBER_BG
     return _GREEN, _GREEN_BG
+
+
+def _canon_status(status: Any, alarms: Any) -> str:
+    """Estado canónico en ESPAÑOL (el reporte es del cliente). Acepta el inglés de
+    la UI ('Attention', 'Critical') y nunca dice 'Normal' si hay alarmas."""
+    s = str(status or "").strip()
+    sl = s.lower()
+    if "fuera" in sl or "offline" in sl:
+        return "Fuera de línea"
+    if "detenid" in sl or "stopped" in sl:
+        return "Máquina detenida"
+    if "crít" in sl or "crit" in sl or "danger" in sl or "peligro" in sl:
+        return "Crítica"
+    if "atenci" in sl or "attention" in sl or "alarm" in sl or "alert" in sl:
+        return "Atención"
+    try:
+        if int(alarms or 0) > 0:
+            return "Atención"
+    except (TypeError, ValueError):
+        pass
+    return "Operación normal"
 
 
 def generate_live_report_pdf(
@@ -108,6 +129,11 @@ def generate_live_report_pdf(
     # líneas DENTRO de la celda en vez de desbordarse sobre "Overall".
     st_loc = ParagraphStyle("loc", fontName=SANS, fontSize=7.6,
                             leading=8.8, textColor=colors.HexColor(_SLATE))
+
+    # Estado canónico (español) — la descarga desde Live pasaba 'Attention' en
+    # inglés y el PDF lo leía como 'Normal' aunque hubiera alarmas.
+    if not kpis.get("offline") and not kpis.get("stopped"):
+        kpis = dict(kpis, status=_canon_status(kpis.get("status"), kpis.get("alarms")))
 
     # ---------- Header ----------
     logo_cell = ""
@@ -183,42 +209,75 @@ def generate_live_report_pdf(
     zone = health.get("zone", "—")
     hcolor = colors.HexColor(health.get("color", _MUTE))
 
-    def _kpi(label, value, vcolor=None):
-        lab = ParagraphStyle("kl", fontName=SANSB, fontSize=7.3,
-                             textColor=colors.HexColor(_MUTE), leading=9, spaceAfter=3)
-        val = ParagraphStyle("kv", fontName=SANSB, fontSize=14.5,
-                             textColor=vcolor or colors.HexColor(_NAVY), leading=17)
-        return [Paragraph(label.upper(), lab), Paragraph(str(value), val)]
-
-    # En OFFLINE, la velocidad es el ÚLTIMO dato conocido (no la actual, que
-    # se desconoce). Se rotula "Velocidad (último)" para no leerla como en vivo.
+    # Banda de datos = la MISMA de Live Monitoring (navy + franja ámbar):
+    # salud, estado, turbina, generador, vibración de eje máx, alarmas, última lectura.
+    import re as _re
     _off = bool(kpis.get("offline"))
-    _vel_label = "Velocidad (último)" if _off else "Velocidad"
-    kpi_tbl = Table([[
-        _kpi("Salud", f"{score_txt}", hcolor),
-        _kpi("Estado", _acc_label.capitalize(), colors.HexColor(_acc)),
-        _kpi(_vel_label, kpis.get("speed", "—")),
-        _kpi("Alarmas", kpis.get("alarms", 0),
-             colors.HexColor(_RED) if kpis.get("alarms", 0) else colors.HexColor(_GREEN)),
-        _kpi("Última lectura", kpis.get("last", "—")),
-    ]], colWidths=[3.44 * cm] * 5)
+    _spall = str(kpis.get("speeds_all") or "")
+    _sp_turb, _sp_gen = str(kpis.get("speed", "—")).replace(" rpm", ""), None
+    for _part in _spall.replace(" rpm", "").split("·"):
+        _m = _re.search(r"([A-Za-zÁÉÍÓÚáéíóú ]+)\s+([\d.,]+)", _part.strip())
+        if _m and _m.group(1).strip().lower().startswith("gen"):
+            _sp_gen = _m.group(2)
+        elif _m and _m.group(1).strip().lower().startswith("turb"):
+            _sp_turb = _m.group(2)
+    _maxv, _maxl, _maxu = None, "", "µm pp"
+    for _c in channels or []:
+        _u = str(_c.get("unit") or "").lower()
+        if "µm" in _u or "um" in _u or "mil" in _u:
+            try:
+                _v = float(_c.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if _maxv is None or _v > _maxv:
+                _maxv, _maxl = _v, str(_c.get("sensor_label") or "").replace("_", "")
+                _maxu = (_c.get("unit") or "µm pp")
+    _st_lab = ParagraphStyle("bl", fontName=SANSB, fontSize=6.6, leading=8,
+                             textColor=colors.HexColor("#9fc0e6"))
+
+    def _bk(label, value, unit="", vcolor="#ffffff", size=13.5):
+        _v = ParagraphStyle("bv", fontName=SANSB, fontSize=size, leading=size + 3,
+                            textColor=colors.HexColor(vcolor))
+        _txt = f"{value}<font size='7' color='#9fc0e6'> {unit}</font>" if unit else f"{value}"
+        return [Paragraph(_txt, _v), Spacer(1, 2), Paragraph(label.upper(), _st_lab)]
+
+    _hc = health.get("color", _MUTE)
+    _alarms_n = kpis.get("alarms", 0) or 0
+    _st_txt = str(kpis.get("status", "—"))
+    _st_col, _ = _sev_colors(_st_txt)
+    if _off or kpis.get("stopped"):
+        _st_col = "#cbd5e1"
+    cells = [
+        _bk("Salud · " + str(zone).split("·")[0].strip(), score_txt, "/100", _hc),
+        _bk("Estado", _st_txt, "", _st_col, 10.5),
+        _bk("Turbina (último)" if _off else "Turbina", _sp_turb, "rpm"),
+    ]
+    widths = [2.7, 2.9, 2.6]
+    if _sp_gen:
+        cells.append(_bk("Generador", _sp_gen, "rpm")); widths.append(2.3)
+    cells.append(_bk("Vib. eje máx" + (f" · {_maxl}" if _maxl else ""),
+                     f"{_maxv:.1f}" if _maxv is not None else "—",
+                     _maxu.replace(" pp", "") + " pp" if _maxv is not None else ""))
+    widths.append(2.9)
+    cells.append(_bk("Alarmas", _alarms_n, "", _RED if _alarms_n else "#4ade80"))
+    widths.append(1.8)
+    cells.append(_bk("Última lectura", str(kpis.get("last", "—")).replace("hace ", ""), "", "#ffffff", 11))
+    widths.append(18.0 - sum(widths))
+    kpi_tbl = Table([cells], colWidths=[w * cm for w in widths])
     kpi_tbl.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(_LINE)),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor(_LINE)),
-        ("TOPPADDING", (0, 0), (-1, -1), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
-        ("LEFTPADDING", (0, 0), (-1, -1), 11),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#12305e")),
+        ("LINEAFTER", (-1, 0), (-1, -1), 4, colors.HexColor("#e8890c")),
+        ("LINEAFTER", (0, 0), (-2, -1), 0.4, colors.HexColor("#2b4a7a")),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("ROUNDEDCORNERS", [6, 6, 6, 6]),
     ]))
     story.append(kpi_tbl)
-    _zline = f"Zona ISO: {zone}"
-    _spall = kpis.get("speeds_all")
-    if _spall and _spall not in ("—", kpis.get("speed")) and "·" in _spall:
-        _vl = "Velocidades (último dato)" if _off else "Velocidades"
-        _zline += f"  ·  {_vl}: {_spall}"   # tren turbo-gen: turbina + generador
-    story.append(Paragraph(_zline, st_meta))
+    story.append(Spacer(1, 3))
+    story.append(Paragraph(f"Zona ISO 20816: {zone}", st_meta))
     story.append(Spacer(1, 8))
 
     # ---------- Banner de estado + diagnóstico en lenguaje simple ----------
