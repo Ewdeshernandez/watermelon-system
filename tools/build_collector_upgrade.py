@@ -49,7 +49,8 @@ param(
     [switch]$Rollback,
     [switch]$AcceptSettings,
     [string]$Root = 'C:\watermelon\collector',
-    [string]$Service = 'WatermelonCollector'
+    [string]$Service = '__SERVICE__',
+    [string]$Python = ''
 )
 $ErrorActionPreference = 'Stop'
 $IID = '__IID__'
@@ -60,11 +61,26 @@ function Step($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "    OK  $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "    !!  $m" -ForegroundColor Yellow }
 
-$py = Join-Path $Root 'venv\Scripts\python.exe'
+# Python: el MISMO del servicio (NSSM lo guarda en el registro); si no, venv / PATH.
+$py = $Python
+if (-not $py) {
+    try { $py = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Service\Parameters" -ErrorAction Stop).Application } catch { $py = '' }
+}
+if (-not $py -or -not (Test-Path $py)) { $py = Join-Path $Root 'venv\Scripts\python.exe' }
 if (-not (Test-Path $py)) { $py = (Get-Command python).Source }
+# Config: la que usa el servicio (--config en AppParameters de NSSM); si no, la estándar.
 $cfgPath = Join-Path $Root 'wm_collector.config.json'
+try {
+    $ap = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Service\Parameters" -ErrorAction Stop).AppParameters
+    if ($ap -match '--config\s+"?([^"]+?\.json)"?') { $cfgPath = $Matches[1] }
+} catch {}
+if (-not [System.IO.Path]::IsPathRooted($cfgPath)) { $cfgPath = Join-Path $Root $cfgPath }
 $colPath = Join-Path $Root 'wm_collector.py'
-$logPath = Join-Path $Root 'logs\wm_collector.log'
+# Log: carpeta log_dir de la config (A usa logs_sgt300a, B usa logs)
+$logDir = 'logs'
+try { $c0 = Get-Content $cfgPath -Raw | ConvertFrom-Json; if ($c0.log_dir) { $logDir = $c0.log_dir } } catch {}
+if (-not [System.IO.Path]::IsPathRooted($logDir)) { $logDir = Join-Path $Root $logDir }
+$logPath = Join-Path $logDir 'wm_collector.log'
 
 if ($Rollback) {
     Step 'Rollback: restaurando el último respaldo'
@@ -184,6 +200,9 @@ if ($tail -match 'remote_map=True' -and $tail -match 'POST OK') {
 
 
 def main() -> int:
+    service = "WatermelonCollector"
+    if len(sys.argv) == 4:
+        service = sys.argv.pop(3)
     if len(sys.argv) != 3:
         print(__doc__)
         return 1
@@ -191,7 +210,7 @@ def main() -> int:
     src = (ROOT / "collector" / "wm_collector.py").read_bytes()
     ver = re.search(rb'COLLECTOR_VERSION = "([^"]+)"', src).group(1).decode()
     ps = (TEMPLATE.replace("__IID__", iid).replace("__VERSION__", ver)
-          .replace("__NAME__", out.name)
+          .replace("__NAME__", out.name).replace("__SERVICE__", service)
           .replace("__SHA__", hashlib.sha256(src).hexdigest())
           .replace("__B64__", base64.b64encode(src).decode()))
     out.write_text(ps, encoding="utf-8-sig")   # BOM: PowerShell 5 lee UTF-8 con acentos
