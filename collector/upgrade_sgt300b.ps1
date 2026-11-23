@@ -6,6 +6,8 @@
       powershell -ExecutionPolicy Bypass -File .\upgrade_sgt300b.ps1
   Volver atrás (restaura el último respaldo y reinicia el servicio):
       powershell -ExecutionPolicy Bypass -File .\upgrade_sgt300b.ps1 -Rollback
+  Si solo difieren AJUSTES del collector (no registros), confirmar con:
+      powershell -ExecutionPolicy Bypass -File .\upgrade_sgt300b.ps1 -AcceptSettings
 
   Qué hace (y aborta + restaura si algo falla):
     1. Verifica que la config/mapa del servidor sean de turbina_sgt300_b
@@ -18,6 +20,7 @@
 #>
 param(
     [switch]$Rollback,
+    [switch]$AcceptSettings,
     [string]$Root = 'C:\watermelon\collector',
     [string]$Service = 'WatermelonCollector'
 )
@@ -89,25 +92,35 @@ r = requests.get(url, headers={"Authorization": "Bearer " + cfg["api_key"]}, tim
 if r.status_code != 200:
     print("API status", r.status_code, r.text[:200]); sys.exit(2)
 cl = r.json(); meta = cl.pop("_config", {})
-print("nube: version", meta.get("version"), "·", meta.get("updated_at"))
+print("nube: version", meta.get("version"), "-", meta.get("updated_at"))
 if cl == loc:
     print("IGUALES"); sys.exit(0)
 lr, cr = loc.get("registers", {}), cl.get("registers", {})
+nreg = 0
 for a in sorted(set(lr) | set(cr), key=lambda x: int(x) if x.isdigit() else 0):
     if lr.get(a) != cr.get(a):
+        nreg += 1
         print("registro", a, "local:", lr.get(a), "nube:", cr.get(a))
 for k in sorted(set(loc) | set(cl)):
     if k != "registers" and loc.get(k) != cl.get(k):
-        print("campo", k, "local:", loc.get(k), "nube:", cl.get(k))
-sys.exit(3)
+        print("ajuste", k, "local:", loc.get(k), "nube:", str(cl.get(k))[:90])
+if nreg:
+    print("REGISTROS DISTINTOS:", nreg); sys.exit(3)
+print("REGISTROS IGUALES - solo cambian ajustes del collector"); sys.exit(4)
 '@ | Set-Content -Path $cmp -Encoding ASCII
 & $py $cmp $cfgPath
 $rc = $LASTEXITCODE
-if ($rc -ne 0) {
+if ($rc -eq 4 -and $AcceptSettings) {
+    Warn 'Registros idénticos; se aceptan los AJUSTES de la nube (-AcceptSettings).'
+} elseif ($rc -eq 4) {
+    Remove-Item $newPath
+    throw "Registros idénticos, pero cambian AJUSTES del collector (arriba). No se activó nada. Si son los esperados, corré de nuevo con -AcceptSettings."
+} elseif ($rc -ne 0) {
     Remove-Item $newPath
     throw "El mapa de la nube NO coincide con el del servidor (codigo $rc). No se activó nada. Revisá las diferencias de arriba y publicá en Machines la versión correcta."
+} else {
+    Ok 'mapa idéntico: activar el remoto no cambia lo que se lee'
 }
-Ok 'mapa idéntico: activar el remoto no cambia lo que se lee'
 
 Step '5/6 Config: remote_map = true'
 $cfg | Add-Member -NotePropertyName instance_id -NotePropertyValue $IID -Force
