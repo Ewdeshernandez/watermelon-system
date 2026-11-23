@@ -86,6 +86,8 @@ st.markdown(
     div[data-testid="stRadio"] label:nth-of-type(1)::before {{ color:#1AAEE5; }}
     div[data-testid="stRadio"] label:nth-of-type(2)::before {{ color:#D89B22; }}
     div[data-testid="stRadio"] label:nth-of-type(3)::before {{ color:#16A34A; }}
+    div[data-testid="stRadio"] label:nth-of-type(4)::before {{ color:#7C3AED; }}
+    div[data-testid="stRadio"] label:nth-of-type(5)::before {{ color:#E5484D; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -104,6 +106,8 @@ elif _sel == "licencias":
     from core.admin.licenses import render as _render
 elif _sel == "conocimiento":
     from core.admin.knowledge import render as _render
+elif _sel == "suscripciones":
+    from core.admin.subscriptions import render as _render
 else:
     from core.admin.users import render as _render
 

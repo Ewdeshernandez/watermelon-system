@@ -1,0 +1,216 @@
+"""
+pages/24_Suscripcion.py — Suscripción del cliente
+=================================================
+
+Plan contratado, factura del periodo, cómo pagar e historial. Solo la ven:
+  · admin (con selector de cliente, "vista del cliente")
+  · los correos AUTORIZADOS de la suscripción (wm_subscriptions.authorized_emails)
+Cualquier otro usuario (incluido el resto del cliente) recibe acceso denegado.
+
+Pago en línea (Wompi para SIGA GROUP SAS / Mercury para Watermelon System EE. UU.)
+se enciende cuando existan las cuentas; mientras tanto: datos de transferencia.
+"""
+from __future__ import annotations
+
+import html
+
+import streamlit as st
+
+from core.auth import get_current_user, render_user_menu, require_login
+
+st.set_page_config(page_title="Watermelon System | Suscripción", layout="wide",
+                   initial_sidebar_state="expanded")
+require_login()
+render_user_menu()
+
+from core.ui_theme import apply_watermelon_page_style, page_header  # noqa: E402
+from core.ui_industrial import dot, html_table, inject_industrial_css  # noqa: E402
+
+apply_watermelon_page_style()
+inject_industrial_css()
+
+from core.billing import periods, pricing, store  # noqa: E402
+from core.billing.cycle import _today, transfer_details  # noqa: E402
+
+user = get_current_user() or {}
+role = (user.get("role") or "").strip().lower()
+email = (user.get("email") or "").strip().lower()
+is_admin = bool(user.get("is_admin")) or role == "admin"
+
+page_header("Suscripción", subtitle="Su plan, sus facturas y cómo pagarlas.")
+
+if not store.available():
+    st.info("La suscripción todavía no está activa en este sistema.")
+    st.stop()
+
+sub = None
+if is_admin:
+    subs = store.list_subscriptions()
+    if not subs:
+        st.info("No hay suscripciones creadas. Créalas en Administración → Suscripciones.")
+        st.stop()
+    ids = [s["client_id"] for s in subs]
+    pick = st.selectbox("Vista del cliente (solo admin)", ids, key="sub_view_client")
+    sub = next(s for s in subs if s["client_id"] == pick)
+else:
+    sub = store.subscription_for_viewer(email)
+    if not sub:
+        st.error("No tiene acceso a esta sección. Si debe gestionar los pagos de su "
+                 "empresa, pida a SIGA que lo agregue como contacto autorizado.")
+        st.stop()
+
+plan = pricing.PLANS.get(sub.get("plan") or "profesional", pricing.PLANS["profesional"])
+entity_key = sub.get("billing_entity") or "siga_co"
+entity = pricing.ENTITIES[entity_key]
+cycle = sub.get("cycle") or "mensual"
+machines = list(sub.get("machines") or [])
+today = _today()
+
+try:
+    from core.clients import get_client_by_id
+    _c = get_client_by_id(sub["client_id"])
+    client_name = _c.display_name if _c else sub["client_id"]
+except Exception:  # noqa: BLE001
+    client_name = sub["client_id"]
+
+quote = None
+try:
+    quote = pricing.quote(plan.key, len(machines), entity_key, cycle,
+                          price_override=sub.get("price_per_machine"),
+                          usd_unit=sub.get("usd_price_per_machine"),
+                          trm=None if sub.get("usd_price_per_machine") else 1)
+    if entity_key == "wm_us" and not sub.get("usd_price_per_machine"):
+        quote = None                    # sin precio USD fijado todavía
+except Exception:  # noqa: BLE001
+    quote = None
+
+invoices = store.list_invoices(sub["client_id"])
+for inv in invoices:
+    inv["_status"] = periods.effective_status(inv.get("status", ""),
+                                              periods.date.fromisoformat(inv["due_date"]), today)
+open_inv = next((i for i in invoices if i["_status"] in ("pendiente", "vencida")), None)
+
+_ST = {"activa": ("ok", "Activa"), "pausada": ("warn", "Pausada"), "cancelada": ("off", "Cancelada")}
+_IS = {"pagada": ("ok", "Pagada"), "pendiente": ("warn", "Pendiente"),
+       "vencida": ("dang", "Vencida"), "anulada": ("off", "Anulada")}
+st_dot, st_txt = _ST.get(sub.get("status"), ("off", sub.get("status", "—")))
+al_dia = not any(i["_status"] == "vencida" for i in invoices)
+
+st.markdown("""
+<style>
+.sb-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:14px;margin:4px 0 14px}
+@media (max-width:820px){.sb-grid{grid-template-columns:1fr}}
+.sb-card{background:#fff;border:1px solid #e2e8f2;border-radius:12px;padding:16px 18px}
+.sb-k{font:600 11px/1.3 'IBM Plex Mono',monospace;letter-spacing:.06em;color:#64748b;text-transform:uppercase}
+.sb-t{font:600 18px/1.3 'IBM Plex Sans',sans-serif;color:#0b1f3a;margin-top:6px}
+.sb-s{font:400 13px/1.55 'IBM Plex Sans',sans-serif;color:#475569}
+.sb-big{font:600 26px/1.2 'IBM Plex Sans',sans-serif;color:#0b1f3a;margin-top:6px}
+.sb-li{font:400 13px/1.7 'IBM Plex Sans',sans-serif;color:#0b1f3a}
+.sb-li s{color:#94a3b8}
+.sb-pill{display:inline-block;font:500 12px/1 'IBM Plex Sans',sans-serif;padding:4px 9px;border-radius:999px}
+.sb-due{background:#fff;border:2px solid #e8890c;border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.sb-due.vencida{border-color:#dc3545}
+.sb-chip{display:inline-block;font:400 12px/1 'IBM Plex Sans',sans-serif;background:#eef2f7;color:#0b1f3a;padding:5px 9px;border-radius:6px;margin:3px 4px 0 0}
+</style>""", unsafe_allow_html=True)
+
+_inc = "<br>".join(f"{dot('ok')} {html.escape(x)}" for x in plan.includes)
+_exc = "<br>".join(f"{dot('off')} <s>{html.escape(x)}</s>" for x in plan.excludes)
+_price = (pricing.fmt_money(quote["amount"], quote["currency"]) + (" / año" if cycle == "anual" else " / mes")
+          if quote else "Por confirmar")
+_unit = (f"{len(machines)} × {pricing.fmt_money(quote['unit_price'], quote['currency'])} por máquina"
+         + (f" · −{quote['volume_discount_pct']:.0f} % por volumen" if quote and quote["volume_discount_pct"] else "")
+         + (" · −5 % pago en USD" if quote and quote["entity_discount_pct"] else "")
+         + (" · 12 meses por el precio de 11" if cycle == "anual" else "")
+         if quote else "")
+_nt = pricing.next_tier(len(machines))
+_upsell = (f"Con {_nt[0]} máquinas el descuento por volumen sube a {_nt[1] * 100:.0f} %." if _nt else "")
+_pill = ('<span class="sb-pill" style="background:#e6f6ec;color:#136c37">Activa · al día</span>'
+         if (sub.get("status") == "activa" and al_dia) else
+         f'<span class="sb-pill" style="background:#fdecea;color:#a12a2a">{dot(st_dot)} {st_txt}'
+         + ("" if al_dia else " · con saldo vencido") + "</span>")
+
+st.markdown(f"""
+<div class="sb-grid">
+ <div class="sb-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+   <span class="sb-k">Su plan · {html.escape(client_name)}</span>{_pill}</div>
+  <div class="sb-t">{plan.name} · {len(machines)} máquina{'s' if len(machines) != 1 else ''}</div>
+  <div class="sb-s">{html.escape(' · '.join(machines)) or '—'}</div>
+  <div class="sb-li" style="margin-top:10px">{_inc}{('<br>' + _exc) if _exc else ''}</div>
+ </div>
+ <div class="sb-card">
+  <div class="sb-k">Próxima renovación</div>
+  <div class="sb-big">{periods.fmt_date(sub.get('next_renewal'))}</div>
+  <div class="sb-s">{'Anual' if cycle == 'anual' else 'Mensual'} · {_price}</div>
+  <div class="sb-s">{html.escape(_unit)}</div>
+  <div class="sb-s" style="margin-top:6px">Factura: {entity['name']} ({entity['country']}, {entity['currency']})</div>
+  <div class="sb-s" style="margin-top:6px;color:#1f6f43">{html.escape(_upsell)}</div>
+ </div>
+</div>""", unsafe_allow_html=True)
+
+# ---- Factura abierta + cómo pagar ----
+if open_inv:
+    p0 = periods.date.fromisoformat(open_inv["period_start"])
+    p1 = periods.date.fromisoformat(open_inv["period_end"])
+    _per = periods.period_label(p0, p1, cycle)
+    _cls = "sb-due vencida" if open_inv["_status"] == "vencida" else "sb-due"
+    _sd, _stx = _IS[open_inv["_status"]]
+    st.markdown(f"""
+<div class="{_cls}">
+ <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+  <div><div class="sb-k">Factura del periodo</div>
+   <div class="sb-t">{html.escape(open_inv['number'])} · {_per}</div>
+   <div class="sb-s">Vence el {periods.fmt_date(open_inv['due_date'])}</div></div>
+  <div style="text-align:right"><div class="sb-big">{pricing.fmt_money(float(open_inv['amount']), open_inv['currency'])}</div>
+   <div class="sb-s">{dot(_sd)} {_stx}</div></div>
+ </div>
+</div>""", unsafe_allow_html=True)
+
+    online = store.get_setting(f"online_{entity_key}", {}) or {}
+    pay_url = (open_inv.get("provider_ref") or "").strip() if str(open_inv.get("provider_ref", "")).startswith("http") else ""
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        if pay_url and online.get("enabled"):
+            st.link_button("Pagar en Mercury ↗" if entity_key == "wm_us" else "Pagar con PSE, Bre-B o tarjeta ↗",
+                           pay_url, type="primary", use_container_width=True)
+        else:
+            _has_td = any(transfer_details(entity_key).values())
+            st.markdown('<div class="sb-s"><b>Pago en línea:</b> se activa muy pronto. '
+                        + ('Mientras tanto puede pagar por transferencia con estos datos.'
+                           if _has_td else
+                           'Mientras tanto SIGA le envía los datos de transferencia con la factura.')
+                        + '</div>', unsafe_allow_html=True)
+    with c2:
+        _m = "".join(f'<span class="sb-chip">{html.escape(m)}</span>' for m in entity["methods"])
+        st.markdown(f'<div class="sb-s">Medios de pago {entity["name"]}:</div>{_m}',
+                    unsafe_allow_html=True)
+    td = transfer_details(entity_key)
+    if any(td.values()):
+        rows = [[k, v] for k, v in (
+            ("Beneficiario", td["beneficiary"]), ("Banco", td["bank"]),
+            ("Tipo de cuenta", td["account_type"]), ("Cuenta", td["account"]),
+            ("Routing / ABA", td["routing"]), ("SWIFT", td["swift"]),
+            ("NIT / Tax ID", td["tax_id"]), ("Referencia", open_inv["number"]),
+            ("Nota", td["notes"])) if v]
+        html_table(["Transferencia", ""], rows)
+else:
+    st.markdown(f'<div class="sb-card" style="margin-bottom:14px"><span class="sb-s">'
+                f'{dot("ok")} No tiene facturas pendientes.</span></div>', unsafe_allow_html=True)
+
+# ---- Historial ----
+st.markdown('<div class="sb-k" style="margin:6px 0 8px">Historial de facturas</div>',
+            unsafe_allow_html=True)
+if invoices:
+    rows = []
+    for i in invoices:
+        _sd, _stx = _IS.get(i["_status"], ("off", i["_status"]))
+        p0 = periods.date.fromisoformat(i["period_start"])
+        p1 = periods.date.fromisoformat(i["period_end"])
+        paid = (f"{_stx} {periods.fmt_date(i.get('paid_at'))}"
+                + (f" · {i['paid_method']}" if i.get("paid_method") else "")) if i["_status"] == "pagada" else _stx
+        rows.append([i["number"], periods.period_label(p0, p1, cycle),
+                     pricing.fmt_money(float(i["amount"]), i["currency"]),
+                     periods.fmt_date(i["due_date"]), f"{dot(_sd)} {html.escape(paid)}"])
+    html_table(["Factura", "Periodo", "Valor", "Vence", "Estado"], rows, raw_cols=[4])
+else:
+    st.caption("Todavía no hay facturas.")
