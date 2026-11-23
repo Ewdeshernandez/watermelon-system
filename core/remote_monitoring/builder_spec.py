@@ -39,15 +39,20 @@ _SDEF = {
 }
 
 _RE_BEARING = re.compile(r"^(\d+)([XYHVZ])D([ab]?)$", re.IGNORECASE)
+# Sondas de carcasa/aux por tipo: 4YA (acel), 4YV (vel) → 4Y_A, 4Y_V (labels del rack)
+_RE_TYPED = re.compile(r"^(\d+)([XYHVZ])([AV])$", re.IGNORECASE)
 
 
 def canonical_label(display: str) -> str:
     """'1XD' → '1X_D', '2ZDa' → '2Z_Da'; el resto queda igual (KPH, 1A, aux)."""
     s = (display or "").strip()
     m = _RE_BEARING.match(s)
-    if not m:
-        return s
-    return f"{m.group(1)}{m.group(2).upper()}_D{m.group(3).lower()}"
+    if m:
+        return f"{m.group(1)}{m.group(2).upper()}_D{m.group(3).lower()}"
+    m = _RE_TYPED.match(s)
+    if m:
+        return f"{m.group(1)}{m.group(2).upper()}_{m.group(3).upper()}"
+    return s
 
 
 def display_label(label: str) -> str:

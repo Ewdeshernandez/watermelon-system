@@ -68,3 +68,9 @@ def test_modbus_machine_only_suggests_new_probes():
     assert len(new.channels) == len(setup.channels)
     _, rep2 = merge_builder_spec(setup, spec, add_new=True)
     assert "3X_D" in rep2["added"]
+
+
+def test_typed_casing_labels():
+    assert canonical_label("4YA") == "4Y_A"
+    assert canonical_label("4XV") == "4X_V"
+    assert display_label("4Y_V") == "4YV"
