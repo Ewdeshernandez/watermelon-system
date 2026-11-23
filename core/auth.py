@@ -29,6 +29,8 @@ ABSOLUTE_SESSION_SECONDS = 6 * 60 * 60
 # CAD instrument" en vez de emojis rainbow consumer-app.
 # =============================================================
 
+SUBSCRIPTION_PAGE = "pages/24_Suscripcion.py"
+
 NAV_GROUPS = [
     {
         "section": "Overview",
@@ -148,6 +150,15 @@ NAV_GROUPS = [
         ],
     },
     {
+        # Suscripción del cliente (plan, facturas, pago). Visible SOLO para
+        # admin y para los correos AUTORIZADOS de la suscripción (no todo
+        # usuario del cliente) — ver subscription_page_visible().
+        "section": "Cuenta",
+        "items": [
+            {"label": "◇  Suscripción", "page": SUBSCRIPTION_PAGE},
+        ],
+    },
+    {
         # v3.31.491 — Sección Administración UNIFICADA (antes había dos headers:
         # "Administration" en inglés + "Administración" hardcodeado para Usuarios).
         # admin_only=True → el sidebar la esconde COMPLETA salvo para is_admin,
@@ -164,6 +175,31 @@ NAV_GROUPS = [
         ],
     },
 ]
+
+def subscription_page_visible(email: str, role: str, is_admin: bool = False) -> bool:
+    """Pestaña Suscripción: admin siempre; cliente solo si su correo está en
+    authorized_emails de una suscripción. Resultado cacheado en la sesión."""
+    if is_admin or (role or "").strip().lower() == "admin":
+        return True
+    if (role or "").strip().lower() != "client" or not email:
+        return False
+    key = f"_wm_sub_visible_{email.strip().lower()}"
+    try:
+        if key in st.session_state:
+            return bool(st.session_state[key])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from core.billing.store import subscription_for_viewer
+        ok = subscription_for_viewer(email) is not None
+    except Exception:  # noqa: BLE001
+        ok = False
+    try:
+        st.session_state[key] = ok
+    except Exception:  # noqa: BLE001
+        pass
+    return ok
+
 
 # Backward-compat: lista plana derivada de los grupos. Cualquier código
 # legacy que importe NAV_ITEMS sigue funcionando.
@@ -946,7 +982,9 @@ def render_user_menu() -> None:
             # NO aparezcan en el sidebar — solo Home + Live Monitoring + Reports.
             visible_items = [
                 it for it in group["items"]
-                if is_page_visible_in_nav_for_role(it["page"], _user_role)
+                if (subscription_page_visible(user.get("email", "") or "", _user_role, _is_admin)
+                    if it["page"] == SUBSCRIPTION_PAGE
+                    else is_page_visible_in_nav_for_role(it["page"], _user_role))
             ]
             if not visible_items:
                 continue  # toda la sección oculta para este role → skip header

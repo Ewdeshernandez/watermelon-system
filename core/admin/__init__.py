@@ -13,6 +13,7 @@ ADMIN_SECTIONS = [
     ("clientes", "Clientes"),
     ("licencias", "Licencias"),
     ("usuarios", "Usuarios"),
+    ("suscripciones", "Suscripciones"),
     ("conocimiento", "Conocimiento"),
 ]
 

@@ -176,6 +176,19 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             log.error("process_quick_reports falló: %s", e)
 
+        # Suscripciones: emite las facturas cuyo periodo ya empezó (idempotente:
+        # una factura por suscripción y periodo). Si faltan las tablas, no hace nada.
+        if not args.dry_run:
+            try:
+                from core.billing import store as _bstore
+                if _bstore.available():
+                    from core.billing.cycle import run_due
+                    _b = run_due()
+                    if _b.get("created") or _b.get("errors"):
+                        log.info("facturación: %s", _b)
+            except Exception as e:  # noqa: BLE001
+                log.error("facturación falló: %s", e)
+
         # v24: list_schedule_entries devuelve UNA fila por cada programación
         # del activo (Semanal + Mensual pueden coexistir), cada una con su día
         # y hora. schedule_due filtra las que coinciden con AHORA.
