@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import copy
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.remote_monitoring.config import AcqSetup, ChannelRow, defaults_for_type
 
@@ -102,7 +102,8 @@ def spec_to_channels(spec: Dict[str, Any]) -> List[ChannelRow]:
     return out
 
 
-def merge_builder_spec(setup: AcqSetup, spec: Dict[str, Any]) -> Tuple[AcqSetup, Dict[str, List[str]]]:
+def merge_builder_spec(setup: AcqSetup, spec: Dict[str, Any],
+                       add_new: Optional[bool] = None) -> Tuple[AcqSetup, Dict[str, List[str]]]:
     """Aplica un build del constructor a una máquina existente SIN pisar lo que
     alimenta Live. Devuelve (setup nuevo, reporte {added, matched, not_in_train}).
 
@@ -111,16 +112,26 @@ def merge_builder_spec(setup: AcqSetup, spec: Dict[str, Any]) -> Tuple[AcqSetup,
     - Sonda nueva → se agrega con defaults de campo, BNC libre siguiente.
     - Canal existente que el tren ya no tiene → se conserva y se reporta (nunca
       se borra en silencio; quitarlo es decisión explícita en la tabla).
+    - Máquina que lee del RACK (canales con origen Modbus): el rack define qué
+      sondas existen → las sondas nuevas del tren NO se agregan, se reportan como
+      `suggested` (el analista las agrega a mano si de verdad existen).
+      `add_new` fuerza el comportamiento.
     """
+    if add_new is None:
+        add_new = not any(c.modbus for c in setup.channels)
     new = copy.deepcopy(setup)
     built = spec_to_channels(spec)
     have = {c.point_label.upper(): c for c in new.channels}
     used_bnc = {c.bnc_port for c in new.channels}
     nxt = (max(used_bnc) if used_bnc else 0) + 1
-    added, matched = [], []
+    added, matched, suggested = [], [], []
     for ch in built:
         if ch.point_label.upper() in have:
             matched.append(ch.point_label)
+            continue
+        if not add_new:
+            if ch.sensor_type != "keyphasor":
+                suggested.append(ch.point_label)
             continue
         ch.bnc_port = nxt
         nxt += 1
@@ -142,4 +153,5 @@ def merge_builder_spec(setup: AcqSetup, spec: Dict[str, Any]) -> Tuple[AcqSetup,
                                     "rolling" if "rolling" in bts else "plain")
     new.machine.n_bearings = sum(int(m.get("bearings") or 0) for m in spec.get("machines") or []) \
         or new.machine.n_bearings
-    return new, {"added": added, "matched": matched, "not_in_train": not_in_train}
+    return new, {"added": added, "matched": matched, "not_in_train": not_in_train,
+                 "suggested": suggested}

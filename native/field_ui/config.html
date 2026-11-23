@@ -281,9 +281,10 @@ function stepMachine(){
 function bHash(view){return (view?'view-':'')+(document.body.classList.contains('light')?'light-':'')+'embed';}
 function stepConstructor(){
   var rep='';
-  if(REPORT){var a=REPORT.added||[],k=REPORT.matched||[],o=REPORT.not_in_train||[];
+  if(REPORT){var a=REPORT.added||[],k=REPORT.matched||[],o=REPORT.not_in_train||[],g=REPORT.suggested||[];
     rep='<div class="callout"><b>Built:</b> '+(a.length?'+'+a.length+' new probe(s) '+esc(a.map(disp).join(', '))+' · ':'')+k.length+' existing kept as-is'+
-      (o.length?' · '+o.length+' not in the drawn train (kept): '+esc(o.map(disp).join(', ')):'')+'. Continue to <b>Sensors &amp; layout</b>.</div>';}
+      (o.length?' · '+o.length+' not in the drawn train (kept): '+esc(o.map(disp).join(', ')):'')+'. Continue to <b>Sensors &amp; layout</b>.'+
+      (g.length?'<br><b>Suggested, not added</b> (this machine reads the protection rack — only probes wired to the rack exist): '+esc(g.map(disp).join(', '))+'. Add them in Sensors &amp; layout only if they are really installed.':'')+'</div>';}
   $('main').innerHTML=(!(S.layout&&S.layout.machines&&S.layout.machines.length)&&S.channels.length?
      '<div class="callout">This machine has sensors but no train drawing yet — draw it once. Existing sensors keep their Live names, Modbus registers and limits.</div>':'')+
     '<iframe class="frame" id="bFrame" title="Train builder" style="height:760px"></iframe>'+rep;
