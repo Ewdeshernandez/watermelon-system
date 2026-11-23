@@ -90,6 +90,15 @@ def alerts(data: Dict[str, Any]) -> List[Tuple[str, str, str]]:
                     out.append(("dang", f"Factura {inv['number']} vencida.", "suscripciones"))
     except Exception:  # noqa: BLE001
         pass
+    try:
+        from core.billing.upsell import _KIND_TXT, open_requests
+        names = {c.id: c.display_name for c in (data.get("_clients") or [])}
+        for r in open_requests()[:3]:
+            out.insert(0, ("info", f"{names.get(r.get('client_id'), r.get('client_id'))} pidió "
+                                   f"{_KIND_TXT.get(r.get('kind'), r.get('kind'))} "
+                                   f"({r.get('by')}).", "suscripciones"))
+    except Exception:  # noqa: BLE001
+        pass
     for lic in data.get("_licenses") or []:
         try:
             exp = datetime.fromisoformat(str(lic.get("expires_at")).replace("Z", "+00:00"))

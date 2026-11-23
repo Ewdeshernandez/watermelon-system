@@ -217,6 +217,75 @@ else:
     st.markdown(f'<div class="sb-card" style="margin-bottom:14px"><span class="sb-s">'
                 f'{dot("ok")} No tiene facturas pendientes.</span></div>', unsafe_allow_html=True)
 
+# ---- Para sus máquinas: ofertas con base en sus datos ----
+from core.billing import upsell  # noqa: E402
+
+_ev = upsell.evidence_for(machines)
+_oi = upsell.integral_offer(sub, upsell.balance_price(), _ev)
+_om = upsell.add_machine_offer(sub)
+_oa = upsell.annual_offer(sub)
+if _oi or _om or _oa:
+    st.markdown('<div class="sb-k" style="margin:6px 0 8px">Para sus máquinas</div>',
+                unsafe_allow_html=True)
+    _who = email or "admin"
+
+
+    def _ask(kind: str, detail: str) -> None:
+        if is_admin:
+            st.info("Vista de admin: la solicitud no se registra.")
+            return
+        if upsell.record_request(sub, kind, _who, detail):
+            st.success("Listo. SIGA recibió su solicitud y le contactará para confirmarla. "
+                       "No se cobra nada hasta que usted lo apruebe.")
+        else:
+            st.error("No se pudo enviar la solicitud. Intente de nuevo.")
+
+    if _oi:
+        _fm = lambda v: pricing.fmt_money(v, _oi["currency"])  # noqa: E731
+        _why = "".join(f"{dot('warn')} {html.escape(r)}<br>" for r in _oi["reasons"])
+        _be = _oi["breakeven"]
+        _pay = (f"Un balanceo de turbomaquinaria contratado aparte cuesta {_fm(_oi['balance_price'])}. "
+                + ("Con un solo balanceo al año, Integral ya le sale más económico."
+                   if _be == 1 else
+                   f"Con {_be} balanceos al año Integral se paga solo, y además incluye el análisis "
+                   "modal y la confiabilidad API 670."))
+        st.markdown(f"""
+<div class="sb-card" style="border:2px solid #e8890c;margin-bottom:10px">
+ <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+  <span class="sb-t" style="margin:0">{html.escape(_oi['title'])}</span>
+  {'<span class="sb-pill" style="background:#fff1dc;color:#8a4b00">Según sus datos</span>' if _oi['data_driven'] else ''}
+ </div>
+ <div class="sb-li" style="margin-top:8px">{_why}</div>
+ <div class="sb-s" style="margin-top:6px">{html.escape(_pay)}</div>
+ <div class="sb-s" style="margin-top:6px"><b>+ {_fm(_oi['diff_month'])} al mes</b> por sus
+ {len(machines)} máquina{'s' if len(machines) != 1 else ''} ({_fm(_oi['diff_year'])} al año).</div>
+</div>""", unsafe_allow_html=True)
+        if st.button("Quiero pasar a Integral", key="up_integral"):
+            _ask("integral", f"Diferencia {_fm(_oi['diff_month'])}/mes · motivos: "
+                             + " | ".join(_oi["reasons"]))
+    _c1, _c2 = st.columns(2)
+    if _om:
+        with _c1:
+            _fm = lambda v: pricing.fmt_money(v, _om["currency"])  # noqa: E731
+            _nt = _om["next_tier"]
+            _tier = (f" Con {_nt[0]} máquinas, −{_nt[1] * 100:.0f} % en todas." if _nt else "")
+            st.markdown(f'<div class="sb-card"><div class="sb-t" style="margin:0">Agregue una máquina</div>'
+                        f'<div class="sb-s" style="margin-top:4px">Su máquina n.º {_om["n"] + 1}: '
+                        f'+ {_fm(_om["extra_month"])} al mes.{_tier} Turbinas, generadores, compresores, '
+                        f'bombas multietapa o ventiladores: toda su turbomaquinaria.</div></div>',
+                        unsafe_allow_html=True)
+            if st.button("Agregar máquina", key="up_machine"):
+                _ask("maquina", f"Máquina n.º {_om['n'] + 1}: + {_fm(_om['extra_month'])}/mes")
+    if _oa:
+        with _c2:
+            _fm = lambda v: pricing.fmt_money(v, _oa["currency"])  # noqa: E731
+            st.markdown(f'<div class="sb-card"><div class="sb-t" style="margin:0">Pague el año completo</div>'
+                        f'<div class="sb-s" style="margin-top:4px">12 meses por el precio de 11: '
+                        f'ahorra {_fm(_oa["saving_year"])} al año.</div></div>',
+                        unsafe_allow_html=True)
+            if st.button("Cambiar a anual", key="up_annual"):
+                _ask("anual", f"Anual {_fm(_oa['annual_amount'])} · ahorro {_fm(_oa['saving_year'])}")
+
 # ---- Historial ----
 st.markdown('<div class="sb-k" style="margin:6px 0 8px">Historial de facturas</div>',
             unsafe_allow_html=True)
