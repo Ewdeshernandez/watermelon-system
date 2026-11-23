@@ -2202,6 +2202,13 @@ def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
     )
 
 
+def _report_for_download(instance_id: str, instance_obj: Any):
+    """Descarga / envío manual = EL MISMO reporte del cron diario
+    (core.live_report_builder): un solo generador, sin versiones distintas."""
+    from core.live_report_builder import build_report_for_instance
+    return build_report_for_instance(instance_id, instance_obj)
+
+
 def _build_live_report_pdf(
     instance_id: str, instance_obj: Any,
     latest: List[Dict[str, Any]],
@@ -4595,10 +4602,7 @@ def main() -> None:
         _pc = st.session_state.get(_pk)
         if not (_pc and (_t_pdf.time() - _pc.get("ts", 0) < 90)):
             with st.spinner("Preparando reporte…"):
-                _pdfb, _ = _build_live_report_pdf(
-                    instance_id, instance_obj, latest,
-                    rendered_rows, severity_summary, spark_data,
-                )
+                _pdfb, _ = _report_for_download(instance_id, instance_obj)
             st.session_state[_pk] = {"pdf": _pdfb, "ts": _t_pdf.time()}
             _pc = st.session_state[_pk]
         _pdfb = (_pc or {}).get("pdf")
@@ -4633,10 +4637,7 @@ def main() -> None:
                            "Configure the client's email or WhatsApp in Machinery "
                            "Library → Send to client.")):
             with st.spinner("Generating and sending report…"):
-                pdf_bytes, _meta = _build_live_report_pdf(
-                    instance_id, instance_obj, latest,
-                    rendered_rows, severity_summary, spark_data,
-                )
+                pdf_bytes, _meta = _report_for_download(instance_id, instance_obj)
                 if not pdf_bytes:
                     st.error("Could not generate the report. Check that there are active readings.")
                 else:

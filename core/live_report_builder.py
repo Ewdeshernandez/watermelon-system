@@ -440,6 +440,16 @@ def build_report_for_instance(
             "x2_amp": _a(v.get("2X_Ampl")), "x2_ph": _p(v.get("2X_Ampl"), v.get("2X_Phase")),
         })
 
+    # Extras del reporte: orden del tren (Y antes que X, auxiliares de Machines al
+    # final), % de alerta, Δ 24 h, puntos a vigilar y series de 24 h.
+    extras: Dict[str, Any] = {}
+    try:
+        from core.report_extras import enrich
+        extras = enrich(instance_id, latest, rendered_rows, channels) or {}
+        channels = extras.get("channels") or channels
+    except Exception:  # noqa: BLE001
+        extras = {}
+
     # Eventos
     def _ev_val(v):
         try:
@@ -483,7 +493,7 @@ def build_report_for_instance(
     # Para el reporte diario/normal, las alarmas del día mandan; si el log no
     # trae nada, se conserva lo detectado en la ventana corta.
     if day_events:
-        events = day_events[:8]
+        events = day_events[:60]   # el PDF los resume por sonda
 
     # Reporte de ALARMA (alarm_focus=True, cron de alarmas): la tendencia
     # muestra EXCLUSIVAMENTE los canales en Alarma/Danger, últimos 7 DÍAS
@@ -542,6 +552,25 @@ def build_report_for_instance(
         except Exception:
             trend_png = None
 
+    # Tendencia 24 h de la vibración de eje (máx por hora, rollup) — reemplaza
+    # la ventana de minutos que no mostraba nada útil.
+    if trend_png is None and extras.get("shaft_series"):
+        try:
+            trend_png = render_trend_png(extras["shaft_series"], y_title="µm pp (máx por hora)")
+            if trend_png:
+                trend_title = "Tendencia 24 h — vibración de eje (máx por hora)"
+        except Exception:  # noqa: BLE001
+            trend_png = None
+    watch_png = None
+    _w0 = (extras.get("watch") or [None])[0]
+    if _w0 and extras.get("watch_series"):
+        try:
+            watch_png = render_trend_png([extras["watch_series"]],
+                                         alarm=_w0.get("alarm") or 0, danger=_w0.get("danger") or 0,
+                                         y_title=f"{_w0.get('unit', '')} (máx por hora)")
+        except Exception:  # noqa: BLE001
+            watch_png = None
+
     # Tendencia PNG (canales que comparten unidad) — programado o fallback
     try:
         by_unit: Dict[str, List[str]] = {}
@@ -587,7 +616,8 @@ def build_report_for_instance(
         pdf_bytes = generate_live_report_pdf(instance_id, instance_obj, health, kpis,
                                              channels, events, trend_png,
                                              trend_title=trend_title,
-                                             schematic_png=schematic_png, train_drawing=_train)
+                                             schematic_png=schematic_png, train_drawing=_train,
+                                             watch=extras.get("watch"), watch_png=watch_png)
         return pdf_bytes, meta
     except Exception:
         return None, meta
