@@ -273,8 +273,19 @@ def create_app() -> "FastAPI":
         apply_live_severity(payload, latest, _build_sensor_lookup(inst), inst, setup)
         _, speeds, _ = pick_speeds(latest)
         newest = max((str(r.get("captured_at") or "") for r in latest), default="")
+        pts = []
+        for pr in payload.get("probes") or []:
+            try:
+                v = float(pr.get("v"))
+            except (TypeError, ValueError):
+                continue
+            al = pr.get("alarm") or 0
+            pts.append({"n": pr.get("n"), "v": round(v, 2), "u": pr.get("u") or "",
+                        "sev": pr.get("sev") or "ok",
+                        "pct": round(v / float(al) * 100) if al else None})
         out = {"label": str(get_setting("showcase_label", "Turbogenerador") or "Turbogenerador"),
-               "svg": build_live_train_svg(layout, payload), "speeds": speeds, "updated": newest}
+               "svg": build_live_train_svg(layout, payload), "speeds": speeds, "updated": newest,
+               "points": pts}
         _SHOWCASE["v"] = (_t.time(), out)
         return out
 
