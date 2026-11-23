@@ -537,7 +537,7 @@ def generate_briefing_pdf(
                 return "—"
 
         head = ["MACHINE", "POINT", "RPM", "FAMILY", "ALARM", "DANGER",
-                "CRITERION BASED", "STATUS", "OVERALL", "% ALERT", "UNIT",
+                "CRITERION BASED", "STATUS", "OVERALL", "% AL.", "UNIT",
                 "0.5X", "1X", "2X"]
         data = [[Paragraph(h, st_hd) for h in head]]
         row_styles = []
@@ -577,10 +577,10 @@ def generate_briefing_pdf(
                 Paragraph(str(c.get("x1_amp", "—")), st_cn),
                 Paragraph(str(c.get("x2_amp", "—")), st_cn),
             ])
-        ctbl = Table(data, colWidths=[1.6 * cm, 2.1 * cm, 0.95 * cm, 1.45 * cm,
-                                      1.0 * cm, 1.1 * cm, 2.1 * cm, 1.2 * cm,
-                                      1.3 * cm, 0.85 * cm, 1.1 * cm, 0.9 * cm,
-                                      1.05 * cm, 1.05 * cm], repeatRows=1)
+        ctbl = Table(data, colWidths=[1.5 * cm, 2.0 * cm, 1.1 * cm, 1.35 * cm,
+                                      1.0 * cm, 1.1 * cm, 2.0 * cm, 1.35 * cm,
+                                      1.2 * cm, 0.95 * cm, 1.05 * cm, 0.75 * cm,
+                                      0.95 * cm, 0.95 * cm], repeatRows=1)
         for _gi in _grp_rows:
             row_styles += [("SPAN", (0, _gi), (-1, _gi)),
                            ("BACKGROUND", (0, _gi), (-1, _gi), colors.HexColor("#e8eef7"))]
