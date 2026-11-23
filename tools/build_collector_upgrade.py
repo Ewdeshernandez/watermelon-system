@@ -114,12 +114,13 @@ $cmp = Join-Path $env:TEMP 'wm_cmp_map.py'
 import json, sys, requests
 cfg = json.load(open(sys.argv[1], encoding="utf-8"))
 loc = json.load(open(cfg["modbus_map"], encoding="utf-8"))
+local_ver = (loc.pop("_config", None) or {}).get("version")
 url = cfg.get("api_url", "").rstrip("/") + "/v1/collector/map/" + loc["instance_id"]
 r = requests.get(url, headers={"Authorization": "Bearer " + cfg["api_key"]}, timeout=20)
 if r.status_code != 200:
     print("API status", r.status_code, r.text[:200]); sys.exit(2)
 cl = r.json(); meta = cl.pop("_config", {})
-print("nube: version", meta.get("version"), "-", meta.get("updated_at"))
+print("nube: version", meta.get("version"), "-", meta.get("updated_at"), "| local:", local_ver)
 if cl == loc:
     print("IGUALES"); sys.exit(0)
 lr, cr = loc.get("registers", {}), cl.get("registers", {})

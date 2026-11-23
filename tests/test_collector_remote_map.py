@@ -81,3 +81,39 @@ def test_fetch_rejects_empty_or_wrong_instance(wc, tmp_path, monkeypatch):
 def test_signature_ignores_config_meta(wc):
     raw = _raw()
     assert wc._map_signature(raw) == wc._map_signature(dict(raw, _config={"updated_at": "x"}))
+
+
+def test_post_ack_payload(wc, monkeypatch):
+    sent = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.update(url=url, json=json)
+        return _Resp(200, {"ok": True})
+    monkeypatch.setattr(wc.requests, "post", fake_post)
+    assert wc.post_ack(_api(wc), "turbina_sgt300_b", 5, "applied", "74 registers", logging.getLogger("t"))
+    assert sent["url"].endswith("/v1/collector/ack")
+    assert sent["json"] == {"instance_id": "turbina_sgt300_b", "version": 5, "status": "applied",
+                            "detail": "74 registers"}
+    assert wc.post_ack(_api(wc), "x", None, "applied", "", logging.getLogger("t")) is False
+
+
+def test_invalid_remote_map_is_rejected(wc, tmp_path, monkeypatch):
+    raw = _raw()
+    acks = []
+    monkeypatch.setattr(wc.requests, "get",
+                        lambda *a, **k: _Resp(200, dict(raw, registers={}, _config={"version": 7})))
+    monkeypatch.setattr(wc, "post_ack", lambda api, iid, v, st, d, log: acks.append((v, st)) or True)
+    assert wc.fetch_remote_map(_api(wc), raw["instance_id"], str(tmp_path / "m.json"),
+                               logging.getLogger("t")) is None
+    assert acks == [(7, "rejected")]
+
+
+def test_same_content_new_version_updates_cache_without_prev(wc, tmp_path, monkeypatch):
+    raw = _raw()
+    cache = tmp_path / "map.json"
+    cache.write_text(json.dumps(dict(raw, _config={"version": 4})), encoding="utf-8")
+    monkeypatch.setattr(wc.requests, "get", lambda *a, **k: _Resp(200, dict(raw, _config={"version": 5})))
+    got = wc.fetch_remote_map(_api(wc), raw["instance_id"], str(cache), logging.getLogger("t"))
+    assert got["_config"]["version"] == 5
+    assert json.loads(cache.read_text(encoding="utf-8"))["_config"]["version"] == 5
+    assert not (tmp_path / "map.json.prev").exists()

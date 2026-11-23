@@ -68,10 +68,13 @@ except ImportError:
     sys.exit(1)
 
 
-COLLECTOR_VERSION = "1.2.0"   # 1.1.0: peak-hold en el borde (lee 1Hz, POST pico/ventana)
+COLLECTOR_VERSION = "1.3.0"   # 1.1.0: peak-hold en el borde (lee 1Hz, POST pico/ventana)
 # 1.2.0: mapa Modbus REMOTO opcional ("remote_map": true) — se descarga del API
 #        (generado desde la config de la máquina en Machines), refresco cada
 #        map_refresh_sec; si falla, sigue con la copia local. Marca source=modbus.
+# 1.3.0: confirma a la nube la versión de config aplicada (POST /v1/collector/ack):
+#        "applied" tras el primer POST OK con esa versión (y en cada arranque),
+#        "rejected" si la nube entrega un mapa inválido. Machines lo muestra.
 
 
 # =============================================================================
@@ -338,6 +341,28 @@ def _map_signature(raw: Dict[str, Any]) -> str:
     return json.dumps(core, sort_keys=True, ensure_ascii=False)
 
 
+def post_ack(api: ApiConfig, instance_id: str, version: Any, status: str,
+             detail: str, log: logging.Logger) -> bool:
+    """Confirma a Machines qué versión de config aplica este nodo (o la rechaza).
+    Nunca rompe la adquisición: cualquier error solo se loguea."""
+    if version is None:
+        return False
+    try:
+        resp = requests.post(
+            api.base_url.rstrip("/") + "/v1/collector/ack",
+            json={"instance_id": instance_id, "version": int(version), "status": status,
+                  "detail": (detail or "")[:300]},
+            headers={"Authorization": f"Bearer {api.api_key}"}, timeout=api.timeout_sec)
+    except Exception as e:  # noqa: BLE001
+        log.warning("ack v%s %s failed: %s", version, status, e)
+        return False
+    if resp.status_code == 200:
+        log.info("ack v%s %s OK", version, status)
+        return True
+    log.warning("ack v%s %s status=%d %s", version, status, resp.status_code, resp.text[:200])
+    return False
+
+
 def fetch_remote_map(
     api: ApiConfig,
     instance_id: str,
@@ -361,23 +386,35 @@ def fetch_remote_map(
         return None
     try:
         raw = resp.json()
+    except Exception as e:  # noqa: BLE001
+        log.warning("remote map: not JSON (%s) — keeping local map", e)
+        return None
+    ver = (raw.get("_config") or {}).get("version") if isinstance(raw, dict) else None
+    try:
         _, regs, _ = parse_modbus_map(raw)
     except Exception as e:  # noqa: BLE001
         log.warning("remote map: invalid payload (%s) — keeping local map", e)
+        post_ack(api, instance_id, ver, "rejected", f"invalid map: {e}", log)
         return None
     if not regs or str(raw.get("instance_id") or "") != instance_id:
         log.warning("remote map: empty or instance mismatch — keeping local map")
+        post_ack(api, instance_id, ver, "rejected",
+                 "empty map" if not regs else f"instance mismatch ({raw.get('instance_id')})", log)
         return None
     try:
         dst = Path(cache_path)
         if dst.exists():
             old = dst.read_text(encoding="utf-8")
+            same_content = False
             try:
-                if _map_signature(json.loads(old)) == _map_signature(raw):
-                    return raw  # sin cambios: no reescribir
+                old_raw = json.loads(old)
+                if old_raw == raw:
+                    return raw  # idéntico (incluida la versión): no reescribir
+                same_content = _map_signature(old_raw) == _map_signature(raw)
             except Exception:  # noqa: BLE001
                 pass
-            dst.with_suffix(dst.suffix + ".prev").write_text(old, encoding="utf-8")
+            if not same_content:   # solo guarda .prev si cambia lo que se lee
+                dst.with_suffix(dst.suffix + ".prev").write_text(old, encoding="utf-8")
         tmp = dst.with_suffix(dst.suffix + ".tmp")
         tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, dst)
@@ -466,6 +503,7 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
         instance_id = raw_map.get("instance_id") or cfg.get("instance_id") or "unknown"
     map_sig = _map_signature(raw_map)
     last_map_check = time.time()
+    acked_version = None          # se confirma tras el primer POST OK (también en cada arranque)
     poll = int(raw_map.get("poll_interval_seconds") or cfg.get("poll_interval_seconds", 10))
     # Peak-hold: tasa de LECTURA Modbus dentro de cada ventana de POST. El Bently
     # 3500 refresca sus escalares ~1/seg → 1.0s es la resolución útil. Captura
@@ -493,7 +531,11 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
         if remote_map and not dry_run and cycle_start - last_map_check >= map_refresh:
             last_map_check = cycle_start
             got = fetch_remote_map(api, instance_id, map_path, log)
-            if got is not None and _map_signature(got) != map_sig:
+            if got is not None and _map_signature(got) == map_sig:
+                # Mismo contenido, otra versión publicada (ej. solo cambiaron ángulos):
+                # se adopta la versión para confirmarla, sin reconectar nada.
+                raw_map["_config"] = got.get("_config") or raw_map.get("_config")
+            elif got is not None:
                 old_target = (mb_cfg.server_ip, mb_cfg.port)
                 mb_cfg, regs, raw_map = parse_modbus_map(got)
                 map_sig = _map_signature(raw_map)
@@ -584,6 +626,13 @@ def main_loop(config_path: str, dry_run: bool = False) -> None:
         else:
             # Si el post directo anduvo, intentamos flushear backlog
             flush_buffer(api, buf, log)
+            # Fase 4: confirmar a Machines la versión de config que se está midiendo.
+            cur_ver = (raw_map.get("_config") or {}).get("version")
+            if remote_map and cur_ver is not None and cur_ver != acked_version:
+                if post_ack(api, instance_id, cur_ver, "applied",
+                            f"collector {COLLECTOR_VERSION} · {len(regs)} registers · "
+                            f"{good_count}/{len(agg)} good · {host_label}", log):
+                    acked_version = cur_ver
 
         # En peak-hold la ventana YA consumió ~poll s leyendo → no dormir otra
         # vez. En legacy (1 lectura) sí completamos el intervalo.

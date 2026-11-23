@@ -34,6 +34,7 @@ body.light{--bg:#f4f7fb;--panel:#ffffff;--panel2:#eef3f9;--line:#dde4ee;--ink:#0
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-sans);font-size:14px;line-height:1.45}
 body.web{background:transparent}
+body.field .topbar{display:none} /* el campo ya tiene su barra (máquina + Puntual/En línea) */
 .app{background:var(--bg);color:var(--ink);display:flex;flex-direction:column;min-height:100vh}
 body.web .app{min-height:0;border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .topbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--chrome);color:#eaf1fb;padding:10px 16px}
@@ -246,13 +247,13 @@ function stepMachine(){
   '<div class="row">'+fld('',sel('mLib',libOpts,CUR),true)+'<button class="btn" id="mLoad">Load</button>'+
    (HOST==='field'?'<button class="btn ghost" id="mFile">📁 Open file…</button>':'')+'<button class="btn ghost" id="mNew">+ New machine</button></div>'+
   '<div class="sub">Asset record</div>'+
-  '<div class="row">'+fld('Machine name:',inp('mName',m.name,'text','placeholder="e.g. SGT-300A, TG-1"'),true)+fld('Type:',inp('mType',m.machine_type,'text','placeholder="e.g. Turbogenerator, Motor+Pump"'),true)+'</div>'+
+  '<div class="row">'+fld('Machine name:',inp('mName',m.name,'text','placeholder="Nombra tu máquina (ej. SGT-300A, TG-1)"'),true)+fld('Type:',inp('mType',m.machine_type,'text','placeholder="e.g. Turbogenerator, Motor+Pump"'),true)+'</div>'+
   '<div class="row">'+fld('Tag:',inp('mTag',m.tag,'text','placeholder="asset tag / nameplate"'),true)+fld('Client:',inp('mClient',m.client,'text','placeholder="client"'),true)+fld('Location:',inp('mLoc',m.location,'text','placeholder="plant / location"'),true)+'</div>'+
   '<div class="sub">Operation &amp; geometry</div>'+
   '<div class="row">'+fld('Mode:',sel('mOp',MODES,S.op_mode))+fld('RPM:',inp('mRpm',m.rpm_nominal,'number','min="0" max="60000" step="10"'))+
    fld('Rotation:',sel('mRot',['CCW','CW'],m.rotation))+fld('Bearing type:',sel('mBrg',['plain','tilting_pad','rolling','mixed'],m.bearing_type))+'</div>'+
-  '<div class="sub">Monitoring type</div>'+
-  '<div class="row">'+fld('This machine is for:',sel('mMon',[['spot','Spot — on opportunity (connect, measure, leave)'],['online','Online — continuous monitoring (fixed equipment, 24/7 alarms)']],S.mode),true)+'</div>'+
+  '<div class="sub">Tipo de monitoreo</div>'+
+  '<div class="row">'+fld('Esta máquina es para:',sel('mMon',[['spot','Puntual — por oportunidad (conectás, medís, te vas)'],['online','En línea — monitoreo continuo (equipo fijo, alarmas 24/7)']],S.mode),true)+'</div>'+
   '<div class="sub">Live link &amp; signal source</div>'+
   '<div class="row">'+fld('Live link (instance_id):',inp('mInst',S.instance_id,'text','placeholder="key used by Live, trends and reports"'),true)+
    fld('Signal source:',sel('mSrc',[['ni','Watermelon NI node'],['modbus','Modbus — existing protection rack']],S.source))+'</div>';
