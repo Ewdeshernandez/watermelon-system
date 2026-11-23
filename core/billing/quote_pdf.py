@@ -104,6 +104,20 @@ def build_quote_pdf(lead: Dict[str, Any], number: str, today: date | None = None
     for x in plan.excludes:
         story.append(Paragraph(f"<font color='#94a3b8'>●&nbsp; {x}</font>", st_b))
 
+    story.append(Paragraph("Condiciones", st_h))
+    conds = []
+    if lead.get("pilot"):
+        conds.append("Piloto de 30 días en 1 máquina sin costo, para que vea el servicio funcionando "
+                     "antes de firmar.")
+    conds += [
+        "Si su máquina no tiene sistema de monitoreo, instalamos nuestros sensores de vibración y el "
+        "nodo de adquisición sin costo adicional. Son propiedad de SIGA (en comodato) y se retiran al "
+        "terminar el contrato.",
+        "Contrato mínimo de 12 meses.",
+    ]
+    for x in conds:
+        story.append(Paragraph(f"<font color='{GREEN}'>●</font>&nbsp; {x}", st_b))
+
     story.append(Paragraph("Siguientes pasos", st_h))
     for i, x in enumerate((
             "Un especialista le contacta para revisar sus máquinas y sus sensores de vibración.",

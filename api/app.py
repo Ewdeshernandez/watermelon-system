@@ -65,6 +65,8 @@ class PublicQuote(BaseModel):
     machines: int = Field(1, ge=1, le=60)
     plan: str = Field("profesional", max_length=20)
     entity: str = Field("siga_co", max_length=10)
+    pilot: bool = False                           # quiere piloto de 30 días en 1 máquina
+    lang: str = Field("es", max_length=2)
     website: str = Field("", max_length=200)      # trampa para bots: debe venir vacío
 
 
@@ -328,8 +330,9 @@ def create_app() -> "FastAPI":
                 "notified": False, "number": number,
                 "lead": {k: lead.get(k) for k in ("company", "name", "email", "phone",
                                                   "machine_types", "machines", "plan",
-                                                  "entity", "trm")},
-                "detail": (f"{pricing.PLANS[lead['plan']].name} · {lead['machines']} máquina(s) · "
+                                                  "entity", "trm", "pilot", "lang")},
+                "detail": (("PILOTO 30 DÍAS · " if lead.get("pilot") else "")
+                           + f"{pricing.PLANS[lead['plan']].name} · {lead['machines']} máquina(s) · "
                            f"{pricing.fmt_money(m['amount'], m['currency'])}/mes · "
                            f"{lead.get('name') or ''} {lead.get('phone') or ''} · "
                            f"{lead.get('machine_types') or ''}").strip(),
