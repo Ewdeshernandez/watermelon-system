@@ -69,9 +69,120 @@ def _sev_colors(status: str):
     s = (status or "").lower()
     if "danger" in s or "crít" in s or "crit" in s:
         return _RED, _RED_BG
-    if "alarma" in s or "alert" in s:
+    if "alarma" in s or "alert" in s or "aten" in s or "attention" in s:
         return _AMBER, _AMBER_BG
+    if "fuera" in s or "detenid" in s or "offline" in s:
+        return "#64748b", "#f1f5f9"
     return _GREEN, _GREEN_BG
+
+
+# ---------------------------------------------------------------------------
+# Secciones nuevas (core.briefing_extras): franja de indicadores, puntos a
+# vigilar, operación del mes, estadística del periodo y eventos por sonda.
+# ---------------------------------------------------------------------------
+
+def _fmt(v, unit: str = "") -> str:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    a = abs(f)
+    txt = f"{f:.0f}" if a >= 100 else (f"{f:.1f}" if a >= 10 else f"{f:.2f}")
+    return f"{txt} {unit}".strip()
+
+
+def _pct_color(p) -> str:
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return "#111827"
+    return _RED if p >= 100 else ("#d97706" if p >= 90 else "#111827")
+
+
+def _delta_txt(d) -> str:
+    try:
+        d = float(d)
+    except (TypeError, ValueError):
+        return "—"
+    col = "#b91c1c" if d >= 20 else ("#d97706" if d >= 10 else ("#15803d" if d <= -10 else "#475569"))
+    return f'<font color="{col}">{d:+.0f} %</font>'
+
+
+def _kpi_band(health, kpis, extras, cm, colors, Paragraph, Spacer, Table, TableStyle,
+              ParagraphStyle, BOLD):
+    """Franja navy de indicadores (la misma del reporte diario)."""
+    band = (extras or {}).get("band") or {}
+    lab = ParagraphStyle("kbl", fontName=BOLD, fontSize=6.6, leading=8,
+                         textColor=colors.HexColor("#9fc0e6"))
+
+    def cell(label, value, unit="", vcol="#ffffff", size=12.5):
+        st = ParagraphStyle("kbv", fontName=BOLD, fontSize=size, leading=size + 3,
+                            textColor=colors.HexColor(vcol))
+        txt = (f"{value}<font size='6.5' color='#9fc0e6'>&nbsp;{unit}</font>"
+               if unit else f"{value}")
+        return [Paragraph(txt, st), Spacer(1, 2), Paragraph(label.upper(), lab)]
+
+    off = bool(kpis.get("offline")) or bool(kpis.get("stopped"))
+    score = health.get("score")
+    zone = str(health.get("zone") or "—")
+    st_txt = str(kpis.get("status") or "—")
+    st_col = "#cbd5e1" if off else _sev_colors(st_txt)[0]
+    cells = [cell("Salud · " + zone.split("·")[0].strip(),
+                  "—" if score is None else score, "" if score is None else "/100",
+                  health.get("color") or "#ffffff"),
+             cell("Estado", st_txt, "", st_col, 10.5)]
+    widths = [2.6, 2.8]
+    for lab_s, val in (band.get("speeds") or [])[:2]:
+        cells.append(cell(lab_s, f"{val:.0f}", "rpm")); widths.append(2.5)
+    sm = band.get("shaft_max")
+    cells.append(cell("Vib. eje máx" + (f" · {sm[1]}" if sm else ""),
+                      _fmt(sm[0]) if sm else "—",
+                      (str(sm[2]).replace(" pp", "") + " pp") if sm else ""))
+    widths.append(3.0)
+    n_al = kpis.get("alarms", 0) or 0
+    cells.append(cell("Alarmas", n_al, "", _RED if n_al else "#4ade80"))
+    widths.append(1.9)
+    widths.append(max(1.6, 18.0 - sum(widths)))
+    cells.append(cell("Periodo", f"{(extras or {}).get('days', 7)} días", "", "#ffffff", 11))
+    t = Table([cells], colWidths=[w * cm for w in widths])
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#12305e")),
+        ("LINEAFTER", (-1, 0), (-1, -1), 4, colors.HexColor("#e8890c")),
+        ("LINEAFTER", (0, 0), (-2, -1), 0.4, colors.HexColor("#2b4a7a")),
+        ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("ROUNDEDCORNERS", [6, 6, 6, 6]),
+    ]))
+    return t
+
+
+def _simple_table(head, rows, widths, cm, colors, Paragraph, Table, TableStyle,
+                  ParagraphStyle, BOLD, REGULAR, group_rows=()):
+    hd = ParagraphStyle("sth", fontName=BOLD, fontSize=6.4, leading=8, textColor=colors.white)
+    cl = ParagraphStyle("stc", fontName=REGULAR, fontSize=7.2, leading=9,
+                        textColor=colors.HexColor("#111827"))
+    gp = ParagraphStyle("stg", fontName=BOLD, fontSize=7, leading=9,
+                        textColor=colors.HexColor("#12305e"))
+    data = [[Paragraph(h, hd) for h in head]]
+    styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.2), ("BOTTOMPADDING", (0, 0), (-1, -1), 3.2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]
+    for i, r in enumerate(rows, start=1):
+        if isinstance(r, str):                       # fila de grupo (auxiliar)
+            data.append([Paragraph(r, gp)] + [""] * (len(head) - 1))
+            styles += [("SPAN", (0, i), (-1, i)),
+                       ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#e8eef7"))]
+        else:
+            data.append([c if not isinstance(c, str) else Paragraph(c, cl) for c in r])
+    t = Table(data, colWidths=[w * cm for w in widths], repeatRows=1)
+    t.setStyle(TableStyle(styles))
+    return t
 
 
 def generate_briefing_pdf(
@@ -91,6 +202,7 @@ def generate_briefing_pdf(
     wf_history: Optional[List[Dict[str, Any]]] = None,
     overall_history: Optional[Dict[str, Any]] = None,
     train_drawing: Optional[Any] = None,
+    extras: Optional[Dict[str, Any]] = None,
 ) -> bytes:
     """Devuelve los bytes del PDF del briefing del activo, en formato pro."""
     from reportlab.lib import colors
@@ -248,6 +360,61 @@ def generate_briefing_pdf(
             pass
     body.append(Spacer(1, 8))
 
+    # ---- NUEVO: franja de indicadores + puntos a vigilar (+ operación mensual)
+    _ex = extras or {}
+    _tk = dict(cm=cm, colors=colors, Paragraph=Paragraph, Table=Table,
+               TableStyle=TableStyle, ParagraphStyle=ParagraphStyle, BOLD=BOLD)
+    if _ex:
+        try:
+            body.append(_kpi_band(health, kpis, _ex, Spacer=Spacer, **_tk))
+            body.append(Spacer(1, 8))
+        except Exception:  # noqa: BLE001
+            pass
+    _st_sub = ParagraphStyle("bfSub", fontName=BOLD, fontSize=9.5, leading=12,
+                             textColor=colors.HexColor("#12305e"), spaceBefore=4,
+                             spaceAfter=4)
+    _st_note = ParagraphStyle("bfNote", fontName=REGULAR, fontSize=7.6, leading=9.5,
+                              textColor=colors.HexColor("#6b7280"), spaceBefore=3,
+                              spaceAfter=6)
+    _watch = [w for w in (_ex.get("watch") or []) if w.get("pct") is not None]
+    if _watch and not kpis.get("offline"):
+        _rows = []
+        for w in _watch:
+            _rows.append([
+                f"<b>{w.get('display') or w.get('sensor_label')}</b>"
+                + (f" · {w.get('aux_group')}" if w.get("aux_group") else ""),
+                _fmt(w.get("value"), w.get("unit", "")),
+                _fmt(w.get("alarm"), w.get("unit", "")),
+                f'<font color="{_pct_color(w["pct"])}"><b>{w["pct"]:.0f} %</b></font>',
+                _delta_txt(w.get("delta")),
+            ])
+        _per = "la semana" if not _ex.get("monthly") else "el mes"
+        body.append(KeepTogether([
+            Paragraph("Puntos a vigilar", _st_sub),
+            _simple_table(["SONDA", "VALOR ACTUAL", "ALERTA", "% DE LA ALERTA",
+                           f"Δ VS {_per.split()[1].upper()} ANTERIOR"], _rows,
+                          [5.0, 3.2, 3.2, 3.0, 3.6], REGULAR=REGULAR, **_tk),
+            Paragraph("Las tres sondas más cerca de su nivel de alerta. Δ = cambio del "
+                      f"promedio en operación contra {_per} anterior.", _st_note),
+        ]))
+    _op = _ex.get("operation") or {}
+    if _ex.get("monthly") and _op.get("hours_data"):
+        _av = _op.get("availability")
+        _rows = [[f"{_op.get('hours_running', 0):.0f} h",
+                  f"{_op.get('hours_stopped', 0):.0f} h",
+                  str(_op.get("starts", 0)), str(_op.get("stops", 0)),
+                  f"{_av:.0f} %" if _av is not None else "—",
+                  _fmt(_op.get("normal_rpm"), "rpm")]]
+        body.append(KeepTogether([
+            Paragraph("Operación del mes", _st_sub),
+            _simple_table(["HORAS EN OPERACIÓN", "HORAS DETENIDA", "ARRANQUES",
+                           "PARADAS", "DISPONIBILIDAD", "VELOCIDAD NORMAL"], _rows,
+                          [3.3, 3.0, 2.4, 2.4, 3.0, 3.9], REGULAR=REGULAR, **_tk),
+            Paragraph("Desde la velocidad del eje principal, por hora. En operación = "
+                      "≥ 90 % de la velocidad normal; disponibilidad = horas girando "
+                      "sobre horas con dato.", _st_note),
+        ]))
+
     # Texto de hallazgos: breve, gerencial, nivel analista Cat. IV (markdown IA)
     if summary:
         body.extend(render_markdown_flowables(summary, styles))
@@ -284,7 +451,43 @@ def generate_briefing_pdf(
     else:
         body.append(_h1("Desarrollo del servicio"))
 
-    # 4.2 Tabular List (espejo de la vista de la app) — arranca en PÁGINA NUEVA
+    # 4.2 NUEVO: Estadística del periodo por sonda (en operación + Δ)
+    _stats = [r for r in (_ex.get("stats") or [])]
+    if _stats and not kpis.get("offline"):
+        _per = "el mes" if _ex.get("monthly") else "la semana"
+        _rows: List[Any] = []
+        _grp = None
+        for r in _stats:
+            g = r.get("aux_group") or ""
+            if g and g != _grp:
+                _rows.append(g)
+            _grp = g
+            _u = r.get("unit", "")
+            _rows.append([
+                f"<b>{r.get('display')}</b>", _u,
+                _fmt(r.get("max")), _fmt(r.get("avg")), _fmt(r.get("min")),
+                _fmt(r.get("alarm")),
+                (f'<font color="{_pct_color(r.get("pct_max"))}">{r["pct_max"]:.0f} %</font>'
+                 if r.get("pct_max") is not None else "—"),
+                _fmt(r.get("prev_avg")), _delta_txt(r.get("delta")),
+            ])
+        _any_run = any(r.get("running") for r in _stats)
+        body.append(CondPageBreak(8 * cm))
+        body.append(_h2(f"Estadística del periodo — últimos {_ex.get('days', 7)} días"))
+        body.append(_simple_table(
+            ["SONDA", "UNIDAD", "MÁXIMO", "PROM. EN OP.", "MÍN. EN OP.", "ALERTA",
+             "MÁX / ALERTA", f"PROM. {_per.split()[1].upper()} ANT.", "Δ"],
+            _rows, [1.9, 1.7, 1.8, 2.1, 2.0, 1.7, 2.1, 2.5, 2.2],
+            REGULAR=REGULAR, **_tk))
+        body.append(Paragraph(
+            ("Máximo = pico del periodo completo. Promedio y mínimo solo con la máquina "
+             "en operación (eje principal ≥ 90 % de su velocidad normal); el mínimo es "
+             "el del promedio por hora, así un corte de señal no lo lleva a cero. "
+             if _any_run else
+             "Sin dato de velocidad: promedio y mínimo sobre todo el periodo. ")
+            + f"Δ = promedio en operación contra {_per} anterior.", _st_note))
+
+    # 4.3 Tabular List (espejo de la vista de la app) — arranca en PÁGINA NUEVA
     # para que el título nunca quede huérfano al pie de página.
     if channels:
         # No forzar página nueva (dejaba la p. de Diagnóstico casi vacía); solo
@@ -334,19 +537,31 @@ def generate_briefing_pdf(
                 return "—"
 
         head = ["MACHINE", "POINT", "RPM", "FAMILY", "ALARM", "DANGER",
-                "CRITERION BASED", "STATUS", "OVERALL", "UNIT",
+                "CRITERION BASED", "STATUS", "OVERALL", "% ALERT", "UNIT",
                 "0.5X", "1X", "2X"]
         data = [[Paragraph(h, st_hd) for h in head]]
         row_styles = []
         _STATUS_COL = 7
-        for i, c in enumerate(channels, start=1):
+        _st_grp = ParagraphStyle("tgrp", fontName=BOLD, fontSize=7, leading=9,
+                                 textColor=colors.HexColor("#12305e"))
+        _grp_rows: List[int] = []
+        _grp = None
+        for c in channels:
+            g = c.get("aux_group") or ""
+            if g and g != _grp:                      # auxiliares agrupados (Machines)
+                data.append([Paragraph(g, _st_grp)] + [""] * (len(head) - 1))
+                _grp_rows.append(len(data) - 1)
+            _grp = g
             fg, bg = _sev_colors(c.get("status", ""))
+            _pc = c.get("pct")
             data.append([
                 Paragraph(c.get("machine", tag), st_cell),
-                # plane_label "—" es truthy → caer explícitamente al sensor_label
+                # plane_label "—" es truthy → caer a la etiqueta sin guion bajo
                 Paragraph((c.get("plane_label")
                            if c.get("plane_label") not in (None, "", "—")
-                           else c.get("sensor_label", "—")), st_cell),
+                           else (c.get("display")
+                                 or str(c.get("sensor_label", "—")).replace("_", ""))),
+                          st_cell),
                 Paragraph(_rpm_txt(c.get("rpm")), st_cn),
                 Paragraph({"Acceleration": "Accel."}.get(
                     c.get("family", "—"), c.get("family", "—")), st_cell),
@@ -355,15 +570,20 @@ def generate_briefing_pdf(
                 Paragraph(c.get("criterion", "ISO 20816-3"), st_cell),
                 Paragraph(f'<font color="{fg}">●</font>&nbsp;{c.get("status", "—")}', st_est),
                 Paragraph(str(c.get("value", "—")), st_cn),
+                Paragraph((f'<font color="{_pct_color(_pc)}">{_pc:.0f}</font>'
+                           if _pc is not None else "—"), st_cn),
                 Paragraph(c.get("unit", ""), st_cell),
                 Paragraph(str(c.get("x05_amp", "—")), st_cn),
                 Paragraph(str(c.get("x1_amp", "—")), st_cn),
                 Paragraph(str(c.get("x2_amp", "—")), st_cn),
             ])
-        ctbl = Table(data, colWidths=[1.45 * cm, 2.1 * cm, 1.0 * cm, 1.45 * cm,
-                                      1.05 * cm, 1.2 * cm, 2.35 * cm, 1.25 * cm,
-                                      1.35 * cm, 1.05 * cm, 0.85 * cm, 0.85 * cm,
-                                      0.85 * cm], repeatRows=1)
+        ctbl = Table(data, colWidths=[1.6 * cm, 2.1 * cm, 0.95 * cm, 1.45 * cm,
+                                      1.0 * cm, 1.1 * cm, 2.1 * cm, 1.2 * cm,
+                                      1.3 * cm, 0.85 * cm, 1.1 * cm, 0.9 * cm,
+                                      1.05 * cm, 1.05 * cm], repeatRows=1)
+        for _gi in _grp_rows:
+            row_styles += [("SPAN", (0, _gi), (-1, _gi)),
+                           ("BACKGROUND", (0, _gi), (-1, _gi), colors.HexColor("#e8eef7"))]
         ctbl.setStyle(TableStyle([
             # Header navy + texto blanco (look v2, consistente con el reporte 1-pág)
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
@@ -376,6 +596,8 @@ def generate_briefing_pdf(
             ("TOPPADDING", (0, 1), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 1), (-1, -1), 3.5),
             ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ]))
+        if row_styles:
+            ctbl.setStyle(TableStyle(row_styles))
         body.append(ctbl)
         st_note_center = ParagraphStyle("bfNoteC", parent=st_cap,
                                         alignment=TA_CENTER)
@@ -438,6 +660,40 @@ def generate_briefing_pdf(
                       ParagraphStyle("bfNoteC2", parent=st_cap,
                                      alignment=TA_CENTER)),
         ]))
+
+    # ---- NUEVO: Eventos de alarma del periodo, resumidos por sonda ----
+    if _ex and not kpis.get("offline"):
+        _evs = _ex.get("events") or []
+        _per_t = f"últimos {_ex.get('days', 7)} días"
+        if _evs:
+            _rows = []
+            for e in _evs[:20]:
+                _wc = _RED if e.get("worst") == "Danger" else "#d97706"
+                _last = e.get("last")
+                try:
+                    from zoneinfo import ZoneInfo
+                    _lt = _last.astimezone(ZoneInfo("America/Bogota")).strftime("%d/%m %H:%M")
+                except Exception:  # noqa: BLE001
+                    _lt = str(_last or "—")[:16]
+                _rows.append([
+                    f"<b>{e.get('display')}</b>",
+                    f'<font color="{_wc}">●</font> '
+                    + ("Peligro" if e.get("worst") == "Danger" else "Alerta"),
+                    str(e.get("count", 0)), _fmt(e.get("max"), e.get("unit", "")), _lt,
+                ])
+            body.append(KeepTogether([
+                _h2(f"Eventos de alarma — {_per_t}"),
+                _simple_table(["SONDA", "PEOR NIVEL", "ENTRADAS A ALARMA",
+                               "VALOR MÁXIMO", "ÚLTIMA VEZ"], _rows,
+                              [3.0, 3.2, 3.6, 4.0, 4.2], REGULAR=REGULAR, **_tk),
+                Paragraph("Cada entrada es un cruce de la sonda hacia alerta o peligro "
+                          "registrado por el monitoreo en línea.", _st_note),
+            ]))
+        else:
+            body.append(KeepTogether([
+                _h2(f"Eventos de alarma — {_per_t}"),
+                Paragraph("Sin cruces de alarma en el periodo.", st_body),
+            ]))
 
     # ---- Métricas de forma de onda (últimos snapshots) ----
     if wf_history:
