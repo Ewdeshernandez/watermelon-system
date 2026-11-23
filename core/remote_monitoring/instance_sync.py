@@ -116,6 +116,23 @@ def sync_sensors_from_setup(sensors: List[Dict[str, Any]], setup: AcqSetup
     return out, {"updated": updated, "added": added, "label_mismatch": label_mismatch}
 
 
+# Ficha del activo: Machines → instances. Live (título y chips), reporte PDF
+# (subtítulo cliente · sitio), app móvil (flota por cliente) y correos la leen
+# de `instances`. Solo valores NO vacíos (nunca borra lo que ya hay).
+_HEADER_MAP = (("client", "client"), ("location", "site"), ("tag", "tag"))
+
+
+def header_changes(inst: Any, setup: AcqSetup) -> Dict[str, Tuple[str, str]]:
+    """{campo_instance: (antes, después)} que el publish aplicaría."""
+    out: Dict[str, Tuple[str, str]] = {}
+    for src, dst in _HEADER_MAP:
+        new = (getattr(setup.machine, src, "") or "").strip()
+        old = (getattr(inst, dst, "") or "") if inst is not None else ""
+        if new and new != old:
+            out[dst] = (old, new)
+    return out
+
+
 def sync_instance(setup: AcqSetup, create_if_missing: bool = True) -> Dict[str, Any]:
     """Escribe la config publicada en `instances` (transición). Nunca borra."""
     if not setup.instance_id:
@@ -131,10 +148,13 @@ def sync_instance(setup: AcqSetup, create_if_missing: bool = True) -> Dict[str, 
                                seed_from_profile=False)
         created = True
     sensors, rep = sync_sensors_from_setup(inst.sensors, setup)
-    if not created and not rep["updated"] and not rep["added"]:
-        return {"ok": True, "created": False, **rep}
+    hdr = header_changes(inst, setup)
+    if not created and not rep["updated"] and not rep["added"] and not hdr:
+        return {"ok": True, "created": False, "header": {}, **rep}
     inst.sensors = sensors
+    for field_name, (_old, new) in hdr.items():
+        setattr(inst, field_name, new)
     if setup.machine.rpm_nominal and not inst.nominal_rpm:
         inst.nominal_rpm = float(setup.machine.rpm_nominal)
     _save_instance(inst)
-    return {"ok": True, "created": created, **rep}
+    return {"ok": True, "created": created, "header": {k: v[1] for k, v in hdr.items()}, **rep}

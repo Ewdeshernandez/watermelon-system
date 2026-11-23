@@ -50,3 +50,13 @@ def test_sync_never_deletes_and_adds_new():
     assert next(s for s in out if sensor_label(s) == "1X_D")["alarm"] == 70
     assert "1X_D" in rep["updated"]
     assert not rep["label_mismatch"] or all("→" in m for m in rep["label_mismatch"])
+
+
+def test_header_changes_only_non_empty():
+    from types import SimpleNamespace
+    from core.remote_monitoring.instance_sync import header_changes
+    _, setup = _setup()
+    setup.machine.client, setup.machine.location, setup.machine.tag = "Cliente Ejemplo SA", "Planta Norte", ""
+    inst = SimpleNamespace(client="CLIENTE EJEMPLO", site="PLANTA NORTE", tag="TG-B")
+    hc = header_changes(inst, setup)
+    assert hc == {"client": ("CLIENTE EJEMPLO", "Cliente Ejemplo SA"), "site": ("PLANTA NORTE", "Planta Norte")}
