@@ -2548,7 +2548,7 @@ def render_asset_header(
         # Data vieja/ausente → NO mostrar salud/zona como si fuera en vivo (honestidad)
         health_block = (
             '<div style="display:flex; align-items:center; gap:10px; '
-            'background:#1e293b; border:1px solid #334155; border-radius:10px; '
+            'background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.16); border-radius:10px; '
             'padding:9px 14px;">'
             '<span style="font-size:9px; color:#64748b; font-weight:700; '
             'letter-spacing:0.1em; text-transform:uppercase;">Asset health</span>'
@@ -2558,128 +2558,121 @@ def render_asset_header(
     else:
         health_block = (
             f'<div style="display:flex; align-items:center; gap:10px; '
-            f'background:#1e293b; border:1px solid #334155; border-radius:10px; '
+            f'background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.16); border-radius:10px; '
             f'padding:5px 12px 5px 8px;">'
             f'{health_gauge_svg(_score, _zcolor)}'
             f'<div style="display:flex; flex-direction:column; gap:2px;">'
             f'<span style="font-size:9px; color:#64748b; font-weight:700; '
-            f'letter-spacing:0.1em; text-transform:uppercase;">Asset health</span>'
+            f'letter-spacing:0.1em; text-transform:uppercase; color:#9fc0e6;">Asset health</span>'
             f'<span style="font-size:12px; color:{_zcolor}; font-weight:800;">{_zone}</span>'
             f'</div></div>'
         )
 
-    # Asset banner compacto (Ciclo 23.23) — barra oscura de 1 línea con
-    # título + KPIs inline + status pill. Reemplaza la card grande de
-    # Ciclo 23.16 que ocupaba 1/3 de la pantalla. Diagrama es protagonista.
-    # Ciclo 23.49 — STICKY: la barra se queda visible al scrollear.
+    # 2026-11-23 — Barra estilo mockup aprobado (banda navy + franja ámbar, título
+    # grande, Online, KPIs grandes: turbina, generador, vibración de eje máx,
+    # última lectura, alarmas) conservando salud ISO y estado. STICKY como antes.
+    import re as _re
+    _gen_val = None
+    if _speed_extra:
+        _m = _re.search(r"([\d][\d.,]*)", _speed_extra)
+        _gen_val = _m.group(1) if _m else _speed_extra
+    _prox = []
+    for _r in direct_rows:
+        _u = (_r.get("unit") or "").lower()
+        if ("µm" in _u or "um" in _u or "mil" in _u) and _r.get("value") is not None:
+            _prox.append((float(_r["value"]), _r.get("unit") or "", _r.get("sensor_label") or ""))
+    _prox.sort(reverse=True)
+    _maxv_txt = f"{_prox[0][0]:.1f}" if _prox else "—"
+    _maxv_unit = (_prox[0][1].replace(" pp", "") if _prox else "µm") + " pp"
+    _maxv_lbl = (_prox[0][2] or "").replace("_", "") if _prox else ""
+    if (not latest) or _is_stale:
+        _conn_txt, _conn_bg, _conn_fg, _conn_dot = ("Offline", "#334155", "#cbd5e1", "#94a3b8")
+    elif _hdr_stopped:
+        _conn_txt, _conn_bg, _conn_fg, _conn_dot = ("Stopped", "#334155", "#e2e8f0", "#94a3b8")
+    else:
+        _conn_txt, _conn_bg, _conn_fg, _conn_dot = ("Online", "#4ade80", "#052e16", "#065f2f")
+    _st_dark = {
+        "NORMAL OPERATION": ("rgba(74,222,128,.14)", "#86efac", "rgba(134,239,172,.45)"),
+        "ATTENTION": ("rgba(245,165,36,.16)", "#fcd34d", "rgba(252,211,77,.55)"),
+        "CRITICAL": ("rgba(239,68,68,.18)", "#fca5a5", "rgba(252,165,165,.6)"),
+    }.get(status_label, ("rgba(148,163,184,.14)", "#cbd5e1", "rgba(203,213,225,.4)"))
+    _cfg_v = ""
+    try:
+        from core.remote_monitoring.config import find_setup_cloud_by_instance as _fsc
+        from core.live_readings import _get_supabase_client as _gsc
+        _fs = _fsc(instance_id, client=_gsc())
+        if _fs and _fs.get("version"):
+            _cfg_v = f" · config v{_fs['version']}"
+    except Exception:  # noqa: BLE001
+        _cfg_v = ""
+    _gen_kpi = (f'<div class="wm-hb-kpi"><div class="n">{_gen_val}<small>rpm</small></div>'
+                f'<div class="l">Generator</div></div>') if _gen_val else ""
     st.markdown(
         textwrap.dedent(
             f"""
             <style>
-            .wm-asset-bar {{
-                background: #0f172a;
-                border-radius: 8px;
-                padding: 12px 18px;
-                margin: 4px 0 8px 0;
-                display: flex; align-items: center; gap: 14px;
-                flex-wrap: wrap;
-                border: 1px solid #1e293b;
-                position: sticky;
-                top: 56px;
-                z-index: 50;
+            @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&family=IBM+Plex+Sans+Condensed:wght@700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+            .wm-hb {{
+                position: sticky; top: 56px; z-index: 50;
+                border-radius: 16px; padding: 16px 22px; margin: 4px 0 10px 0;
+                background: linear-gradient(120deg,#0e2547 0%,#12305e 46%,#274b7d 100%);
+                color: #eaf1fb; overflow: hidden;
+                box-shadow: 0 10px 30px rgba(12,32,78,.22);
+                display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center;
+                font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
             }}
-            .wm-bar-live {{
-                display: inline-flex; align-items: center; gap: 7px;
-                color: #f1f5f9; font-weight: 800; font-size: 12px;
-                letter-spacing: 0.18em;
-            }}
-            .wm-bar-live-dot {{
-                width: 7px; height: 7px; border-radius: 50%;
-                background: #ef4444;
-                animation: wm-pulse 2.4s ease-in-out infinite;
-            }}
-            @keyframes wm-pulse {{
-                0%, 100% {{ opacity: 1; }}
-                50% {{ opacity: 0.55; }}
-            }}
-            .wm-bar-divider {{
-                width: 1px; height: 32px; background: #334155;
-            }}
-            .wm-bar-title-block {{
-                display: flex; flex-direction: column; gap: 2px;
-            }}
-            .wm-bar-title {{
-                font-size: 22px; font-weight: 900; color: #f8fafc;
-                letter-spacing: -0.01em; line-height: 1;
-            }}
-            .wm-bar-class {{
-                font-size: 10px; color: #94a3b8; font-weight: 600;
-                letter-spacing: 0.12em; text-transform: uppercase;
-            }}
-            .wm-bar-kpi {{
-                display: flex; flex-direction: column; gap: 2px;
-                background: #1e293b; border: 1px solid #334155;
-                border-radius: 8px; padding: 6px 12px; min-width: 90px;
-            }}
-            .wm-bar-kpi-label {{
-                font-size: 9px; color: #64748b; font-weight: 700;
-                letter-spacing: 0.1em; text-transform: uppercase;
-            }}
-            .wm-bar-kpi-value {{
-                font-size: 16px; font-weight: 800; color: #f1f5f9;
-                font-variant-numeric: tabular-nums; line-height: 1.1;
-            }}
-            .wm-bar-kpi-unit {{
-                font-size: 10px; color: #94a3b8;
-                font-weight: 600; margin-left: 2px;
-            }}
-            .wm-bar-status {{
-                margin-left: auto;
-                display: inline-flex; align-items: center; gap: 7px;
-                padding: 7px 14px; border-radius: 6px;
-                background: {status_bg}; color: {status_fg};
-                font-weight: 700; font-size: 11px;
-                letter-spacing: 0.1em; text-transform: uppercase;
-                border: 1px solid {status_border};
-            }}
-            .wm-bar-chips {{
-                display: flex; gap: 6px; flex-wrap: wrap;
-                margin: 0 0 12px 0;
-            }}
-            .wm-bar-chip {{
-                background: white; border: 1px solid #dbe5f0;
-                border-radius: 7px; padding: 4px 10px;
-                font-size: 11px; color: #0f172a; font-weight: 700;
-            }}
-            .wm-bar-chip b {{
-                color: #64748b; font-size: 9px; font-weight: 800;
-                letter-spacing: 0.1em; margin-right: 6px;
-                text-transform: uppercase;
-            }}
+            .wm-hb::after {{ content:""; position:absolute; inset:0; pointer-events:none;
+                background: repeating-linear-gradient(135deg,rgba(255,255,255,.045) 0 2px,transparent 2px 9px); }}
+            .wm-hb .strip {{ position:absolute; top:0; right:0; height:100%; width:6px;
+                background: linear-gradient(180deg,#e8890c,#c56f05); }}
+            .wm-hb > * {{ position: relative; z-index: 1; }}
+            .wm-hb .k {{ font: 600 10.5px 'IBM Plex Mono', monospace; letter-spacing:.14em;
+                text-transform: uppercase; color:#9fc0e6; }}
+            .wm-hb h1 {{ margin: 2px 0 0; font: 700 26px 'IBM Plex Sans Condensed','IBM Plex Sans',sans-serif;
+                letter-spacing:.01em; color:#ffffff; line-height:1.1; }}
+            .wm-hb .sub {{ margin: 2px 0 0; color:#b9cbe2; font-size: 12.5px; }}
+            .wm-hb .pill {{ display:inline-flex; align-items:center; gap:7px;
+                font: 700 11px 'IBM Plex Mono', monospace; letter-spacing:.08em; text-transform:uppercase;
+                padding: 5px 11px; border-radius: 999px; background:{_conn_bg}; color:{_conn_fg}; }}
+            .wm-hb .pill i {{ width:8px; height:8px; border-radius:50%; background:{_conn_dot};
+                animation: wm-hb-pulse 1.6s infinite; }}
+            @keyframes wm-hb-pulse {{ 0%,100% {{ opacity:1 }} 50% {{ opacity:.25 }} }}
+            @media (prefers-reduced-motion: reduce) {{ .wm-hb .pill i {{ animation:none; }} }}
+            .wm-hb .kpis {{ display:flex; flex-wrap:wrap; gap: 20px; margin-left:auto; align-items:center; }}
+            .wm-hb-kpi .n {{ font: 700 22px 'IBM Plex Sans', sans-serif; font-variant-numeric: tabular-nums;
+                color:#ffffff; line-height:1.1; }}
+            .wm-hb-kpi .n small {{ font: 500 11px 'IBM Plex Mono', monospace; color:#9fc0e6; margin-left:4px; }}
+            .wm-hb-kpi .l {{ font: 600 10px 'IBM Plex Mono', monospace; letter-spacing:.1em;
+                text-transform: uppercase; color:#9fc0e6; }}
+            .wm-hb .status {{ display:inline-flex; align-items:center; gap:7px; padding: 7px 13px;
+                border-radius: 8px; font: 700 11px 'IBM Plex Mono', monospace; letter-spacing:.1em;
+                text-transform: uppercase; background:{_st_dark[0]}; color:{_st_dark[1]};
+                border: 1px solid {_st_dark[2]}; }}
+            .wm-bar-chips {{ display:flex; gap:6px; flex-wrap:wrap; margin: 0 0 12px 0; }}
+            .wm-bar-chip {{ background:white; border:1px solid #dbe5f0; border-radius:7px; padding:4px 10px;
+                font-size:11px; color:#0f172a; font-weight:700; }}
+            .wm-bar-chip b {{ color:#64748b; font-size:9px; font-weight:800; letter-spacing:.1em;
+                margin-right:6px; text-transform:uppercase; }}
             </style>
-            <div class="wm-asset-bar">
-                <span class="wm-bar-live">
-                    <span class="wm-bar-live-dot"></span>LIVE
-                </span>
-                <div class="wm-bar-divider"></div>
-                <div class="wm-bar-title-block">
-                    <div class="wm-bar-title">{title_text}</div>
-                    <div class="wm-bar-class">{class_label} · ISO 20816 / API 670</div>
+            <div class="wm-hb"><span class="strip"></span>
+                <div>
+                    <div class="k">Live Monitoring · Machine</div>
+                    <h1>{title_text}</h1>
+                    <div class="sub">{class_label} · ISO 20816 / API 670{_cfg_v}</div>
                 </div>
-                <div class="wm-bar-kpi">
-                    <span class="wm-bar-kpi-label">{"TURBINA" if _speed_extra else "SPEED"}</span>
-                    <span class="wm-bar-kpi-value">{speed_txt}<span class="wm-bar-kpi-unit">rpm</span>{f'<span style="display:block;font-size:9px;font-weight:600;color:#8aa0bd;letter-spacing:.03em;margin-top:1px;">{_speed_extra} rpm</span>' if _speed_extra else ''}</span>
+                <span class="pill"><i></i>{_conn_txt}</span>
+                <div class="kpis">
+                    <div class="wm-hb-kpi"><div class="n">{speed_txt}<small>rpm</small></div>
+                        <div class="l">{"Turbine" if _speed_extra else "Speed"}</div></div>{_gen_kpi}
+                    <div class="wm-hb-kpi"><div class="n">{_maxv_txt}<small>{_maxv_unit}</small></div>
+                        <div class="l">Max shaft vib{(" · " + _maxv_lbl) if _maxv_lbl else ""}</div></div>
+                    <div class="wm-hb-kpi"><div class="n" style="color:{age_color};">{age_txt}</div>
+                        <div class="l">Last reading</div></div>
+                    <div class="wm-hb-kpi"><div class="n" style="color:{alarms_color};">{alarms_txt}</div>
+                        <div class="l">Alarms</div></div>
+                    {health_block}
+                    <span class="status">{status_icon} {status_label}</span>
                 </div>
-                <div class="wm-bar-kpi">
-                    <span class="wm-bar-kpi-label">LAST READING</span>
-                    <span class="wm-bar-kpi-value" style="color:{age_color};">{age_txt} ago</span>
-                </div>
-                <div class="wm-bar-kpi">
-                    <span class="wm-bar-kpi-label">ALARMS</span>
-                    <span class="wm-bar-kpi-value" style="color:{alarms_color};">{alarms_txt}</span>
-                </div>
-                {health_block}
-                <span class="wm-bar-status">{status_icon} {status_label}</span>
             </div>
             <div class="wm-bar-chips">{chips_html}</div>
             """
@@ -4441,23 +4434,11 @@ def main() -> None:
     # señal "viva" tipo Bently/System1 (el contador de última lectura y el
     # gauge tickean en tiempo real) con riesgo mínimo: el fragment está
     # acotado al header, no toca el sensor map ni el drill-down.
-    _live_header_fragment(instance_obj, instance_id, sensor_lookup)
-
-    # Alarm strip prominente arriba si hay danger
-    render_alarm_strip(rendered_rows)
-
-    # Hero — Machine Map.
-    # Prioridad (Ciclo 23.13):
-    #   1) Asset library 2D vectorial (System1 / Emerson AMS-style) si la
-    #      instancia tiene driver_icon_key + driven_icon_key configurados.
-    #      Sensor dots se posicionan en los anchors físicos del icono
-    #      (DE / NDE / TRF / CRF) por convención Bently / API 670.
-    #   2) PNG 3D legacy con overlay x_pct/y_pct si no hay icon_keys.
-    #   3) PNG plano sin overlay si tampoco hay coordenadas.
     # 2026-11-23 — Si la máquina tiene TREN dibujado en Machines, el hero es ese
-    # tren EN VIVO (mismo builder.html del campo/web, modo #live): cada sonda con
-    # valor, ángulo y % de alerta; auxiliares en su caja. Se refresca solo cada
-    # 10 s sin recargar el dibujo. Sin tren en Machines → diagrama actual.
+    # tren EN VIVO (mismo builder.html del campo/web, modo #live). Barra de estado,
+    # franja de alarmas y tren se dibujan en UN fragment de 10 s con UNA sola
+    # lectura → siempre muestran los mismos números y la misma severidad.
+    # Sin tren en Machines → barra + diagrama de siempre.
     @st.cache_data(ttl=60, show_spinner=False)
     def _cached_machines_train(iid: str):
         try:
@@ -4470,45 +4451,50 @@ def main() -> None:
             return None
 
     _mtrain = _cached_machines_train(instance_id)
-    has_map = False
     if _mtrain:
         @st.fragment(run_every=10)
-        def _live_train_hero():
+        def _live_top_with_train():
             from core.live_train import live_payload
             from core.machine_builder_component import machine_live_train
             from core.remote_monitoring.config import setup_from_dict as _sfd
-            # MISMO dato fresco que la barra de estado (no el caché de 15 s) y MISMA
-            # severidad (compute_severity + límites del activo) → tren y barra
-            # nunca muestran estados distintos.
             try:
                 _rows = latest_for_instance(instance_id) or latest
             except Exception:  # noqa: BLE001
                 _rows = latest
-            _msetup = _sfd(_mtrain[0])
-            _payload = live_payload(_msetup, _rows)
-            try:
-                from core.severity import compute_severity as _cs
-                _units = {(r.get("sensor_label") or ""): r.get("unit") or "" for r in _rows
-                          if r.get("metric") == "Direct"}
-                _map = {"Danger": "danger", "Alarma": "alert", "Normal": "ok"}
-                for _p in _payload["probes"]:
-                    _lbl = next((c.point_label for c in _msetup.channels
-                                 if c.point_label.replace("_", "") == _p["n"]), None)
-                    if _lbl is None or _p["v"] is None:
-                        continue
-                    _sv = _cs(_p["v"], sensor_lookup.get(_lbl), _units.get(_lbl, _p["u"]), instance_obj)
-                    if _sv.get("status") in _map:
-                        _p["sev"] = _map[_sv["status"]]
-                        _p["alarm"] = _sv.get("alarm") or _p["alarm"]
-                        _p["danger"] = _sv.get("danger") or _p["danger"]
-            except Exception:  # noqa: BLE001
-                pass
+            _rr, _summ = compute_rendered_rows(_rows, sensor_lookup, instance_obj)
+            render_asset_header(instance_obj, instance_id, _rows, _summ)
+            render_alarm_strip(_rr)
+            _payload = live_payload(_sfd(_mtrain[0]), _rows)
+            _st = {r["sensor_label"]: r for r in _rr}
+            _map = {"Danger": "danger", "Alarma": "alert", "Normal": "ok"}
+            for _p in _payload["probes"]:
+                _r = next((v for k, v in _st.items() if (k or "").replace("_", "") == _p["n"]), None)
+                if _r and _r.get("status") in _map:
+                    _p["sev"] = _map[_r["status"]]
+                    _p["alarm"] = _r.get("alarm_used") or _p["alarm"]
+                    _p["danger"] = _r.get("danger_used") or _p["danger"]
             machine_live_train(_mtrain[1], _payload, key=f"wm_live_train_{instance_id}")
         try:
-            _live_train_hero()
-            has_map = True
+            _live_top_with_train()
         except Exception as _lt_err:  # noqa: BLE001
             st.caption(f"Machines train unavailable ({_lt_err}) — showing the standard diagram.")
+            _mtrain = None
+            _live_header_fragment(instance_obj, instance_id, sensor_lookup)
+            render_alarm_strip(rendered_rows)
+    else:
+        _live_header_fragment(instance_obj, instance_id, sensor_lookup)
+        # Alarm strip prominente arriba si hay danger
+        render_alarm_strip(rendered_rows)
+
+    # Hero — Machine Map.
+    # Prioridad (Ciclo 23.13):
+    #   1) Asset library 2D vectorial (System1 / Emerson AMS-style) si la
+    #      instancia tiene driver_icon_key + driven_icon_key configurados.
+    #      Sensor dots se posicionan en los anchors físicos del icono
+    #      (DE / NDE / TRF / CRF) por convención Bently / API 670.
+    #   2) PNG 3D legacy con overlay x_pct/y_pct si no hay icon_keys.
+    #   3) PNG plano sin overlay si tampoco hay coordenadas.
+    has_map = bool(_mtrain)
     if not has_map:
         has_map = render_sensor_map_library(
             instance_obj, latest, sensor_lookup,
