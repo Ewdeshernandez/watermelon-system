@@ -38,8 +38,25 @@ STEPS = ["Machine", "Constructor", "Sensors & layout", "Channel editor",
 MEASURE_BAND_DEFAULTS = {"prox": [1.0, 1000.0], "vel": [10.0, 1000.0], "accel": [10.0, 1000.0]}
 
 
+def _norms() -> List[Dict[str, Any]]:
+    """Catálogo de normas ISO/API con sus clases (para el selector de Machines)."""
+    try:
+        from core.iso_thresholds import list_classes_for_norm, list_norms
+        out = []
+        for n in list_norms():
+            code = n.get("code")
+            out.append({"code": code, "name": n.get("name") or n.get("title") or code,
+                        "classes": [{"code": c.get("code"), "label": c.get("label"),
+                                     "warning": c.get("warning"), "danger": c.get("danger")}
+                                    for c in (list_classes_for_norm(code) or [])]})
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def defaults_payload() -> Dict[str, Any]:
-    out: Dict[str, Any] = {"types": {}, "units": {k: list(v) for k, v in UNITS_BY_TYPE.items()}}
+    out: Dict[str, Any] = {"types": {}, "units": {k: list(v) for k, v in UNITS_BY_TYPE.items()},
+                           "norms": _norms()}
     for t, d in _SDEF.items():
         base = defaults_for_type(t)
         out["types"][t] = {"sens": d["sens"], "gap": d["gap"], "alarm": d["alarm"],

@@ -86,7 +86,7 @@ def render_save_snapshot_button(
     if not instance_id:
         st.caption(
             "_💾 Para guardar este análisis a Live Monitoring, primero "
-            "seleccioná una instancia activa (Machinery Library)._"
+            "seleccioná una máquina activa (Machines)._"
         )
         return False
 

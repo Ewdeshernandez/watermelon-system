@@ -252,6 +252,10 @@ function stepMachine(){
   '<div class="sub">Operation &amp; geometry</div>'+
   '<div class="row">'+fld('Mode:',sel('mOp',MODES,S.op_mode))+fld('RPM:',inp('mRpm',m.rpm_nominal,'number','min="0" max="60000" step="10"'))+
    fld('Rotation:',sel('mRot',['CCW','CW'],m.rotation))+fld('Bearing type:',sel('mBrg',['plain','tilting_pad','rolling','mixed'],m.bearing_type))+'</div>'+
+  '<div class="sub">Vibration standard (fallback for probes without their own Alert / Danger)</div>'+
+  '<div class="row">'+fld('Standard:',sel('mNorm',[['','— none —']].concat((D.norms||[]).map(function(n){return [n.code,n.name];})),m.iso_norm||''),true)+
+   fld('Class:',sel('mCls',[['','—']].concat(((D.norms||[]).filter(function(n){return n.code===m.iso_norm;})[0]||{classes:[]}).classes.map(function(c){return [c.code,c.label];})),m.iso_class||''),true)+'</div>'+
+  '<div class="hint">Each probe’s own Alert / Danger (Channel editor) always wins. The standard only fills probes left without limits. Live, Rotordynamics, reports, Report Center and the mobile app all use these values.</div>'+
   '<div class="sub">Tipo de monitoreo</div>'+
   '<div class="row">'+fld('Esta máquina es para:',sel('mMon',[['spot','Puntual — por oportunidad (conectás, medís, te vas)'],['online','En línea — monitoreo continuo (equipo fijo, alarmas 24/7)']],S.mode),true)+'</div>'+
   '<div class="sub">Live link &amp; signal source</div>'+
@@ -268,7 +272,9 @@ function stepMachine(){
   bindv('mClient',function(v){m.client=v;});bindv('mLoc',function(v){m.location=v;});
   bindv('mOp',function(v){S.op_mode=v;S.acquisition.averages=(v==='estable'?4:1);});
   bindv('mRpm',function(v){m.rpm_nominal=v;},true);bindv('mRot',function(v){m.rotation=v;});bindv('mBrg',function(v){m.bearing_type=v;});
-  bindv('mMon',function(v){S.mode=v;renderActions();});bindv('mInst',function(v){S.instance_id=v.trim();});
+  bindv('mMon',function(v){S.mode=v;renderActions();});
+  on('mNorm','change',function(e){m.iso_norm=e.target.value;m.iso_class='';changed();stepMachine();});
+  bindv('mCls',function(v){m.iso_class=v;});bindv('mInst',function(v){S.instance_id=v.trim();});
   on('mSrc','change',function(e){S.source=e.target.value;changed();refreshTop();stepMachine();});
   bindv('gIp',function(v){mb.server_ip=v.trim();});bindv('gPort',function(v){mb.port=v;},true);bindv('gUnit',function(v){mb.unit_id=v;},true);
   bindv('gOrd',function(v){mb.byte_order=v;});bindv('gRd',function(v){g.read_interval_seconds=v;},true);bindv('gPost',function(v){g.poll_interval_seconds=v;},true);

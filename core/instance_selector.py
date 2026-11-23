@@ -216,7 +216,7 @@ def render_instance_selector(module_name: str = "module",
             "Cada instancia representa una máquina física específica. "
             "Los datos del Vault (parámetros, manuales) y los reportes "
             "se asocian a la instancia, no al tipo de máquina. "
-            "Crea instancias nuevas desde la Machinery Library."
+            "Crea máquinas nuevas desde Machines."
         ),
     )
 

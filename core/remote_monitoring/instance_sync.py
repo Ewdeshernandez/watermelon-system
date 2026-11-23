@@ -119,7 +119,8 @@ def sync_sensors_from_setup(sensors: List[Dict[str, Any]], setup: AcqSetup
 # Ficha del activo: Machines → instances. Live (título y chips), reporte PDF
 # (subtítulo cliente · sitio), app móvil (flota por cliente) y correos la leen
 # de `instances`. Solo valores NO vacíos (nunca borra lo que ya hay).
-_HEADER_MAP = (("client", "client"), ("location", "site"), ("tag", "tag"))
+_HEADER_MAP = (("client", "client"), ("location", "site"), ("tag", "tag"),
+               ("iso_norm", "iso_norm_code"), ("iso_class", "iso_norm_class"))
 
 
 def header_changes(inst: Any, setup: AcqSetup) -> Dict[str, Tuple[str, str]]:
@@ -130,6 +131,11 @@ def header_changes(inst: Any, setup: AcqSetup) -> Dict[str, Tuple[str, str]]:
         old = (getattr(inst, dst, "") or "") if inst is not None else ""
         if new and new != old:
             out[dst] = (old, new)
+    # Operación: rpm nominal (Machines = fuente única)
+    rpm = float(getattr(setup.machine, "rpm_nominal", 0) or 0)
+    old_rpm = float(getattr(inst, "nominal_rpm", 0) or 0) if inst is not None else 0.0
+    if rpm > 0 and abs(rpm - old_rpm) > 0.5:
+        out["nominal_rpm"] = (f"{old_rpm:g}" if old_rpm else "", f"{rpm:g}")
     return out
 
 
@@ -153,8 +159,6 @@ def sync_instance(setup: AcqSetup, create_if_missing: bool = True) -> Dict[str, 
         return {"ok": True, "created": False, "header": {}, **rep}
     inst.sensors = sensors
     for field_name, (_old, new) in hdr.items():
-        setattr(inst, field_name, new)
-    if setup.machine.rpm_nominal and not inst.nominal_rpm:
-        inst.nominal_rpm = float(setup.machine.rpm_nominal)
+        setattr(inst, field_name, float(new) if field_name == "nominal_rpm" else new)
     _save_instance(inst)
     return {"ok": True, "created": created, "header": {k: v[1] for k, v in hdr.items()}, **rep}

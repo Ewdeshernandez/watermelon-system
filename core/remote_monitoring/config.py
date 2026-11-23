@@ -107,7 +107,8 @@ class MachineConfig:
     speed_control: str = "constant"  # constant | variable
     bearing_type: str = "plain"      # plain | tilting_pad | rolling | mixed
     n_bearings: int = 2
-    iso_norm: str = ""
+    iso_norm: str = ""               # código de norma (ej. ISO_20816_3) — Machines = fuente única
+    iso_class: str = ""              # clase/grupo dentro de la norma (ej. "2")
     # --- Ficha del activo (homólogo a la web / ADRE 408) ---
     machine_type: str = ""           # ej. "Turbogenerator", "Motor+Pump"
     tag: str = ""                    # tag / placa de la máquina

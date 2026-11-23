@@ -331,7 +331,7 @@ def _save_snapshot_ui(build_fn, *, key: str, default_rpm: float = 0.0,
     with st.popover("💾 Guardar en reporte", use_container_width=False):
         assets = _list_assets()
         if not assets:
-            st.caption("No hay máquinas registradas en Machinery Library.")
+            st.caption("No hay máquinas registradas en Machines.")
             return
         tags = [t for _i, t in assets]
         _def = tags.index(cur_asset) if cur_asset in tags else 0
