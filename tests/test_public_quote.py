@@ -12,6 +12,10 @@ def client(monkeypatch):
     mem = {}
     monkeypatch.setattr(store, "get_setting", lambda k, d=None: mem.get(k, d))
     monkeypatch.setattr(store, "set_setting", lambda k, v: mem.__setitem__(k, v) or True)
+    # Nunca enviar correos reales desde las pruebas
+    import core.email_sender as es
+    monkeypatch.setattr(es, "get_email_backend_status", lambda: {"configured": False})
+    monkeypatch.setattr(es, "send_email", lambda **kw: {"ok": True})
     A._QUOTE_HITS.clear()
     return TestClient(A.create_app()), mem
 

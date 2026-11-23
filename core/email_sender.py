@@ -79,11 +79,27 @@ def _safe_subdict(parent: Any, key: str) -> Dict[str, Any]:
             return {}
 
 
+def _env_section(*path: str) -> Dict[str, Any]:
+    """Respaldo por variables de entorno para servicios SIN Streamlit (la API en
+    Render): RESEND_API_KEY [+ RESEND_FROM_EMAIL, RESEND_FROM_NAME]."""
+    import os
+    if path == ("email", "resend") and os.environ.get("RESEND_API_KEY", "").strip():
+        return {"api_key": os.environ["RESEND_API_KEY"].strip(),
+                "from_email": os.environ.get("RESEND_FROM_EMAIL", "avisos@watermelonsystem.app").strip(),
+                "from_name": os.environ.get("RESEND_FROM_NAME", "Watermelon System").strip()}
+    return {}
+
+
 def _read_secret_section(*path: str) -> Dict[str, Any]:
     """Lee una sección anidada de st.secrets como dict puro.
     Ej: _read_secret_section('email', 'graph') → contenido de [email.graph].
-    Devuelve dict vacío si no existe o si st no está disponible.
+    Si no hay secrets de Streamlit (API), cae a variables de entorno.
     """
+    sec = _read_secret_section_st(*path)
+    return sec or _env_section(*path)
+
+
+def _read_secret_section_st(*path: str) -> Dict[str, Any]:
     try:
         import streamlit as st  # type: ignore
         if not hasattr(st, "secrets"):
