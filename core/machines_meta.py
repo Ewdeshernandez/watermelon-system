@@ -34,6 +34,13 @@ def machine_header(instance_id: str, client: Any = None) -> Optional[Dict[str, A
                    "tag": m.tag or m.name, "rpm_nominal": m.rpm_nominal,
                    "iso_norm": m.iso_norm, "iso_class": m.iso_class,
                    "version": found.get("version")}
+            from core.demo_access import is_demo
+            if is_demo(instance_id):          # demo: nombres SOLO de la instance demo
+                from core.instance_state import get_instance
+                di = get_instance(instance_id)
+                out.update(type=(getattr(di, "asset_class", "") or "Turbogenerador"),
+                           client=getattr(di, "client", "") or "", location=getattr(di, "site", "") or "",
+                           tag=getattr(di, "tag", "") or instance_id)
     except Exception:  # noqa: BLE001
         out = None
     _CACHE[instance_id] = (now, out)

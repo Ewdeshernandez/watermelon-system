@@ -703,6 +703,11 @@ def find_setup_cloud_by_instance(instance_id: str, client: Any = None) -> Option
     Devuelve {id, name, updated_at, setup} o None. Tabla pequeña → filtro en
     Python (instance_id vive dentro del jsonb `metadata`). `client` opcional
     (la API FastAPI pasa el suyo: SUPABASE_URL/SUPABASE_SERVICE_KEY)."""
+    try:                                   # máquina demo → configuración de la real
+        from core.demo_access import source_for
+        instance_id = source_for(instance_id)
+    except Exception:  # noqa: BLE001
+        pass
     client = client or _rm_client()
     if client is None or not instance_id:
         return None

@@ -898,8 +898,25 @@ def logout(silent: bool = False) -> None:
         st.toast("Sesión cerrada")
 
 
+def _check_demo_expiry() -> None:
+    """Acceso demo vencido (14 días) → no deja entrar."""
+    try:
+        email = str(st.session_state.get("auth_email", "") or "")
+        if not email:
+            return
+        from core.demo_access import demo_status
+        if demo_status(email) == "vencido":
+            st.error("Su acceso de demostración terminó. Para seguir viendo Watermelon System, "
+                     "escríbanos y le activamos el piloto de 30 días o un plan.")
+            st.markdown("[Ir a watermelonsystem.com](https://watermelonsystem.com)")
+            st.stop()
+    except Exception:  # noqa: BLE001
+        return
+
+
 def require_login() -> None:
     if is_authenticated():
+        _check_demo_expiry()
         _show_authenticated_layout_tweaks()
         return
 
