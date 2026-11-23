@@ -79,6 +79,8 @@ def generate_live_report_pdf(
     trend_title: str = "Tendencia overall",
     schematic_png: Optional[bytes] = None,
     train_drawing: Any = None,
+    watch: Optional[List[Dict[str, Any]]] = None,
+    watch_png: Optional[bytes] = None,
 ) -> bytes:
     """Genera el PDF ejecutivo de 1 página. Devuelve bytes.
 
@@ -206,7 +208,7 @@ def generate_live_report_pdf(
     # ---------- KPIs ----------
     score = health.get("score")
     score_txt = str(score) if score is not None else "—"
-    zone = health.get("zone", "—")
+    zone = str(health.get("zone", "—")).replace("Zone ", "Zona ").replace("No data", "Sin datos")
     hcolor = colors.HexColor(health.get("color", _MUTE))
 
     # Banda de datos = la MISMA de Live Monitoring (navy + franja ámbar):
@@ -235,10 +237,10 @@ def generate_live_report_pdf(
     _st_lab = ParagraphStyle("bl", fontName=SANSB, fontSize=6.6, leading=8,
                              textColor=colors.HexColor("#9fc0e6"))
 
-    def _bk(label, value, unit="", vcolor="#ffffff", size=13.5):
+    def _bk(label, value, unit="", vcolor="#ffffff", size=12.5):
         _v = ParagraphStyle("bv", fontName=SANSB, fontSize=size, leading=size + 3,
                             textColor=colors.HexColor(vcolor))
-        _txt = f"{value}<font size='7' color='#9fc0e6'> {unit}</font>" if unit else f"{value}"
+        _txt = f"{value}<font size='6.5' color='#9fc0e6'>&nbsp;{unit}</font>" if unit else f"{value}"
         return [Paragraph(_txt, _v), Spacer(1, 2), Paragraph(label.upper(), _st_lab)]
 
     _hc = health.get("color", _MUTE)
@@ -252,15 +254,15 @@ def generate_live_report_pdf(
         _bk("Estado", _st_txt, "", _st_col, 10.5),
         _bk("Turbina (último)" if _off else "Turbina", _sp_turb, "rpm"),
     ]
-    widths = [2.7, 2.9, 2.6]
+    widths = [2.5, 2.7, 2.7]
     if _sp_gen:
-        cells.append(_bk("Generador", _sp_gen, "rpm")); widths.append(2.3)
+        cells.append(_bk("Generador", _sp_gen, "rpm")); widths.append(2.5)
     cells.append(_bk("Vib. eje máx" + (f" · {_maxl}" if _maxl else ""),
                      f"{_maxv:.1f}" if _maxv is not None else "—",
                      _maxu.replace(" pp", "") + " pp" if _maxv is not None else ""))
     widths.append(2.9)
     cells.append(_bk("Alarmas", _alarms_n, "", _RED if _alarms_n else "#4ade80"))
-    widths.append(1.8)
+    widths.append(1.95)
     cells.append(_bk("Última lectura", str(kpis.get("last", "—")).replace("hace ", ""), "", "#ffffff", 11))
     widths.append(18.0 - sum(widths))
     kpi_tbl = Table([cells], colWidths=[w * cm for w in widths])
@@ -327,6 +329,10 @@ def generate_live_report_pdf(
         _band = "OPERACIÓN NORMAL"
         _diag = (f"El activo opera dentro de parámetros normales (ISO 20816, {zone}). "
                  "Sin acciones requeridas; continuar el monitoreo en línea.")
+        _w0 = (watch or [None])[0]
+        if _w0 and (_w0.get("pct") or 0) >= 90:
+            _diag += (f" <b>Punto a vigilar:</b> {_w0.get('display') or _w0.get('sensor_label')} "
+                      f"está al {_w0['pct']:.0f} % de su nivel de alerta.")
     st_band = ParagraphStyle("bd", fontName=SANSB, fontSize=12.5,
                              textColor=colors.HexColor(_fg), leading=15)
     st_diag = ParagraphStyle("dg", fontName=SANS, fontSize=9.5,
@@ -379,6 +385,61 @@ def generate_live_report_pdf(
         except Exception:
             pass
 
+    # ---------- Puntos a vigilar (aviso temprano) ----------
+    if watch:
+        try:
+            st_wt = ParagraphStyle("wt", fontName=SANS, fontSize=8.6, leading=10.5,
+                                   textColor=colors.HexColor(_NAVY))
+            wdata = [["Sonda", "Ubicación", "Valor", "Alerta", "% de alerta", "Δ 24 h"]]
+            wstyles = []
+            for i, w in enumerate(watch, start=1):
+                pct = w.get("pct") or 0
+                pc = _RED if pct >= 100 else (_AMBER if pct >= 90 else _GREEN)
+                bar_w = 2.6 * min(pct, 100) / 100.0
+                bar = Table([["", ""]], colWidths=[max(0.05, bar_w) * cm, max(0.0, 2.6 - bar_w) * cm],
+                            rowHeights=[0.22 * cm])
+                bar.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (0, 0), colors.HexColor(pc)),
+                    ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#e6ebf2")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+                d = w.get("delta")
+                dtxt = "—" if d is None else f"{d:+.1f} %"
+                dcol = _MUTE if d is None else (_RED if d >= 10 else (_GREEN if d <= -10 else "#475569"))
+                loc = w.get("aux_group") or w.get("plane_label") or "—"
+                wdata.append([
+                    Paragraph(f"<b>{w.get('display') or w.get('sensor_label')}</b>", st_wt),
+                    Paragraph(str(loc), st_loc),
+                    f"{w.get('value', '—')} {w.get('unit', '')}",
+                    f"{w.get('alarm'):g}" if w.get("alarm") else "—",
+                    Table([[Paragraph(f'<font color="{pc}"><b>{pct:.0f} %</b></font>', st_wt), bar]],
+                          colWidths=[1.3 * cm, 2.7 * cm],
+                          style=TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                            ("LEFTPADDING", (0, 0), (-1, -1), 0)])),
+                    Paragraph(f'<font color="{dcol}">{dtxt}</font>', st_wt),
+                ])
+            wtbl = Table(wdata, colWidths=[1.8 * cm, 4.6 * cm, 2.6 * cm, 1.6 * cm, 4.4 * cm, 1.9 * cm])
+            wtbl.setStyle(TableStyle([
+                ("FONTNAME", (0, 0), (-1, 0), SANSB), ("FONTSIZE", (0, 0), (-1, -1), 8.6),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_NAVY)),
+                ("FONTNAME", (0, 1), (-1, -1), SANS),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7f9fc")]),
+                ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ] + wstyles))
+            blk = [Paragraph("Puntos a vigilar — más cerca de su nivel de alerta", st_section), wtbl]
+            if watch_png:
+                blk += [Spacer(1, 4),
+                        Paragraph(f"{watch[0].get('display') or watch[0].get('sensor_label')} — últimas 24 h "
+                                  f"(máx por hora) con sus niveles de alerta y peligro", st_meta),
+                        Image(BytesIO(watch_png), width=18 * cm, height=4.2 * cm)]
+            story.append(KeepTogether(blk))
+            story.append(Spacer(1, 8))
+        except Exception:  # noqa: BLE001
+            pass
+
     # ---------- Tendencia (si hay PNG) ----------
     if trend_png:
         try:
@@ -410,51 +471,75 @@ def generate_live_report_pdf(
         ch_truncated = 0
 
     _ch_title = Paragraph("Canales — Overall + vectores 1X / 2X (API 670)", st_section)
-    head = ["Estado", "Canal", "Ubicación", "Overall", "Unit", "1X ampl", "1X °", "2X ampl", "2X °"]
-    st_estado = ParagraphStyle("est", fontName=SANSB, fontSize=8.2,
-                               textColor=colors.HexColor(_NAVY), leading=10)
+    head = ["Estado", "Canal", "Ubicación", "Overall", "Unidad", "% alerta", "Δ 24 h",
+            "1X ampl", "1X °", "2X ampl", "2X °"]
+    st_estado = ParagraphStyle("est", fontName=SANSB, fontSize=7.6,
+                               textColor=colors.HexColor(_NAVY), leading=9)
+    st_grp = ParagraphStyle("grp", fontName=SANSB, fontSize=8,
+                            textColor=colors.HexColor("#12305e"), leading=10)
+    _ES = {"normal": "Normal", "alarma": "Alarma", "danger": "Peligro",
+           "sin norma": "Sin norma", "no data": "Sin dato"}
     data = [head]
+    extra_styles = []
+    _cur_grp = None
     for c in channels:
+        _grp = c.get("aux_group") or ""
+        if _grp and _grp != _cur_grp:
+            _cur_grp = _grp
+            data.append([Paragraph(f"AUXILIAR · {_grp}", st_grp)] + [""] * (len(head) - 1))
+            r = len(data) - 1
+            extra_styles += [("SPAN", (0, r), (-1, r)),
+                             ("BACKGROUND", (0, r), (-1, r), colors.HexColor("#eef3f9")),
+                             ("TOPPADDING", (0, r), (-1, r), 3), ("BOTTOMPADDING", (0, r), (-1, r), 3)]
         fg, _bg = _sev_colors(c.get("status", ""))
-        _stt = c.get("status") or "—"
+        _stt = _ES.get(str(c.get("status") or "").lower(), c.get("status") or "—")
+        pct = c.get("pct")
+        pcol = _MUTE if pct is None else (_RED if pct >= 100 else (_AMBER if pct >= 90 else "#475569"))
+        d = c.get("delta")
+        dcol = _MUTE if d is None else (_RED if d >= 10 else (_GREEN if d <= -10 else "#475569"))
         data.append([
             Paragraph(f'<font color="{fg}">●</font>&nbsp;{_stt}', st_estado),
-            c.get("sensor_label", "—"),
-            Paragraph(str(c.get("plane_label") or "—"), st_loc),
+            c.get("display") or str(c.get("sensor_label", "—")).replace("_", ""),
+            Paragraph(str(_grp or c.get("plane_label") or "—"), st_loc),
             c.get("value", "—"),
-            c.get("unit", ""),
+            Paragraph(str(c.get("unit", "")), st_loc),
+            Paragraph(f'<font color="{pcol}">{"—" if pct is None else f"{pct:.0f} %"}</font>', st_cellnum),
+            Paragraph(f'<font color="{dcol}">{"—" if d is None else f"{d:+.0f} %"}</font>', st_cellnum),
             c.get("x1_amp", "—"),
             c.get("x1_ph", "—"),
             c.get("x2_amp", "—"),
             c.get("x2_ph", "—"),
         ])
 
-    ctbl = Table(data, colWidths=[1.9*cm, 1.4*cm, 3.5*cm, 1.8*cm, 1.4*cm,
-                                  1.6*cm, 1.2*cm, 1.6*cm, 1.2*cm])
+    ctbl = Table(data, colWidths=[1.75*cm, 1.15*cm, 2.75*cm, 1.45*cm, 1.55*cm,
+                                  1.45*cm, 1.35*cm, 1.45*cm, 1.05*cm, 1.45*cm, 1.05*cm])
     base_style = [
         # Header: fondo navy suave + texto claro (más definido)
         ("FONTNAME", (0, 0), (-1, 0), SANSB),
-        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 0), (-1, 0), 7.6),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_NAVY)),
         ("TOPPADDING", (0, 0), (-1, 0), 5), ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
         # Cuerpo
         ("FONTNAME", (1, 1), (-1, -1), SANS),
-        ("FONTSIZE", (1, 1), (-1, -1), 9),
-        ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+        ("FONTSIZE", (1, 1), (-1, -1), 8.6),
+        ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
         ("ALIGN", (0, 0), (2, -1), "LEFT"),
-        ("TOPPADDING", (0, 1), (-1, -1), 3.5),
-        ("BOTTOMPADDING", (0, 1), (-1, -1), 3.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 1), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         # Zebra + hairline inferior
         ("ROWBACKGROUNDS", (0, 1), (-1, -1),
          [colors.white, colors.HexColor("#f7f9fc")]),
         ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor(_LINE)),
         ("LINEBELOW", (0, 0), (-1, 0), 0, colors.white),
-    ]
+    ] + extra_styles
     ctbl.setStyle(TableStyle(base_style))
     story.append(KeepTogether([_ch_title, ctbl]))
-    meta_txt = "1X = componente síncrona (desbalance) · 2X = segunda armónica (desalineamiento / soltura)"
+    meta_txt = ("% alerta = valor / nivel de alerta · Δ 24 h = última hora vs la misma hora de ayer · "
+                "1X = componente síncrona (desbalance) · 2X = segunda armónica (desalineamiento / soltura)")
     if ch_truncated:
         meta_txt += (f" · Mostrando {_MAX_CH} de {total_ch} canales "
                      f"(priorizados por severidad)")
@@ -467,15 +552,44 @@ def generate_live_report_pdf(
                                    textColor=colors.HexColor(_GREEN))
         story.append(Paragraph("● Sin alarmas en las últimas 24 h.", _ok_style))
     else:
-        ev_data = [["", "Canal", "Estado", "Valor", "Hace"]]
+        # Resumen POR SONDA (antes: una fila por cada cruce → una sonda oscilando en
+        # su límite llenaba una página entera). Entradas a alarma/peligro, valor
+        # máximo y cuándo fue la última.
+        _agg: Dict[str, Dict[str, Any]] = {}
+        _order: List[str] = []
+        for e in events:
+            k = str(e.get("sensor_label", "—")).replace("_", "")
+            if k not in _agg:
+                _agg[k] = {"n": 0, "max": None, "unit": e.get("unit", ""), "last": None,
+                           "worst": "Alarma", "now": None}
+                _order.append(k)
+            a = _agg[k]
+            if a["now"] is None:
+                a["now"] = e.get("to")
+            if e.get("rising"):
+                a["n"] += 1
+                if a["last"] is None:
+                    a["last"] = e.get("age")
+                if e.get("to") == "Danger":
+                    a["worst"] = "Peligro"
+            try:
+                v = float(e.get("value"))
+                a["max"] = v if a["max"] is None or v > a["max"] else a["max"]
+            except (TypeError, ValueError):
+                pass
+        ev_data = [["", "Sonda", "Entradas a alarma", "Máximo", "Última", "Ahora"]]
         ev_styles = []
-        for i, e in enumerate(events[:8], start=1):
-            arrow = "▲" if e.get("rising") else "▼"
-            acolor = _RED if e.get("rising") else _GREEN
-            ev_data.append([arrow, e.get("sensor_label", "—"), e.get("to", "—"),
-                            f"{e.get('value','—')} {e.get('unit','')}", e.get("age", "—")])
-            ev_styles.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor(acolor)))
-        etbl = Table(ev_data, colWidths=[0.7*cm, 2.0*cm, 2.2*cm, 3.5*cm, 2.5*cm])
+        for i, k in enumerate(_order[:6], start=1):
+            a = _agg[k]
+            col = _RED if a["worst"] == "Peligro" else _AMBER
+            _now = {"Danger": "Peligro", "Alarma": "Alarma"}.get(a["now"], "Normal")
+            ev_data.append(["▲", k, f"{a['n']} ({a['worst'].lower()})",
+                            f"{a['max']:.2f} {a['unit']}" if a["max"] is not None else "—",
+                            f"hace {a['last']}" if a["last"] else "—", _now])
+            ev_styles.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor(col)))
+            ev_styles.append(("TEXTCOLOR", (5, i), (5, i),
+                              colors.HexColor(_GREEN if _now == "Normal" else col)))
+        etbl = Table(ev_data, colWidths=[0.7*cm, 1.8*cm, 3.6*cm, 3.2*cm, 2.6*cm, 2.0*cm])
         etbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), SANSB),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
