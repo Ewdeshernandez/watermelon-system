@@ -239,6 +239,9 @@ CLIENT_BLOCKED_PAGES = {
 # Home + Live Monitoring + Reports — clase mundial enterprise, menos
 # saturado que el menú completo del analista.
 CLIENT_HIDE_FROM_NAV = {
+    # Rotodinámica = espacio de análisis manual con CSV del analista; el
+    # cliente ya tiene las gráficas dentro de Live Monitoring.
+    "pages/02_Analysis.py",
     "pages/01__Tabular_List.py",
     "pages/02_Time_Waveforms.py",
     "pages/03_Spectrum.py",

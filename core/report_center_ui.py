@@ -474,7 +474,8 @@ def _render_approval_detail(_iid: str, _tag: str, _d: dict, me_name: str) -> Non
                             prepared_role=_elab_rol, approved_role=_aprb_rol, send=True,
                             # Reusa el PDF de la vista previa (idéntico) → instantáneo.
                             prebuilt_pdf=st.session_state.get(f"rc_pdf_{_ck}"),
-                            prebuilt_meta=st.session_state.get(f"rc_pdfmeta_{_ck}"))
+                            prebuilt_meta=st.session_state.get(f"rc_pdfmeta_{_ck}"),
+                            owner_email=str(st.session_state.get("auth_email", "") or ""))
                     if _res.get("ok"):
                         _dv = _res.get("delivery") or {}
                         if _dv.get("any_ok"):

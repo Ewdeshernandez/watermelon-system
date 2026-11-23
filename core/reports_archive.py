@@ -552,8 +552,8 @@ def _can_view(viewer_email: str, viewer_role: str, sidecar: Dict[str, Any]) -> b
     """Reglas de visibilidad por role:
        admin       → TODO
        specialist  → suyos + de otros @sigasas.com
-       client      → shared_with_client=True  OR  match_strings/asset_tags
-                     coinciden con el cliente al que pertenece el viewer.
+       client      → SOLO si match_strings/asset_tags coinciden con el
+                     cliente al que pertenece el viewer (nunca de otro cliente).
        (otros)     → solo suyos
     """
     role = (viewer_role or "").strip().lower()
@@ -568,12 +568,11 @@ def _can_view(viewer_email: str, viewer_role: str, sidecar: Dict[str, Any]) -> b
             return True
         return owner.endswith("@sigasas.com")
     if role == "client":
-        # Ciclo 23.131 — Visibilidad ampliada:
-        # (a) flag explícito shared_with_client, O
-        # (b) el reporte matchea con los match_strings/asset_tags del
-        #     cliente al que pertenece el viewer (auto-share por scope).
-        if bool(sidecar.get("shared_with_client")):
-            return True
+        # Un cliente SOLO ve reportes de SU cliente: el reporte debe coincidir
+        # con los match_strings/asset_tags del cliente al que pertenece el
+        # viewer. `shared_with_client` ya NO abre el reporte a cualquier
+        # cliente (antes un reporte marcado "compartir" lo veía el usuario de
+        # OTRO cliente). Sin cliente asignado → no ve nada.
         try:
             from core.clients import get_client_for_email
             c = get_client_for_email(viewer)
