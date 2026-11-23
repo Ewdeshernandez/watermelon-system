@@ -571,9 +571,10 @@ def build_report_for_instance(
     try:
         _train = None
         try:                                   # DIAGRAMA LIVE (vector, preferido)
-            from core.train_svg import build_train_svg, svg_to_train_drawing
-            _svg = build_train_svg(instance_obj, latest, sensor_lookup)
-            _train = svg_to_train_drawing(_svg) if _svg else None
+            # Tren de Machines en vivo (mismo dibujo de Live); si la máquina no
+            # tiene tren en Machines → dibujo anterior. Ver core/live_train_svg.py
+            from core.live_train_svg import train_drawing_for
+            _train = train_drawing_for(instance_id, instance_obj, latest, sensor_lookup)
         except Exception:  # noqa: BLE001
             _train = None
         schematic_png = None

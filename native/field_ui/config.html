@@ -308,7 +308,8 @@ function stepSensors(){
   $('main').innerHTML='<div class="legend"><span><span class="dot" style="background:var(--c-prox)"></span>Proximity</span><span><span class="dot" style="background:var(--c-vel)"></span>Velocity</span><span><span class="dot" style="background:var(--c-accel)"></span>Accelerometer</span><span><span class="dot" style="background:var(--c-kph)"></span>Keyphasor</span><span>API 670 angle: from TDC · R = clockwise · L = counter-clockwise (45°L + 45°R = 90°)</span></div>'+
    '<div class="split"><div class="tbl pick"><table><thead><tr><th>Channel</th><th>Type</th><th>BNC</th><th>Angle°</th><th>Side</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
    '<iframe class="frame" id="vFrame" title="Machine layout" style="height:320px"></iframe></div>'+
-   '<div class="row"><button class="btn" id="sAdd">+ Sensor</button><button class="btn" id="sDel">– Remove</button><span class="hint">Sensitivity, gap, alarms and advanced fields: Channel editor (double-click a row).</span></div>';
+   '<div class="row"><button class="btn" id="sAdd">+ Sensor</button><button class="btn" id="sDel">– Remove</button><span class="hint">Sensitivity, gap, alarms and advanced fields: Channel editor (double-click a row).</span></div>'+
+   auxEditorHtml();
   vFrame=$('vFrame');vFrame.src='builder.html#'+bHash(true);
   vFrame.onload=function(){ if(S.layout&&S.layout.machines) vFrame.contentWindow.postMessage({wm:'load',spec:S.layout},'*'); };
   S.channels.forEach(function(c,i){
@@ -320,10 +321,48 @@ function stepSensors(){
     tr.addEventListener('click',function(e){if(e.target.closest('input,select'))return;selCh=+tr.dataset.i;stepSensors();});
     tr.addEventListener('dblclick',function(){selCh=+tr.dataset.i;go(3);});
   });
+  bindAuxEditor();
   on('sAdd','click',function(){var c=newChannel('P'+(S.channels.length+1),'accelerometer');S.channels.push(c);selCh=S.channels.length-1;changed();stepSensors();});
   on('sDel','click',function(){if(!S.channels.length)return;var c=S.channels[selCh];
     if(c.modbus&&Object.keys(c.modbus).length&&pendingDel!==c){pendingDel=c;toast(disp(c.point_label)+' feeds Live via Modbus — press Remove again to confirm');return;}
     pendingDel=null;S.channels.splice(selCh,1);selCh=Math.max(0,selCh-1);changed();stepSensors();});
+}
+
+// ---- Grupos AUXILIARES (fuera del tren): nombre + sondas existentes ----
+// Viven en S.layout.aux = [{name, k, probes:[{n:'4YA', k:'accel'}]}]. Live, el
+// reporte PDF y el Constructor los dibujan en su caja fuera del tren.
+var KSHORT={proximity:'prox',velometer:'vel',accelerometer:'accel',keyphasor:'kph'};
+function auxList(){ S.layout=S.layout||{}; S.layout.aux=S.layout.aux||[]; return S.layout.aux; }
+function auxOwner(n){ var a=auxList(); for(var i=0;i<a.length;i++){ if((a[i].probes||[]).some(function(p){return String(p.n||p).toUpperCase()===n.toUpperCase();})) return i; } return -1; }
+function auxEditorHtml(){
+  var a=auxList(), cand=S.channels.filter(function(c){return c.sensor_type!=='keyphasor';});
+  var h='<div class="sub">Auxiliary groups (outside the train)</div>';
+  if(!a.length) h+='<div class="hint">No auxiliary groups. Use them for equipment off the shaft line: lube-oil pump, starter, cooling fan…</div>';
+  a.forEach(function(g,gi){
+    h+='<div class="callout" style="display:flex;flex-direction:column;gap:8px">'+
+      '<div class="row">'+fld('Name:',inp('axN'+gi,g.name||'','text','style="min-width:220px"'),true)+'<button class="btn sm" id="axDel'+gi+'">Remove group</button></div>'+
+      '<div class="row">'+cand.map(function(c){var n=disp(c.point_label), own=auxOwner(n);
+        return '<label class="fld" title="'+(own>=0&&own!==gi?'Now in '+esc(a[own].name):'')+'"><input type="checkbox" id="axC'+gi+'_'+esc(n)+'" data-g="'+gi+'" data-n="'+esc(n)+'" data-k="'+(KSHORT[c.sensor_type]||'accel')+'"'+(own===gi?' checked':'')+'> '+
+          '<span class="mb" style="color:'+(own===gi?'var(--ink)':(own>=0?'var(--dim)':'var(--mute)'))+'">'+esc(n)+'</span></label>';}).join('')+'</div></div>';
+  });
+  h+='<div class="row"><button class="btn" id="axAdd">+ Auxiliary group</button><span class="hint">A probe can belong to one group only; checking it here moves it.</span></div>';
+  return h;
+}
+function bindAuxEditor(){
+  var a=auxList();
+  a.forEach(function(g,gi){
+    on('axN'+gi,'change',function(e){ g.name=e.target.value.trim()||g.name; changed(); });
+    on('axDel'+gi,'click',function(){ a.splice(gi,1); changed(); stepSensors(); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('input[data-g]'),function(cb){
+    cb.addEventListener('change',function(){
+      var gi=+cb.dataset.g, n=cb.dataset.n;
+      a.forEach(function(g){ g.probes=(g.probes||[]).filter(function(p){return String(p.n||p).toUpperCase()!==n.toUpperCase();}); });
+      if(cb.checked){ a[gi].probes.push({n:n,k:cb.dataset.k}); a[gi].k=a[gi].k||cb.dataset.k; }
+      changed(); stepSensors();
+    });
+  });
+  on('axAdd','click',function(){ a.push({name:'Auxiliary '+(a.length+1),k:'accel',probes:[]}); changed(); stepSensors(); });
 }
 
 // ---------------- 4 · Channel editor ----------------

@@ -2352,10 +2352,9 @@ def _build_live_report_pdf(
     try:
         _train = None
         try:                                   # DIAGRAMA LIVE (vector, preferido)
-            from core.train_svg import build_train_svg, svg_to_train_drawing
+            from core.live_train_svg import train_drawing_for
             _slk = _build_sensor_lookup(instance_obj)
-            _svg = build_train_svg(instance_obj, latest, _slk)
-            _train = svg_to_train_drawing(_svg) if _svg else None
+            _train = train_drawing_for(instance_id, instance_obj, latest, _slk)
         except Exception:  # noqa: BLE001
             _train = None
         _schem_png = None
