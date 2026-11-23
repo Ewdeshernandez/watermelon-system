@@ -211,6 +211,42 @@ def claim_consecutive(instance_id: str, period: str = "Semanal") -> str:
         return ""
 
 
+def archive_approved(instance_id: str, inst: Any, pdf: bytes, *, period: str,
+                     consecutive: str = "", prepared_by: str = "",
+                     approved_by: str = "", status: str = "",
+                     owner_email: str = "") -> Dict[str, Any]:
+    """Guarda el reporte aprobado en el archivo histórico (Reports), con el
+    cliente y el tag del activo para que el usuario cliente lo encuentre.
+    Best-effort: si falla, el envío ya ocurrió y no se revierte."""
+    try:
+        from core.reports_archive import archive_report_pdf
+        tag = (getattr(inst, "tag", "") or instance_id)
+        from datetime import datetime as _dt
+        try:
+            from zoneinfo import ZoneInfo
+            _now = _dt.now(ZoneInfo("America/Bogota")).replace(tzinfo=None)
+        except Exception:  # noqa: BLE001
+            _now = _dt.now()
+        meta = {
+            "client": (getattr(inst, "client", "") or "").strip(),
+            "site": (getattr(inst, "site", "") or getattr(inst, "location", "") or "").strip(),
+            "asset_class": f"Reporte {period} · {tag}",
+            "instance_tag": tag, "instance_id": instance_id,
+            "report_date": _now.strftime("%Y-%m-%d"),
+            "consecutive": consecutive,
+            "executive_severity": status,
+            "prepared_by": prepared_by, "reviewed_by": approved_by,
+        }
+        return archive_report_pdf(
+            pdf_bytes=pdf, meta=meta,
+            owner_email=(owner_email or "report-center@sigasas.com").strip().lower(),
+            archived_at=_now, shared_with_client=True,
+            extra_notes=f"Aprobado en Report Center ({period}).")
+    except Exception as e:  # noqa: BLE001
+        log.warning("archive_approved(%s) falló: %s", instance_id, e)
+        return {"ok": False, "error": str(e)}
+
+
 def approve_and_send(instance_id: str, *,
                      period: str = "Semanal",
                      prepared_by: str, approved_by: str,
@@ -218,6 +254,7 @@ def approve_and_send(instance_id: str, *,
                      send: bool = True,
                      prebuilt_pdf: Optional[bytes] = None,
                      prebuilt_meta: Optional[Dict[str, Any]] = None,
+                     owner_email: str = "",
                      ) -> Dict[str, Any]:
     """Aprueba el borrador y (si send) lo envía al cliente.
 
@@ -281,6 +318,17 @@ def approve_and_send(instance_id: str, *,
         except Exception as e:
             log.error("approve_and_send(%s) envío falló: %s", instance_id, e)
             out["delivery"] = {"any_ok": False, "error": str(e)}
+
+    # Archivo del cliente: el reporte aprobado queda en Reports → Archivo
+    # histórico, visible SOLO para los usuarios de ese cliente (match por tag).
+    _sent = ((delivery or {}).get("email") or {}).get("sent") or []
+    _to_client = any("@" in str(e) and not str(e).lower().endswith("@sigasas.com")
+                     for e in _sent)
+    if send and _to_client:
+        out["archive"] = archive_approved(
+            instance_id, inst, pdf, period=period, consecutive=_consec,
+            prepared_by=prepared_by, approved_by=approved_by,
+            status=str(meta.get("status", "") or ""), owner_email=owner_email)
 
     update_draft(
         instance_id, period,
