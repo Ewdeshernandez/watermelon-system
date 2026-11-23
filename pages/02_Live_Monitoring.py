@@ -4454,10 +4454,42 @@ def main() -> None:
     #      (DE / NDE / TRF / CRF) por convención Bently / API 670.
     #   2) PNG 3D legacy con overlay x_pct/y_pct si no hay icon_keys.
     #   3) PNG plano sin overlay si tampoco hay coordenadas.
-    has_map = render_sensor_map_library(
-        instance_obj, latest, sensor_lookup,
-        spark_data=spark_data, severity_summary=severity_summary,
-    )
+    # 2026-11-23 — Si la máquina tiene TREN dibujado en Machines, el hero es ese
+    # tren EN VIVO (mismo builder.html del campo/web, modo #live): cada sonda con
+    # valor, ángulo y % de alerta; auxiliares en su caja. Se refresca solo cada
+    # 10 s sin recargar el dibujo. Sin tren en Machines → diagrama actual.
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _cached_machines_train(iid: str):
+        try:
+            from core.live_readings import _get_supabase_client as _gsc
+            from core.live_train import machines_train_for
+            from core.remote_monitoring.config import setup_to_dict as _std
+            r = machines_train_for(iid, client=_gsc())
+            return (_std(r[0]), r[1]) if r else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    _mtrain = _cached_machines_train(instance_id)
+    has_map = False
+    if _mtrain:
+        @st.fragment(run_every=10)
+        def _live_train_hero():
+            from core.live_train import live_payload
+            from core.machine_builder_component import machine_live_train
+            from core.remote_monitoring.config import setup_from_dict as _sfd
+            _rows = _cached_latest_for_instance(instance_id) or latest
+            machine_live_train(_mtrain[1], live_payload(_sfd(_mtrain[0]), _rows),
+                               key=f"wm_live_train_{instance_id}")
+        try:
+            _live_train_hero()
+            has_map = True
+        except Exception as _lt_err:  # noqa: BLE001
+            st.caption(f"Machines train unavailable ({_lt_err}) — showing the standard diagram.")
+    if not has_map:
+        has_map = render_sensor_map_library(
+            instance_obj, latest, sensor_lookup,
+            spark_data=spark_data, severity_summary=severity_summary,
+        )
     if not has_map:
         has_map = render_sensor_map_hero(instance_obj, instance_id, latest, sensor_lookup)
 

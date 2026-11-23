@@ -38,3 +38,16 @@ def machine_config(msgs: List[Dict[str, Any]], nonce: str, key: str,
     cuando cambia `nonce`. Devuelve la última acción {wm:'action', name, setup, ..., ts}."""
     return _component(page="config.html", msgs=msgs, nonce=nonce, skin=skin,
                       key=key, default=None)
+
+
+def machine_live_train(layout: Dict[str, Any], live: Dict[str, Any], key: str,
+                       skin: str = "light") -> None:
+    """Tren de Machines EN VIVO (builder.html#live) para el hero de Live
+    Monitoring. El tren se carga una vez; los valores llegan en cada rerun por
+    postMessage {wm:'live'} sin recargar el iframe (sin parpadeo)."""
+    import hashlib
+    import json as _json
+    nonce = hashlib.sha1(_json.dumps(layout, sort_keys=True).encode()).hexdigest()[:12]
+    _component(page="builder.html", mode="live", spec=layout, live=live, nonce=nonce,
+               skin=skin, key=key, default=None)
+

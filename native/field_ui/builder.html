@@ -768,7 +768,9 @@ body.viewer .stage{padding:10px 8px}
   };
 
   var _lastH=0;
-  setInterval(function(){ var h=document.documentElement.scrollHeight; if(Math.abs(h-_lastH)>2){ _lastH=h; wmPost({wm:'size',h:h}); } },250);
+  // Alto del CONTENIDO (no del viewport): si no, el iframe nunca se achica.
+  setInterval(function(){ var w=document.querySelector('.wrap'); var h=w?Math.ceil(w.getBoundingClientRect().bottom+(window.scrollY||0)+6):document.documentElement.scrollHeight;
+    if(Math.abs(h-_lastH)>2){ _lastH=h; wmPost({wm:'size',h:h}); } },250);
   window.addEventListener('message',function(e){
     var d=e.data||{};
     if(d.wm==='load'){ window.wmLoadSpec(d.spec); if(d.sel!=null && d.sel<train.length){ sel=d.sel; render(); } }

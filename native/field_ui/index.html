@@ -24,7 +24,7 @@
 <script>
 (function(){
   var fr = document.getElementById('b');
-  var ready = false, page = null, skin = null, lastNonce = null, pending = null;
+  var ready = false, page = null, skin = null, mode = null, lastNonce = null, pending = null, live = null;
 
   function toST(type, extra){
     var m = {isStreamlitMessage: true, apiVersion: 1, type: type};
@@ -36,6 +36,7 @@
     var p = pending; pending = null;
     if (page === 'builder.html'){
       if (p.spec && p.spec.machines && p.spec.machines.length) fr.contentWindow.postMessage({wm: 'load', spec: p.spec}, '*');
+      if (live) fr.contentWindow.postMessage({wm: 'live', data: live}, '*');
     } else {
       (p.msgs || []).forEach(function(m){ fr.contentWindow.postMessage(m, '*'); });
     }
@@ -46,7 +47,7 @@
     var d = e.data || {};
     if (e.source === fr.contentWindow){
       if (d.wm === 'size' && d.h){
-        var h = Math.max(page === 'builder.html' ? 520 : 400, Math.ceil(d.h));
+        var h = Math.max(page === 'builder.html' ? (mode === 'live' ? 260 : 520) : 400, Math.ceil(d.h));
         fr.style.height = h + 'px';
         toST('streamlit:setFrameHeight', {height: h});
       } else if (d.wm === 'ready'){
@@ -61,12 +62,15 @@
       var a = d.args || {};
       var wantPage = a.page || 'builder.html';
       var wantSkin = (a.skin === 'dark' ? 'dark' : 'light');
-      if (wantPage !== page || wantSkin !== skin){
-        page = wantPage; skin = wantSkin; ready = false; lastNonce = null;
+      var wantMode = a.mode || '';
+      if (wantPage !== page || wantSkin !== skin || wantMode !== mode){
+        page = wantPage; skin = wantSkin; mode = wantMode; ready = false; lastNonce = null;
         var hash = page === 'config.html' ? (skin === 'light' ? 'web-light' : 'web') :
-                   (skin === 'light' ? 'light-embed' : 'embed');
+                   ((mode === 'live' ? 'view-' : '') + (skin === 'light' ? 'light-embed' : 'embed') + (mode === 'live' ? '-live' : ''));
         fr.src = page + '#' + hash;
       }
+      // Modo en vivo: los valores llegan en CADA render (sin recargar el tren).
+      if (a.live){ live = a.live; if (ready && a.nonce === lastNonce) fr.contentWindow.postMessage({wm: 'live', data: live}, '*'); }
       if (a.nonce !== lastNonce){
         lastNonce = a.nonce;
         pending = {spec: a.spec, msgs: a.msgs};
