@@ -36,42 +36,8 @@
   ],
   "clients": [
     {
-      "id": "ecopetrol_magnex",
-      "display_name": "Ecopetrol — Magnex",
-      "match_strings": [
-        "ecopetrol",
-        "magnex"
-      ],
-      "asset_tags": [
-        "TES1",
-        "TES3"
-      ],
-      "whatsapp_numbers": [],
-      "api_key": "",
-      "owner_emails": [
-        "jmora@sigasas.com",
-        "william.castro@magnexgroup.com",
-        "jefersson.arguello@ecopetrol.com.co"
-      ]
-    },
-    {
-      "id": "parex",
-      "display_name": "Parex Resources",
-      "match_strings": [
-        "parex"
-      ],
-      "asset_tags": [
-        "SGT300A",
-        "SGT300B",
-        "C-200-C"
-      ],
-      "whatsapp_numbers": [],
-      "api_key": "",
-      "owner_emails": []
-    },
-    {
       "id": "parex_sgt300",
-      "display_name": "Parex Resources — SGT300",
+      "display_name": "Parex Resources",
       "match_strings": [
         "parex"
       ],
@@ -84,18 +50,6 @@
       "owner_emails": [
         "melky.garzon@parexresources.com"
       ]
-    },
-    {
-      "id": "refoenergy",
-      "display_name": "Refoenergy",
-      "match_strings": [
-        "refoenergy",
-        "refo"
-      ],
-      "asset_tags": [],
-      "whatsapp_numbers": [],
-      "api_key": "",
-      "owner_emails": []
     }
   ]
 }
