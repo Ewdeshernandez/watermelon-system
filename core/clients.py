@@ -111,8 +111,37 @@ def _normalize_phone(p: str) -> str:
     return (p or "").strip().lstrip("+").replace(" ", "").replace("-", "")
 
 
+REMOTE_KEY = "clients_registry"
+
+
+def _remote_registry() -> Optional[Dict[str, Any]]:
+    """Registry guardado en Supabase (wm_billing_settings, key clients_registry).
+
+    En Render el disco se borra en cada despliegue: lo que se edita desde
+    Administración vive en Supabase. Si no hay copia remota (o no hay
+    conexión), se usa data/clients.json del repo. WM_REGISTRY_FILE_ONLY=1
+    fuerza el archivo (pruebas)."""
+    import os
+    if os.environ.get("WM_REGISTRY_FILE_ONLY"):
+        return None
+    try:
+        from core.billing.store import get_setting
+        v = get_setting(REMOTE_KEY)
+        if isinstance(v, dict) and isinstance(v.get("clients"), list):
+            return v
+    except Exception as e:  # noqa: BLE001
+        log.warning("registry remoto no disponible: %s", e)
+    return None
+
+
 @lru_cache(maxsize=1)
 def _load_registry() -> Dict[str, Any]:
+    remote = _remote_registry()
+    if remote is not None:
+        data = dict(remote)
+        data.setdefault("admins", [])
+        data.setdefault("specialists", [])
+        return data
     if not REGISTRY_PATH.exists():
         log.warning("clients.json no encontrado en %s — usando registry vacío", REGISTRY_PATH)
         return {"admins": [], "specialists": [], "clients": []}
@@ -181,6 +210,12 @@ def save_registry(data: Dict[str, Any]) -> None:
         encoding="utf-8",
     )
     tmp_path.replace(REGISTRY_PATH)
+    try:                                   # copia durable (sobrevive despliegues)
+        from core.billing.store import set_setting
+        if not set_setting(REMOTE_KEY, payload):
+            log.warning("registry: no se pudo guardar la copia en Supabase")
+    except Exception as e:  # noqa: BLE001
+        log.warning("registry remoto no guardado: %s", e)
     reload_registry()
 
 
@@ -243,46 +278,65 @@ def get_client_for_email(email: str) -> Optional[Client]:
 
 
 def assign_client_to_email(client_id: str, email: str) -> bool:
-    """Agrega `email` a owner_emails del cliente `client_id` en clients.json.
+    """Agrega `email` a owner_emails del cliente `client_id`.
 
-    Returns True si se hizo el cambio (escrito y registry refrescado).
-    Si el email ya estaba presente o el client_id no existe, devuelve False.
-    """
+    Returns True si se hizo el cambio. Si el email ya estaba o el client_id no
+    existe, devuelve False."""
     target_id = (client_id or "").strip()
     target_email = (email or "").strip().lower()
     if not target_id or not target_email:
         return False
-
-    if not REGISTRY_PATH.exists():
-        return False
-    try:
-        with REGISTRY_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return False
-
-    clients = data.get("clients") or []
-    touched = False
-    for c in clients:
+    reload_registry()
+    data = json.loads(json.dumps(_load_registry()))
+    for c in data.get("clients") or []:
         if str(c.get("id", "")).strip() == target_id:
             existing = [str(e).strip().lower() for e in (c.get("owner_emails") or [])]
             if target_email in existing:
-                return False  # ya estaba — no-op
+                return False
             c["owner_emails"] = (c.get("owner_emails") or []) + [target_email]
-            touched = True
-            break
+            try:
+                save_registry(data)
+            except (OSError, ValueError):
+                return False
+            return True
+    return False
 
-    if not touched:
-        return False
 
-    try:
-        with REGISTRY_PATH.open("w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-    except OSError:
-        return False
-
+def remove_email_from_client(client_id: str, email: str) -> bool:
+    """Quita `email` de owner_emails del cliente (deja de ver sus activos)."""
+    target_email = (email or "").strip().lower()
     reload_registry()
+    data = json.loads(json.dumps(_load_registry()))
+    for c in data.get("clients") or []:
+        if str(c.get("id", "")).strip() == (client_id or "").strip():
+            before = list(c.get("owner_emails") or [])
+            c["owner_emails"] = [e for e in before if str(e).strip().lower() != target_email]
+            if c["owner_emails"] == before:
+                return False
+            save_registry(data)
+            return True
+    return False
+
+
+def update_client(client_id: str, **fields: Any) -> bool:
+    """Actualiza campos de un cliente (display_name, asset_tags, match_strings,
+    whatsapp_numbers). Crea el cliente si no existe y viene display_name."""
+    allowed = {"display_name", "asset_tags", "match_strings", "whatsapp_numbers"}
+    reload_registry()
+    data = json.loads(json.dumps(_load_registry()))
+    clients = data.setdefault("clients", [])
+    target = next((c for c in clients if c.get("id") == client_id), None)
+    if target is None:
+        if not fields.get("display_name"):
+            return False
+        target = {"id": client_id, "display_name": "", "match_strings": [],
+                  "asset_tags": [], "whatsapp_numbers": [], "api_key": "",
+                  "owner_emails": []}
+        clients.append(target)
+    for k, v in fields.items():
+        if k in allowed:
+            target[k] = v
+    save_registry(data)
     return True
 
 

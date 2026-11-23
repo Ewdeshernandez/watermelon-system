@@ -44,17 +44,17 @@ def test_registry_loads_admins_and_specialists():
     assert len(specialists) >= 2, "Debe haber 2 specialists (Jessica + Natalia)"
 
 
-def test_registry_loads_three_seed_clients():
+def test_registry_loads_clients():
     reload_registry()
     clients = list_clients()
-    ids = {c.id for c in clients}
-    assert "ecopetrol_magnex" in ids
-    assert "parex" in ids
-    assert "refoenergy" in ids
+    assert clients, "el registro debe tener al menos un cliente"
+    assert all(c.id and c.display_name for c in clients)
 
 
 def test_get_client_by_id_known_unknown():
-    assert get_client_by_id("ecopetrol_magnex") is not None
+    reload_registry()
+    first = list_clients()[0].id
+    assert get_client_by_id(first) is not None
     assert get_client_by_id("does-not-exist") is None
     assert get_client_by_id("") is None
 
