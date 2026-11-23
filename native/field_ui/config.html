@@ -296,12 +296,13 @@ function stepConstructor(){
 function nextBnc(){return S.channels.reduce(function(m,c){return Math.max(m,c.bnc_port||0);},0)+1;}
 function newChannel(label,type){var d=D.types[type]||{};return {bnc_port:nextBnc(),point_label:label,plane:1,sensor_type:type,
   sensitivity_mv_per_eu:d.sens||100,unit_native:d.unit||'',coupling:d.coupling||'AC',angle_deg:0,side:'',alarm:d.alarm||0,danger:d.danger||0,
-  full_scale:0,gap_bias_v:d.gap||0,active:true,events_per_rev:1,trigger_v:0,notch_type:'',keyphasor_ref:'',pair_ref:'',variable:'',location:'',direction:'',modbus:{}};}
+  full_scale:0,gap_bias_v:d.gap||0,active:true,events_per_rev:1,trigger_v:0,notch_type:'',keyphasor_ref:'',pair_ref:'',variable:'',location:'',direction:'',modbus:{},derived_from:'',measure:''};}
+function bncCell(c){return c.derived_from?('← '+disp(c.derived_from)):c.bnc_port;}
 function stepSensors(){
   var rows=S.channels.map(function(c,i){
     return '<tr data-i="'+i+'"'+(i===selCh?' class="sel"':'')+'><td class="lbl" style="color:'+KCOL[c.sensor_type]+'">'+esc(disp(c.point_label))+'</td>'+
       '<td>'+sel('sT'+i,TYPES.map(function(k){return [k,KNAME[k]];}),c.sensor_type)+'</td>'+
-      '<td><input id="sB'+i+'" type="number" value="'+c.bnc_port+'" min="1" max="64"></td>'+
+      '<td>'+(c.derived_from?'<span class="mb" title="Derived measurement — no BNC of its own">← '+esc(disp(c.derived_from))+'</span>':'<input id="sB'+i+'" type="number" value="'+c.bnc_port+'" min="1" max="64">')+'</td>'+
       '<td><input id="sA'+i+'" type="number" value="'+c.angle_deg+'" min="0" max="360" step="5"></td>'+
       '<td>'+sel('sS'+i,['—','R','L'],c.side||'—')+'</td></tr>';}).join('');
   $('main').innerHTML='<div class="legend"><span><span class="dot" style="background:var(--c-prox)"></span>Proximity</span><span><span class="dot" style="background:var(--c-vel)"></span>Velocity</span><span><span class="dot" style="background:var(--c-accel)"></span>Accelerometer</span><span><span class="dot" style="background:var(--c-kph)"></span>Keyphasor</span><span>API 670 angle: from TDC · R = clockwise · L = counter-clockwise (45°L + 45°R = 90°)</span></div>'+
@@ -348,7 +349,9 @@ function stepChannel(){
   $('main').innerHTML='<div class="row"><div class="fld"><label>Channel:</label>'+sel('cSel',S.channels.map(function(x,i){return [i,disp(x.point_label)];}),selCh)+'</div>'+
     '<button class="btn ghost" id="cPrev" aria-label="Previous channel">‹</button><button class="btn ghost" id="cNext" aria-label="Next channel">›</button>'+
     '<span class="hint">Bearing '+c.plane+(c.location?' · '+esc(c.location):'')+'</span></div>'+
-   '<div class="grp"><div class="sub">Identification (API 670)</div><div class="row">'+fld('Point:',inp('cPt',disp(c.point_label),'text','style="width:110px"'))+fld('BNC:',inp('cBnc',c.bnc_port,'number','min="1" max="64"'))+
+   '<div class="grp"><div class="sub">Identification (API 670)</div><div class="row">'+fld('Point:',inp('cPt',disp(c.point_label),'text','style="width:110px"'))+
+     fld('Measured from:',sel('cSrc',[['','Own sensor (BNC)']].concat(S.channels.filter(function(x){return x!==c&&x.sensor_type==='accelerometer'&&!x.derived_from;}).map(function(x){return [x.point_label,'Derived from '+disp(x.point_label)+' · velocity (integrated)'];})),c.derived_from||''))+
+     fld('BNC:',inp('cBnc',c.bnc_port,'number','min="1" max="64"'+(c.derived_from?' disabled':'')))+
      fld('Bearing:',inp('cBrg',c.plane,'number','min="0" max="24"'))+'<label class="fld"><input id="cAct" type="checkbox" '+(c.active?'checked':'')+'> Active (collects data)</label></div></div>'+
    '<div class="grp"><div class="sub">Transducer</div><div class="row">'+fld('Type:',sel('cType',TYPES.map(function(k){return [k,KNAME[k]];}),c.sensor_type))+
      fld('Sensitivity mV/EU:',inp('cSens',c.sensitivity_mv_per_eu,'number','step="10"'))+fld('Unit:',sel('cUnit',units,c.unit_native))+fld('Coupling:',sel('cCoup',['DC','AC','IEPE'],c.coupling))+'</div>'+
@@ -361,6 +364,7 @@ function stepChannel(){
      '<span class="hint" id="cUnitH">'+esc(c.unit_native)+'</span></div></div>'+
    '<div class="grp"><div class="sub">Live &amp; signal source</div><div class="row">'+
      fld('Live variable:',inp('cVar',c.variable,'text','placeholder="'+esc(disp(c.point_label))+'"'),true)+fld('Location:',inp('cLoc',c.location,'text'),true)+'</div>'+
+     (c.derived_from?'<div class="mb">Derived: velocity RMS integrated from '+esc(disp(c.derived_from))+' (ISO 20816 band). Rack/Modbus publishes it as its own register; the NI node computes it from the same accelerometer.</div>':'')+
      (mb.length?'<div class="mb">Modbus registers (rack): '+mb.sort(function(a,b){return c.modbus[a].register-c.modbus[b].register;}).map(function(k){return esc(k.split('@')[0])+' → '+c.modbus[k].register;}).join(' · ')+'</div>':
        '<div class="mb">No Modbus registers — read by the NI node (BNC '+c.bnc_port+').</div>')+
      '<div class="hint">Keep the Live variable when migrating Modbus → NI: trends continue on the same line.</div></div>'+
@@ -372,8 +376,11 @@ function stepChannel(){
   on('cAng','input',redial);on('cSide','change',redial);
   on('cType','change',function(){var t=$('cType').value,d=D.types[t]||{};$('cUnit').innerHTML=(D.units[t]||[]).map(function(u){return '<option>'+esc(u)+'</option>';}).join('');
     $('cSens').value=d.sens||0;$('cCoup').value=d.coupling||'AC';redial();});
+  on('cSrc','change',function(){ var d=$('cSrc').value; $('cBnc').disabled=!!d;
+    if(d){ $('cType').value='velometer'; $('cType').dispatchEvent(new Event('change')); } });
   on('cApply','click',function(){
-    c.point_label=canon($('cPt').value)||c.point_label;c.bnc_port=num($('cBnc').value);c.plane=num($('cBrg').value);c.active=$('cAct').checked;
+    c.derived_from=$('cSrc').value; c.measure=c.derived_from?'velocity':'';
+    c.point_label=canon($('cPt').value)||c.point_label;c.bnc_port=c.derived_from?0:num($('cBnc').value);c.plane=num($('cBrg').value);c.active=$('cAct').checked;
     c.sensor_type=$('cType').value;c.sensitivity_mv_per_eu=num($('cSens').value);c.unit_native=$('cUnit').value;c.coupling=$('cCoup').value;
     c.full_scale=num($('cFull').value);c.gap_bias_v=num($('cGap').value);c.angle_deg=num($('cAng').value);c.side=$('cSide').value==='—'?'':$('cSide').value;
     c.keyphasor_ref=$('cKph').value;c.pair_ref=$('cPair').value;c.alarm=num($('cAl').value);c.danger=num($('cDa').value);
@@ -429,7 +436,7 @@ function stepSummary(){
   var a=S.acquisition,m=M(),g=gw();
   var rows=S.channels.map(function(c){var b=c.sensor_type==='keyphasor'?{}:bandOf(c.sensor_type);
     function v(x){return (x===undefined||x===null||x==='')?'—':x;}
-    return '<tr><td class="lbl" style="color:'+KCOL[c.sensor_type]+'">'+esc(disp(c.point_label))+'</td><td>'+c.plane+'</td><td>'+KNAME[c.sensor_type]+'</td><td>'+c.bnc_port+'</td><td>'+c.sensitivity_mv_per_eu+'</td><td>'+esc(c.unit_native)+'</td><td>'+esc(c.coupling)+'</td><td>'+c.angle_deg+'</td><td>'+(c.side||'—')+'</td><td>'+c.full_scale+'</td><td>'+c.gap_bias_v+'</td><td>'+c.alarm+'</td><td>'+c.danger+'</td><td>'+v(b.fmin_hz)+'</td><td>'+v(b.fmax_hz)+'</td><td>'+v(b.lines)+'</td><td>'+(disp(c.keyphasor_ref)||'—')+'</td><td>'+(disp(c.pair_ref)||'—')+'</td><td>'+(c.active?'✓':'✗')+'</td>'+
+    return '<tr><td class="lbl" style="color:'+KCOL[c.sensor_type]+'">'+esc(disp(c.point_label))+'</td><td>'+c.plane+'</td><td>'+KNAME[c.sensor_type]+'</td><td>'+esc(bncCell(c))+'</td><td>'+c.sensitivity_mv_per_eu+'</td><td>'+esc(c.unit_native)+'</td><td>'+esc(c.coupling)+'</td><td>'+c.angle_deg+'</td><td>'+(c.side||'—')+'</td><td>'+c.full_scale+'</td><td>'+c.gap_bias_v+'</td><td>'+c.alarm+'</td><td>'+c.danger+'</td><td>'+v(b.fmin_hz)+'</td><td>'+v(b.fmax_hz)+'</td><td>'+v(b.lines)+'</td><td>'+(disp(c.keyphasor_ref)||'—')+'</td><td>'+(disp(c.pair_ref)||'—')+'</td><td>'+(c.active?'✓':'✗')+'</td>'+
     '<td>'+esc(c.variable||'—')+'</td><td class="mb">'+((c.modbus&&c.modbus.Direct)?c.modbus.Direct.register:'—')+'</td></tr>';}).join('');
   var nv=(V.length?V[0].v:0)+1;
   var dest=HOST==='field'?

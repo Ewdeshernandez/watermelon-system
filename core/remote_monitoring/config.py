@@ -155,6 +155,11 @@ class ChannelRow:
     # metric → {"register": int, "unit", "encoding", "kind", ...extras}.
     # El mapa del collector se GENERA desde aquí (modbus_binding.py).
     modbus: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # --- Medición DERIVADA del mismo transductor (sin BNC propio) ----------
+    # ej. 4Y_V = velocidad integrada de la onda del acelerómetro 4Y_A. Con Modbus el
+    # rack la publica en su registro; con NI la calcula el nodo (derived.py).
+    derived_from: str = ""         # point_label del canal físico ("" = canal propio)
+    measure: str = ""              # velocity (integrada)
 
     def is_keyphasor(self) -> bool:
         if self.sensor_type == "keyphasor":
@@ -345,9 +350,26 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
     if not chans:
         return [Finding("error", "no_channels", "No channels configured.")]
 
-    # BNC único
+    # Mediciones derivadas (ej. 4Y_V = velocidad de 4Y_A): sin BNC propio; deben
+    # apuntar a un canal físico existente del tipo correcto.
+    labels = {c.point_label: c for c in chans}
+    for ch in chans:
+        if not ch.derived_from:
+            continue
+        src = labels.get(ch.derived_from)
+        if src is None or src.derived_from:
+            out.append(Finding("error", "derived_source",
+                               f"{ch.point_label}: derived from '{ch.derived_from}', which is not a physical channel."))
+        elif ch.measure == "velocity" and src.sensor_type != "accelerometer":
+            out.append(Finding("error", "derived_source",
+                               f"{ch.point_label}: velocity is integrated from an accelerometer; "
+                               f"{src.point_label} is {src.sensor_type}."))
+
+    # BNC único (solo canales físicos)
     seen: Dict[int, str] = {}
     for ch in chans:
+        if ch.derived_from:
+            continue
         if ch.bnc_port in seen:
             out.append(Finding("error", "dup_bnc",
                                f"BNC {ch.bnc_port} duplicated ({seen[ch.bnc_port]} and {ch.point_label})."))
