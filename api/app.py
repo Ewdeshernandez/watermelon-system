@@ -291,6 +291,56 @@ def create_app() -> "FastAPI":
         _SHOWCASE["v"] = (_t.time(), out)
         return out
 
+    _SHOW_TREND: dict = {}
+
+    @app.get("/v1/public/showcase/trend", tags=["public"],
+             summary="Tendencia de un sensor de la máquina de muestra (página /demo)")
+    def public_showcase_trend(sensor: str = Query("", max_length=12),
+                              days: int = Query(30, ge=1, le=30)):
+        """Máximo y promedio cada 2 h de un sensor de la máquina de muestra, con
+        sus niveles de alerta y peligro. Sin tag ni cliente. Caché 10 min."""
+        import time as _t
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        key = f"{sensor.upper()}:{days}"
+        hit = _SHOW_TREND.get(key)
+        if hit and _t.time() - hit[0] < 600:
+            return hit[1]
+        from core.billing.store import get_setting
+        iid = str(get_setting("showcase_instance", "") or "").strip()
+        if not iid:
+            raise HTTPException(status_code=404, detail="sin máquina de muestra")
+        from core.instance_state import get_instance
+        from core.live_readings import history_rollup, latest_for_instance
+        from core.live_report_builder import _build_sensor_lookup, _compute_rendered_rows
+        inst = get_instance(iid)
+        latest = latest_for_instance(iid) or []
+        rows, _ = _compute_rendered_rows(latest, _build_sensor_lookup(inst), inst)
+        direct = {r["sensor_label"]: r for r in rows if r.get("variable")}
+        var_by = {}
+        for r in latest:
+            if (r.get("metric") or "") == "Direct" and r.get("sensor_label") and r.get("variable"):
+                var_by.setdefault(r["sensor_label"], r["variable"])
+        from core.report_extras import _axis_rank, _bearing
+        labels = sorted(direct, key=lambda x: (_bearing(x), _axis_rank(x), x))
+        want = sensor.strip().upper().replace("_", "")
+        pick = next((l for l in labels if l.replace("_", "").upper() == want), None)
+        if pick is None:
+            pick = labels[0] if labels else None
+        if pick is None or pick not in var_by:
+            raise HTTPException(status_code=404, detail="sin datos")
+        frm = (_dt.now(_tz.utc) - _td(days=days)).isoformat()
+        pts = history_rollup(iid, var_by[pick], "Direct", frm, "2 hours") or []
+        r = direct[pick]
+        out = {
+            "sensor": pick.replace("_", ""), "unit": r.get("unit") or "",
+            "alarm": r.get("alarm_used") or None, "danger": r.get("danger_used") or None,
+            "sensors": [l.replace("_", "") for l in labels],
+            "points": [{"t": p.get("bucket"), "max": p.get("max_val"), "avg": p.get("avg_val")}
+                       for p in pts if p.get("max_val") is not None],
+        }
+        _SHOW_TREND[key] = (_t.time(), out)
+        return out
+
     @app.post("/v1/public/quote", tags=["public"], summary="Cotización en PDF (web de ventas)",
               response_class=Response if _FASTAPI_AVAILABLE else None)
     def public_quote(request: "Request", payload: PublicQuote = Body(...)):
