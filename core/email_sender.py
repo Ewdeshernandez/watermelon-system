@@ -383,6 +383,8 @@ def _send_via_resend(
     body_text: str,
     body_html: str = "",
     attachments: Optional[List[Tuple[str, bytes, str]]] = None,
+    reply_to: str = "",
+    from_name_override: str = "",
 ) -> Dict[str, Any]:
     """Envía email vía Resend API (https://resend.com).
 
@@ -398,7 +400,7 @@ def _send_via_resend(
     cfg = _read_secret_section("email", "resend")
     api_key = cfg.get("api_key", "")
     from_email = cfg.get("from_email", "")
-    from_name = cfg.get("from_name", "Watermelon System")
+    from_name = from_name_override or cfg.get("from_name", "Watermelon System")
     if not api_key or not from_email:
         return {"ok": False, "error": "Resend sin api_key/from_email."}
 
@@ -413,6 +415,8 @@ def _send_via_resend(
         "subject": subject,
         "text": body_text or "",
     }
+    if reply_to:
+        payload["reply_to"] = [reply_to]
     if body_html:
         payload["html"] = body_html
     if attachments:
@@ -449,6 +453,8 @@ def send_email(
     body_text: str,
     body_html: str = "",
     attachments: Optional[List[Tuple[str, bytes, str]]] = None,
+    reply_to: str = "",
+    from_name: str = "",
 ) -> Dict[str, Any]:
     """Envía un email usando el backend configurado.
 
@@ -487,10 +493,12 @@ def send_email(
         print(f"[WM_EMAIL] sending via {backend} · to={to} · subject={subject!r}",
               file=_sys.stderr, flush=True)
         try:
+            _extra = ({"reply_to": reply_to, "from_name_override": from_name}
+                      if backend == "resend" else {})
             result = _senders[backend](
                 to=to, subject=subject,
                 body_text=body_text, body_html=body_html,
-                attachments=attachments,
+                attachments=attachments, **_extra,
             )
         except Exception as e:  # noqa: BLE001
             result = {"ok": False, "error": f"{backend} excepción: {type(e).__name__}: {e}"}
