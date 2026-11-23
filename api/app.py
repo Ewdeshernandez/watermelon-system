@@ -242,6 +242,42 @@ def create_app() -> "FastAPI":
             "annual_months_charged": pricing.ANNUAL_MONTHS_CHARGED,
         }
 
+    _SHOWCASE: dict = {}
+
+    @app.get("/v1/public/showcase/train", tags=["public"],
+             summary="Tren en vivo de la máquina de muestra (web de ventas)")
+    def public_showcase_train():
+        """Tren de Machines EN VIVO de la máquina elegida en Administración
+        (wm_billing_settings.showcase_instance). Sin tag ni cliente en el dibujo:
+        la web lo rotula 'Turbogenerador'. Caché 60 s."""
+        import time as _t
+        hit = _SHOWCASE.get("v")
+        if hit and _t.time() - hit[0] < 60:
+            return hit[1]
+        from core.billing.store import get_setting
+        iid = str(get_setting("showcase_instance", "") or "").strip()
+        if not iid:
+            raise HTTPException(status_code=404, detail="sin máquina de muestra")
+        from core.instance_state import get_instance
+        from core.live_readings import _get_supabase_client, latest_for_instance
+        from core.live_report_builder import _build_sensor_lookup, pick_speeds
+        from core.live_train import live_payload, machines_train_for
+        from core.live_train_svg import apply_live_severity, build_live_train_svg
+        inst = get_instance(iid)
+        mt = machines_train_for(iid, client=_get_supabase_client())
+        if inst is None or not mt:
+            raise HTTPException(status_code=404, detail="sin tren")
+        latest = latest_for_instance(iid) or []
+        setup, layout = mt
+        payload = live_payload(setup, latest)
+        apply_live_severity(payload, latest, _build_sensor_lookup(inst), inst, setup)
+        _, speeds, _ = pick_speeds(latest)
+        newest = max((str(r.get("captured_at") or "") for r in latest), default="")
+        out = {"label": str(get_setting("showcase_label", "Turbogenerador") or "Turbogenerador"),
+               "svg": build_live_train_svg(layout, payload), "speeds": speeds, "updated": newest}
+        _SHOWCASE["v"] = (_t.time(), out)
+        return out
+
     @app.post("/v1/public/quote", tags=["public"], summary="Cotización en PDF (web de ventas)",
               response_class=Response if _FASTAPI_AVAILABLE else None)
     def public_quote(request: "Request", payload: PublicQuote = Body(...)):
