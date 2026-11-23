@@ -55,12 +55,12 @@ def _enrich_with_apikey(c: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def render() -> None:
-    st.title("Administración · Clientes, Specialists & Admins")
+def render(embedded: bool = False) -> None:
+    if not embedded:
+        st.title("Administración · Clientes, Specialists & Admins")
     st.caption(
-        "Gestión del registry multi-tenant `data/clients.json`. "
-        "Cada cambio se escribe atómicamente y toma efecto inmediato. "
-        "Recordá hacer `git commit` periódicamente para versionarlo.")
+        "Registro técnico de clientes (se guarda en Supabase; el archivo "
+        "data/clients.json del repo es solo el respaldo inicial).")
 
     reload_registry()
     admins_data: List[Dict[str, Any]] = list_admins()

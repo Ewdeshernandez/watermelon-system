@@ -599,9 +599,12 @@ def render() -> None:
             ("warn", n_expsoon, "Vencen pronto"),
             ("ok", n_machines, "Máquinas activas"),
         ])
-    st.markdown(f'<div class="wi-kpis">{_kpi_row}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="wi-label">Licencias de campo · Modal · Torsional · '
-                'Balanceo · Field</div>', unsafe_allow_html=True)
+    # Vista simple (Administración): sin franja de cifras; lista corta + gestionar
+    # UNA licencia a la vez (abajo). `_kpi_row` queda por compatibilidad.
+    del _kpi_row
+    from core.admin import ui as _ui
+    _ui.title("Licencias de campo", f"{n_active} activas · {n_machines} equipos · "
+                                    "Rotordynamics, Modal, Torsional, Balanceo")
 
     # --- Crear licencia ---
     with st.expander("＋  Crear licencia nueva", expanded=(n_total == 0)):
@@ -664,8 +667,6 @@ def render() -> None:
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"Error al crear: {e}")
-
-    st.divider()
 
     if not licenses:
         st.info("No hay licencias todavía. Crea la primera arriba.")
@@ -747,10 +748,23 @@ def render() -> None:
             ] for e in events[:60]]
             html_table(["Fecha/hora", "Cliente", "Módulo", "PC", "IP", "Ubicación"], rows)
 
-    # --- Lista de licencias ---
+    # --- Lista corta + gestionar una ---
+    _rows = []
     for lic in licenses:
-        _render_license_card(sb, lic, by_lic.get(lic.get("id"), []),
-                             ev_lic.get(lic.get("id"), []))
+        _sev, _txt, _ = _lic_state(lic)
+        _used = sum(1 for a in by_lic.get(lic.get("id"), []) if not a.get("revoked"))
+        _pk = {"ok": "ok", "warn": "wa", "dang": "da"}.get(_sev, "ne")
+        _who = _html.escape(str(lic.get("account") or lic.get("customer") or "—"))
+        _rows.append((f"<b>{_who}</b> <span class='adm-mut'>{_used}/{lic.get('seats') or 1} equipos"
+                      f" · vence {_html.escape(str(lic.get('expires_at') or '')[:10])}</span>",
+                      _ui.pill(_txt.split('·')[0].strip() or _txt, _pk)))
+    _ui.group("", _rows)
+    _labels = [f"{l.get('account') or l.get('customer') or '—'} · {l.get('key')}" for l in licenses]
+    _i = st.selectbox("Gestionar licencia", range(len(licenses)),
+                      format_func=lambda k: _labels[k], key="lic_manage_pick")
+    _lic = licenses[_i]
+    _render_license_card(sb, _lic, by_lic.get(_lic.get("id"), []),
+                         ev_lic.get(_lic.get("id"), []))
 
 
 def _render_license_card(sb, lic: Dict[str, Any], acts: List[Dict[str, Any]],

@@ -67,8 +67,15 @@ def render() -> None:
         rows.append([c.display_name, pricing.PLANS[s["plan"]].name,
                      len(s.get("machines") or []), val, periods.fmt_date(s.get("next_renewal")),
                      f"{dot(sd)} {s.get('status')}"])
-    html_table(["Cliente", "Plan", "Máquinas", "Valor periodo", "Renovación", "Estado"],
-               rows, raw_cols=[5])
+    from core.admin import ui
+    ui.title("Suscripciones", "Planes, facturas y datos de pago")
+    _pk = {"activa": "ok", "pausada": "wa", "cancelada": "ne"}
+    ui.group("", [(f"<b>{r[0]}</b> <span class='adm-mut'>{r[1]} · {r[2]} máquinas · "
+                   f"renueva {r[4]}</span>",
+                   f"<span class='adm-mut'>{r[3]}</span> "
+                   + ui.pill(str(r[5]).split('</span>')[-1].strip() or '—',
+                             _pk.get(str(r[5]).split('</span>')[-1].strip(), "ne")))
+                  for r in rows])
 
     # ---- Editar ----
     labels = [f"{c.display_name} · {c.id}" for c in clients]
@@ -79,7 +86,8 @@ def render() -> None:
     today = bc._today()
     tag_opts = sorted(set(list(cl.asset_tags or ()) + list(s.get("machines") or [])))
 
-    with st.form(f"adm_sub_form_{cl.id}"):
+    _edit = st.expander("Editar suscripción" if s else "Crear suscripción", expanded=not s)
+    with _edit, st.form(f"adm_sub_form_{cl.id}"):
         c1, c2, c3 = st.columns(3)
         plan = c1.selectbox("Plan", _PLAN_KEYS,
                             index=_PLAN_KEYS.index(s.get("plan", "profesional")),

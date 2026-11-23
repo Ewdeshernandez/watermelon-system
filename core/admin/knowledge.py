@@ -22,11 +22,9 @@ def render() -> None:
         voyage_ready, ingest_document, list_documents, delete_document,
         EMBED_MODEL)
 
-    st.markdown("### Repositorio de conocimiento")
-    st.caption("Cursos de vibraciones y manuales de máquina. El motor de "
-               "reportes se apoya en este material (recuperación semántica) "
-               "para fundamentar el análisis. Solo tú (admin) lo ves. Uso de "
-               "referencia: la IA sintetiza y cita — no copia texto del manual.")
+    from core.admin import ui
+    ui.title("Conocimiento", "Cursos, manuales y normas en los que se apoyan los reportes "
+                             "con IA. La IA sintetiza y cita; no copia el texto.")
 
     if not voyage_ready():
         st.error("Falta la llave de embeddings **VOYAGE_API_KEY** "
@@ -41,7 +39,7 @@ def render() -> None:
         _me = ""
 
     # ---------- Subir ----------
-    with st.expander("Subir documento (PDF)", expanded=True):
+    with st.expander("Subir documento (PDF)", expanded=False):
         up = st.file_uploader("PDF (manual, curso o norma)", type=["pdf"],
                               key="kb_pdf")
         c1, c2 = st.columns([2, 1])

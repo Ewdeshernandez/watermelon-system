@@ -1,114 +1,101 @@
 """
-pages/20_Administracion.py — Hub de Administración (una sola página)
-===================================================================
+pages/20_Administracion.py — Administración (solo admin)
+========================================================
 
-Consolida las 3 secciones de administración en pestañas de colores (estilo
-Calibración/Reports): Clientes · Licencias · Usuarios. Solo admin.
+Diseño simple, tipo Ajustes: arriba el estado de la cuenta en 4 cifras y los
+avisos que piden acción; abajo la lista de secciones (izquierda) y el detalle
+(derecha). Se renderiza SOLO la sección activa (branch).
 
-Diseño anti-riesgo: el selector es un radio estilizado como barra de pestañas
-y se renderiza SOLO la sección activa (branch, no st.tabs) — así no hay
-colisiones de llaves de widgets ni se ejecutan las 3 secciones a la vez. Cada
-sección vive en core/admin/*.py como render() sin efectos de import.
-
-Las páginas viejas (pages/_admin_clients.py, 20_License_Admin.py,
-_admin_users.py) quedan como envoltorios finos que llaman al mismo render(),
-así sus URLs siguen sirviendo.
+Secciones:
+  Clientes       → core.admin.clients_home   (editor técnico en "Avanzado")
+  Usuarios       → core.admin.people         (panel completo en "Avanzado")
+  Licencias      → core.admin.licenses
+  Suscripciones  → core.admin.subscriptions
+  Conocimiento   → core.admin.knowledge
 """
 from __future__ import annotations
 
+import html
+
 import streamlit as st
 
-st.set_page_config(
-    page_title="Watermelon System | Administration",
-    page_icon="🛡️",
-    layout="wide",
-)
+st.set_page_config(page_title="Watermelon System | Administración", page_icon="🛡️",
+                   layout="wide")
 
-from core.auth import (
-    require_login, render_user_menu, require_role, get_current_user,
-)
-from core.ui_theme import apply_watermelon_page_style
-from core.admin import ADMIN_SECTIONS
+from core.auth import get_current_user, render_user_menu, require_login, require_role  # noqa: E402
+from core.ui_theme import apply_watermelon_page_style  # noqa: E402
 
 require_login()
 render_user_menu()
 apply_watermelon_page_style()
 require_role(allowed_roles=("admin",))
 
-_NAVY = "#12305e"
-_CYAN = "#274b7d"
-
-# --- Look industrial compartido (mismo del Report Center) ---
-from core.ui_industrial import inject_industrial_css, industrial_band
+from core.admin import ADMIN_SECTIONS, overview, ui  # noqa: E402
+from core.ui_industrial import inject_industrial_css  # noqa: E402
 
 inject_industrial_css()
+ui.inject()
 
-# KPIs del registro (admins / specialists / clientes) — best-effort.
-_kpis = None
-try:
-    from core.clients import list_admins, list_clients, list_specialists, reload_registry
-    reload_registry()
-    from core.ui_industrial import dot as _dot
-    _kpis = [(f'{_dot("dang")} {len(list_admins() or [])}', "Admins"),
-             (f'{_dot("warn")} {len(list_specialists() or [])}', "Specialists"),
-             (f'{_dot("info")} {len(list_clients() or [])}', "Clientes")]
-except Exception:
-    _kpis = None
+_me = get_current_user() or {}
+_first = str(_me.get("full_name") or "").split(" ")[0] or "admin"
+st.markdown(f'<div class="adm-h1">Administración</div>'
+            f'<div class="adm-hi">Hola, {html.escape(_first)}. Todo lo de la cuenta en un solo lugar.</div>',
+            unsafe_allow_html=True)
 
-industrial_band(
-    "SIGA Internal · Administration", "Administration Panel",
-    "Clientes &amp; roles · Licencias de campo · System users · Conocimiento",
-    kpis=_kpis,
-)
+data = overview.collect()
 
-# --- Selector tipo pestañas plano con puntos de color (estilo Calibración) ---
-st.markdown(
-    f"""
-    <style>
-    div[data-testid="stRadio"] > div[role="radiogroup"] {{
-        flex-direction:row !important; gap:30px; flex-wrap:wrap;
-        border-bottom:1px solid #E5EAF0; margin-bottom:16px;
-    }}
-    div[data-testid="stRadio"] label {{
-        background:transparent !important; border:none !important; border-radius:0 !important;
-        box-shadow:none; padding:6px 1px 11px 1px !important; margin:0 !important;
-        font-weight:500; font-size:14px; color:#64748B; cursor:pointer; transition:color .15s;
-    }}
-    div[data-testid="stRadio"] label:hover {{ color:{_NAVY}; }}
-    div[data-testid="stRadio"] label > div:first-of-type {{ display:none !important; }}
-    div[data-testid="stRadio"] label:has(input:checked) {{
-        color:{_NAVY}; box-shadow:inset 0 -3px 0 {_CYAN};
-    }}
-    div[data-testid="stRadio"] label::before {{
-        content:"●"; font-size:13px; margin-right:8px; vertical-align:middle;
-        position:relative; top:-1px; opacity:0.95;
-    }}
-    div[data-testid="stRadio"] label:nth-of-type(1)::before {{ color:#1AAEE5; }}
-    div[data-testid="stRadio"] label:nth-of-type(2)::before {{ color:#D89B22; }}
-    div[data-testid="stRadio"] label:nth-of-type(3)::before {{ color:#16A34A; }}
-    div[data-testid="stRadio"] label:nth-of-type(4)::before {{ color:#7C3AED; }}
-    div[data-testid="stRadio"] label:nth-of-type(5)::before {{ color:#E5484D; }}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-_LABELS = [lbl for _, lbl in ADMIN_SECTIONS]
-_KEYS = [key for key, _ in ADMIN_SECTIONS]
-_choice = st.radio("Section", _LABELS, horizontal=True, key="admin_section_choice",
-                   label_visibility="collapsed")
-_sel = _KEYS[_LABELS.index(_choice)] if _choice in _LABELS else "clientes"
-
-# --- Render SOLO la sección activa (branch) ---
-if _sel == "clientes":
-    from core.admin.clients import render as _render
-elif _sel == "licencias":
-    from core.admin.licenses import render as _render
-elif _sel == "conocimiento":
-    from core.admin.knowledge import render as _render
-elif _sel == "suscripciones":
-    from core.admin.subscriptions import render as _render
+_ni = data.get("next_invoice")
+_tiles = [
+    (data.get("clients", 0), f"Cliente{'s' if data.get('clients') != 1 else ''} · "
+                             f"{data.get('machines', 0)} máquinas"),
+    (data.get("users") if data.get("users") is not None else "—", "Usuarios"),
+    (data.get("lic_active") if data.get("lic_active") is not None else "—",
+     f"Licencias activas · {data.get('lic_machines') or 0} equipos"),
+]
+if _ni:
+    from core.billing.periods import fmt_date
+    _d = fmt_date(_ni[0]).rsplit(" ", 1)[0]
+    _tiles.append((_d, f"Próxima factura · {overview.short_money(float(_ni[1]), _ni[2])}"))
 else:
-    from core.admin.users import render as _render
+    _tiles.append(("—", "Próxima factura"))
+st.markdown('<div class="adm-tiles">' + "".join(
+    f'<div class="adm-tile"><div class="adm-tn">{html.escape(str(n))}</div>'
+    f'<div class="adm-tl">{html.escape(l)}</div></div>' for n, l in _tiles) + "</div>",
+    unsafe_allow_html=True)
 
-_render()
+_KEYS = [k for k, _ in ADMIN_SECTIONS]
+_LBL = dict(ADMIN_SECTIONS)
+_COUNTS = {"clientes": data.get("clients"), "usuarios": data.get("users"),
+           "licencias": len(data.get("_licenses") or []) or None,
+           "suscripciones": len(data.get("_subs") or []) or None,
+           "conocimiento": data.get("docs")}
+
+
+def _go(section: str) -> None:
+    st.session_state["adm_nav"] = section
+
+
+for i, (sev, text, dest) in enumerate(overview.alerts(data)[:4]):
+    a, b = st.columns([12, 1.4])
+    a.markdown(f'<div class="adm-alert {sev}">{html.escape(text)}</div>', unsafe_allow_html=True)
+    b.button("Ver", key=f"adm_alert_{i}", on_click=_go, args=(dest,), use_container_width=True)
+
+if st.session_state.get("adm_nav") not in _KEYS:
+    st.session_state["adm_nav"] = "clientes"
+
+left, right = st.columns([1, 3.2], gap="large")
+with left:
+    sel = st.radio("Sección", _KEYS, key="adm_nav", label_visibility="collapsed",
+                   format_func=lambda k: _LBL[k] + (f"  ·  {_COUNTS[k]}" if _COUNTS.get(k) else ""))
+with right:
+    if sel == "clientes":
+        from core.admin.clients_home import render as _render
+    elif sel == "usuarios":
+        from core.admin.people import render as _render
+    elif sel == "licencias":
+        from core.admin.licenses import render as _render
+    elif sel == "suscripciones":
+        from core.admin.subscriptions import render as _render
+    else:
+        from core.admin.knowledge import render as _render
+    _render()
