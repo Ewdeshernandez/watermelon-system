@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 # de api/app.py). Esto permite que api/services.py y api/auth.py
 # permanezcan testeables sin instalar FastAPI.
 try:
-    from fastapi import Body, Depends, FastAPI, HTTPException, Header, Query, Response
+    from fastapi import Body, Depends, FastAPI, HTTPException, Header, Query, Request, Response
     from fastapi.responses import JSONResponse
     from pydantic import BaseModel, Field
     _FASTAPI_AVAILABLE = True
@@ -42,6 +42,7 @@ except ImportError:
     Header = None  # type: ignore
     Query = None  # type: ignore
     Response = None  # type: ignore
+    Request = None  # type: ignore
     JSONResponse = None  # type: ignore
     BaseModel = object  # type: ignore
     Field = lambda *a, **k: None  # type: ignore
@@ -52,6 +53,34 @@ from api import services
 
 
 log = logging.getLogger("watermelon.api")
+
+
+class PublicQuote(BaseModel):
+    """Formulario 'Cotice en 1 minuto' de la web de ventas (sin llave)."""
+    company: str = Field("", max_length=160)
+    name: str = Field("", max_length=120)
+    email: str = Field(..., max_length=160)
+    phone: str = Field("", max_length=40)
+    machine_types: str = Field("", max_length=200)
+    machines: int = Field(1, ge=1, le=60)
+    plan: str = Field("profesional", max_length=20)
+    entity: str = Field("siga_co", max_length=10)
+    website: str = Field("", max_length=200)      # trampa para bots: debe venir vacío
+
+
+_QUOTE_HITS: dict = {}
+
+
+def _quote_rate_ok(ip: str, limit: int = 6, window_s: int = 3600) -> bool:
+    import time as _t
+    now = _t.time()
+    hits = [h for h in _QUOTE_HITS.get(ip, []) if now - h < window_s]
+    if len(hits) >= limit:
+        _QUOTE_HITS[ip] = hits
+        return False
+    hits.append(now)
+    _QUOTE_HITS[ip] = hits
+    return True
 
 
 # =============================================================================
@@ -185,6 +214,85 @@ def create_app() -> "FastAPI":
         contact={"name": "SIGA Group SAS"},
         license_info={"name": "Proprietary"},
     )
+
+    # Web de ventas (watermelonsystem.com) llama a /v1/public/* desde el navegador.
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["https://watermelonsystem.com", "https://www.watermelonsystem.com",
+                       "http://localhost:3000", "http://localhost:3300"],
+        allow_origin_regex=r"https://watermelon-web[a-z0-9-]*\.vercel\.app",
+        allow_methods=["GET", "POST"], allow_headers=["Content-Type"],
+    )
+
+    # =========================================================
+    # Web de ventas — planes y cotización (PÚBLICO, sin llave)
+    # =========================================================
+    @app.get("/v1/public/plans", tags=["public"], summary="Planes y descuentos vigentes")
+    def public_plans():
+        from core.billing import pricing
+        return {
+            "currency": "COP",
+            "plans": [{"key": p.key, "name": p.name, "price_cop": p.price_cop,
+                       "includes": list(p.includes), "excludes": list(p.excludes)}
+                      for p in pricing.PLANS.values()],
+            "volume_tiers": [{"from": n, "discount_pct": round(d * 100)}
+                             for n, d in sorted(pricing.VOLUME_TIERS)],
+            "usd_discount_pct": round(pricing.USD_DISCOUNT * 100),
+            "annual_months_charged": pricing.ANNUAL_MONTHS_CHARGED,
+        }
+
+    @app.post("/v1/public/quote", tags=["public"], summary="Cotización en PDF (web de ventas)",
+              response_class=Response if _FASTAPI_AVAILABLE else None)
+    def public_quote(request: "Request", payload: PublicQuote = Body(...)):
+        import re as _re
+        import secrets as _secrets
+        from datetime import date as _date, datetime as _dt, timezone as _tz
+        from core.billing import pricing
+        from core.billing.quote_pdf import build_quote_pdf, quote_number
+        if payload.website:                       # bot
+            raise HTTPException(status_code=400, detail="invalid")
+        ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")
+              ).split(",")[0].strip()
+        if not _quote_rate_ok(ip or "?"):
+            raise HTTPException(status_code=429, detail="Demasiadas solicitudes, intente más tarde.")
+        email = payload.email.strip().lower()
+        if not _re.match(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", email):
+            raise HTTPException(status_code=422, detail="Correo inválido")
+        if payload.plan not in pricing.PLANS or payload.entity not in pricing.ENTITIES:
+            raise HTTPException(status_code=422, detail="Plan o facturación inválidos")
+        trm = None
+        if payload.entity == "wm_us":
+            from core.billing.cycle import get_trm
+            trm = get_trm()
+            if not trm:
+                raise HTTPException(status_code=503, detail="TRM no disponible, intente en un momento")
+        lead = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+        lead.update(email=email, trm=trm)
+        number = quote_number(_date.today(), _secrets.token_hex(3))
+        pdf = build_quote_pdf(lead, number)
+        try:                                      # prospecto → Administración (aviso + cron correo)
+            from core.billing import store
+            reqs = list(store.get_setting("sales_requests", []) or [])
+            m = pricing.quote(lead["plan"], lead["machines"], lead["entity"], "mensual", trm=trm)
+            reqs.insert(0, {
+                "at": _dt.now(_tz.utc).isoformat(timespec="seconds"), "kind": "cotizacion",
+                "client_id": lead.get("company") or email, "by": email, "status": "nueva",
+                "notified": False, "number": number,
+                "lead": {k: lead.get(k) for k in ("company", "name", "email", "phone",
+                                                  "machine_types", "machines", "plan",
+                                                  "entity", "trm")},
+                "detail": (f"{pricing.PLANS[lead['plan']].name} · {lead['machines']} máquina(s) · "
+                           f"{pricing.fmt_money(m['amount'], m['currency'])}/mes · "
+                           f"{lead.get('name') or ''} {lead.get('phone') or ''} · "
+                           f"{lead.get('machine_types') or ''}").strip(),
+            })
+            store.set_setting("sales_requests", reqs[:300])
+        except Exception as e:  # noqa: BLE001
+            log.warning("cotización: no se pudo guardar el prospecto: %s", e)
+        log.info("public_quote: %s plan=%s n=%s", number, lead["plan"], lead["machines"])
+        return Response(content=pdf, media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{number}.pdf"'})
 
     # =========================================================
     # Health (público)
