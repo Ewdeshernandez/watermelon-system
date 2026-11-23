@@ -341,6 +341,17 @@ def create_app() -> "FastAPI":
         except Exception as e:  # noqa: BLE001
             log.warning("cotización: no se pudo guardar el prospecto: %s", e)
         log.info("public_quote: %s plan=%s n=%s", number, lead["plan"], lead["machines"])
+        # Correo al prospecto + aviso a SIGA AL INSTANTE (hilo aparte para no
+        # demorar la descarga). Si la API no tiene backend de correo, lo envía
+        # el cron horario (notify_new_leads marca notified y no duplica).
+        try:
+            from core.email_sender import get_email_backend_status
+            if get_email_backend_status().get("configured"):
+                import threading as _th
+                from core.billing.upsell import notify_new_leads
+                _th.Thread(target=notify_new_leads, daemon=True).start()
+        except Exception as e:  # noqa: BLE001
+            log.warning("cotización: aviso inmediato no disparado: %s", e)
         return Response(content=pdf, media_type="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="{number}.pdf"'})
 

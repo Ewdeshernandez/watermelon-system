@@ -79,14 +79,22 @@ def build_quote_pdf(lead: Dict[str, Any], number: str, today: date | None = None
         rows.append([f"Descuento por volumen ({n} máquinas)", f"−{m['volume_discount_pct']:.0f} %"])
     if m["entity_discount_pct"]:
         rows.append(["Descuento por pago en USD", f"−{m['entity_discount_pct']:.0f} %"])
-    rows += [["Total mensual", f(m["amount"])],
-             ["Total anual pagando el año completo (12 meses por 11)", f(y["amount"])]]
+    if cur == "COP":
+        iva = round(m["amount"] * 0.19)
+        rows += [["Total mensual antes de IVA", f(m["amount"])],
+                 ["IVA (19 %)", f(iva)],
+                 ["Total mensual con IVA", f(m["amount"] + iva)],
+                 ["Total anual antes de IVA, pagando el año completo (12 meses por 11)", f(y["amount"])]]
+    else:
+        rows += [["Total mensual", f(m["amount"])],
+                 ["Total anual pagando el año completo (12 meses por 11)", f(y["amount"])]]
     t = Table(rows, colWidths=[W * 0.66, W * 0.34])
     t.setStyle(TableStyle([
         ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(NAVY)),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONT", (0, 1), (-1, -1), "Helvetica", 10),
+        ("FONT", (0, -2 if cur != "COP" else -4), (-1, -2 if cur != "COP" else -4), "Helvetica-Bold", 11),
         ("FONT", (0, -2), (-1, -2), "Helvetica-Bold", 11),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor("#e6ebf2")),
@@ -96,7 +104,7 @@ def build_quote_pdf(lead: Dict[str, Any], number: str, today: date | None = None
     story += [t, Spacer(1, 4),
               Paragraph(f"Factura {ent['name']} ({ent['country']}, {ent['currency']})"
                         + (f" · TRM de referencia {trm:,.2f}" if cur == "USD" and trm else "")
-                        + (". IVA (19 %) incluido." if cur == "COP" else "."), st_m)]
+                        + (". Precios antes de IVA; el IVA (19 %) se suma en la factura." if cur == "COP" else "."), st_m)]
 
     story.append(Paragraph(f"Qué incluye el plan {plan.name}", st_h))
     for x in plan.includes:
