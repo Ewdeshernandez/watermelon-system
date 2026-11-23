@@ -186,6 +186,10 @@ def main() -> int:
                     _b = run_due()
                     if _b.get("created") or _b.get("errors"):
                         log.info("facturación: %s", _b)
+                    from core.billing.upsell import notify_new_leads
+                    _l = notify_new_leads()
+                    if _l.get("sent"):
+                        log.info("prospectos web notificados: %s", _l)
             except Exception as e:  # noqa: BLE001
                 log.error("facturación falló: %s", e)
 

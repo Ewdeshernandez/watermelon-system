@@ -153,7 +153,7 @@ def evidence_for(machines: List[str]) -> Dict[str, Any]:
 # ------------------------------------------------------------------ solicitudes
 
 _KIND_TXT = {"integral": "pasar a plan Integral", "maquina": "agregar una máquina",
-             "anual": "cambiar a pago anual"}
+             "anual": "cambiar a pago anual", "cotizacion": "una cotización desde la web"}
 
 
 def record_request(sub: Dict[str, Any], kind: str, by: str, detail: str = "") -> bool:
@@ -194,3 +194,56 @@ def close_request(at: str) -> bool:
         if r.get("at") == at:
             r["status"] = "atendida"
     return store.set_setting(REQUESTS_KEY, reqs)
+
+
+# ------------------------------------------------------------------ prospectos (web)
+
+def notify_new_leads() -> dict:
+    """Cron: por cada cotización nueva de la web → correo al prospecto con su PDF
+    y aviso a SIGA. Marca notified=True (no reenvía)."""
+    from datetime import date as _date
+    reqs = list(store.get_setting(REQUESTS_KEY, []) or [])
+    pend = [r for r in reqs if r.get("kind") == "cotizacion" and not r.get("notified")
+            and r.get("lead")]
+    if not pend:
+        return {"sent": 0}
+    from core.billing.quote_pdf import build_quote_pdf
+    from core.email_sender import send_email
+    to_siga = str(store.get_setting("billing_contact", "") or "").strip()
+    if not to_siga:
+        try:
+            from core.clients import list_admins
+            to_siga = next((a.get("email") for a in list_admins() if a.get("email")), "")
+        except Exception:  # noqa: BLE001
+            to_siga = ""
+    sent = 0
+    for r in pend:
+        lead = r["lead"]
+        try:
+            day = _date.fromisoformat(str(r.get("at", ""))[:10])
+        except ValueError:
+            day = _date.today()
+        pdf = build_quote_pdf(lead, r.get("number", "COT"), today=day)
+        att = [(f"{r.get('number', 'cotizacion')}.pdf", pdf, "application/pdf")]
+        plan = pricing.PLANS.get(lead.get("plan"), pricing.PLANS["profesional"]).name
+        try:
+            send_email(
+                to=lead["email"],
+                subject=f"Su cotización Watermelon System · {r.get('number')}",
+                body_text=(f"Hola{(' ' + lead.get('name')) if lead.get('name') else ''},\n\n"
+                           f"Adjuntamos su cotización del plan {plan} para {lead.get('machines')} "
+                           "máquina(s). Un especialista le contactará para revisar sus máquinas.\n\n"
+                           "Watermelon System · watermelonsystem.com"),
+                attachments=att)
+            if to_siga:
+                send_email(to=to_siga,
+                           subject=f"Nuevo prospecto web: {lead.get('company') or lead.get('email')}",
+                           body_text=(f"{r.get('detail')}\nCorreo: {lead.get('email')}\n"
+                                      f"Cotización {r.get('number')} adjunta."),
+                           attachments=att)
+            r["notified"] = True
+            sent += 1
+        except Exception as e:  # noqa: BLE001
+            log.warning("prospecto %s no notificado: %s", r.get("number"), e)
+    store.set_setting(REQUESTS_KEY, reqs)
+    return {"sent": sent}
