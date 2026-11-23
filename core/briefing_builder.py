@@ -1189,6 +1189,20 @@ def build_asset_briefing(
     except Exception as e:
         log.warning("train_drawing briefing falló (%s) → schematic PNG", e)
 
+    # Secciones nuevas (franja, puntos a vigilar, estadística del periodo en
+    # operación, eventos por sonda, operación del mes). Reordena los canales
+    # como el tren (Y antes que X, auxiliares de Machines agrupados) ANTES del
+    # histórico overall, que hereda este orden.
+    extras: Dict[str, Any] = {}
+    try:
+        from core.briefing_extras import period_extras
+        extras = period_extras(instance_id, data["channels"], period_label) or {}
+        if extras.get("channels"):
+            data["channels"] = extras["channels"]
+    except Exception as e:  # noqa: BLE001
+        log.warning("briefing extras falló (%s): %s", instance_id, e)
+        extras = {}
+
     # Tablas históricas (v3.31.408): métricas de forma de onda (últimos 10
     # snapshots) + matriz de overall diario (últimos 10 días, semáforo).
     wf_history = []
@@ -1286,6 +1300,7 @@ def build_asset_briefing(
             meta_extra=pdf_meta,
             wf_history=wf_history,
             overall_history=overall_history,
+            extras=extras,
         )
     except Exception as e:
         log.error("briefing PDF falló para %s: %s", instance_id, e)
