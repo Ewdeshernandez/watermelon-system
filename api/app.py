@@ -565,6 +565,27 @@ def create_app() -> "FastAPI":
         return {"asset": asset, "svg": svg, "kind": "legacy"}
 
     # =========================================================
+    # Reporte de condición en PDF = EL MISMO del cron diario y de la descarga
+    # desde Live (core.live_report_builder). La app móvil lo pide aquí para que
+    # su reporte sea copia exacta del de la web. Detecta solo fuera de línea.
+    # =========================================================
+    @app.get("/v1/assets/{asset}/report-pdf", tags=["figures"],
+             summary="Reporte de condición (PDF) — mismo de la web",
+             response_class=Response if _FASTAPI_AVAILABLE else None)
+    def asset_report_pdf(asset: str, api_key_hash: str = Depends(_api_key_dependency)):
+        from core.instance_state import get_instance
+        from core.live_report_builder import build_report_for_instance
+        inst = get_instance(asset)
+        if inst is None:
+            raise HTTPException(status_code=404, detail="asset no encontrado")
+        pdf, meta = build_report_for_instance(asset, inst)
+        if not pdf:
+            raise HTTPException(status_code=404, detail="sin lecturas para armar el reporte")
+        log.info("report_pdf: asset=%s status=%s caller_hash=%s",
+                 asset, (meta or {}).get("status"), api_key_hash)
+        return Response(content=pdf, media_type="application/pdf")
+
+    # =========================================================
     # Manejo global de errores
     # =========================================================
     @app.exception_handler(Exception)
