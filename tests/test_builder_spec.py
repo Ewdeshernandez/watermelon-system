@@ -49,10 +49,22 @@ def test_spec_to_channels_order_and_angles():
 def test_merge_keeps_live_contract():
     raw = json.loads((ROOT / "data" / "modbus_maps" / "sgt300b.json").read_text(encoding="utf-8"))
     setup = setup_from_modbus_map(raw, name="SGT300B")
-    new, rep = merge_builder_spec(setup, SPEC)
+    new, rep = merge_builder_spec(setup, SPEC, add_new=True)
     assert "LB0011" in rep["added"] and "1X_D" in rep["matched"]
     # Lo que alimenta Live queda intacto: el mapa Modbus generado no cambia.
     assert modbus_map_from_setup(new) == raw
     # Nada se borra en silencio.
     assert len(new.channels) == len(setup.channels) + len(rep["added"])
     assert new.layout == SPEC
+
+
+def test_modbus_machine_only_suggests_new_probes():
+    raw = json.loads((ROOT / "data" / "modbus_maps" / "sgt300b.json").read_text(encoding="utf-8"))
+    setup = setup_from_modbus_map(raw, name="SGT300B")
+    spec = dict(SPEC, sensors=SPEC["sensors"] + [{"comp": "Caja", "n": "3XD", "k": "prox", "ang": "45°R"}])
+    new, rep = merge_builder_spec(setup, spec)
+    assert rep["added"] == []
+    assert "3X_D" in rep["suggested"] and "LB0011" in rep["suggested"]
+    assert len(new.channels) == len(setup.channels)
+    _, rep2 = merge_builder_spec(setup, spec, add_new=True)
+    assert "3X_D" in rep2["added"]

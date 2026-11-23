@@ -36,7 +36,7 @@ def test_build_and_findings():
     spec = {"machines": [{"type": "turb", "name": "T", "bearings": 2, "bearing_type": "journal"}],
             "sensors": [{"n": "1XD", "k": "prox", "ang": "45°R"}, {"n": "9XD", "k": "prox", "ang": "45°R"}]}
     out = cb.handle_build(cb.normalize(s), spec)
-    assert out["wm"] == "setup" and "9X_D" in out["report"]["added"]
+    assert out["wm"] == "setup" and "9X_D" in out["report"]["suggested"]   # máquina Modbus: solo sugiere
     fs = cb.findings(out["setup"])
     assert all({"level", "code", "message"} <= set(f) for f in fs)
 
