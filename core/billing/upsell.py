@@ -227,20 +227,47 @@ def notify_new_leads() -> dict:
         att = [(f"{r.get('number', 'cotizacion')}.pdf", pdf, "application/pdf")]
         plan = pricing.PLANS.get(lead.get("plan"), pricing.PLANS["profesional"]).name
         try:
-            send_email(
-                to=lead["email"],
-                subject=f"Su cotización Watermelon System · {r.get('number')}",
-                body_text=(f"Hola{(' ' + lead.get('name')) if lead.get('name') else ''},\n\n"
-                           f"Adjuntamos su cotización del plan {plan} para {lead.get('machines')} "
-                           "máquina(s). Un especialista le contactará para revisar sus máquinas.\n\n"
-                           "Watermelon System · watermelonsystem.com"),
-                attachments=att)
+            en = (lead.get("lang") or "es") == "en"
+            who = (lead.get("name") or "").split(" ")[0]
+            pilot = bool(lead.get("pilot"))
+            if en:
+                subj = f"Your Watermelon System quote · {r.get('number')}"
+                hi = f"Hi {who}," if who else "Hello,"
+                body = (f"Thank you for your interest in Watermelon System. Attached is your quote for the "
+                        f"{plan} plan for {lead.get('machines')} machine(s)"
+                        + (", starting with the free 30-day pilot" if pilot else "") + ".")
+                nxt = ("A specialist will contact you shortly to review your machines and sensors. "
+                       "You can simply reply to this email with any question.")
+                sign = "Ewdes Hernández · Machinery Diagnostics Champion"
+            else:
+                subj = f"Su cotización Watermelon System · {r.get('number')}"
+                hi = f"Hola {who}," if who else "Hola,"
+                body = (f"Gracias por su interés en Watermelon System. Le adjuntamos la cotización del plan "
+                        f"{plan} para {lead.get('machines')} máquina(s)"
+                        + (", empezando con el piloto de 30 días sin costo" if pilot else "") + ".")
+                nxt = ("Un especialista le contactará en breve para revisar sus máquinas y sensores. "
+                       "Puede responder directamente a este correo con cualquier pregunta.")
+                sign = "Ewdes Hernández · Machinery Diagnostics Champion"
+            text = f"{hi}\n\n{body}\n\n{nxt}\n\n{sign}\nWatermelon System · watermelonsystem.com"
+            html = f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:auto;color:#0b1f3a">
+<div style="background:#0f2748;color:#fff;padding:18px 22px;border-radius:10px 10px 0 0">
+<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#2f8f4e;border:2px solid #9fd4a9;vertical-align:-1px"></span>
+<b style="font-size:16px;margin-left:6px">Watermelon System</b></div>
+<div style="border:1px solid #e3e9f1;border-top:0;border-radius:0 0 10px 10px;padding:22px;font-size:15px;line-height:1.6">
+<p>{hi}</p><p>{body}</p><p>{nxt}</p>
+<p style="margin-top:22px"><a href="https://watermelonsystem.com/{'en/' if en else ''}demo" style="background:#2f8f4e;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">{'See the live demo' if en else 'Ver la demo en vivo'}</a></p>
+<p style="margin-top:26px">{sign}<br><span style="color:#5b6b80">Watermelon System · SIGA GROUP SAS</span></p>
+</div></div>"""
+            send_email(to=lead["email"], subject=subj, body_text=text, body_html=html,
+                       attachments=att, reply_to=to_siga,
+                       from_name="Ewdes Hernández · Watermelon System")
             if to_siga:
                 send_email(to=to_siga,
                            subject=f"Nuevo prospecto web: {lead.get('company') or lead.get('email')}",
                            body_text=(f"{r.get('detail')}\nCorreo: {lead.get('email')}\n"
-                                      f"Cotización {r.get('number')} adjunta."),
-                           attachments=att)
+                                      f"Cotización {r.get('number')} adjunta. Responde este correo "
+                                      "y le llega directo al prospecto."),
+                           attachments=att, reply_to=lead["email"])
             r["notified"] = True
             sent += 1
         except Exception as e:  # noqa: BLE001
