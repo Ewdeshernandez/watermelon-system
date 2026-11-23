@@ -574,11 +574,10 @@ def create_app() -> "FastAPI":
              response_class=Response if _FASTAPI_AVAILABLE else None)
     def asset_report_pdf(asset: str, api_key_hash: str = Depends(_api_key_dependency)):
         from core.instance_state import get_instance
-        from core.live_report_builder import build_report_for_instance
         inst = get_instance(asset)
         if inst is None:
             raise HTTPException(status_code=404, detail="asset no encontrado")
-        pdf, meta = build_report_for_instance(asset, inst)
+        pdf, meta = _report_pdf_isolated(asset)   # se arma en un proceso aparte
         if not pdf:
             raise HTTPException(status_code=404, detail="sin lecturas para armar el reporte")
         log.info("report_pdf: asset=%s status=%s caller_hash=%s",
@@ -597,6 +596,41 @@ def create_app() -> "FastAPI":
         )
 
     return app
+
+
+# =============================================================
+# Reporte PDF aislado (memoria)
+# =============================================================
+# Armar el reporte sube el proceso de ~45 MB a ~380-420 MB (plotly, reportlab,
+# svglib, numpy) y esa memoria NO se devuelve: dos reportes seguidos tumbaban
+# el servicio (límite 512 MB, aviso de Render 2026-11-23). Ahora cada reporte
+# corre en un proceso hijo que termina al entregar el PDF (la memoria vuelve
+# al sistema), UNO a la vez, y el mismo reporte se reusa 120 s.
+import threading as _threading
+import time as _time
+
+_REPORT_LOCK = _threading.Lock()
+_REPORT_CACHE: dict = {}
+_REPORT_TTL_S = 120.0
+
+
+def _report_pdf_isolated(asset: str):
+    hit = _REPORT_CACHE.get(asset)
+    if hit and _time.time() - hit[0] < _REPORT_TTL_S:
+        return hit[1], hit[2]
+    with _REPORT_LOCK:
+        hit = _REPORT_CACHE.get(asset)               # otro request lo pudo armar
+        if hit and _time.time() - hit[0] < _REPORT_TTL_S:
+            return hit[1], hit[2]
+        import multiprocessing as _mp
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=1, mp_context=_mp.get_context("spawn")) as ex:
+            from core.report_worker import build_report
+            pdf, meta = ex.submit(build_report, asset).result(timeout=170)
+        if pdf:
+            _REPORT_CACHE.clear()                    # guarda solo el último (memoria)
+            _REPORT_CACHE[asset] = (_time.time(), pdf, meta)
+        return pdf, meta
 
 
 # Instancia top-level para `uvicorn api.app:app`. Sólo se construye si

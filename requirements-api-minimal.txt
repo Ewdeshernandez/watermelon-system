@@ -21,4 +21,6 @@ supabase>=2.0.0
 reportlab>=4.0.0
 svglib>=1.5.1
 plotly==6.1.1
-kaleido==0.2.1
+# Gráficas del PDF con matplotlib (en proceso). kaleido abría un Chromium por
+# gráfica (~600 MB de pico) y tumbaba la API de 512 MB (2026-11-23) → retirado.
+matplotlib>=3.7.0

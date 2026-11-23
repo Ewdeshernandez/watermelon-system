@@ -625,15 +625,93 @@ def generate_live_report_pdf(
     return buf.getvalue()
 
 
+def _render_trend_png_mpl(sensor_series: List[Dict[str, Any]], alarm: float = 0.0,
+                          danger: float = 0.0, y_title: str = "valor") -> Optional[bytes]:
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+    from io import BytesIO
+    try:
+        from zoneinfo import ZoneInfo
+        _bog = ZoneInfo("America/Bogota")
+    except Exception:  # noqa: BLE001
+        _bog = None
+
+    def _local(xs):
+        out = []
+        for v in xs or []:
+            try:
+                dt = (datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+                      if not isinstance(v, datetime) else v)
+                if dt.tzinfo is None:
+                    from datetime import timezone as _tz
+                    dt = dt.replace(tzinfo=_tz.utc)
+                out.append(dt.astimezone(_bog).replace(tzinfo=None) if _bog else dt)
+            except Exception:  # noqa: BLE001
+                out.append(None)
+        return out
+
+    fig = None
+    try:
+        fig, ax = plt.subplots(figsize=(10, 3.2), dpi=160)
+        fig.patch.set_facecolor("white")
+        ax.set_facecolor("white")
+        for s_ in sensor_series:
+            xs, ys = _local(s_.get("x", [])), list(s_.get("y", []) or [])
+            pts = [(x, y) for x, y in zip(xs, ys) if x is not None and y is not None]
+            if len(pts) < 2:
+                continue
+            ax.plot([p[0] for p in pts], [p[1] for p in pts], lw=1.6,
+                    color=s_.get("color", "#1e40af"), label=s_.get("label", ""))
+        if danger and danger > 0:
+            ax.axhline(danger, color="#dc2626", lw=1.2, ls="--")
+            ax.annotate("Danger", xy=(0, danger), xycoords=("axes fraction", "data"),
+                        xytext=(3, 3), textcoords="offset points", fontsize=9, color="#dc2626")
+        if alarm and alarm > 0:
+            ax.axhline(alarm, color="#d97706", lw=1.2, ls="--")
+            ax.annotate("Alarma", xy=(0, alarm), xycoords=("axes fraction", "data"),
+                        xytext=(3, 3), textcoords="offset points", fontsize=9, color="#d97706")
+        ax.grid(True, color="#f1f5f9", lw=0.8)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        for sp in ("left", "bottom"):
+            ax.spines[sp].set_color("#e5edf7")
+        ax.tick_params(colors="#475569", labelsize=9)
+        ax.set_ylabel(y_title, color="#475569", fontsize=10)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m %H:%M"))
+        if any(l.get_label() and not l.get_label().startswith("_") for l in ax.get_lines()):
+            ax.legend(loc="lower right", bbox_to_anchor=(1, 1.0), ncol=6, frameon=False,
+                      fontsize=9, labelcolor="#475569")
+        fig.tight_layout()
+        buf = BytesIO()
+        fig.savefig(buf, format="png", facecolor="white")
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        if fig is not None:
+            plt.close(fig)
+
+
 def render_trend_png(sensor_series: List[Dict[str, Any]],
                      alarm: float = 0.0, danger: float = 0.0,
                      y_title: str = "valor") -> Optional[bytes]:
     """Renderiza el gráfico de tendencia a PNG para embeber en el PDF.
 
     sensor_series: lista de {label, x (lista datetime), y (lista float), color}
-    Devuelve PNG bytes o None si kaleido/plotly no están disponibles
-    (degradación graceful — el PDF se genera igual sin la tendencia).
+    Devuelve PNG bytes o None si no hay librería de gráficos (el PDF sale igual).
+
+    2026-11-23: se dibuja con matplotlib (en el mismo proceso). plotly+kaleido
+    abría un Chromium por gráfica (~600 MB de pico) y tumbaba la API de 512 MB.
+    plotly queda solo como respaldo si matplotlib no está instalado.
     """
+    png = _render_trend_png_mpl(sensor_series, alarm, danger, y_title)
+    if png is not None:
+        return png
     try:
         import plotly.graph_objects as go
     except Exception:
