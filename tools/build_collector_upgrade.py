@@ -174,8 +174,13 @@ $cfg | Add-Member -NotePropertyName map_refresh_sec -NotePropertyValue 600 -Forc
 Ok 'config actualizada (sin BOM)'
 
 Step '6/6 Prueba en seco con el collector nuevo'
+# stderr de python NO debe cortar el script (ErrorActionPreference=Stop lo
+# convertía en excepción y no se restauraba la config).
+$eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 $out = & $py $newPath --config $cfgPath --dry-run 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $out -notmatch '"source": "modbus"') {
+$rc = $LASTEXITCODE
+$ErrorActionPreference = $eap
+if ($rc -ne 0 -or $out -notmatch '"source": "modbus"') {
     Write-Host $out
     Restore-Config; Remove-Item $newPath
     throw 'La prueba en seco falló. Config restaurada; el servicio sigue con el collector viejo.'
