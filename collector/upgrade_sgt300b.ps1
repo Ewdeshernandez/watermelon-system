@@ -22,7 +22,8 @@ param(
     [switch]$Rollback,
     [switch]$AcceptSettings,
     [string]$Root = 'C:\watermelon\collector',
-    [string]$Service = 'WatermelonCollector'
+    [string]$Service = 'WatermelonCollector',
+    [string]$Python = ''
 )
 $ErrorActionPreference = 'Stop'
 $IID = 'turbina_sgt300_b'
@@ -33,11 +34,26 @@ function Step($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "    OK  $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "    !!  $m" -ForegroundColor Yellow }
 
-$py = Join-Path $Root 'venv\Scripts\python.exe'
+# Python: el MISMO del servicio (NSSM lo guarda en el registro); si no, venv / PATH.
+$py = $Python
+if (-not $py) {
+    try { $py = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Service\Parameters" -ErrorAction Stop).Application } catch { $py = '' }
+}
+if (-not $py -or -not (Test-Path $py)) { $py = Join-Path $Root 'venv\Scripts\python.exe' }
 if (-not (Test-Path $py)) { $py = (Get-Command python).Source }
+# Config: la que usa el servicio (--config en AppParameters de NSSM); si no, la estándar.
 $cfgPath = Join-Path $Root 'wm_collector.config.json'
+try {
+    $ap = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$Service\Parameters" -ErrorAction Stop).AppParameters
+    if ($ap -match '--config\s+"?([^"]+?\.json)"?') { $cfgPath = $Matches[1] }
+} catch {}
+if (-not [System.IO.Path]::IsPathRooted($cfgPath)) { $cfgPath = Join-Path $Root $cfgPath }
 $colPath = Join-Path $Root 'wm_collector.py'
-$logPath = Join-Path $Root 'logs\wm_collector.log'
+# Log: carpeta log_dir de la config (A usa logs_sgt300a, B usa logs)
+$logDir = 'logs'
+try { $c0 = Get-Content $cfgPath -Raw | ConvertFrom-Json; if ($c0.log_dir) { $logDir = $c0.log_dir } } catch {}
+if (-not [System.IO.Path]::IsPathRooted($logDir)) { $logDir = Join-Path $Root $logDir }
+$logPath = Join-Path $logDir 'wm_collector.log'
 
 if ($Rollback) {
     Step 'Rollback: restaurando el último respaldo'
@@ -131,8 +147,13 @@ $cfg | Add-Member -NotePropertyName map_refresh_sec -NotePropertyValue 600 -Forc
 Ok 'config actualizada (sin BOM)'
 
 Step '6/6 Prueba en seco con el collector nuevo'
+# stderr de python NO debe cortar el script (ErrorActionPreference=Stop lo
+# convertía en excepción y no se restauraba la config).
+$eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 $out = & $py $newPath --config $cfgPath --dry-run 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or $out -notmatch '"source": "modbus"') {
+$rc = $LASTEXITCODE
+$ErrorActionPreference = $eap
+if ($rc -ne 0 -or $out -notmatch '"source": "modbus"') {
     Write-Host $out
     Restore-Config; Remove-Item $newPath
     throw 'La prueba en seco falló. Config restaurada; el servicio sigue con el collector viejo.'
