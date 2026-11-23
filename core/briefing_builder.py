@@ -1181,11 +1181,11 @@ def build_asset_briefing(
     try:
         from core.live_readings import latest_for_instance
         from core.live_report_builder import _build_sensor_lookup
-        from core.train_svg import build_train_svg, svg_to_train_drawing
+        from core.live_train_svg import train_drawing_for
         _latest_live = latest_for_instance(instance_id) or []
         _slk = _build_sensor_lookup(instance_obj)
-        _svg_train = build_train_svg(instance_obj, _latest_live, _slk)
-        train_drawing = svg_to_train_drawing(_svg_train) if _svg_train else None
+        # Tren de Machines en vivo (= Live); sin tren en Machines → dibujo anterior
+        train_drawing = train_drawing_for(instance_id, instance_obj, _latest_live, _slk)
     except Exception as e:
         log.warning("train_drawing briefing falló (%s) → schematic PNG", e)
 
