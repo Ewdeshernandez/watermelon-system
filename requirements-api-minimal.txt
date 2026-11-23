@@ -14,3 +14,11 @@ pandas>=2.0.0
 # Ciclo 19: la API necesita Supabase para acceder al archivo de reportes
 # (mismo bucket que usa la app Streamlit).
 supabase>=2.0.0
+# 2026-11-23 — Reporte de condición en PDF desde la API (/v1/assets/{id}/report-pdf):
+# la app móvil lo pide para que su reporte sea COPIA EXACTA del de la web. Mismas
+# versiones que requirements.txt. Sin estas libs el reporte fallaba en silencio y la
+# app caía a su PDF propio.
+reportlab>=4.0.0
+svglib>=1.5.1
+plotly==6.1.1
+kaleido==0.2.1
