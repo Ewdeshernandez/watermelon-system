@@ -96,7 +96,7 @@ def build_quote_pdf(lead: Dict[str, Any], number: str, today: date | None = None
     story += [t, Spacer(1, 4),
               Paragraph(f"Factura {ent['name']} ({ent['country']}, {ent['currency']})"
                         + (f" · TRM de referencia {trm:,.2f}" if cur == "USD" and trm else "")
-                        + ". Valores antes de impuestos.", st_m)]
+                        + (". IVA (19 %) incluido." if cur == "COP" else "."), st_m)]
 
     story.append(Paragraph(f"Qué incluye el plan {plan.name}", st_h))
     for x in plan.includes:
@@ -111,9 +111,14 @@ def build_quote_pdf(lead: Dict[str, Any], number: str, today: date | None = None
                      "antes de firmar.")
     conds += [
         "Si su máquina no tiene sistema de monitoreo, instalamos nuestros sensores de vibración y el "
-        "nodo de adquisición sin costo adicional. Son propiedad de SIGA (en comodato) y se retiran al "
-        "terminar el contrato.",
-        "Contrato mínimo de 12 meses.",
+        "nodo de adquisición sin costo adicional: son de SIGA, se entregan en alquiler incluido en el "
+        "plan, deben devolverse en buen estado y se retiran al terminar el contrato.",
+        "Incluye instalación, soporte, almacenamiento de datos, comunicación remota, pruebas "
+        "metrológicas anuales y una capacitación anual (no certificada) para hasta 10 personas.",
+        "Contrato mínimo de 12 meses. Pago mensual a 30 días tras la radicación de la factura.",
+        "Garantía de 1 año (Ley 1480 de 2011) y derecho de retracto de 5 días hábiles.",
+        "Cotización válida por 30 días calendario. Aplican los Términos y condiciones publicados en "
+        "watermelonsystem.com/terminos.",
     ]
     for x in conds:
         story.append(Paragraph(f"<font color='{GREEN}'>●</font>&nbsp; {x}", st_b))
