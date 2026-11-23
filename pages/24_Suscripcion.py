@@ -193,6 +193,26 @@ if open_inv:
             ("NIT / Tax ID", td["tax_id"]), ("Referencia", open_inv["number"]),
             ("Nota", td["notes"])) if v]
         html_table(["Transferencia", ""], rows)
+elif not invoices:
+    # Cliente nuevo: todavía no hay facturas → bienvenida con qué va a pasar.
+    _first_amt = (pricing.fmt_money(quote["amount"], quote["currency"]) if quote else "por confirmar")
+    _contact = str(store.get_setting("billing_contact", "") or "").strip()
+    _m = [m[0].lower() + m[1:] if m.split()[0] in ("Tarjeta", "Transferencia") else m
+          for m in entity["methods"]]
+    _ways = ", ".join(_m[:-1]) + " o " + _m[-1]
+    _notice = ("le llega aviso por correo" if sub.get("notify_email")
+               else "la verá aquí en Suscripción")
+    st.markdown(f"""
+<div class="sb-card" style="margin-bottom:14px;border:2px solid #1f9d55">
+ <div class="sb-k">Bienvenido a Watermelon System</div>
+ <div class="sb-t">Su primera factura: {periods.fmt_date(sub.get('next_renewal'))} · {_first_amt}</div>
+ <div class="sb-li" style="margin-top:8px">
+  {dot('ok')} Ese día la emitimos y {_notice}; tendrá {int(sub.get('due_days') or 10)} días para pagarla.<br>
+  {dot('ok')} Podrá pagar aquí mismo con {html.escape(_ways)}.<br>
+  {dot('ok')} Mientras tanto su monitoreo ya está activo en Live Monitoring.<br>
+  {dot('info')} ¿Dudas sobre su plan o la factura? Escríbanos{(' a <b>' + html.escape(_contact) + '</b>') if _contact else ' a su contacto en SIGA'}.
+ </div>
+</div>""", unsafe_allow_html=True)
 else:
     st.markdown(f'<div class="sb-card" style="margin-bottom:14px"><span class="sb-s">'
                 f'{dot("ok")} No tiene facturas pendientes.</span></div>', unsafe_allow_html=True)

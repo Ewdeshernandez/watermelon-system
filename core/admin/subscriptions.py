@@ -243,3 +243,9 @@ def render() -> None:
                 store.set_setting("trm_manual", t or 0)
                 st.success("Guardado.")
         st.caption(f"TRM vigente para fijar precios USD: {bc.get_trm() or '—'}")
+        with st.form("adm_billing_contact"):
+            bc_mail = st.text_input("Correo de contacto que ven los clientes (dudas de facturación)",
+                                    value=str(store.get_setting("billing_contact", "") or ""))
+            if st.form_submit_button("Guardar contacto"):
+                store.set_setting("billing_contact", bc_mail.strip())
+                st.success("Guardado.")
