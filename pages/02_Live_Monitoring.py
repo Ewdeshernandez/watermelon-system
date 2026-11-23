@@ -2172,8 +2172,10 @@ def compute_health_score(
 
 def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
     """Arco de salud 0-100 estilo gauge AMS. Compacto para la barra de estado."""
-    r = size / 2 - 9
+    sw = max(4.0, size * 0.08)               # trazo proporcional
+    r = size / 2 - sw / 2 - 1.5
     cx = cy = size / 2
+    compact = size < 60
     import math as _m
     circ = 2 * _m.pi * r
     frac = (score or 0) / 100.0
@@ -2183,16 +2185,20 @@ def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
         f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
         f'role="img" aria-label="Asset health {val_txt} of 100" '
         f'style="display:block;">'
-        f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="#334155" stroke-width="7"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="#334155" stroke-width="{sw:.1f}"/>'
         f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="{color}" '
-        f'stroke-width="7" stroke-linecap="round" '
+        f'stroke-width="{sw:.1f}" stroke-linecap="round" '
         f'stroke-dasharray="{circ:.1f}" stroke-dashoffset="{offset:.1f}" '
         f'transform="rotate(-90 {cx} {cy})"/>'
-        f'<text x="{cx}" y="{cy - 1}" text-anchor="middle" font-size="22" '
-        f'font-weight="800" fill="#f1f5f9" font-family="monospace">{val_txt}</text>'
-        f'<text x="{cx}" y="{cy + 13}" text-anchor="middle" font-size="8" '
-        f'fill="#94a3b8" font-weight="700">/ 100</text>'
-        f'</svg>'
+        + (f'<text x="{cx}" y="{cy + size * 0.12:.1f}" text-anchor="middle" '
+           f'font-size="{size * 0.32:.1f}" font-weight="800" fill="#f1f5f9" '
+           f'font-family="IBM Plex Sans, system-ui, sans-serif">{val_txt}</text>'
+           if compact else
+           f'<text x="{cx}" y="{cy - 1}" text-anchor="middle" font-size="22" '
+           f'font-weight="800" fill="#f1f5f9" font-family="monospace">{val_txt}</text>'
+           f'<text x="{cx}" y="{cy + 13}" text-anchor="middle" font-size="8" '
+           f'fill="#94a3b8" font-weight="700">/ 100</text>')
+        + '</svg>'
     )
 
 
@@ -2604,6 +2610,17 @@ def render_asset_header(
             _cfg_v = f" · config v{_fs['version']}"
     except Exception:  # noqa: BLE001
         _cfg_v = ""
+    import html as _html
+    _hb_title = _html.escape((getattr(instance_obj, "tag", "") or instance_id) if instance_obj is not None else instance_id)
+    _drv = " ".join(p for p in [getattr(instance_obj, "driver_manufacturer", "") or "",
+                                getattr(instance_obj, "driver_model", "") or ""] if p).strip() if instance_obj is not None else ""
+    _dvn = " ".join(p for p in [getattr(instance_obj, "driven_manufacturer", "") or "",
+                                getattr(instance_obj, "driven_model", "") or ""] if p).strip() if instance_obj is not None else ""
+    _train_txt = f"{_drv} → {_dvn}" if (_drv and _dvn) else (_drv or _dvn or class_label)
+    _hb_bits = [_train_txt,
+                (getattr(instance_obj, "client", "") or "") if instance_obj is not None else "",
+                (getattr(instance_obj, "site", "") or "") if instance_obj is not None else ""]
+    _hb_sub = _html.escape(" · ".join(b for b in _hb_bits if b)) + f"<span style='opacity:.65'> · ISO 20816 / API 670{_cfg_v}</span>"
     _gen_kpi = (f'<div class="wm-hb-kpi"><div class="n">{_gen_val}<small>rpm</small></div>'
                 f'<div class="l">Generator</div></div>') if _gen_val else ""
     st.markdown(
@@ -2627,10 +2644,11 @@ def render_asset_header(
             .wm-hb > * {{ position: relative; z-index: 1; }}
             .wm-hb .k {{ font: 600 10.5px 'IBM Plex Mono', monospace; letter-spacing:.14em;
                 text-transform: uppercase; color:#9fc0e6; }}
-            .wm-hb .id {{ display:flex; align-items:center; gap:12px; min-width:0; }}
+            .wm-hb .id {{ display:flex; align-items:center; gap:12px; min-width:0; flex: 1 1 220px; }}
             .wm-hb h1 {{ margin: 0; padding: 0; font: 700 21px 'IBM Plex Sans Condensed','IBM Plex Sans',sans-serif;
                 letter-spacing:.01em; color:#ffffff; line-height:1.1; white-space:nowrap; }}
-            .wm-hb .sub {{ margin: 1px 0 0; color:#9fb6d3; font-size: 11px; white-space:nowrap; }}
+            .wm-hb .sub {{ margin: 1px 0 0; color:#9fb6d3; font-size: 11px; white-space:nowrap;
+                overflow:hidden; text-overflow:ellipsis; max-width: 100%; }}
             .wm-hb .pill {{ display:inline-flex; align-items:center; gap:7px;
                 font: 700 11px 'IBM Plex Mono', monospace; letter-spacing:.08em; text-transform:uppercase;
                 padding: 5px 11px; border-radius: 999px; background:{_conn_bg}; color:{_conn_fg}; }}
@@ -2638,7 +2656,8 @@ def render_asset_header(
                 animation: wm-hb-pulse 1.6s infinite; }}
             @keyframes wm-hb-pulse {{ 0%,100% {{ opacity:1 }} 50% {{ opacity:.25 }} }}
             @media (prefers-reduced-motion: reduce) {{ .wm-hb .pill i {{ animation:none; }} }}
-            .wm-hb .kpis {{ display:flex; flex-wrap:wrap; gap: 4px 18px; margin-left:auto; align-items:center; }}
+            .wm-hb .kpis {{ display:flex; flex-wrap:wrap; gap: 4px 18px; margin-left:auto; align-items:center;
+                flex: 0 1 auto; justify-content:flex-end; }}
             .wm-hb-kpi .n {{ font: 700 17px 'IBM Plex Sans', sans-serif; font-variant-numeric: tabular-nums;
                 color:#ffffff; line-height:1.15; white-space:nowrap; }}
             .wm-hb-kpi .n small {{ font: 500 11px 'IBM Plex Mono', monospace; color:#9fc0e6; margin-left:4px; }}
@@ -2657,9 +2676,9 @@ def render_asset_header(
             <div class="wm-hb"><span class="strip"></span>
                 <div class="id">
                     <span class="pill"><i></i>{_conn_txt}</span>
-                    <div>
-                        <h1>{title_text}</h1>
-                        <div class="sub">{class_label} · ISO 20816 / API 670{_cfg_v}</div>
+                    <div style="min-width:0;">
+                        <h1 title="{instance_id}">{_hb_title}</h1>
+                        <div class="sub">{_hb_sub}</div>
                     </div>
                 </div>
                 <div class="kpis">
@@ -2675,7 +2694,6 @@ def render_asset_header(
                     <span class="status">{status_icon} {status_label}</span>
                 </div>
             </div>
-            <div class="wm-bar-chips">{chips_html}</div>
             """
         ).strip(),
         unsafe_allow_html=True,
