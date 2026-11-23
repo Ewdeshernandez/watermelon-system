@@ -542,11 +542,27 @@ def create_app() -> "FastAPI":
                     pass
         except Exception:  # noqa: BLE001
             pass
+        # 2026-11-23 — Si la máquina tiene TREN dibujado en Machines, se entrega ese
+        # tren EN VIVO (mismo de Live Monitoring y del reporte PDF web): la app
+        # móvil y su reporte lo muestran sin cambios de código propios.
+        try:
+            from core.live_readings import _get_supabase_client
+            from core.live_train import live_payload, machines_train_for
+            from core.live_train_svg import apply_live_severity, build_live_train_svg
+            mt = machines_train_for(asset, client=_get_supabase_client())
+            if mt:
+                setup, layout = mt
+                payload = live_payload(setup, latest)
+                apply_live_severity(payload, latest, lookup, inst, setup)
+                return {"asset": asset, "svg": build_live_train_svg(layout, payload),
+                        "kind": "machines"}
+        except Exception as e:  # noqa: BLE001
+            log.warning("train-svg machines falló (%s) → dibujo anterior", e)
         svg = build_train_svg(inst, latest, lookup)
         if not svg:
             raise HTTPException(status_code=404,
                                 detail="sin diagrama (faltan driver/driven_icon_key o sensores mapeables)")
-        return {"asset": asset, "svg": svg}
+        return {"asset": asset, "svg": svg, "kind": "legacy"}
 
     # =========================================================
     # Manejo global de errores

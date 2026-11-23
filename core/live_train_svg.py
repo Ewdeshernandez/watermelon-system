@@ -30,8 +30,12 @@ SEVC = {"ok": "#34d399", "alert": "#f5a524", "danger": "#ef4444", "off": "#5d718
 SEVR = {"off": 0, "ok": 1, "alert": 2, "danger": 3}
 KCOL = {"prox": "#a78bfa", "vel": "#22b8cf", "accel": "#f87171", "kph": "#f59e0b"}
 TOP, CH, CW, GAP = 96, 40, 82, 6
-MONO = "Courier"            # svglib: fuentes base de reportlab
-SANS = "Helvetica"
+# Listas de fuentes: cada motor toma la primera que tenga — app móvil / resvg
+# (IBM Plex), navegador, svglib del PDF web (Courier / Helvetica base de reportlab).
+MONO = "'IBM Plex Mono', Courier, monospace"
+SANS = "'IBM Plex Sans', Helvetica, sans-serif"
+MONO_A = MONO.replace("'", "&#39;")
+SANS_A = SANS.replace("'", "&#39;")
 
 
 @functools.lru_cache(maxsize=1)
@@ -140,19 +144,19 @@ def build_live_train_svg(layout: Dict[str, Any], live: Dict[str, Any]) -> str:
             if worst.get(no) in ("alert", "danger"):
                 g.append(f'<circle cx="{bx:.1f}" cy="96" r="20" fill="{col}" fill-opacity="0.22"/>')
             g.append(f'<circle cx="{bx:.1f}" cy="96" r="12" fill="#0a141e" stroke="{col}" stroke-width="3"/>')
-            g.append(f'<text x="{bx:.1f}" y="100" text-anchor="middle" font-family="{MONO}" font-size="11" font-weight="bold" fill="#ffffff">{no}</text>')
+            g.append(f'<text x="{bx:.1f}" y="100" text-anchor="middle" font-family="{MONO_A}" font-size="11" font-weight="bold" fill="#ffffff">{no}</text>')
 
     def chip(p: Dict[str, Any], cx: float, cy: float) -> None:
         sc = SEVC.get(p.get("sev") or "off", SEVC["off"])
         v = p.get("v")
         out.append(f'<rect x="{cx:.1f}" y="{cy:.1f}" width="{CW}" height="{CH}" rx="7" fill="#0c1726" stroke="{sc}" stroke-width="1.4"/>')
         out.append(f'<circle cx="{cx+10:.1f}" cy="{cy+12:.1f}" r="3.6" fill="{KCOL.get(p.get("k"), "#8aa0b6")}"/>')
-        out.append(f'<text x="{cx+18:.1f}" y="{cy+15.5:.1f}" font-family="{MONO}" font-size="10" font-weight="bold" fill="#cfe0f1">{_esc(p.get("n"))}</text>')
+        out.append(f'<text x="{cx+18:.1f}" y="{cy+15.5:.1f}" font-family="{MONO_A}" font-size="10" font-weight="bold" fill="#cfe0f1">{_esc(p.get("n"))}</text>')
         if p.get("ang"):
-            out.append(f'<text x="{cx+CW-6:.1f}" y="{cy+15.5:.1f}" text-anchor="end" font-family="{MONO}" font-size="8.5" fill="#6f86a0">{_esc(p["ang"])}</text>')
+            out.append(f'<text x="{cx+CW-6:.1f}" y="{cy+15.5:.1f}" text-anchor="end" font-family="{MONO_A}" font-size="8.5" fill="#6f86a0">{_esc(p["ang"])}</text>')
         fv = _fmt(v)
-        out.append(f'<text x="{cx+8:.1f}" y="{cy+32:.1f}" font-family="{SANS}" font-size="14" font-weight="bold" fill="#ffffff">{_esc(fv)}</text>')
-        out.append(f'<text x="{cx+8+len(fv)*8.2+10:.1f}" y="{cy+32:.1f}" font-family="{MONO}" font-size="9" fill="#8aa0b6">{_esc(_unit_short(p.get("u")))}</text>')
+        out.append(f'<text x="{cx+8:.1f}" y="{cy+32:.1f}" font-family="{SANS_A}" font-size="14" font-weight="bold" fill="#ffffff">{_esc(fv)}</text>')
+        out.append(f'<text x="{cx+8+len(fv)*8.2+10:.1f}" y="{cy+32:.1f}" font-family="{MONO_A}" font-size="9" fill="#8aa0b6">{_esc(_unit_short(p.get("u")))}</text>')
         alarm = p.get("alarm") or 0
         pct = min(1.25, v / alarm) if (v is not None and alarm) else 0.0
         bc = SEVC["alert"] if (p.get("sev") == "ok" and pct >= 0.9) else sc
@@ -215,7 +219,7 @@ def build_live_train_svg(layout: Dict[str, Any], live: Dict[str, Any]) -> str:
     if aux:
         abh = CH + 34
         ay, ax = h_total + 22, 6.0
-        out.append(f'<text x="6" y="{ay-8:.1f}" font-family="{MONO}" font-size="10" fill="#6f86a0">AUXILIARES · fuera del tren</text>')
+        out.append(f'<text x="6" y="{ay-8:.1f}" font-family="{MONO_A}" font-size="10" fill="#6f86a0">AUXILIARES · fuera del tren</text>')
         for ai, a in enumerate(aux):
             mine = sorted([p for p in aux_probes if auxn[str(p["n"]).upper()] == ai],
                           key=lambda p: (_axis(str(p["n"])), str(p["n"])))
@@ -228,7 +232,7 @@ def build_live_train_svg(layout: Dict[str, Any], live: Dict[str, Any]) -> str:
                 ax, ay = 6.0, ay + abh + 14
             out.append(f'<rect x="{ax:.1f}" y="{ay:.1f}" width="{bw}" height="{abh}" rx="10" fill="#0f1c2b" '
                        f'stroke="{SEVC.get(wst, "#27425e")}" stroke-width="1.2" stroke-dasharray="5 4"/>')
-            out.append(f'<text x="{ax+10:.1f}" y="{ay+17:.1f}" font-family="{SANS}" font-size="12" font-weight="bold" fill="#e8f0f8">{_esc(a.get("name"))}</text>')
+            out.append(f'<text x="{ax+10:.1f}" y="{ay+17:.1f}" font-family="{SANS_A}" font-size="12" font-weight="bold" fill="#e8f0f8">{_esc(a.get("name"))}</text>')
             for pi, p in enumerate(mine):
                 chip(p, ax + GAP + pi * (CW + GAP), ay + 26)
             ax += bw + 16
