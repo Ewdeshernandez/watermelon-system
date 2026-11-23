@@ -321,10 +321,9 @@ def approve_and_send(instance_id: str, *,
 
     # Archivo del cliente: el reporte aprobado queda en Reports → Archivo
     # histórico, visible SOLO para los usuarios de ese cliente (match por tag).
-    _sent = ((delivery or {}).get("email") or {}).get("sent") or []
-    _to_client = any("@" in str(e) and not str(e).lower().endswith("@sigasas.com")
-                     for e in _sent)
-    if send and _to_client:
+    # TODO semanal/mensual aprobado y enviado queda archivado (decisión del
+    # usuario 2026-11-23: el archivo del cliente debe tenerlos todos).
+    if send and (delivery or {}).get("any_ok"):
         out["archive"] = archive_approved(
             instance_id, inst, pdf, period=period, consecutive=_consec,
             prepared_by=prepared_by, approved_by=approved_by,
