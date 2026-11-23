@@ -4477,9 +4477,33 @@ def main() -> None:
             from core.live_train import live_payload
             from core.machine_builder_component import machine_live_train
             from core.remote_monitoring.config import setup_from_dict as _sfd
-            _rows = _cached_latest_for_instance(instance_id) or latest
-            machine_live_train(_mtrain[1], live_payload(_sfd(_mtrain[0]), _rows),
-                               key=f"wm_live_train_{instance_id}")
+            # MISMO dato fresco que la barra de estado (no el caché de 15 s) y MISMA
+            # severidad (compute_severity + límites del activo) → tren y barra
+            # nunca muestran estados distintos.
+            try:
+                _rows = latest_for_instance(instance_id) or latest
+            except Exception:  # noqa: BLE001
+                _rows = latest
+            _msetup = _sfd(_mtrain[0])
+            _payload = live_payload(_msetup, _rows)
+            try:
+                from core.severity import compute_severity as _cs
+                _units = {(r.get("sensor_label") or ""): r.get("unit") or "" for r in _rows
+                          if r.get("metric") == "Direct"}
+                _map = {"Danger": "danger", "Alarma": "alert", "Normal": "ok"}
+                for _p in _payload["probes"]:
+                    _lbl = next((c.point_label for c in _msetup.channels
+                                 if c.point_label.replace("_", "") == _p["n"]), None)
+                    if _lbl is None or _p["v"] is None:
+                        continue
+                    _sv = _cs(_p["v"], sensor_lookup.get(_lbl), _units.get(_lbl, _p["u"]), instance_obj)
+                    if _sv.get("status") in _map:
+                        _p["sev"] = _map[_sv["status"]]
+                        _p["alarm"] = _sv.get("alarm") or _p["alarm"]
+                        _p["danger"] = _sv.get("danger") or _p["danger"]
+            except Exception:  # noqa: BLE001
+                pass
+            machine_live_train(_mtrain[1], _payload, key=f"wm_live_train_{instance_id}")
         try:
             _live_train_hero()
             has_map = True
