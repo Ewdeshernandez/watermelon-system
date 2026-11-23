@@ -1924,10 +1924,11 @@ def render_sensor_zoom_panel(
                         )
                         break
                     try:
+                        from core.demo_access import source_for as _demo_src
                         q = (
                             client.table(_TABLE)
                             .select("id,captured_at,value,unit,quality")
-                            .eq("instance_id", inst)
+                            .eq("instance_id", _demo_src(inst))
                             .eq("variable", var)
                             .eq("metric", met)
                         )
@@ -4064,9 +4065,16 @@ def main() -> None:
     def _cached_list_instances(version: int):
         # Solo activos EN SERVICIO: los equipos demo/fuera de servicio se
         # ocultan de Live Monitoring (quedan solo en el mapa del Home).
+        # Excepción: la máquina DEMO (fuera de servicio para reportes y alarmas)
+        # sí se muestra, para los accesos de demostración.
+        try:
+            from core.demo_access import is_demo as _is_demo
+        except Exception:  # noqa: BLE001
+            _is_demo = lambda _i: False  # noqa: E731
         return [r for r in (_raw_list_instances() or [])
                 if (r.get("in_service", True) if isinstance(r, dict)
-                    else getattr(r, "in_service", True))]
+                    else getattr(r, "in_service", True))
+                or _is_demo(r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", ""))]
 
     @st.cache_data(ttl=30, show_spinner=False)
     def _cached_get_instance(iid: str, version: int):
@@ -4154,7 +4162,14 @@ def main() -> None:
         tag = meta.get("tag", "") or iid.upper()
         client = meta.get("client", "")
         base = f"{tag}  ·  {client}" if client else tag
-        if not meta.get("in_service", True):
+        try:
+            from core.demo_access import is_demo as _isd
+            _demo_opt = _isd(iid)
+        except Exception:  # noqa: BLE001
+            _demo_opt = False
+        if _demo_opt:
+            pass                                   # máquina demo: sin rótulo de baja
+        elif not meta.get("in_service", True):
             base += "   ·   FUERA DE SERVICIO"       # activo dado de baja (no se reporta)
         elif _current_role in ("admin", "specialist") and _is_demo_asset(iid, meta):
             base += "   ·   DEMO"
@@ -4318,7 +4333,12 @@ def main() -> None:
         return
 
     # Badge GRIS para activos fuera de servicio (dados de baja, no se reportan).
-    if not inst_meta.get(instance_id, {}).get("in_service", True):
+    try:
+        from core.demo_access import is_demo as _isd2
+        _live_is_demo = _isd2(instance_id)
+    except Exception:  # noqa: BLE001
+        _live_is_demo = False
+    if not inst_meta.get(instance_id, {}).get("in_service", True) and not _live_is_demo:
         st.markdown(
             "<div style=\"background:#eef1f5;border:1px solid #d3d9e2;"
             "border-left:4px solid #8a97a8;border-radius:10px;padding:9px 14px;"
@@ -4637,6 +4657,12 @@ def main() -> None:
         except Exception:
             _avail = {"email": False, "whatsapp": False}
         _can_send = _avail.get("email") or _avail.get("whatsapp")
+        try:                                   # máquina demo: nunca envía correos
+            from core.demo_access import is_demo as _isd3
+            if _isd3(instance_id):
+                _can_send = False
+        except Exception:  # noqa: BLE001
+            pass
         if st.button("Send to client", use_container_width=True,
                      key=f"live_send_{instance_id}", disabled=not _can_send,
                      help=("Sends the report by email and/or WhatsApp to the recipient "

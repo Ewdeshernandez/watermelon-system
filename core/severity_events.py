@@ -58,6 +58,12 @@ def record_events(instance_id: str, rendered_rows: List[Dict[str, Any]]) -> int:
     """Inserta un evento por cada canal cuyo estado cambió vs el último registro.
     Devuelve cuántos eventos nuevos insertó. No inserta la primera vez que ve un
     canal en Normal (evita ruido de arranque); sí registra el primer cruce real."""
+    try:                                   # máquina demo: no escribe eventos propios
+        from core.demo_access import is_demo
+        if is_demo(instance_id):
+            return 0
+    except Exception:  # noqa: BLE001
+        pass
     client = _client()
     if client is None or not rendered_rows:
         return 0
@@ -122,6 +128,18 @@ def _fmt_dur(seconds: float) -> str:
 def list_recent(instance_id: str, limit: int = 40) -> List[Dict[str, Any]]:
     """Últimos eventos (más nuevo primero) con duración en estado. Para el que
     sigue vigente (último de su canal y no-Normal) la duración es hasta AHORA."""
+    demo = False
+    try:                                   # máquina demo: lee los eventos reales, sin id
+        from core.demo_access import is_demo, source_for
+        demo = is_demo(instance_id)
+        if demo:
+            out = list_recent(source_for(instance_id), limit)
+            for e in out:
+                e["id"] = None             # sin "reconocer": el demo no toca eventos reales
+                e["instance_id"] = instance_id
+            return out
+    except Exception:  # noqa: BLE001
+        pass
     client = _client()
     if client is None:
         return []

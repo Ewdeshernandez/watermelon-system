@@ -144,6 +144,51 @@ def render() -> None:
             else:
                 st.caption("No hay personas.")
 
+        # --- Accesos demo (solo en el cliente demo) ---
+        try:
+            from core.demo_access import access_list, demo_status, grant, revoke
+            _is_demo_client = any(t.upper().startswith("TG-DEMO") for t in (c.asset_tags or ()))
+        except Exception:  # noqa: BLE001
+            _is_demo_client = False
+        if _is_demo_client:
+            acc = access_list()
+            drows = []
+            for e in c.owner_emails or ():
+                rec = acc.get(e.lower()) or {}
+                stt = demo_status(e) or "sin plazo"
+                until = str(rec.get("until") or "")[:10]
+                drows.append((f"<b>{html.escape(rec.get('name') or name_by_email.get(e.lower()) or e)}</b> "
+                              f"<span class='adm-mut'>{html.escape(e)}</span>",
+                              ui.pill(f"{stt} · hasta {until}" if until else stt,
+                                      "ok" if stt == "activo" else "da" if stt == "vencido" else "ne")))
+            ui.group("Accesos demo (14 días)", drows or [("Nadie tiene acceso demo todavía", "")])
+            d1, d2 = st.columns(2)
+            with d1.popover("Dar acceso demo (14 días)", use_container_width=True):
+                with st.form("adm_demo_grant", clear_on_submit=True):
+                    dem = st.text_input("Correo del prospecto").strip().lower()
+                    dnm = st.text_input("Nombre y empresa").strip()
+                    okd = st.form_submit_button("Dar acceso", type="primary")
+                if okd:
+                    if "@" not in dem:
+                        st.error("Escribe un correo válido.")
+                    else:
+                        msg = _add_person(c.id, dem, dnm, False, name_by_email)
+                        g = grant(dem, dnm)
+                        st.success(f"{msg} Acceso demo hasta {g['until'][:10]}. Entra en "
+                                   "watermelonsystem.app con su correo (código de un solo uso).")
+                        st.rerun()
+            with d2.popover("Quitar acceso demo", use_container_width=True):
+                if c.owner_emails:
+                    with st.form("adm_demo_revoke"):
+                        who = st.selectbox("Persona", list(c.owner_emails), key="adm_demo_who")
+                        if st.form_submit_button("Quitar"):
+                            revoke(who)
+                            remove_email_from_client(c.id, who)
+                            st.success(f"{who} ya no tiene acceso demo.")
+                            st.rerun()
+                else:
+                    st.caption("No hay accesos.")
+
         with st.expander("Avanzado · palabras de coincidencia, WhatsApp"):
             with st.form(f"adm_adv_{c.id}"):
                 dn = st.text_input("Nombre", c.display_name)

@@ -19,8 +19,9 @@ def collect() -> Dict[str, Any]:
     from core.clients import list_clients
     out: Dict[str, Any] = {}
     clients = _safe(list_clients, []) or []
-    out["clients"] = len(clients)
-    out["machines"] = sum(len(c.asset_tags or ()) for c in clients)
+    real = [c for c in clients if not any(t.upper().startswith("TG-DEMO") for t in (c.asset_tags or ()))]
+    out["clients"] = len(real)
+    out["machines"] = sum(len(c.asset_tags or ()) for c in real)
 
     from core.supabase_auth import list_all_users
     users = _safe(list_all_users, None)
@@ -109,6 +110,8 @@ def alerts(data: Dict[str, Any]) -> List[Tuple[str, str, str]]:
         except Exception:  # noqa: BLE001
             continue
     for c in data.get("_clients") or []:
+        if any(t.upper().startswith("TG-DEMO") for t in (c.asset_tags or ())):
+            continue                       # cliente demo: no es un cliente real
         if not (c.owner_emails or ()):
             out.append(("info", f"{c.display_name} no tiene personas con acceso.", "clientes"))
     return out

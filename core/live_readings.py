@@ -119,6 +119,15 @@ _TABLE = "live_readings"
 _VIEW = "latest_live_reading"
 
 
+def _demo_source(instance_id: str) -> str:
+    """Cuenta demo: una instance demo lee los datos de su máquina real."""
+    try:
+        from core.demo_access import source_for
+        return source_for(instance_id)
+    except Exception:  # noqa: BLE001
+        return instance_id
+
+
 def _get_supabase_client() -> Any:
     """
     Devuelve un client de Supabase configurado, o None si no hay
@@ -255,6 +264,7 @@ def latest_for_instance(instance_id: str) -> List[Dict[str, Any]]:
     lentísimo. La query a la tabla es O(limit) sobre el índice
     `(instance_id, captured_at desc)`. La vista queda solo como último recurso.
     """
+    instance_id = _demo_source(instance_id)   # máquina demo → datos reales
     client = _get_supabase_client()
     if client is None:
         return []
@@ -295,6 +305,7 @@ def history_for_metric(
     batch con el mismo captured_at). Sin id, la paginación perdía
     filas silenciosamente en bordes de page.
     """
+    instance_id = _demo_source(instance_id)   # máquina demo → datos reales
     client = _get_supabase_client()
     if client is None:
         return []
@@ -334,6 +345,7 @@ def history_bucketed(
 
     Cada fila: {bucket, avg_val, min_val, max_val, n}.
     """
+    instance_id = _demo_source(instance_id)   # máquina demo → datos reales
     client = _get_supabase_client()
     if client is None:
         return []
@@ -362,6 +374,7 @@ def history_rollup(
     (trend_rollup). Instantáneo para 7d/30d/1a (lee ~cientos de filas, no
     cientos de miles). Mismas columnas que history_bucketed: bucket, avg_val,
     min_val, max_val, n. Devuelve [] si la función/tabla no existe aún."""
+    instance_id = _demo_source(instance_id)   # máquina demo → datos reales
     client = _get_supabase_client()
     if client is None:
         return []
@@ -389,6 +402,7 @@ def recent_history_all_direct(
 
     Útil para sparklines en Live Monitoring sin penalizar latencia.
     """
+    instance_id = _demo_source(instance_id)   # máquina demo → datos reales
     client = _get_supabase_client()
     if client is None:
         return {}
@@ -422,6 +436,7 @@ def recent_history_all_direct(
 
 def count_for_instance(instance_id: str) -> int:
     """Conteo total de readings de un activo (debug / health)."""
+    instance_id = _demo_source(instance_id)   # máquina demo → datos reales
     client = _get_supabase_client()
     if client is None:
         return 0
