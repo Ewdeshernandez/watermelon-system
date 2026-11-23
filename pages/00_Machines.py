@@ -146,6 +146,8 @@ if val and val.get("ts") and val["ts"] != SS.get("mc_last_ts"):
             parts.append("+" + ", ".join(x.replace("_", "") for x in r["added"]))
         if r.get("updated"):
             parts.append(f"{len(r['updated'])} updated")
+        if r.get("header"):
+            parts.append(", ".join(f"{k} → {v}" for k, v in r["header"].items()))
         return (" · Live asset: " + " · ".join(parts)) if parts else ""
 
     if name == "load":
@@ -207,10 +209,11 @@ _cur = SS.get("mc_setup") or {}
 if _cur.get("instance_id"):
     try:
         from core.instance_state import get_instance
-        from core.remote_monitoring.instance_sync import sync_sensors_from_setup
+        from core.remote_monitoring.instance_sync import header_changes, sync_sensors_from_setup
         _setup = setup_from_dict(_cur)
         _inst = get_instance(_setup.instance_id)
         _, _rep = sync_sensors_from_setup(_inst.sensors if _inst else [], _setup)
+        _hdr = header_changes(_inst, _setup)
         _bits = []
         if _inst is None:
             _bits.append(f"new Live asset “{_setup.instance_id}”")
@@ -218,6 +221,8 @@ if _cur.get("instance_id"):
             _bits.append("adds " + ", ".join(x.replace("_", "") for x in _rep["added"]))
         if _rep["updated"]:
             _bits.append(f"updates limits/angles of {len(_rep['updated'])} sensor(s)")
+        if _hdr:
+            _bits.append("asset record: " + ", ".join(f"{k} “{o or '—'}” → “{n}”" for k, (o, n) in _hdr.items()))
         st.checkbox(
             "On publish, also update the Live asset (Machinery Library) — adds / updates only, never deletes"
             + (f" · {'; '.join(_bits)}" if _bits else " · already in sync"),
