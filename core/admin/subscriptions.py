@@ -77,6 +77,24 @@ def render() -> None:
                              _pk.get(str(r[5]).split('</span>')[-1].strip(), "ne")))
                   for r in rows])
 
+    # ---- Solicitudes de clientes (desde su pestaña Suscripción) ----
+    try:
+        from core.billing.upsell import _KIND_TXT, close_request, open_requests
+        _reqs = open_requests()
+    except Exception:  # noqa: BLE001
+        _reqs = []
+    if _reqs:
+        st.markdown('<div class="adm-gl">Solicitudes nuevas</div>', unsafe_allow_html=True)
+        for r in _reqs:
+            a1, a2 = st.columns([6, 1.3])
+            a1.markdown(f"**{r.get('client_id')}** pidió **{_KIND_TXT.get(r.get('kind'), r.get('kind'))}**"
+                        f" · {r.get('by')} · {str(r.get('at'))[:16].replace('T', ' ')}  \n"
+                        f"<span class='adm-mut'>{r.get('detail') or ''}</span>",
+                        unsafe_allow_html=True)
+            if a2.button("Atendida", key=f"req_done_{r.get('at')}"):
+                close_request(r.get("at"))
+                st.rerun()
+
     # ---- Editar ----
     labels = [f"{c.display_name} · {c.id}" for c in clients]
     i = st.selectbox("Cliente", range(len(clients)), format_func=lambda k: labels[k],
@@ -243,6 +261,15 @@ def render() -> None:
                 store.set_setting("trm_manual", t or 0)
                 st.success("Guardado.")
         st.caption(f"TRM vigente para fijar precios USD: {bc.get_trm() or '—'}")
+        with st.form("adm_balance_price"):
+            from core.billing.upsell import BALANCE_PRICE_KEY, balance_price
+            bp = st.number_input("Precio de un balanceo de turbomaquinaria contratado aparte (COP)",
+                                 min_value=0, value=int(balance_price()), step=1_000_000,
+                                 help="Se usa en la oferta 'Pase a Integral' para mostrar al cliente "
+                                      "cuándo Integral le sale más económico.")
+            if st.form_submit_button("Guardar precio"):
+                store.set_setting(BALANCE_PRICE_KEY, int(bp))
+                st.success("Guardado.")
         with st.form("adm_billing_contact"):
             bc_mail = st.text_input("Correo de contacto que ven los clientes (dudas de facturación)",
                                     value=str(store.get_setting("billing_contact", "") or ""))
