@@ -83,10 +83,18 @@ if _FASTAPI_AVAILABLE:
             description="Info del collector: version, host, modbus byte order, etc.",
         )
 
+    class CollectorAck(BaseModel):
+        """Confirmación del nodo: versión de config de máquina aplicada/rechazada."""
+        instance_id: str
+        version: int
+        status: str = Field("applied", description="applied | rejected")
+        detail: Optional[str] = Field(None, description="motivo / resumen (máx 300 chars)")
+
 else:
     # Stubs para que el módulo importe sin FastAPI (tests)
     LiveReadingItem = object  # type: ignore
     LiveIngestPayload = object  # type: ignore
+    CollectorAck = object  # type: ignore
 
 
 def _require_fastapi():
@@ -440,6 +448,32 @@ def create_app() -> "FastAPI":
         log.info("collector_map: instance=%s regs=%d caller_hash=%s",
                  instance_id, len(out.get("registers") or {}), api_key_hash)
         return out
+
+    # =========================================================
+    # Confirmación del nodo (Fase 4): el collector / nodo en línea avisa qué
+    # versión de la config de máquina está aplicando ("applied") o por qué la
+    # rechazó ("rejected"). Machines lo muestra en el historial de versiones.
+    # =========================================================
+    @app.post("/v1/collector/ack", tags=["ingest"],
+              summary="El nodo confirma la versión de config aplicada (o la rechaza)")
+    def collector_ack(payload: CollectorAck = Body(...),
+                      api_key_hash: str = Depends(_api_key_dependency)):
+        from core.live_readings import _get_supabase_client
+        from core.remote_monitoring.config import find_setup_cloud_by_instance
+        from core.remote_monitoring.setup_versions import node_ack
+
+        status = payload.status if payload.status in ("applied", "rejected") else "applied"
+        client = _get_supabase_client()
+        found = find_setup_cloud_by_instance(payload.instance_id, client=client)
+        if not found:
+            raise HTTPException(status_code=404, detail="No machine config for this instance")
+        res = node_ack(found["id"], int(payload.version), status,
+                       (payload.detail or "")[:300], client=client)
+        if not res.get("ok"):
+            raise HTTPException(status_code=502, detail=res.get("reason") or "ack failed")
+        log.info("collector_ack: instance=%s v%s %s caller_hash=%s",
+                 payload.instance_id, payload.version, status, api_key_hash)
+        return {"ok": True, "setup_id": found["id"], "version": int(payload.version), "status": status}
 
     # =========================================================
     # Figuras — FUENTE ÚNICA (core.figure_series). Web, reportes y app
