@@ -505,7 +505,7 @@ def render_delivery() -> None:
 
     _rows = _cached_instances()
     if not _rows:
-        st.info("No assets registered. Create one in Machinery Library first.")
+        st.info("No assets registered. Create one in Machines first.")
         return
 
     def _is_in_service(r):

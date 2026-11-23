@@ -57,6 +57,18 @@ def test_header_changes_only_non_empty():
     from core.remote_monitoring.instance_sync import header_changes
     _, setup = _setup()
     setup.machine.client, setup.machine.location, setup.machine.tag = "Cliente Ejemplo SA", "Planta Norte", ""
-    inst = SimpleNamespace(client="CLIENTE EJEMPLO", site="PLANTA NORTE", tag="TG-B")
+    inst = SimpleNamespace(client="CLIENTE EJEMPLO", site="PLANTA NORTE", tag="TG-B",
+                           nominal_rpm=float(setup.machine.rpm_nominal))
     hc = header_changes(inst, setup)
     assert hc == {"client": ("CLIENTE EJEMPLO", "Cliente Ejemplo SA"), "site": ("PLANTA NORTE", "Planta Norte")}
+
+
+def test_header_changes_norm_and_rpm():
+    from types import SimpleNamespace
+    from core.remote_monitoring.instance_sync import header_changes
+    _, setup = _setup()
+    setup.machine.iso_norm, setup.machine.iso_class, setup.machine.rpm_nominal = "ISO_20816_3", "2", 14000
+    inst = SimpleNamespace(client="", site="", tag="", iso_norm_code="", iso_norm_class="", nominal_rpm=3600.0)
+    hc = header_changes(inst, setup)
+    assert hc["iso_norm_code"] == ("", "ISO_20816_3") and hc["iso_norm_class"] == ("", "2")
+    assert hc["nominal_rpm"] == ("3600", "14000")

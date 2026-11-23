@@ -38,7 +38,10 @@ NAV_GROUPS = [
             # del campo + versiones + origen Modbus/NI). Reemplazará Machinery
             # Library + Crear activo cuando la doble escritura a `instances` esté.
             {"label": "⚙  Machines", "page": "pages/00_Machines.py"},
-            {"label": "▣  Machinery Library", "page": "pages/00_Machinery_Library.py"},
+            # 2026-11-23: Machinery Library retirada del nav — Machines es la
+            # fuente ÚNICA (norma, alerta/peligro, tipo, operación, esquema);
+            # los documentos van en Administración → Conocimiento. La página
+            # sigue en el repo (abre por URL) mientras se migran lectores.
             # 2026-11-23: "Crear activo (wizard)" retirado del nav — Machines lo
             # reemplaza (+ New machine → Publish crea también el activo de Live).
             # pages/_machinery_wizard.py sigue en el repo (abre por URL).

@@ -359,6 +359,13 @@ def build_report_for_instance(
     health = {"score": score, "zone": zone, "color": zcolor}
     kpis = {"speed": speed_txt, "speeds_all": speed_all,
             "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
+    try:                                   # tipo de máquina desde Machines (fuente única)
+        from core.machines_meta import machine_header
+        _mh = machine_header(instance_id)
+        if _mh and _mh.get("type"):
+            kpis["machine_type"] = _mh["type"]
+    except Exception:  # noqa: BLE001
+        pass
     meta = {"instance_id": instance_id, "status": status, "score": score,
             "zone": zone, "alarms": n_danger + n_alarm}
 

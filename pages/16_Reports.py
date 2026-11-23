@@ -3741,7 +3741,7 @@ elif _runcmp_prev is None:
     if not _runcmp_iid and not _runcmp_itag:
         _runcmp_help = (
             "No asset selected in the report meta. "
-            "Activate an instance from Machinery Library."
+            "Activate a machine from Machines."
         )
     else:
         _runcmp_help = (

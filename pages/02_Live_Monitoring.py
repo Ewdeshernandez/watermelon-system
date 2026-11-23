@@ -2624,6 +2624,13 @@ def render_asset_header(
     _dvn = " ".join(p for p in [getattr(instance_obj, "driven_manufacturer", "") or "",
                                 getattr(instance_obj, "driven_model", "") or ""] if p).strip() if instance_obj is not None else ""
     _train_txt = f"{_drv} → {_dvn}" if (_drv and _dvn) else (_drv or _dvn or class_label)
+    try:                                   # Machines = fuente única del tipo
+        from core.machines_meta import machine_header as _mh
+        _mhd = _mh(instance_id)
+        if _mhd and _mhd.get("type"):
+            _train_txt = _mhd["type"]
+    except Exception:  # noqa: BLE001
+        pass
     _hb_bits = [_train_txt,
                 (getattr(instance_obj, "client", "") or "") if instance_obj is not None else "",
                 (getattr(instance_obj, "site", "") or "") if instance_obj is not None else ""]

@@ -133,7 +133,9 @@ if val and val.get("ts") and val["ts"] != SS.get("mc_last_ts"):
         return m
 
     def _sync_live(setup) -> str:
-        if not SS.get("mc_sync_live", True) or not setup.instance_id:
+        # Machines = fuente ÚNICA: al publicar SIEMPRE se copia al activo que leen
+        # Live, Rotodinámica, reportes, Report Center y la app (nunca borra).
+        if not setup.instance_id:
             return ""
         from core.remote_monitoring.instance_sync import sync_instance
         r = sync_instance(setup)
@@ -223,9 +225,9 @@ if _cur.get("instance_id"):
             _bits.append(f"updates limits/angles of {len(_rep['updated'])} sensor(s)")
         if _hdr:
             _bits.append("asset record: " + ", ".join(f"{k} “{o or '—'}” → “{n}”" for k, (o, n) in _hdr.items()))
-        st.checkbox(
-            "On publish, also update the Live asset (Machinery Library) — adds / updates only, never deletes"
-            + (f" · {'; '.join(_bits)}" if _bits else " · already in sync"),
-            value=True, key="mc_sync_live")
+        st.caption(
+            "Machines is the single source: publishing updates Live, Rotordynamics, reports, "
+            "Report Center and the mobile app (adds / updates only, never deletes)"
+            + (f" · on publish: {'; '.join(_bits)}" if _bits else " · already in sync"))
     except Exception as _e:  # noqa: BLE001
         st.caption(f"Live asset preview unavailable: {_e}")

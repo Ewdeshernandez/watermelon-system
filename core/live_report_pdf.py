@@ -147,6 +147,8 @@ def generate_live_report_pdf(
     driven = " ".join(p for p in [getattr(instance_obj, "driven_manufacturer", ""),
                                   getattr(instance_obj, "driven_model", "")] if p)
     train = f"{driver} → {driven}" if driver and driven else (driver or driven or "")
+    if kpis.get("machine_type"):          # Machines = fuente única del tipo
+        train = str(kpis["machine_type"])
     client = getattr(instance_obj, "client", "") or ""
     site = getattr(instance_obj, "site", "") or getattr(instance_obj, "location", "") or ""
     # Ciclo 23.157 — Hora LOCAL del cliente (America/Bogota), no UTC del

@@ -1107,8 +1107,9 @@ with left:
                 if st.button("Open →", key=f"asset_open_{inst.instance_id}",
                              use_container_width=True):
                     st.session_state["wm_active_instance"] = inst.instance_id
+                    st.session_state["live_asset_v3"] = inst.instance_id
                     try:
-                        st.switch_page("pages/00_Machinery_Library.py")
+                        st.switch_page("pages/02_Live_Monitoring.py")
                     except Exception:
                         pass
 
