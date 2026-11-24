@@ -26,8 +26,8 @@ STALE_H = 6.0            # más vieja que esto → aviso ámbar
 # El robot nombra los archivos en HORA DE PLANTA (Colombia, UTC−5), no UTC.
 PLANT_TZ = timezone(timedelta(hours=-5))
 
-_VIEWS = [":material/show_chart: Waveform", ":material/equalizer: Spectrum",
-          ":material/track_changes: Orbit"]
+# Solo texto (estilo software de monitoreo profesional): sin íconos ni emojis.
+_VIEWS = ["Waveform", "Spectrum", "Orbit"]
 
 
 # ---------------------------------------------------------------- datos

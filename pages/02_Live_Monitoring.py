@@ -4650,50 +4650,54 @@ def main() -> None:
     # (email/WhatsApp) se configura por activo en Machinery Library → tab
     # "Envío al cliente". Es la versión testeable de la Fase 1; el envío
     # automático programado lo hará el cron headless.
-    with col_send:
-        try:
-            from core.report_delivery import available_channels
-            _avail = available_channels(instance_obj)
-        except Exception:
-            _avail = {"email": False, "whatsapp": False}
-        _can_send = _avail.get("email") or _avail.get("whatsapp")
-        try:                                   # máquina demo: nunca envía correos
-            from core.demo_access import is_demo as _isd3
-            if _isd3(instance_id):
-                _can_send = False
-        except Exception:  # noqa: BLE001
-            pass
-        if st.button("Send to client", use_container_width=True,
-                     key=f"live_send_{instance_id}", disabled=not _can_send,
-                     help=("Sends the report by email and/or WhatsApp to the recipient "
-                           "configured in Machinery Library." if _can_send else
-                           "Configure the client's email or WhatsApp in Machinery "
-                           "Library → Send to client.")):
-            with st.spinner("Generating and sending report…"):
-                pdf_bytes, _meta = _report_for_download(instance_id, instance_obj)
-                if not pdf_bytes:
-                    st.error("Could not generate the report. Check that there are active readings.")
-                else:
-                    from core.report_delivery import deliver_report
-                    if isinstance(_meta, dict):
-                        _meta.setdefault("period", "Diario")
-                    res = deliver_report(instance_obj, pdf_bytes, _meta)
-                    _em = res.get("email")
-                    _wa = res.get("whatsapp")
-                    if _em is not None:
-                        if _em.get("ok"):
-                            st.success(f"✓ Email sent to {instance_obj.client_email}")
-                        else:
-                            st.error(f"Email: {_em.get('error', 'failed')}")
-                    if _wa is not None:
-                        if _wa.get("ok"):
-                            st.success(f"✓ WhatsApp sent to {instance_obj.whatsapp_number}")
-                        else:
-                            st.error(f"WhatsApp: {_wa.get('error', 'failed')}")
-                    if not res.get("any_ok") and _em is None and _wa is None:
-                        st.warning(res.get("error", "Not sent through any channel."))
-        if not _can_send:
-            st.caption("Configure the recipient in Machinery Library.")
+    # 2026-11-23 — "Send to client" es una acción de SIGA (analista/admin):
+    # el cliente NO ve el botón (antes le aparecía en su propia vista).
+    _staff_send = (st.session_state.get("auth_role", "") or "").strip().lower() in ("admin", "specialist")
+    if _staff_send:
+        with col_send:
+            try:
+                from core.report_delivery import available_channels
+                _avail = available_channels(instance_obj)
+            except Exception:
+                _avail = {"email": False, "whatsapp": False}
+            _can_send = _avail.get("email") or _avail.get("whatsapp")
+            try:                                   # máquina demo: nunca envía correos
+                from core.demo_access import is_demo as _isd3
+                if _isd3(instance_id):
+                    _can_send = False
+            except Exception:  # noqa: BLE001
+                pass
+            if st.button("Send to client", use_container_width=True,
+                         key=f"live_send_{instance_id}", disabled=not _can_send,
+                         help=("Sends the report by email and/or WhatsApp to the recipient "
+                               "configured in Machinery Library." if _can_send else
+                               "Configure the client's email or WhatsApp in Machinery "
+                               "Library → Send to client.")):
+                with st.spinner("Generating and sending report…"):
+                    pdf_bytes, _meta = _report_for_download(instance_id, instance_obj)
+                    if not pdf_bytes:
+                        st.error("Could not generate the report. Check that there are active readings.")
+                    else:
+                        from core.report_delivery import deliver_report
+                        if isinstance(_meta, dict):
+                            _meta.setdefault("period", "Diario")
+                        res = deliver_report(instance_obj, pdf_bytes, _meta)
+                        _em = res.get("email")
+                        _wa = res.get("whatsapp")
+                        if _em is not None:
+                            if _em.get("ok"):
+                                st.success(f"✓ Email sent to {instance_obj.client_email}")
+                            else:
+                                st.error(f"Email: {_em.get('error', 'failed')}")
+                        if _wa is not None:
+                            if _wa.get("ok"):
+                                st.success(f"✓ WhatsApp sent to {instance_obj.whatsapp_number}")
+                            else:
+                                st.error(f"WhatsApp: {_wa.get('error', 'failed')}")
+                        if not res.get("any_ok") and _em is None and _wa is None:
+                            st.warning(res.get("error", "Not sent through any channel."))
+            if not _can_send:
+                st.caption("Configure the recipient in Machinery Library.")
 
     # Ciclo 23.173 — Event List estilo System1, ahora PERSISTENTE: registra los
     # cruces (Normal→Alarma→Danger→Normal) en la tabla severity_events y muestra
