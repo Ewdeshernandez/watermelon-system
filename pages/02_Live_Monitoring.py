@@ -4729,6 +4729,18 @@ def main() -> None:
         import logging
         logging.warning("render_api670_table (overview) failed: %s", e)
 
+    # 2026-11-23 — ESPEJO de Rotodinámica: la última captura del robot,
+    # procesada por el MISMO motor de Rotodinámica (core.rd_figures), publicada
+    # aquí en solo lectura y actualizándose sola. El análisis completo sigue
+    # viviendo en Rotodinámica; esto es la vitrina para el cliente.
+    try:
+        with st.expander("Waveform · Spectrum · Orbit — latest capture", expanded=True):
+            from core.rd_live_mirror import render_rd_mirror
+            render_rd_mirror(instance_id)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.warning("rd mirror failed: %s", e)
+
     # Ciclo 23.180 — "Advanced analysis — Waveform · Spectrum · Orbit"
     # ELIMINADO de Live Monitoring (pedido del usuario): TODO el análisis de
     # órbita / espectro / forma de onda / full-spectrum vive ahora en

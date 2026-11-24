@@ -1497,21 +1497,15 @@ _PROBES_UP_45 = {"3", "4", "5", "6"}
 
 
 def _bearing_id(*vals):
-    """Primer número de cojinete hallado en un bearing/label/nombre (ej '5XD' → '5')."""
-    import re  # noqa: PLC0415
-    for v in vals:
-        m = re.search(r"\d+", str(v or ""))
-        if m:
-            return m.group(0)
-    return ""
+    """Primer número de cojinete (FUENTE ÚNICA: core.rd_figures.bearing_id)."""
+    from core.rd_figures import bearing_id
+    return bearing_id(*vals)
 
 
 def _probe_angles(bid):
-    """(ang_x, ang_y, zona) por cojinete (conv. Bently 0°=arriba). Generador (5/6)
-    y gearbox (3/4) = sondas ARRIBA 45°R/45°L; turbina (1/2) = ABAJO 135°R/135°L."""
-    if str(bid) in _PROBES_UP_45:
-        return 45.0, 45.0, ("generador" if str(bid) in _GEN_BEARINGS else "gearbox")
-    return 135.0, 135.0, "turbina"
+    """(ang_x, ang_y, zona) por cojinete (FUENTE ÚNICA: core.rd_figures)."""
+    from core.rd_figures import probe_angles
+    return probe_angles(bid)
 
 
 def _gap_to_vh(dgx: np.ndarray, dgy: np.ndarray, ang_x: float = 135.0, ang_y: float = 135.0):
@@ -1540,122 +1534,25 @@ def _add_probe_glyphs(fig, R, ax_deg, ay_deg, lbl_x, lbl_y, with_cone=True, with
 
 
 def _fmt_dt(s):
-    """'7/12/2026 6:50:38 AM' → '12/07/2026 06:50' (24h, día/mes/año)."""
-    from datetime import datetime  # noqa: PLC0415
-    s = str(s or "").strip()
-    for _f in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
-               "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M"):
-        try:
-            return datetime.strptime(s, _f).strftime("%d/%m/%Y %H:%M")
-        except ValueError:
-            continue
-    return s
+    from core.rd_figures import fmt_dt
+    return fmt_dt(s)
 
 
 def _orbit_data(b, fmode, ang_x, ang_y):
-    """Órbita de un cojinete (método System1). FUENTE ÚNICA: core.orbit_render
-    (el MISMO cálculo que usan los reportes). Aquí solo se extraen los arrays del
-    bearing `b` y se arma el stamp (máquina + fecha), delegando a compute_orbit."""
-    from core.orbit_render import compute_orbit
-    _time = getattr(b.x, "cap_time", "") or getattr(b.y, "cap_time", "")
-    _mach = getattr(b.x, "machine", "") or getattr(b.y, "machine", "")
-    _stamp = " · ".join(x for x in (_mach, _fmt_dt(_time)) if x)
-    d = compute_orbit(
-        b.x.v, b.y.v,
-        fs_hz=float(b.x.fs_hz or b.y.fs_hz or 0),
-        spr=int(b.x.spr or b.y.spr or 0),
-        rpm=float(b.x.rpm or 0),
-        bearing_label=(b.x.label or b.name or ""),
-        x_label=(b.x.label or "X"), y_label=(b.y.label or "Y"),
-        unit=(b.x.unit or "µm"), machine=_mach, stamp=_stamp,
-        fmode=fmode, ang_x=ang_x, ang_y=ang_y)
-    d["time"] = _time
-    return d
+    """Órbita de un cojinete. FUENTE ÚNICA: core.rd_figures (→ core.orbit_render),
+    la misma que usa el espejo de Live Monitoring y los reportes."""
+    from core.rd_figures import orbit_data
+    return orbit_data(b, fmode, ang_x, ang_y)
 
 
 def _orbit_fig(b, d, R, ang_x, ang_y, fmode, h=560, compact=False):
-    """Arma la figura de UNA órbita con escala forzada R (misma para todas). El sentido
-    de giro real (API 670) = solo texto CW/CCW en la esquina (sin arco)."""
-    fig = go.Figure()
-    _add_probe_glyphs(fig, R, ang_x, ang_y, b.x.label, b.y.label,
-                      with_top=False, with_cone=not compact)
-    fig.add_trace(go.Scatter(x=d["xv"], y=d["yv"], mode="lines",
-                  line=dict(color=_NAVY, width=1.6), name=b.name, showlegend=False))
-    km = d["kmarks"]
-    if km:
-        _kx = [p[0] for p in km]; _ky = [p[1] for p in km]
-        if d["order"] == 0 and len(km) > 1:
-            fig.add_trace(go.Scatter(x=_kx, y=_ky, mode="markers",
-                          marker=dict(color="#1f9d55", size=6,
-                                      line=dict(color="white", width=0.8)), showlegend=False))
-        else:
-            _ks = (d["smax"] if d["smax"] else 1.0) * 0.07
-            for _th in range(0, 360, 60):
-                _r = np.radians(_th)
-                fig.add_trace(go.Scatter(x=[_kx[0], _kx[0] + _ks * np.sin(_r)],
-                              y=[_ky[0], _ky[0] + _ks * np.cos(_r)], mode="lines",
-                              line=dict(color="#1f9d55", width=1.2),
-                              hoverinfo="skip", showlegend=False))
-            fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
-                          marker=dict(color="#1f9d55", size=12,
-                                      line=dict(color="white", width=1.5)), showlegend=False))
-    if d["sp"] is not None and not compact:
-        fig.add_annotation(x=d["sp"][0], y=d["sp"][1], text=f"KΦ {d['kpos']}", showarrow=False,
-                           yshift=-14, font=dict(color="#1f9d55", size=10, family="IBM Plex Mono"))
-    # GIRO real (API 670) = SOLO texto CW/CCW en la esquina (sin arco, no roba espacio).
-    fig.add_annotation(xref="paper", yref="paper", x=0.985, y=0.985, xanchor="right",
-                       yanchor="top", text=f"<b>{d['rot_api']}</b>", showarrow=False,
-                       font=dict(color="#64748b", size=13, family="IBM Plex Mono"),
-                       bgcolor="rgba(255,255,255,0.65)")
-    if d.get("stamp"):     # tag de máquina + fecha/hora (24h), discreto (gris, esquina)
-        fig.add_annotation(xref="paper", yref="paper", x=0.015, y=0.015, xanchor="left",
-                           yanchor="bottom", text=d["stamp"], showarrow=False,
-                           font=dict(color="#94a3b8", size=10, family="IBM Plex Mono"))
-    _rng = R * 1.5 if R else None
-    fig.update_xaxes(title=(b.x.unit or "µm") if not compact else "", scaleanchor="y",
-                     scaleratio=1, zeroline=True, zerolinecolor="rgba(120,140,170,.45)",
-                     gridcolor="rgba(120,140,170,.12)", range=[-_rng, _rng] if _rng else None)
-    fig.update_yaxes(title=(b.y.unit or "µm") if not compact else "", zeroline=True,
-                     zerolinecolor="rgba(120,140,170,.45)", gridcolor="rgba(120,140,170,.12)",
-                     range=[-_rng, _rng] if _rng else None)
-    _ttl = (f"{b.name} · {fmode}" if compact
-            else f"Órbita · {b.name} · {fmode}  ·  precesión {d['precd']}")
-    fig = _layout(fig, _ttl, h=h)
-    fig.update_layout(plot_bgcolor="white", paper_bgcolor="white", showlegend=False)
-    return fig
+    from core.rd_figures import orbit_figure
+    return orbit_figure(b, d, R, ang_x, ang_y, fmode, h=h, compact=compact)
 
 
 def _orbit_add_cell(fig, bb, d, R, ang_x, ang_y, row, col):
-    """Pinta UNA órbita (probetas + trazo + keyphasor + texto CW/CCW) en la celda
-    (row, col) de un subplot, con escala R (misma para todas)."""
-    _rc = dict(row=row, col=col)
-    _add_probe_glyphs(fig, R, ang_x, ang_y, bb.x.label, bb.y.label,
-                      with_top=False, with_cone=False, row=row, col=col)
-    fig.add_trace(go.Scatter(x=d["xv"], y=d["yv"], mode="lines",
-                  line=dict(color=_NAVY, width=1.6), showlegend=False), **_rc)
-    km = d["kmarks"]
-    if km:
-        _kx = [p[0] for p in km]; _ky = [p[1] for p in km]
-        if d["order"] == 0 and len(km) > 1:
-            fig.add_trace(go.Scatter(x=_kx, y=_ky, mode="markers",
-                          marker=dict(color="#1f9d55", size=5,
-                                      line=dict(color="white", width=0.7)),
-                          showlegend=False), **_rc)
-        else:
-            _ks = (d["smax"] if d["smax"] else 1.0) * 0.07
-            for _th in range(0, 360, 60):
-                _r = np.radians(_th)
-                fig.add_trace(go.Scatter(x=[_kx[0], _kx[0] + _ks * np.sin(_r)],
-                              y=[_ky[0], _ky[0] + _ks * np.cos(_r)], mode="lines",
-                              line=dict(color="#1f9d55", width=1.1),
-                              hoverinfo="skip", showlegend=False), **_rc)
-            fig.add_trace(go.Scatter(x=_kx[:1], y=_ky[:1], mode="markers",
-                          marker=dict(color="#1f9d55", size=11,
-                                      line=dict(color="white", width=1.4)),
-                          showlegend=False), **_rc)
-    fig.add_annotation(x=R * 1.33, y=R * 1.33, text=f"<b>{d['rot_api']}</b>", showarrow=False,
-                       font=dict(color="#64748b", size=12, family="IBM Plex Mono"),
-                       bgcolor="rgba(255,255,255,0.65)", **_rc)
+    from core.rd_figures import orbit_add_cell
+    orbit_add_cell(fig, bb, d, R, ang_x, ang_y, row, col)
 
 
 def _trend_setpoint(tr):
@@ -2438,63 +2335,9 @@ elif view == "Forma de Onda":
     if not wsel:
         st.info("Elegí al menos un canal.")
     else:
-        fig = go.Figure()
-        _wunits, _wrows, _wtmax, _wymax = set(), [], 0.0, 0.0
-        for i, lab in enumerate(wsel):
-            ch = _wcmap[lab]
-            vv = ch.v
-            t_ms = ch.t * 1000.0 if ch.t.size else np.arange(vv.size) * 1.0
-            if t_ms.size:
-                _wtmax = max(_wtmax, float(t_ms[-1]))
-            _vf = vv[np.isfinite(vv)]
-            if _vf.size:
-                _wymax = max(_wymax, float(np.max(np.abs(_vf))))
-            col = _TREND_PAL[i % len(_TREND_PAL)]
-            fig.add_trace(go.Scatter(
-                x=t_ms, y=vv, mode="lines", name=lab,
-                line=dict(color=col, width=1.4, shape="spline", smoothing=0.4),
-                hovertemplate=f"<b>{lab}</b><br>%{{x:.2f}} ms<br>"
-                              f"%{{y:.2f}} {ch.unit or ''}<extra></extra>"))
-            _wunits.add(ch.unit or "")
-            # marcas de KEYPHASOR (una por vuelta, t=k·60/rpm) — como los puntos de System1
-            if wkph and ch.rpm and t_ms.size:
-                Tms = 60000.0 / ch.rpm
-                if Tms < (t_ms[-1] - t_ms[0]):
-                    kts = np.arange(float(t_ms[0]), float(t_ms[-1]), Tms)
-                    kvs = np.interp(kts, t_ms, vv)
-                    fig.add_trace(go.Scatter(
-                        x=kts, y=kvs, mode="markers",
-                        marker=dict(color=col, size=7, symbol="circle",
-                                    line=dict(color="white", width=1)),
-                        name=f"KPH {lab}", showlegend=False, hoverinfo="skip"))
-            # métricas por canal (para la tabla System1-class)
-            mx = compute_waveform_metrics(vv) or {}
-            _u = ch.unit or ""
-            _wrows.append([lab, f"{mx.get('peak_to_peak',0):.2f} {_u}",
-                           f"{mx.get('rms',0):.2f} {_u}", f"{mx.get('peak',0):.2f} {_u}",
-                           f"{mx.get('crest_factor',0):.2f}",
-                           f"{ch.rpm:,.0f}" if ch.rpm else "—"])
-        _wu = next(iter(_wunits)) if len(_wunits) == 1 else "mixto"
-        fig = _layout(fig, "Forma de onda", h=500)
-        _ym = _wymax * 1.08 if _wymax else None
-        # X ARRANCA EN 0 (sin padding) hasta el fin de la captura; Y CENTRADO en 0
-        # y simétrico (como System1) → el 0 queda al medio.
-        fig.update_xaxes(title="Tiempo (ms)", showgrid=True,
-                         gridcolor="rgba(120,140,170,.12)", showline=True,
-                         linecolor="#d9e1ec", zeroline=False,
-                         range=[0, _wtmax] if _wtmax else None,
-                         ticks="outside", ticklen=4, tickcolor="#d9e1ec")
-        fig.update_layout(
-            yaxis=dict(title=f"Amplitud ({_wu or 'a.u.'})", showgrid=True,
-                       gridcolor="rgba(120,140,170,.12)", zeroline=True,
-                       zerolinecolor="rgba(120,140,170,.45)", zerolinewidth=1.2,
-                       range=[-_ym, _ym] if _ym else None,
-                       ticks="outside", ticklen=4, tickcolor="#d9e1ec"),
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center",
-                        x=0.5, font=dict(size=12)),
-            margin=dict(l=64, r=28, t=52, b=72), hovermode="x unified",
-            plot_bgcolor="white", paper_bgcolor="white")
+        # FUENTE ÚNICA (core.rd_figures): el espejo de Live Monitoring dibuja igual.
+        from core.rd_figures import waveform_figure
+        fig, _wrows, _wu = waveform_figure([_wcmap[lab] for lab in wsel], kph=wkph)
         st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
         _download_fig_table_button(
             fig, ["Sensor", "Pico-pico", "RMS", "Pico", "Crest", "RPM"], _wrows,
@@ -2533,15 +2376,6 @@ elif view == "Espectro":
     _scmap = {c.label: c for c in rec.channels}
     _slabels = [c.label for c in rec.channels]
 
-    def _spk(u):
-        u = (u or "").lower()
-        if "mm/s" in u:
-            return "vel"
-        if u.strip() in ("g", "g pk", "g rms") or "m/s2" in u or "m/s²" in u:
-            return "accel"
-        return "disp"
-    _CPMAX = {"disp": 60000, "vel": 300000, "accel": 600000}
-
     sc1, sc2 = st.columns([3, 1])
     with sc1:
         ssel = st.multiselect("Canales (uno o varios)", _slabels,
@@ -2553,73 +2387,15 @@ elif view == "Espectro":
     if not ssel:
         st.info("Elegí al menos un canal.")
     else:
-        fig = go.Figure()
-        _sunits, _hrows, _cpmax_auto, _ord_ref = set(), [], 0, None
-        for i, lab in enumerate(ssel):
-            ch = _scmap[lab]
-            v = ch.v[np.isfinite(ch.v)]
-            fs = ch.fs_hz
-            if v.size < 8 or not fs:
-                continue
-            w = v - np.mean(v)
-            win = np.hanning(w.size)
-            am = np.abs(np.fft.rfft(w * win)) * 2.0 / np.sum(win)   # cero-a-pico corregido
-            fr = np.fft.rfftfreq(w.size, d=1.0 / fs)
-            cpm = fr * 60.0
-            kind = _spk(ch.unit)
-            mode = "pp" if kind == "disp" else "rms"
-            ampd = am * (2.0 if mode == "pp" else 1.0 / np.sqrt(2.0))
-            ud = ch.unit or ("µm pp" if kind == "disp" else
-                             "mm/s rms" if kind == "vel" else "g")
-            _sunits.add(ud)
-            _cpmax_auto = max(_cpmax_auto, _CPMAX[kind])
-            col = _TREND_PAL[i % len(_TREND_PAL)]
-            fig.add_trace(go.Scatter(
-                x=cpm, y=ampd, mode="lines", name=lab,
-                line=dict(color=col, width=1.2),      # sin spline: los picos deben ser nítidos
-                hovertemplate=f"<b>{lab}</b><br>%{{x:,.0f}} cpm<br>"
-                              f"%{{y:.2f}} {ud}<extra></extra>"))
-            if ch.rpm:
-                if _ord_ref is None:
-                    _ord_ref = ch.rpm                 # 1X en cpm = rpm del primer keyphasor
-
-                def _aat(fh):
-                    k = int(np.argmin(np.abs(fr - fh)))
-                    lo, hi = max(0, k - 2), min(ampd.size, k + 3)
-                    return float(np.max(ampd[lo:hi])) if hi > lo else 0.0
-                f1 = ch.rpm / 60.0
-                _ov = float(np.ptp(v)) if mode == "pp" else float(np.std(v))
-                _hrows.append([lab, f"{ch.rpm:,.0f}", f"{_ov:.2f} {ch.unit or ''}",
-                               f"{_aat(f1):.2f}", f"{_aat(2*f1):.2f}",
-                               f"{_aat(3*f1):.2f}", f"{_aat(4*f1):.2f}"])
-        if not fig.data:
+        # FUENTE ÚNICA (core.rd_figures): el espejo de Live Monitoring dibuja igual.
+        from core.rd_figures import spectrum_figure
+        _xmax = {"Auto (por tipo)": -1, "60.000 cpm (despl)": 60000,
+                 "300.000 cpm (vel)": 300000, "600.000 cpm (accel)": 600000,
+                 "Completo": None}[xsc]
+        fig, _hrows = spectrum_figure([_scmap[lab] for lab in ssel], xmax=_xmax)
+        if fig is None:
             st.warning("Espectro: faltan muestras o no se pudo estimar la fs.")
         else:
-            _xmax = {"Auto (por tipo)": _cpmax_auto, "60.000 cpm (despl)": 60000,
-                     "300.000 cpm (vel)": 300000, "600.000 cpm (accel)": 600000,
-                     "Completo": None}[xsc]
-            _su = next(iter(_sunits)) if len(_sunits) == 1 else "mixto"
-            # marcas de ORDEN 1X-4X (del primer keyphasor) en cpm
-            if _ord_ref:
-                for _k, _ol in [(1, "1X"), (2, "2X"), (3, "3X"), (4, "4X")]:
-                    _xo = _k * _ord_ref
-                    if _xmax is None or _xo <= _xmax:
-                        fig.add_vline(x=_xo, line=dict(color="#8090a6", width=1, dash="dot"),
-                                      annotation_text=_ol, annotation_position="top",
-                                      annotation_font_size=10)
-            fig = _layout(fig, "Espectro (FFT)", h=500)
-            fig.update_xaxes(title="Frecuencia (cpm)", showgrid=True,
-                             gridcolor="rgba(120,140,170,.12)", showline=True,
-                             linecolor="#d9e1ec", zeroline=False,
-                             range=[0, _xmax] if _xmax else None)
-            fig.update_layout(
-                yaxis=dict(title=f"Amplitud ({_su})", showgrid=True,
-                           gridcolor="rgba(120,140,170,.12)", rangemode="tozero"),
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="top", y=-0.14, xanchor="center",
-                            x=0.5, font=dict(size=12)),
-                margin=dict(l=64, r=28, t=52, b=72), hovermode="x unified",
-                plot_bgcolor="white", paper_bgcolor="white")
             st.plotly_chart(fig, use_container_width=True, config=_NOBAR)
             if _hrows:
                 _spcols = ["Sensor", "RPM", "Overall", "1X", "2X", "3X", "4X"]
@@ -2860,12 +2636,7 @@ elif view == "Órbita":
         _ocols = ["Cojinete", "RPM", "Precesión", "Giro (API 670)",
                   "Eje mayor", "Eje menor", "Elipticidad", "Smax"]
 
-        def _orow(bb, d):
-            _u = bb.x.unit or "µm"
-            return [bb.name, f"{d['rpm']:,.0f}" if d["rpm"] else "—", d["precd"],
-                    f"{d['rot_api']} ({d['maq']})", f"{d['major']:.1f} {_u}",
-                    f"{d['minor']:.1f} {_u}", f"{d['ellip']:.2f}", f"{d['smax']:.1f} {_u}"]
-
+        from core.rd_figures import orbit_row as _orow
         if len(_datas) == 1:
             bb, d = _datas[0]
             fig = _orbit_fig(bb, d, _gR, *_ang_for(bb), fmode, h=580, compact=False)
@@ -2895,35 +2666,8 @@ elif view == "Órbita":
                 f"(desalineación). Punto verde = keyphasor · CW/CCW (esquina) = giro real."
                 f"</div></div>", unsafe_allow_html=True)
         else:
-            from plotly.subplots import make_subplots  # noqa: PLC0415
-            import math as _math  # noqa: PLC0415
-            _ncol = 2
-            _nrow = _math.ceil(len(_datas) / _ncol)
-            _titles = [f"{bb.name} · {d['prec']} · giro {d['rot_api']}"
-                       + (f"<br><span style='font-size:11px;color:#94a3b8'>{d['stamp']}</span>"
-                          if d.get("stamp") else "")
-                       for bb, d in _datas]
-            figM = make_subplots(rows=_nrow, cols=_ncol, subplot_titles=_titles,
-                                 horizontal_spacing=0.08,
-                                 vertical_spacing=0.18 if _nrow > 1 else 0.12)
-            _L = _gR * 1.5
-            for _i, (bb, d) in enumerate(_datas):
-                _r, _c = _i // _ncol + 1, _i % _ncol + 1
-                _orbit_add_cell(figM, bb, d, _gR, *_ang_for(bb), _r, _c)
-                _idx = (_r - 1) * _ncol + _c
-                _yid = "y" if _idx == 1 else f"y{_idx}"
-                figM.update_xaxes(range=[-_L, _L], scaleanchor=_yid, scaleratio=1,
-                                  row=_r, col=_c, zeroline=True,
-                                  zerolinecolor="rgba(120,140,170,.4)",
-                                  gridcolor="rgba(120,140,170,.1)")
-                figM.update_yaxes(range=[-_L, _L], row=_r, col=_c, zeroline=True,
-                                  zerolinecolor="rgba(120,140,170,.4)",
-                                  gridcolor="rgba(120,140,170,.1)")
-            figM.update_layout(
-                template="plotly_white", height=360 * _nrow + 40, showlegend=False,
-                title=dict(text=f"Órbitas · {fmode}", font=dict(color="#12305e", size=16)),
-                font=dict(family="IBM Plex Sans"), plot_bgcolor="white",
-                paper_bgcolor="white", margin=dict(l=55, r=35, t=66, b=45))
+            from core.rd_figures import orbit_grid_figure
+            figM = orbit_grid_figure(_datas, _gR, fmode, _ang_for)
             st.plotly_chart(figM, use_container_width=True, config=_NOBAR)
             _orows_all = [_orow(bb, d) for bb, d in _datas]
             _download_fig_table_button(
