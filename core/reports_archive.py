@@ -59,6 +59,7 @@ ARCHIVE_BUCKET_NAME = "reports-archive"
 _SUPABASE_CLIENT_CACHE: Any = None
 _SUPABASE_CLIENT_TRIED: bool = False
 _SYNC_FROM_DONE: bool = False  # Para llamar sync_from_supabase 1 vez por proceso
+_SYNC_FROM_AT: float = 0.0     # monotonic del último sync (refresh periódico)
 
 
 # =============================================================
@@ -316,7 +317,7 @@ def sync_archive_from_supabase(*, force: bool = False) -> Dict[str, int]:
     Returns:
         {"downloaded": int, "skipped": int, "failed": int}
     """
-    global _SYNC_FROM_DONE
+    global _SYNC_FROM_DONE, _SYNC_FROM_AT
     if _SYNC_FROM_DONE and not force:
         return {"downloaded": 0, "skipped": 0, "failed": 0,
                 "already_synced": True}
@@ -324,6 +325,7 @@ def sync_archive_from_supabase(*, force: bool = False) -> Dict[str, int]:
     client = _get_archive_supabase_client()
     if client is None:
         _SYNC_FROM_DONE = True
+        _SYNC_FROM_AT = __import__("time").monotonic()
         return {"downloaded": 0, "skipped": 0, "failed": 0,
                 "supabase_unavailable": True}
 
@@ -357,12 +359,26 @@ def sync_archive_from_supabase(*, force: bool = False) -> Dict[str, int]:
             stats["failed"] += 1
 
     _SYNC_FROM_DONE = True
+    _SYNC_FROM_AT = __import__("time").monotonic()
     if stats["downloaded"] > 0 or stats["failed"] > 0:
         print(
             f"[WM_ARCHIVE] sync_from_supabase: {stats}",
             file=sys.stderr, flush=True,
         )
     return stats
+
+
+def refresh_archive_from_supabase(max_age_s: float = 600.0) -> Dict[str, int]:
+    """Re-sincroniza (incremental: solo baja lo que falta) si el último sync
+    tiene más de `max_age_s`. Los reportes que archiva el cron (otro proceso
+    en Render) no existen en el disco del proceso web hasta este refresh —
+    sin esto el cliente no veía el semanal auto-enviado hasta un redeploy."""
+    global _SYNC_FROM_DONE
+    import time as _time
+    if _SYNC_FROM_DONE and (_time.monotonic() - _SYNC_FROM_AT) < max_age_s:
+        return {"downloaded": 0, "skipped": 0, "failed": 0, "fresh": True}
+    _SYNC_FROM_DONE = False
+    return sync_archive_from_supabase()
 
 
 def sync_archive_to_supabase(*, force: bool = False) -> Dict[str, int]:
@@ -515,6 +531,7 @@ def archive_report_pdf(
             "consecutive":     meta.get("consecutive", ""),
             "executive_summary": meta.get("executive_summary", ""),
             "executive_severity": meta.get("executive_severity", ""),
+            "period":          meta.get("period", ""),
             "prepared_by":     meta.get("prepared_by", ""),
             "reviewed_by":     meta.get("reviewed_by", ""),
         },
@@ -662,6 +679,8 @@ def list_archived_reports(
     # filesystem (rápido). Idempotente.
     if not _SYNC_FROM_DONE:
         sync_archive_from_supabase()
+    else:
+        refresh_archive_from_supabase()
 
     if not ARCHIVE_ROOT.exists():
         return []

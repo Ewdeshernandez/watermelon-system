@@ -38,6 +38,7 @@ page_header(
 )
 
 from core.report_center_ui import inject_css, render_approval, render_delivery
+from core.client_report_archive import render_archive_admin
 
 inject_css()
 
@@ -45,18 +46,24 @@ try:
     from core.auth import get_current_user as _gcu
     _me = (_gcu() or {})
     _me_name = _me.get("full_name") or _me.get("username") or ""
+    _me_email = (_me.get("email") or "").strip().lower()
+    _me_role = (_me.get("role") or "").strip().lower()
 except Exception:
     _me_name = ""
+    _me_email = ""
+    _me_role = ""
 
 # Sub-navegación (segmented control con el mismo look del design system)
 st.markdown('<div class="bf-label">View</div>', unsafe_allow_html=True)
 _view = st.radio(
-    "View", ["Approval", "Delivery scheduling"], horizontal=True,
+    "View", ["Approval", "Delivery scheduling", "Archive"], horizontal=True,
     key="rc_view", label_visibility="collapsed",
 )
 st.markdown("")
 
 if _view == "Approval":
     render_approval(_me_name)
+elif _view == "Archive":
+    render_archive_admin(_me_email, _me_role)
 else:
     render_delivery()
