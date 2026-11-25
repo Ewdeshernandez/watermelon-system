@@ -167,11 +167,13 @@ def _supabase_path_for(archive_id: str, suffix: str) -> str:
 
 def _upload_to_supabase(
     archive_id: str,
-    pdf_bytes: bytes,
+    pdf_bytes: Optional[bytes],
     sidecar_dict: Dict[str, Any],
 ) -> bool:
     """Sube PDF + sidecar JSON a Supabase Storage. Idempotente (upsert).
-    Devuelve True si ambos uploads fueron OK."""
+    pdf_bytes=None sube solo el sidecar (el PDF ya está en el bucket y puede
+    no estar en disco local: el sync solo baja sidecars).
+    Devuelve True si los uploads fueron OK."""
     client = _get_archive_supabase_client()
     if client is None:
         return False
@@ -179,10 +181,11 @@ def _upload_to_supabase(
         bucket = client.storage.from_(ARCHIVE_BUCKET_NAME)
         pdf_path = _supabase_path_for(archive_id, ".pdf")
         json_path = _supabase_path_for(archive_id, ".json")
-        bucket.upload(
-            pdf_path, pdf_bytes,
-            {"upsert": "true", "content-type": "application/pdf"},
-        )
+        if pdf_bytes is not None:
+            bucket.upload(
+                pdf_path, pdf_bytes,
+                {"upsert": "true", "content-type": "application/pdf"},
+            )
         sidecar_bytes = json.dumps(
             sidecar_dict, indent=2, ensure_ascii=False, default=str
         ).encode("utf-8")
@@ -192,7 +195,7 @@ def _upload_to_supabase(
         )
         print(
             f"[WM_ARCHIVE] Supabase upload OK: {archive_id} "
-            f"({_human_size(len(pdf_bytes))})",
+            f"({_human_size(len(pdf_bytes)) if pdf_bytes is not None else 'solo sidecar'})",
             file=sys.stderr, flush=True,
         )
         return True
@@ -225,6 +228,27 @@ def _download_from_supabase(archive_id: str) -> Tuple[Optional[bytes], Optional[
             file=sys.stderr, flush=True,
         )
         return None, None
+
+
+def _download_sidecar_from_supabase(archive_id: str) -> Optional[Dict[str, Any]]:
+    """Baja solo el sidecar JSON (pocos KB). El PDF se baja bajo demanda en
+    get_archived_pdf_bytes — así el cold start no arrastra cientos de MB."""
+    client = _get_archive_supabase_client()
+    if client is None:
+        return None
+    bucket = client.storage.from_(ARCHIVE_BUCKET_NAME)
+    last_exc: Optional[Exception] = None
+    for _attempt in range(2):
+        try:
+            raw = bucket.download(_supabase_path_for(archive_id, ".json"))
+            return json.loads(raw.decode("utf-8")) if raw else None
+        except Exception as exc:  # EAGAIN transitorio → un reintento
+            last_exc = exc
+    print(
+        f"[WM_ARCHIVE] Supabase sidecar FAIL para {archive_id}: {last_exc}",
+        file=sys.stderr, flush=True,
+    )
+    return None
 
 
 def _delete_from_supabase(archive_id: str) -> bool:
@@ -332,19 +356,26 @@ def sync_archive_from_supabase(*, force: bool = False) -> Dict[str, int]:
     archive_ids = _list_supabase_archive_files()
     stats = {"downloaded": 0, "skipped": 0, "failed": 0}
 
+    missing = []
     for aid in archive_ids:
-        local_pdf = ARCHIVE_ROOT / f"{aid}.pdf"
-        local_json = ARCHIVE_ROOT / f"{aid}.json"
-        if (not force and local_pdf.exists() and local_json.exists()):
+        if not force and (ARCHIVE_ROOT / f"{aid}.json").exists():
             stats["skipped"] += 1
-            continue
-        pdf_bytes, sidecar_dict = _download_from_supabase(aid)
-        if pdf_bytes is None or sidecar_dict is None:
+        else:
+            missing.append(aid)
+    # Solo el sidecar: el listado vive de los JSON y el PDF se baja al
+    # pedirlo (get_archived_pdf_bytes). En paralelo: un cold start con ~100
+    # reportes bajaba en serie ~1 min antes de pintar la página.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        fetched = list(zip(missing, pool.map(_download_sidecar_from_supabase, missing)))
+
+    for aid, sidecar_dict in fetched:
+        local_json = ARCHIVE_ROOT / f"{aid}.json"
+        if sidecar_dict is None:
             stats["failed"] += 1
             continue
         try:
-            local_pdf.parent.mkdir(parents=True, exist_ok=True)
-            local_pdf.write_bytes(pdf_bytes)
+            local_json.parent.mkdir(parents=True, exist_ok=True)
             local_json.write_text(
                 json.dumps(sidecar_dict, indent=2, ensure_ascii=False,
                            default=str),
@@ -862,11 +893,11 @@ def share_with_client(
     # no cambió pero el sidecar sí; lo subimos junto para mantenerlo
     # consistente entre filesystem y bucket).
     pdf_path = ARCHIVE_ROOT / f"{archive_id}.pdf"
-    if pdf_path.exists():
-        try:
-            _upload_to_supabase(archive_id, pdf_path.read_bytes(), sc)
-        except Exception:
-            pass
+    try:
+        _upload_to_supabase(
+            archive_id, pdf_path.read_bytes() if pdf_path.exists() else None, sc)
+    except Exception:
+        pass
     return {"ok": True, "shared": bool(shared)}
 
 
