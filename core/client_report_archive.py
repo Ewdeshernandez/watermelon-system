@@ -216,7 +216,7 @@ def _row(sc: Dict[str, Any], email: str, role: str, key_prefix: str) -> None:
     import streamlit as st
     rm = _rm(sc)
     kind = report_kind(sc)
-    sev_txt = str(rm.get("executive_severity", "") or "").strip() or "Sin estado"
+    sev_txt = str(rm.get("executive_severity", "") or "").strip()
     color = _SEV_COLORS[sev_class(sev_txt)]
     consec = str(rm.get("consecutive", "") or "").strip() or "Sin consecutivo"
     signers = []
@@ -242,9 +242,10 @@ def _row(sc: Dict[str, Any], email: str, role: str, key_prefix: str) -> None:
             f'<div class="ra-sub">{_esc(fmt_date(report_date(sc)))}</div></div>',
             unsafe_allow_html=True)
     with c4:
+        # Reportes anteriores (cargados desde el correo) no traen estado: celda vacía.
         st.markdown(
-            f'<div class="ra-cell"><div class="ra-s"><i style="background:{color}"></i>'
-            f'{_esc(sev_txt)}</div></div>',
+            (f'<div class="ra-cell"><div class="ra-s"><i style="background:{color}"></i>'
+             f'{_esc(sev_txt)}</div></div>') if sev_txt else '<div class="ra-cell"></div>',
             unsafe_allow_html=True)
     with c5:
         st.download_button(
