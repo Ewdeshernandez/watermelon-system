@@ -258,11 +258,16 @@ def _row(sc: Dict[str, Any], email: str, role: str, key_prefix: str) -> None:
         )
 
 
-def render_client_archive(email: str, role: str = "client") -> None:
-    """Vista completa del archivo para un usuario cliente (solo lectura)."""
+def render_client_archive(email: str, role: str = "client", *,
+                          as_client: Any = None) -> None:
+    """Vista completa del archivo para un usuario cliente (solo lectura).
+
+    as_client: un core.clients.Client — vista previa admin "ver como cliente":
+    lista con los permisos del admin y filtra con la MISMA regla que aplica a
+    los usuarios de ese cliente (sidecar_matches_client)."""
     import streamlit as st
     from core.ui_industrial import inject_industrial_css, industrial_band
-    from core.reports_archive import list_archived_reports
+    from core.reports_archive import list_archived_reports, sidecar_matches_client
 
     inject_industrial_css()
     st.markdown(_CLIENT_CSS, unsafe_allow_html=True)
@@ -272,8 +277,11 @@ def render_client_archive(email: str, role: str = "client") -> None:
                                         limit=2000)
     except Exception:  # noqa: BLE001
         reports = []
+    if as_client is not None:
+        reports = [r for r in reports if sidecar_matches_client(r, as_client)]
 
-    cname = _client_name(email)
+    cname = ((getattr(as_client, "display_name", "") or "").strip()
+             if as_client is not None else _client_name(email))
     n_w = sum(1 for r in reports if report_kind(r) == KIND_WEEKLY)
     n_m = sum(1 for r in reports if report_kind(r) == KIND_MONTHLY)
     last = max((report_date(r) for r in reports), default="")
@@ -370,6 +378,24 @@ def render_archive_admin(me_email: str, me_role: str) -> None:
     from core.ui_industrial import html_table, dot
     from core.reports_archive import (archive_report_pdf, list_archived_reports,
                                       delete_archived_report)
+
+    if (me_role or "").lower() == "admin":
+        try:
+            from core.clients import list_clients
+            clients = [c for c in list_clients() if (c.display_name or "").strip()]
+        except Exception:  # noqa: BLE001
+            clients = []
+        full = "Full archive"
+        pick = st.selectbox(
+            "View as", [full] + [c.display_name for c in clients],
+            key="rc_archive_view_as",
+            help="Preview the archive exactly as a client's users see it in Reports.")
+        if pick != full:
+            client = next(c for c in clients if c.display_name == pick)
+            st.caption(f"Preview — this is exactly what {pick} users see in Reports "
+                       "(same visibility rule, read-only).")
+            render_client_archive(me_email, me_role, as_client=client)
+            return
 
     reports = list_archived_reports(viewer_email=me_email, viewer_role=me_role,
                                     limit=2000)

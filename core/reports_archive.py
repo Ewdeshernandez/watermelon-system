@@ -596,6 +596,29 @@ def archive_report_pdf(
 # LIST — buscar reportes archivados con filtros + permisos
 # =============================================================
 
+def sidecar_matches_client(sidecar: Dict[str, Any], client: Any) -> bool:
+    """True si el reporte pertenece al cliente (match_strings / asset_tags
+    contra client / instance_tag / asset / asset_class / train_description).
+    Es LA regla que decide qué ve un usuario cliente; la vista admin "ver
+    como cliente" usa la misma para no divergir."""
+    rm = (sidecar.get("report_meta") or {})
+    haystack_lc = " ".join([
+        str(rm.get("client", "")),
+        str(rm.get("instance_tag", "")),
+        str(rm.get("asset", "")),
+        str(rm.get("asset_class", "")),
+        str(rm.get("train_description", "")),
+        str(sidecar.get("client", "")),
+        str(sidecar.get("asset", "")),
+    ]).lower()
+    for s in list(getattr(client, "match_strings", ()) or ()) + \
+            list(getattr(client, "asset_tags", ()) or ()):
+        s_lc = str(s).strip().lower()
+        if s_lc and s_lc in haystack_lc:
+            return True
+    return False
+
+
 def _can_view(viewer_email: str, viewer_role: str, sidecar: Dict[str, Any]) -> bool:
     """Reglas de visibilidad por role:
        admin       → TODO
@@ -626,30 +649,7 @@ def _can_view(viewer_email: str, viewer_role: str, sidecar: Dict[str, Any]) -> b
             c = get_client_for_email(viewer)
             if c is None:
                 return False
-            rm = (sidecar.get("report_meta") or {})
-            # Texto donde buscamos match: client / instance_tag /
-            # asset_class / train_description / asset
-            haystacks = [
-                str(rm.get("client", "")),
-                str(rm.get("instance_tag", "")),
-                str(rm.get("asset", "")),
-                str(rm.get("asset_class", "")),
-                str(rm.get("train_description", "")),
-                str(sidecar.get("client", "")),
-                str(sidecar.get("asset", "")),
-            ]
-            haystack_lc = " ".join(haystacks).lower()
-            # Match por match_strings (substring case-insensitive)
-            for s in c.match_strings:
-                s_lc = str(s).strip().lower()
-                if s_lc and s_lc in haystack_lc:
-                    return True
-            # Match por asset_tags (TES1, TES3, etc.)
-            for t in c.asset_tags:
-                t_lc = str(t).strip().lower()
-                if t_lc and t_lc in haystack_lc:
-                    return True
-            return False
+            return sidecar_matches_client(sidecar, c)
         except Exception:
             return False
     # Default conservador
@@ -926,6 +926,7 @@ def get_archive_stats() -> Dict[str, Any]:
 
 
 __all__ = [
+    "sidecar_matches_client",
     "ARCHIVE_ROOT",
     "archive_report_pdf",
     "list_archived_reports",

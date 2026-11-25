@@ -53,3 +53,13 @@ def test_download_name_is_safe():
         "SIGA-REP-TEC-WM-SGT300B-015.pdf"
     n = download_name(_sc(instance_tag="SGT 300/B", period="Semanal", report_date="2026-11-23"))
     assert "/" not in n and n.endswith(".pdf")
+
+
+def test_sidecar_matches_client_rule():
+    from types import SimpleNamespace
+    from core.reports_archive import sidecar_matches_client
+    acme = SimpleNamespace(match_strings=("Acme Energy",), asset_tags=("TX1",))
+    assert sidecar_matches_client(_sc(client="Acme Energy", asset_class="Reporte"), acme)
+    assert sidecar_matches_client(_sc(instance_tag="TX1"), acme)
+    assert not sidecar_matches_client(_sc(client="Other Co", instance_tag="TX9"), acme)
+    assert not sidecar_matches_client(_sc(), SimpleNamespace(match_strings=("",), asset_tags=()))
