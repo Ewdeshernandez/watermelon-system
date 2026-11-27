@@ -22,7 +22,7 @@ from core.auth import require_login, render_user_menu, require_role
 st.set_page_config(
     page_title="Watermelon System | Report Center",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 require_login()
 render_user_menu()

@@ -19,7 +19,7 @@ import streamlit as st
 from core.auth import get_current_user, render_user_menu, require_login
 
 st.set_page_config(page_title="Watermelon System | Suscripción", layout="wide",
-                   initial_sidebar_state="expanded")
+                   initial_sidebar_state="auto")
 require_login()
 render_user_menu()
 

@@ -28,7 +28,7 @@ from core.auth import require_login, render_user_menu
 st.set_page_config(
     page_title="Watermelon System | Advanced Analysis",
     layout="wide",
-    initial_sidebar_state="expanded",  # Ciclo 23.161 — nav visible al entrar
+    initial_sidebar_state="auto",  # Ciclo 23.161 — nav visible al entrar
 )
 require_login()
 render_user_menu()
