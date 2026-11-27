@@ -385,9 +385,17 @@ def whatsapp_url(text: str) -> str:
 
 def attention_items(fleet: Sequence[Dict[str, Any]],
                     events_by_iid: Dict[str, List[Dict[str, Any]]],
-                    pending: Sequence[Tuple[str, str, Dict[str, Any]]] = ()) -> List[Dict[str, Any]]:
+                    pending: Sequence[Tuple[str, str, Dict[str, Any]]] = (),
+                    requests: Sequence[Dict[str, Any]] = ()) -> List[Dict[str, Any]]:
     """Lo que SIGA tiene que mirar, ordenado: rojo → ámbar → azul."""
     items: List[Dict[str, Any]] = []
+    for r in requests or []:
+        if r.get("status") == "open":
+            urgent = r.get("urgency") == "urgent"
+            items.append({"sev": 0 if urgent else 1, "color": "dang" if urgent else "warn",
+                          "iid": r.get("instance_id"),
+                          "title": f"{r.get('tag') or '—'} · service request{' (URGENT)' if urgent else ''}",
+                          "body": f"{r.get('email', '')}: {(r.get('description') or '')[:120]}"})
     for a in fleet:
         tag, iid = a.get("tag") or a["iid"], a["iid"]
         state = a.get("state")
@@ -487,10 +495,10 @@ _CSS = """
 .lp-kpi .v small { font-size: 13px; color: #8fb3dd; font-weight: 500; }
 .lp-kpi .l { font-size: 13px; color: #8fb3dd; margin-top: 3px; }
 .lp-h2 { margin: 6px 0 10px; font-size: 20px; font-weight: 700; color: #0f172a; }
-.lp-card-ic { width: 40px; height: 40px; border-radius: 11px; background: #e8f1fb; display: flex;
+.lp-card-ic { width: 40px; height: 40px; border-radius: 11px; background: #eef3f9; display: flex;
   align-items: center; justify-content: center; margin-bottom: 8px; }
-.lp-card-t { font-size: 16px; font-weight: 600; color: #0f172a; line-height: 1.3; min-height: 42px; }
-.lp-card-d { font-size: 13px; color: #56667e; line-height: 1.45; min-height: 58px; margin: 2px 0 6px; }
+.lp-card-t { font-size: 16px; font-weight: 600; color: #0f172a; line-height: 1.3; }
+.lp-card-d { font-size: 13px; color: #56667e; line-height: 1.45; min-height: 40px; margin: 2px 0 6px; }
 .lp-panel { background: #fff; border: 1px solid #dbe3ee; border-radius: 18px; padding: 20px 22px; }
 .lp-panel-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .lp-ph { margin: 0; font: 600 17px 'IBM Plex Sans', sans-serif; color: #0f172a; letter-spacing: -.005em; }
@@ -498,7 +506,23 @@ _CSS = """
 .lp-line { display: flex; gap: 12px; padding: 7px 0; font-size: 14.5px; line-height: 1.5; color: #24344d; }
 .lp-line i { flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; }
 .lp-label { font: 600 11px 'IBM Plex Mono', monospace; letter-spacing: .12em; color: #56667e; text-transform: uppercase; }
-.lp-pt { display: grid; grid-template-columns: 50px 1fr 108px; gap: 12px; align-items: center; padding: 4px 0; }
+.lp-pt { display: grid; grid-template-columns: 42px minmax(50px, 1fr) 118px 74px 66px; gap: 10px; align-items: center; padding: 4px 0; }
+.lp-pt .sp { display: flex; }
+.lp-dc { font: 600 11.5px 'IBM Plex Mono', monospace; border-radius: 999px; padding: 2px 8px; text-align: center; white-space: nowrap; }
+.lp-dc.up { background: #fdf1d8; color: #8a5a00; } .lp-dc.dn { background: #e3f6ea; color: #17733f; }
+.lp-dc.fl { background: #eef2f7; color: #56667e; } .lp-dc.off { color: #9aa8ba; }
+.lp-op { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.lp-op .n { font: 600 26px 'IBM Plex Mono', monospace; color: #0f172a; font-variant-numeric: tabular-nums; }
+.lp-op .n small { font-size: 13px; color: #56667e; font-weight: 500; }
+.lp-op .l { font-size: 13px; color: #56667e; margin-top: 2px; }
+.lp-opbar { height: 8px; border-radius: 999px; background: #edf1f6; overflow: hidden; margin-top: 8px; }
+.lp-opbar b { display: block; height: 100%; background: #1f9d55; }
+.lp-rec { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid #edf1f6; font-size: 14px; line-height: 1.45; color: #24344d; }
+.lp-rec:last-child { border-bottom: 0; }
+.lp-pill { font: 600 11px 'IBM Plex Mono', monospace; letter-spacing: .04em; border-radius: 999px; padding: 3px 9px; white-space: nowrap; height: fit-content; }
+.lp-pill.pending { background: #fdf1d8; color: #8a5a00; } .lp-pill.in_progress { background: #e3eefb; color: #1d5fa8; }
+.lp-pill.done { background: #e3f6ea; color: #17733f; }
+.lp-rec small { display: block; color: #8090a6; font-size: 12px; margin-top: 2px; }
 .lp-pt .t { font: 600 13.5px 'IBM Plex Mono', monospace; color: #0f172a; }
 .lp-pt .bar { height: 9px; background: #edf1f6; border-radius: 999px; overflow: hidden; position: relative; }
 .lp-pt .bar b { display: block; height: 100%; border-radius: 999px; }
@@ -544,6 +568,7 @@ _ICONS = {
     "archive": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 14h8"/>',
     "chat": '<path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/>',
     "phone": '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
+    "service": '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
 }
 
 
@@ -629,7 +654,9 @@ def render_client_actions(*, instance_id: str, tag: str, client_name: str, pdf_b
 
     st.markdown(f'<div class="lp"><h2 class="lp-h2">{"What do you need today?" if lang == "en" else "¿Qué necesita hoy?"}</h2></div>',
                 unsafe_allow_html=True)
-    cols = st.columns(5, gap="small")
+    r1 = st.columns(3, gap="small")
+    r2 = st.columns(3, gap="small")
+    cols = [r1[0], r1[1], r1[2], r2[0], r2[2]]
 
     def _card(col, key, icon, title, desc, icolor="#1d5fa8"):
         with col:
@@ -677,6 +704,15 @@ def render_client_actions(*, instance_id: str, tag: str, client_name: str, pdf_b
               else "WhatsApp con la máquina ya en el mensaje.", "#1f9d55")
     b.link_button("Open WhatsApp" if lang == "en" else "Abrir WhatsApp", whatsapp_url(msg),
                   use_container_width=True)
+
+    def _open_sr():
+        st.session_state["lp_sr_open"] = True
+
+    b = _card(r2[1], "service", "service", "Request a service" if lang == "en" else "Solicitar servicio",
+              "Remote analysis, site visit, balancing… straight to SIGA." if lang == "en"
+              else "Análisis remoto, visita, balanceo… directo a SIGA.", "#e8890c")
+    b.button("Request" if lang == "en" else "Solicitar", key=f"lp_btn_sr_{instance_id}", on_click=_open_sr,
+             use_container_width=True)
 
     b = _card(cols[4], "app", "phone", "On your phone" if lang == "en" else "En su celular",
               "Install Watermelon Live and get alarms instantly." if lang == "en"
@@ -743,8 +779,36 @@ def render_this_week(lines: List[Dict[str, str]], *, last_report: Optional[Dict[
                      else f"Próximo reporte semanal: {fmt_day(next_at, lang, weekday=True)}"))
 
 
-def render_points(groups: List[Dict[str, Any]], lang: str) -> None:
+def spark_svg(vals: Sequence[float], color: str = "#1d5fa8", w: int = 72, h: int = 20) -> str:
+    v = [float(x) for x in vals or [] if x is not None]
+    if len(v) < 2:
+        return f'<svg width="{w}" height="{h}" aria-hidden="true"></svg>'
+    lo, hi = min(v), max(v)
+    span = (hi - lo) or (abs(hi) * 0.05) or 1.0
+    pts = " ".join(f"{i / (len(v) - 1) * (w - 4) + 2:.1f},{h - 3 - (x - lo) / span * (h - 6):.1f}"
+                   for i, x in enumerate(v))
+    lx, ly = pts.split(" ")[-1].split(",")
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" aria-hidden="true">'
+            f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.6" '
+            f'stroke-linejoin="round" stroke-linecap="round"/>'
+            f'<circle cx="{lx}" cy="{ly}" r="2.2" fill="{color}"/></svg>')
+
+
+def delta_chip(tr: Optional[Dict[str, Any]], lang: str) -> str:
+    if not tr or tr.get("pct") is None:
+        return '<span class="lp-dc off">—</span>'
+    pct, d = tr["pct"], tr["dir"]
+    if d == "up":
+        return f'<span class="lp-dc up" title="{"vs last week" if lang == "en" else "vs semana pasada"}">↑ {pct:+.0f} %</span>'
+    if d == "down":
+        return f'<span class="lp-dc dn" title="{"vs last week" if lang == "en" else "vs semana pasada"}">↓ {pct:+.0f} %</span>'
+    return f'<span class="lp-dc fl">{"steady" if lang == "en" else "estable"}</span>'
+
+
+def render_points(groups: List[Dict[str, Any]], lang: str,
+                  trends: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
     import streamlit as st
+    trends = trends or {}
     blocks = []
     for g in groups:
         rows = []
@@ -762,13 +826,17 @@ def render_points(groups: List[Dict[str, Any]], lang: str) -> None:
             val = f"{_num(p['value'], 2 if abs(float(p['value'] or 0)) < 10 else 1, lang)} {_esc(p['unit'])}"
             title = (f"{p['tag']}: {pct} % of alarm" if lang == "en" else f"{p['tag']}: {pct} % de la alarma") \
                 if pct is not None else p["tag"]
+            tr = trends.get(p["tag"])
+            sp_col = "#d99a00" if (tr or {}).get("dir") == "up" else "#1d5fa8"
             rows.append(f'<div class="lp-pt" title="{_esc(title)}"><span class="t">{p["tag"]}</span>'
                         f'<div class="bar"><b style="width:{w}%;background:{col}"></b></div>'
-                        f'<span class="v">{val}</span></div>')
+                        f'<span class="v">{val}</span>'
+                        f'<span class="sp">{spark_svg((tr or {}).get("spark", []), sp_col)}</span>'
+                        f'{delta_chip(tr, lang)}</div>')
         blocks.append(f'<div class="lp-grp"><div class="lp-label">{_esc(_L(COMP_NAMES.get(g["key"], COMP_NAMES["other"]), lang))}</div>'
                       f'{"".join(rows)}</div>')
-    hint = ("The bar shows how close each point is to its alarm limit" if lang == "en"
-            else "La barra muestra qué tan cerca está cada punto de su límite de alarma")
+    hint = ("Bar = how close to its alarm · line = last 30 days · arrow = vs last week" if lang == "en"
+            else "Barra = cercanía a su alarma · línea = últimos 30 días · flecha = vs semana pasada")
     st.markdown(f'<div class="lp lp-panel"><div class="lp-panel-h"><div class="lp-ph">{"Measurement points" if lang == "en" else "Puntos de medición"}</div>'
                 f'<span>{_esc(hint)}</span></div><div class="lp-grid2">{"".join(blocks)}</div></div>',
                 unsafe_allow_html=True)
@@ -913,3 +981,158 @@ def render_client_activity() -> None:
                    f'<span>{_esc(last)} · <span class="lp-mono">{when_txt}</span></span>'
                    f'<span>{u["visits"]} visits · {u["downloads"]} downloads</span></div>')
     box.markdown(f'<div class="lp">{"".join(out)}</div>', unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Operación, recomendaciones y solicitudes de servicio
+# ---------------------------------------------------------------------------
+
+def render_operation(stats: Optional[Dict[str, Any]], lang: str) -> None:
+    import streamlit as st
+    if not stats:
+        return
+    pct = stats["pct_running"]
+    nod = stats.get("hours_nodata") or 0
+    cells = [
+        (f'{_num(pct, 0, lang)}<small> %</small>',
+         "of the time running (hours with data)" if lang == "en" else "del tiempo operando (horas con dato)"),
+        (f'{_num(stats["hours_running"], 0, lang)}<small> h</small>',
+         "running at normal speed" if lang == "en" else "a velocidad normal"),
+        (f'{stats["starts"]}', ("starts" if lang == "en" else "arranques") + f' · {stats["stops"]} '
+         + ("stops" if lang == "en" else "paradas")),
+    ]
+    if nod:
+        cells.append((f'{_num(nod, 0, lang)}<small> h</small>',
+                      "without data from the plant" if lang == "en" else "sin datos de la planta"))
+    body = "".join(f'<div><div class="n">{n}</div><div class="l">{_esc(l) if "<" not in l else l}</div></div>'
+                   for n, l in cells)
+    rpm = stats.get("normal_rpm")
+    sub = (f"normal speed {_num(rpm, 0, lang)} rpm" if lang == "en" else f"velocidad normal {_num(rpm, 0, lang)} rpm") if rpm else ""
+    st.markdown(
+        f'<div class="lp lp-panel"><div class="lp-panel-h"><div class="lp-ph">'
+        f'{"Operation · last 30 days" if lang == "en" else "Operación · últimos 30 días"}</div>'
+        f'<span>{_esc(sub)}</span></div><div class="lp-op">{body}</div>'
+        f'<div class="lp-opbar"><b style="width:{min(100, pct)}%"></b></div></div>',
+        unsafe_allow_html=True)
+
+
+def render_recommendations(recs: List[Dict[str, Any]], lang: str) -> None:
+    import streamlit as st
+    from core.live_insights import REC_LABELS, sort_recs
+    recs = sort_recs(recs)
+    open_ = [r for r in recs if r.get("status") != "done"]
+    closed = [r for r in recs if r.get("status") == "done"]
+    rows = []
+    for r in open_ + closed[:3]:
+        stt = r.get("status", "pending")
+        when = _parse_ts(r.get("updated_at") or r.get("created_at"))
+        meta = []
+        if r.get("source"):
+            meta.append(_esc(r["source"]))
+        if when:
+            meta.append(fmt_day(when, lang))
+        rows.append(f'<div class="lp-rec"><span class="lp-pill {stt}">{_esc(_L(REC_LABELS.get(stt, (stt, stt)), lang))}</span>'
+                    f'<div>{_esc(r["text"])}<small>{" · ".join(meta)}</small></div></div>')
+    if not rows:
+        rows.append('<div class="lp-line"><i style="background:#1f9d55"></i><div>'
+                    + ("No open recommendations." if lang == "en" else "Sin recomendaciones abiertas.")
+                    + '</div></div>')
+    cnt = (f"{len(open_)} open" if lang == "en" else f"{len(open_)} abierta{'s' if len(open_) != 1 else ''}")
+    st.markdown(f'<div class="lp lp-panel"><div class="lp-panel-h"><div class="lp-ph">'
+                f'{"Specialist recommendations" if lang == "en" else "Recomendaciones del especialista"}</div>'
+                f'<span>{cnt}</span></div>{"".join(rows)}</div>', unsafe_allow_html=True)
+
+
+def open_service_dialog(*, email: str, client_name: str, instance_id: str, tag: str,
+                        machines: Sequence[str], lang: str) -> None:
+    """Formulario 'Solicitar servicio' (st.dialog)."""
+    import streamlit as st
+    from core.live_insights import SERVICE_KINDS, create_service_request
+    from core.portal_activity import log_activity
+
+    @st.dialog("Request a service" if lang == "en" else "Solicitar servicio")
+    def _dlg():
+        st.caption("Your request goes straight to your SIGA specialist." if lang == "en"
+                   else "Su solicitud llega directo a su especialista de SIGA.")
+        mopts = list(dict.fromkeys([tag] + [m for m in machines if m]))
+        mach = st.selectbox("Machine" if lang == "en" else "Máquina", mopts, key="lp_sr_m")
+        kind = st.selectbox("What do you need?" if lang == "en" else "¿Qué necesita?", list(SERVICE_KINDS),
+                            format_func=lambda k: _L(SERVICE_KINDS[k], lang), key="lp_sr_k")
+        urg = st.segmented_control("Urgency" if lang == "en" else "Urgencia", ["normal", "urgent"],
+                                   default="normal", key="lp_sr_u",
+                                   format_func=lambda u: {"normal": "Normal", "urgent": ("Urgent" if lang == "en" else "Urgente")}[u])
+        desc = st.text_area("Describe what you see or need" if lang == "en" else "Describa qué observa o qué necesita",
+                            key="lp_sr_d", height=120, max_chars=2000)
+        phone = st.text_input("Contact phone (optional)" if lang == "en" else "Teléfono de contacto (opcional)",
+                              key="lp_sr_p", max_chars=40)
+        if st.button("Send request" if lang == "en" else "Enviar solicitud", type="primary",
+                     use_container_width=True, disabled=not (desc or "").strip()):
+            res = create_service_request(email=email, client=client_name, instance_id=instance_id, tag=mach,
+                                         kind=kind, urgency=urg or "normal", description=desc, phone=phone)
+            if res.get("ok"):
+                log_activity("service_request", instance_id, detail=f"{kind}/{urg}")
+                st.session_state["lp_sr_done"] = True
+                st.rerun()
+            else:
+                st.error("Could not send it. Please write to your specialist on WhatsApp." if lang == "en"
+                         else "No se pudo enviar. Escriba a su especialista por WhatsApp.")
+    _dlg()
+
+
+# ---- SIGA: editores ---------------------------------------------------------
+
+def render_recs_editor(instance_id: str, tag: str, me_email: str) -> None:
+    import streamlit as st
+    from core.live_insights import (REC_LABELS, REC_STATUSES, add_recommendation, get_recommendations,
+                                    save_recommendations, set_rec_status, sort_recs)
+    recs = get_recommendations(instance_id)
+    box = st.container(border=True, key="lp_recs_box")
+    box.markdown(f'<div class="lp"><div class="lp-panel-h" style="margin:0"><div class="lp-ph">Recommendations for the client</div>'
+                 f'<span>{_esc(tag)}</span></div></div>', unsafe_allow_html=True)
+    with box.form(f"lp_rec_add_{instance_id}", clear_on_submit=True, border=False):
+        c1, c2 = st.columns([3, 1.2])
+        txt = c1.text_input("New recommendation (Spanish, plain words)", max_chars=400,
+                            placeholder="Revisar la bomba de lubricación del gearbox (4YV)")
+        src = c2.text_input("Source", max_chars=80, placeholder="SIGA-REP-…-015")
+        if st.form_submit_button("Add", use_container_width=True) and (txt or "").strip():
+            if save_recommendations(instance_id, add_recommendation(recs, txt, me_email, src)):
+                st.toast("Recommendation published to the client.")
+                st.rerun()
+    for r in sort_recs(recs)[:8]:
+        c1, c2 = box.columns([3, 1.2], vertical_alignment="center")
+        c1.markdown(f'<div class="lp" style="font-size:13.5px">{_esc(r["text"])}</div>', unsafe_allow_html=True)
+        new = c2.selectbox("Status", REC_STATUSES, index=REC_STATUSES.index(r.get("status", "pending")),
+                           key=f"lp_rec_st_{r['id']}", label_visibility="collapsed",
+                           format_func=lambda s_: REC_LABELS[s_][1])
+        if new != r.get("status"):
+            if save_recommendations(instance_id, set_rec_status(recs, r["id"], new, me_email)):
+                st.rerun()
+
+
+def render_service_requests(reqs: Optional[List[Dict[str, Any]]], me_email: str) -> None:
+    import streamlit as st
+    from core.live_insights import SERVICE_KINDS, set_request_status
+    box = st.container(border=True, key="lp_sr_box")
+    box.markdown('<div class="lp"><div class="lp-panel-h" style="margin:0"><div class="lp-ph">Service requests</div>'
+                 f'<span>{0 if not reqs else len(reqs)} open</span></div></div>', unsafe_allow_html=True)
+    if reqs is None:
+        box.caption("Not available (table service_requests missing or offline).")
+        return
+    if not reqs:
+        box.caption("No open requests from clients.")
+        return
+    for r in reqs[:6]:
+        when = _parse_ts(r.get("created_at"))
+        when_txt = when.astimezone(timezone(timedelta(hours=-5))).strftime("%d %b %H:%M") if when else "—"
+        urgent = r.get("urgency") == "urgent"
+        box.markdown(
+            f'<div class="lp lp-att"><i style="background:{_DOT["dang" if urgent else "warn"]}"></i><div>'
+            f'<b>{_esc(r.get("tag") or "—")} · {_esc(SERVICE_KINDS.get(r.get("kind"), (r.get("kind"),) * 2)[1])}'
+            f'{" · URGENT" if urgent else ""}</b><span>{_esc((r.get("description") or "")[:220])}<br>'
+            f'{_esc(r.get("email") or "")}{" · " + _esc(r.get("phone")) if r.get("phone") else ""} · {when_txt}</span>'
+            f'</div></div>', unsafe_allow_html=True)
+        c1, c2 = box.columns(2)
+        if r.get("status") == "open" and c1.button("In progress", key=f"lp_sr_ip_{r['id']}", use_container_width=True):
+            set_request_status(r["id"], "in_progress", me_email); st.rerun()
+        if c2.button("Done", key=f"lp_sr_dn_{r['id']}", use_container_width=True):
+            set_request_status(r["id"], "done", me_email); st.rerun()

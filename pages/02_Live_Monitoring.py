@@ -4163,6 +4163,18 @@ def _client_reports(email: str, role: str, client_id: str, tag: str):
         return None, None
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_point_trends(iid: str, pts: Tuple[Tuple[str, str], ...]) -> Dict[str, Any]:
+    from core.live_insights import point_trends
+    return point_trends(iid, [{"tag": t, "variable": v} for t, v in pts])
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_op_stats(iid: str, speed_var: str) -> Optional[Dict[str, Any]]:
+    from core.live_insights import load_operation_stats
+    return load_operation_stats(iid, speed_var)
+
+
 def _render_client_body(*, instance_id, instance_obj, latest, rendered_rows, sensor_lookup,
                         spark_data, pdf_bytes, email, role) -> None:
     """Todo lo que va debajo del tren en la vista CLIENTE."""
@@ -4178,6 +4190,13 @@ def _render_client_body(*, instance_id, instance_obj, latest, rendered_rows, sen
 
     LP.render_client_actions(instance_id=instance_id, tag=tag, client_name=client_name or "SIGA",
                              pdf_bytes=pdf_bytes, n_reports=n_reps, lang=lang, tab_key="live_client_tab")
+    if st.session_state.pop("lp_sr_done", False):
+        st.success(T("Solicitud enviada. Su especialista de SIGA le contactará.",
+                     "Request sent. Your SIGA specialist will contact you."))
+    if st.session_state.pop("lp_sr_open", False):
+        _machs = [inst.get("tag") for inst in (st.session_state.get("_lp_client_machines") or [])]
+        LP.open_service_dialog(email=email, client_name=client_name or "—", instance_id=instance_id,
+                               tag=tag, machines=_machs, lang=lang)
     st.write("")
     tab = LP.client_tab_selector("live_client_tab", lang)
     groups = LP.point_groups(rendered_rows)
@@ -4195,12 +4214,25 @@ def _render_client_body(*, instance_id, instance_obj, latest, rendered_rows, sen
         except Exception:  # noqa: BLE001
             _now = datetime.now()
         lines = LP.week_lines(ev_groups, groups, LP.get_client_note(instance_id), lang)
-        c1, c2 = st.columns([1, 1.25], gap="medium")
+        from core.live_insights import main_speed_variable, get_recommendations
+        _spv = main_speed_variable(latest)
+        if _spv:
+            LP.render_operation(_cached_op_stats(instance_id, _spv), lang)
+            st.write("")
+        _pts = tuple((LP.tag_of(r.get("sensor_label")), str(r.get("variable") or ""))
+                     for r in (rendered_rows or []) if r.get("variable"))
+        try:
+            _trends = _cached_point_trends(instance_id, _pts)
+        except Exception:  # noqa: BLE001
+            _trends = {}
+        c1, c2 = st.columns([1, 1.35], gap="medium")
         with c1:
             LP.render_this_week(lines, last_report=last_rep, next_at=LP.next_report_at(schedules, _now),
                                 lang=lang, viewer_email=email, viewer_role=role)
+            st.write("")
+            LP.render_recommendations(get_recommendations(instance_id), lang)
         with c2:
-            LP.render_points(groups, lang)
+            LP.render_points(groups, lang, _trends)
         st.write("")
         LP.render_specialist(signers, tag=tag, client_name=client_name or "SIGA", lang=lang)
     elif tab == "trend":
@@ -4288,15 +4320,22 @@ def _render_ops_center(options: List[str], inst_meta: Dict[str, Any], get_instan
         pending = list_pending()
     except Exception:  # noqa: BLE001
         pending = []
-    items = LP.attention_items(fleet, events_by, pending)
+    from core.live_insights import open_service_requests
+    reqs = open_service_requests()
+    items = LP.attention_items(fleet, events_by, pending, reqs or [])
     c1, c2, c3 = st.columns([1.25, 1, 1], gap="medium")
+    _tag = inst_meta.get(sel, {}).get("tag") or str(sel).upper()
     with c1:
         LP.render_attention(items)
     with c2:
-        _tag = inst_meta.get(sel, {}).get("tag") or str(sel).upper()
         LP.render_client_note_editor(sel, _tag, me_email)
     with c3:
         LP.render_client_activity()
+    d1, d2 = st.columns([1.4, 1], gap="medium")
+    with d1:
+        LP.render_recs_editor(sel, _tag, me_email)
+    with d2:
+        LP.render_service_requests(reqs, me_email)
     st.write("")
 
 
@@ -4483,7 +4522,7 @@ def main() -> None:
             text-transform: uppercase; letter-spacing: 0.08em;
         }
         /* Esconder label nativo del selectbox (lo reemplazamos por wm-picker-header) */
-        div[data-testid="stSelectbox"] label[data-testid="stWidgetLabel"] {
+        [data-testid="stMain"] div[data-testid="stSelectbox"] label[data-testid="stWidgetLabel"] {
             display: none !important;
         }
         /* Selectbox con look industrial */
@@ -4625,6 +4664,7 @@ def main() -> None:
                       and (not _isd_pv(o) or o == _cur_sel)] or [_cur_sel]
         else:
             _copts = options
+        st.session_state["_lp_client_machines"] = [inst_meta.get(o, {}) for o in _copts]
         _pk1, _pk2 = st.columns([5, 1.1], vertical_alignment="center")
         with _pk1:
             instance_id = st.segmented_control(
