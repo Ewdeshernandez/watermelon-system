@@ -255,7 +255,16 @@ def _row(sc: Dict[str, Any], email: str, role: str, key_prefix: str) -> None:
             mime="application/pdf",
             key=f"{key_prefix}_{sc.get('archive_id', '')}",
             use_container_width=True,
+            on_click=_log_download, args=(sc.get("archive_id", ""),),
         )
+
+
+def _log_download(archive_id: str) -> None:
+    try:
+        from core.portal_activity import log_activity
+        log_activity("download_archived_report", detail=archive_id)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def render_client_archive(email: str, role: str = "client", *,

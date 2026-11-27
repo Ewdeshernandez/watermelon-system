@@ -516,6 +516,11 @@ if _wm_my_role == "client":
     # semanales + mensuales agrupados por mes, filtros, estado con punto de
     # color y PDF bajo demanda. La visibilidad sigue en reports_archive._can_view.
     from core.client_report_archive import render_client_archive
+    try:
+        from core.portal_activity import log_activity
+        log_activity("view_reports", once_per_session=True)
+    except Exception:  # noqa: BLE001
+        pass
     render_client_archive(_wm_my_email, _wm_my_role)
     st.stop()
 

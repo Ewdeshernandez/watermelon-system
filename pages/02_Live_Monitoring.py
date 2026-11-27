@@ -29,6 +29,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+from core.portal_i18n import T
+
 from core.auth import require_login, render_user_menu, require_role
 from core.live_report_builder import pick_speeds as _pick_speeds
 from core.live_readings import (
@@ -355,8 +357,10 @@ def _to_local(ts) -> Any:
 
 def status_pill_html(status: str, fg: str, bg: str) -> str:
     from core.severity import status_display_en
+    _txt = status_display_en(status) if T("es", "en") == "en" else \
+        {"Danger": "Peligro", "Sin Norma": "Sin norma", "No Data": "Sin dato"}.get(status, status)
     return (f'<span class="wm-status-pill" style="background:{bg};color:{fg};">'
-            f'{status_display_en(status)}</span>')
+            f'{_txt}</span>')
 
 
 def _build_sensor_lookup(instance_obj) -> Dict[str, Dict[str, Any]]:
@@ -2928,7 +2932,8 @@ def render_event_timeline(instance_id: str, user_email: Optional[str] = None,
             'background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;'
             'margin:4px 0 12px 0;font-size:12px;color:#166534;">'
             '<span style="font-size:15px;">✓</span>'
-            'No threshold crossings recorded — stable operation.'
+            + T('Sin cruces de umbral registrados — operación estable.',
+                'No threshold crossings recorded — stable operation.') +
             '</div>',
             unsafe_allow_html=True,
         )
@@ -2947,8 +2952,10 @@ def render_event_timeline(instance_id: str, user_email: Optional[str] = None,
             val_txt = "—"
         active = bool(e.get("_active"))
         dur = e.get("_duration", "—")
-        dur_txt = (f'<b style="color:{acol};">in {_EVT_EN.get(to, to)} · {dur}</b>'
-                   if active else f'{dur} in {_EVT_EN.get(to, to)}')
+        _st_txt = (_EVT_EN.get(to, to) if T("es", "en") == "en"
+                   else {"Alarma": "alarma", "Danger": "peligro", "Normal": "normal"}.get(to, to))
+        dur_txt = (f'<b style="color:{acol};">{T("en", "in")} {_st_txt} · {dur}</b>'
+                   if active else f'{dur} {T("en", "in")} {_st_txt}')
         if e.get("ack_by"):
             ack_txt = (f'<span style="color:#16a34a;font-size:10px;">✓ ack '
                        f'{str(e.get("ack_by")).split("@")[0]}</span>')
@@ -2962,16 +2969,16 @@ def render_event_timeline(instance_id: str, user_email: Optional[str] = None,
             f'{left_bar}border-bottom:1px solid #f1f5f9;font-size:12px;'
             f'{"background:#fffbeb;" if active else ""}">'
             f'<span style="font-size:11px;color:{acol};font-weight:800;width:12px;">{arrow}</span>'
-            f'<span style="font-family:ui-monospace,monospace;font-weight:700;color:#0f172a;min-width:56px;">{e.get("sensor_label","—")}</span>'
+            f'<span style="font-family:ui-monospace,monospace;font-weight:700;color:#0f172a;min-width:56px;">{str(e.get("sensor_label","—")).replace("_", "")}</span>'
             f'{_evt_pill(frm)}<span style="color:#cbd5e1;">→</span>{_evt_pill(to)}'
             f'<span style="color:#475569;font-family:ui-monospace,monospace;min-width:110px;">{val_txt}</span>'
             f'<span style="color:#475569;">{dur_txt}</span>'
             f'<span style="margin-left:auto;display:flex;gap:10px;align-items:center;">'
-            f'{ack_txt}<span style="color:#94a3b8;font-size:11px;">{e.get("_age","—")} ago</span></span>'
+            f'{ack_txt}<span style="color:#94a3b8;font-size:11px;">{T("hace " + str(e.get("_age","—")), str(e.get("_age","—")) + " ago")}</span></span>'
             f'</div>'
         )
     n_active = sum(1 for e in evs if e.get("_active"))
-    hdr = f"Event log · {len(evs)} crossings"
+    hdr = T(f"Registro de eventos · {len(evs)} cruces", f"Event log · {len(evs)} crossings")
     if n_active:
         hdr += f" · {n_active} active"
     _log_html = (
@@ -3238,7 +3245,7 @@ def render_api670_table(
         body.append(
             f'<tr class="{row_class}">'
             f'<td>{status_pill_html(r["status"], r["fg"], r["bg"])}</td>'
-            f'<td><b>{sl}</b></td>'
+            f'<td><b>{str(sl).replace("_", "")}</b></td>'
             f'<td class="col-mono">{r.get("plane_label") or "—"}</td>'
             f'<td class="col-num">{val}</td>'
             f'<td class="col-mono">{r["unit"]}</td>'
@@ -3258,12 +3265,18 @@ def render_api670_table(
     table_html = (
         '<div style="overflow-x:auto;">'
         '<table class="wm-live-table"><thead><tr>'
-        '<th>Status</th><th>Channel</th><th>Location</th>'
-        '<th style="text-align:right;">Overall</th><th>Unit</th>'
-        '<th style="text-align:center;">Zone</th><th>% alarm</th><th>Trend</th>'
-        '<th style="text-align:center;">1X</th>'
-        '<th style="text-align:right;">1X ampl</th><th>1X phase</th>'
-        '<th style="text-align:right;">2X ampl</th><th>2X phase</th>'
+        + T('<th>Estado</th><th>Punto</th><th>Ubicación</th>'
+            '<th style="text-align:right;">Global</th><th>Unidad</th>'
+            '<th style="text-align:center;">Zona</th><th>% alarma</th><th>Tendencia</th>'
+            '<th style="text-align:center;">1X</th>'
+            '<th style="text-align:right;">1X ampl</th><th>1X fase</th>'
+            '<th style="text-align:right;">2X ampl</th><th>2X fase</th>',
+            '<th>Status</th><th>Channel</th><th>Location</th>'
+            '<th style="text-align:right;">Overall</th><th>Unit</th>'
+            '<th style="text-align:center;">Zone</th><th>% alarm</th><th>Trend</th>'
+            '<th style="text-align:center;">1X</th>'
+            '<th style="text-align:right;">1X ampl</th><th>1X phase</th>'
+            '<th style="text-align:right;">2X ampl</th><th>2X phase</th>') +
         '</tr></thead><tbody>' + "\n".join(body) + '</tbody></table></div>'
     )
     st.markdown(table_html, unsafe_allow_html=True)
@@ -3278,14 +3291,18 @@ def render_api670_table(
             width=1320)
     except Exception:  # noqa: BLE001
         pass
-    st.caption(
+    st.caption(T(
+        "Zona = ISO 20816 (A nueva · B aceptable · C alarma · D peligro) · "
+        "% alarma = valor global frente al límite de alarma · "
+        "glifo 1X = vector sincrónico orientado físicamente (API 670): 0° = arriba, "
+        "sonda en su ángulo de montaje; el vector apunta al punto pesado · "
+        "1X = desbalance · 2X = desalineación / holgura.",
         "Zone = ISO 20816 (A new · B acceptable · C alarm · D danger) · "
         "% alarm = Overall vs alarm setpoint (mark = alarm on the bar) · "
         "1X glyph = synchronous vector physically oriented (Bently / API 670): "
         "0° = TDC, probe at its mounting angle, phase (lag) grows against "
         "rotation → the vector points to the high spot · "
-        "1X = unbalance · 2X = misalignment / looseness."
-    )
+        "1X = unbalance · 2X = misalignment / looseness."))
 
 
 def render_vectors_phasors(latest: List[Dict[str, Any]]) -> None:
@@ -3743,13 +3760,13 @@ def render_history_chart(
         and not (r.get("variable") or "").lower().startswith("velocidad")
     ]
     if not direct_rows:
-        st.info("No Direct variables to plot yet.")
+        st.info(T("Aún no hay variables para graficar.", "No Direct variables to plot yet."))
         return
 
     options = sorted([
         (r.get("sensor_label") or "—", r.get("variable")) for r in direct_rows
     ])
-    labels = [f"{s} — {v}" for (s, v) in options]
+    labels = [f"{str(s).replace('_', '')} — {v}" for (s, v) in options]
 
     # Multi-sensor selector (Ciclo 23.56; default mejorado 23.143)
     # Default: hasta 4 canales que comparten la MISMA unidad (overlay
@@ -3788,20 +3805,27 @@ def render_history_chart(
 
     col_var, col_view = st.columns([3, 1])
     with col_var:
+        _ml_default = [l for l in st.session_state.get("live_history_vars_multi", []) if l in labels] \
+            or _default_labels()
+        st.session_state["live_history_vars_multi"] = _ml_default
         chosen_labels = st.multiselect(
-            "Channels — overlay one or several",
+            T("Puntos — uno o varios superpuestos", "Channels — overlay one or several"),
             labels,
-            default=_default_labels(),
             key="live_history_vars_multi",
-            help="Compare 1YA vs 2YA, or watch cross-channel patterns of a load "
-                 "event. By default the channels sharing a unit are shown.",
+            help=T("Compare puntos entre sí. Por defecto se muestran los que comparten unidad.",
+                   "Compare 1YA vs 2YA, or watch cross-channel patterns of a load "
+                   "event. By default the channels sharing a unit are shown."),
         )
     with col_view:
         view_mode = st.segmented_control(
-            "View", ["Overlay", "Tiles"], default="Overlay",
+            T("Vista", "View"), ["Overlay", "Tiles"], default="Overlay",
             key="live_history_view",
-            help="Overlay = todas las señales en un eje. Tiles = un panel por "
-                 "sensor con su umbral y valor actual (estilo tablero).",
+            format_func=lambda o: {"Overlay": T("Superpuesta", "Overlay"),
+                                   "Tiles": T("Paneles", "Tiles")}[o],
+            help=T("Superpuesta = todas las señales en un eje. Paneles = un panel por "
+                   "punto con su umbral y valor actual.",
+                   "Overlay = all signals on one axis. Tiles = one panel per sensor "
+                   "with its threshold and current value."),
         )
 
     # Botonera de RANGO — segmentada, estilo consola (1H · 6H · 24H · 7D · 30D · 1Y)
@@ -3815,13 +3839,14 @@ def render_history_chart(
         "1Y":  (_td(days=365), "1 day"),
     }
     range_choice = st.segmented_control(
-        "Range", list(range_cfg.keys()), default="6H",
+        T("Rango", "Range"), list(range_cfg.keys()), default="6H",
         key="live_history_range",
-        help="Ventana de tendencia. Agregado server-side; escala a 1 año.",
+        help=T("Ventana de tendencia, hasta 1 año.", "Trend window, up to 1 year."),
     ) or "6H"
 
     if not chosen_labels:
-        st.info("Select at least 1 channel to see the trend.")
+        st.info(T("Elija al menos un punto para ver la tendencia.",
+                  "Select at least 1 channel to see the trend."))
         return
 
     _delta, _bucket = range_cfg.get(range_choice, (_td(hours=6), "2 minutes"))
@@ -3913,7 +3938,7 @@ def render_history_chart(
         })
 
     if not sensor_data:
-        st.info("No history yet on any selected sensor.")
+        st.info(T("Aún no hay historial para los puntos elegidos.", "No history yet on any selected sensor."))
         return
 
     # Honestidad de rango: si caímos al fallback crudo, el gráfico NO cubre el
@@ -4026,13 +4051,266 @@ def render_history_chart(
 
 
 # ============================================================
+# PORTAL — vista cliente + centro SIGA (core.live_portal)
+# ============================================================
+
+_SPEED_EN = {"turbina": "Turbine", "generador": "Generator", "motor": "Motor",
+             "compresor": "Compressor", "bomba": "Pump", "ventilador": "Fan"}
+
+
+def _speed_tiles(latest: List[Dict[str, Any]], lang: str) -> List[Tuple[str, str, str]]:
+    """Velocidades (variables 'Velocidad X') como tiles: [(label, valor, 'rpm')]."""
+    from core.portal_i18n import num
+    out = []
+    for r in latest or []:
+        var = str(r.get("variable") or "")
+        if r.get("metric") != "Direct" or not var.lower().startswith("velocidad"):
+            continue
+        name = var[len("velocidad"):].strip() or "Eje"
+        if lang == "en":
+            name = _SPEED_EN.get(name.lower(), name)
+        try:
+            out.append((name, num(float(r.get("value")), 0), "rpm"))
+        except (TypeError, ValueError):
+            continue
+    out.sort(key=lambda t: -float(t[1].replace(" ", "").replace(",", "")) if t[1] != "—" else 0)
+    return out[:2]
+
+
+def _client_hero_kpis(instance_obj, instance_id: str, latest, rendered_rows, summary) -> Dict[str, Any]:
+    from core import live_portal as LP
+    from core.portal_i18n import lang as _lang, num
+    lang = _lang()
+    tag = (getattr(instance_obj, "tag", None) or instance_id) if instance_obj is not None else instance_id
+    ages = [_seconds_since(r.get("captured_at")) for r in (latest or [])]
+    fresh = min(ages) if ages else None
+    no_data = not latest
+    stale = (fresh is None) or fresh > 900
+    try:
+        _sp_val = _pick_speeds(latest or [])[2]
+        from core.live_report_builder import is_machine_stopped
+        stopped = (not no_data and not stale and is_machine_stopped(_sp_val))
+    except Exception:  # noqa: BLE001
+        stopped = False
+    score, _zl, hcol = compute_health_score(summary, latest)
+    if no_data or stale or stopped:
+        score = None
+    rows_eval = [r for r in (rendered_rows or []) if r.get("status") in ("Normal", "Alarma", "Danger")]
+    v = LP.verdict(tag, summary, no_data=no_data, stale=stale, stopped=stopped,
+                   n_points=len(rows_eval) or len(rendered_rows or []), lang=lang)
+    tiles = list(_speed_tiles(latest, lang))
+    disp = [r for r in (rendered_rows or []) if "m" in str(r.get("unit") or "") and "µ" in str(r.get("unit") or "")
+            or str(r.get("unit") or "").lower().startswith("um")]
+    if disp:
+        top = max(disp, key=lambda r: float(r.get("value") or 0))
+        tiles.append(((f"Max vibration · {LP.tag_of(top['sensor_label'])}" if lang == "en"
+                       else f"Vibración máxima · {LP.tag_of(top['sensor_label'])}"),
+                      num(top.get("value"), 1), str(top.get("unit") or "")))
+    s = summary or {}
+    n_act = int(s.get("Alarma", 0) or 0) + int(s.get("Danger", 0) or 0)
+    act_col = "#ff8a80" if s.get("Danger") else ("#ffd166" if s.get("Alarma") else "#6fe3a1")
+    tiles.append(("Active alarms" if lang == "en" else "Alarmas activas",
+                  f'<span style="color:{act_col}">{n_act}</span>', ""))
+    client = str(getattr(instance_obj, "client", "") or "").strip() if instance_obj is not None else ""
+    newest = min(latest, key=lambda r: _seconds_since(r.get("captured_at"))) if latest else None
+    age = _format_age(newest.get("captured_at")) if newest else "—"
+    if lang != "en":
+        age = age.replace("now", "ahora")
+    return {"tag": tag, "verdict": v, "live": not (no_data or stale), "age_txt": age,
+            "asset_line": " · ".join(x for x in (client.upper(), str(tag)) if x),
+            "health": score, "health_color": hcol, "hottest": LP.hottest_point(rendered_rows),
+            "tiles": tiles}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_events(iid: str, limit: int = 250) -> List[Dict[str, Any]]:
+    try:
+        from core.severity_events import list_recent
+        return list_recent(iid, limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _client_for_instance(instance_obj) -> Any:
+    try:
+        from core.clients import list_clients
+        hay = " ".join(str(getattr(instance_obj, k, "") or "") for k in ("client", "tag", "instance_id")).lower()
+        for c in list_clients():
+            for sv in list(c.match_strings) + list(c.asset_tags):
+                if str(sv).strip() and str(sv).strip().lower() in hay:
+                    return c
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _client_reports(email: str, role: str, client_id: str, tag: str):
+    """(n_reportes_del_cliente, último_reporte_de_la_máquina)."""
+    try:
+        from core.reports_archive import list_archived_reports, sidecar_matches_client
+        from core.client_report_archive import machine_of, report_date
+        reps = list_archived_reports(viewer_email=email, viewer_role=role, limit=2000)
+        if role != "client" and client_id:
+            from core.clients import get_client_by_id
+            c = get_client_by_id(client_id)
+            if c is not None:
+                reps = [r for r in reps if sidecar_matches_client(r, c)]
+        mine = [r for r in reps if machine_of(r).upper() == str(tag).upper()]
+        last = max(mine, key=lambda r: (report_date(r), r.get("archived_at", ""))) if mine else None
+        return len(reps), last
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _render_client_body(*, instance_id, instance_obj, latest, rendered_rows, sensor_lookup,
+                        spark_data, pdf_bytes, email, role) -> None:
+    """Todo lo que va debajo del tren en la vista CLIENTE."""
+    from core import live_portal as LP
+    from core.portal_i18n import lang as _lang, T
+    from core.portal_activity import log_activity
+    lang = _lang()
+    tag = (getattr(instance_obj, "tag", None) or instance_id) if instance_obj is not None else instance_id
+    cobj = _client_for_instance(instance_obj)
+    client_name = (cobj.display_name if cobj else str(getattr(instance_obj, "client", "") or "")).strip()
+    n_reps, last_rep = _client_reports(email, role, cobj.id if cobj else "", tag)
+    log_activity("view_live", instance_id, once_per_session=True)
+
+    LP.render_client_actions(instance_id=instance_id, tag=tag, client_name=client_name or "SIGA",
+                             pdf_bytes=pdf_bytes, n_reports=n_reps, lang=lang, tab_key="live_client_tab")
+    st.write("")
+    tab = LP.client_tab_selector("live_client_tab", lang)
+    groups = LP.point_groups(rendered_rows)
+    ev_groups = LP.summarize_events(_cached_events(instance_id))
+
+    if tab == "summary":
+        try:
+            from core.briefing_queue import get_schedules, get_signers
+            schedules, signers = get_schedules(instance_id), get_signers(instance_id)
+        except Exception:  # noqa: BLE001
+            schedules, signers = [], {}
+        try:
+            from zoneinfo import ZoneInfo
+            _now = datetime.now(ZoneInfo("America/Bogota")).replace(tzinfo=None)
+        except Exception:  # noqa: BLE001
+            _now = datetime.now()
+        lines = LP.week_lines(ev_groups, groups, LP.get_client_note(instance_id), lang)
+        c1, c2 = st.columns([1, 1.25], gap="medium")
+        with c1:
+            LP.render_this_week(lines, last_report=last_rep, next_at=LP.next_report_at(schedules, _now),
+                                lang=lang, viewer_email=email, viewer_role=role)
+        with c2:
+            LP.render_points(groups, lang)
+        st.write("")
+        LP.render_specialist(signers, tag=tag, client_name=client_name or "SIGA", lang=lang)
+    elif tab == "trend":
+        render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
+    elif tab == "events":
+        LP.render_event_summary(ev_groups, groups, lang)
+        with st.expander(T("Registro completo de cruces de umbral", "Full threshold-crossing log")):
+            render_event_timeline(instance_id, email, asset_label=tag)
+    else:
+        sub_opts = ["tab", "rd"]
+        if st.session_state.get("live_client_tech") not in sub_opts:
+            st.session_state["live_client_tech"] = "tab"
+        sub = st.segmented_control(
+            "Vista técnica", sub_opts, key="live_client_tech", label_visibility="collapsed",
+            format_func=lambda o: (T("Tabla API 670", "API 670 table") if o == "tab"
+                                   else T("Onda · Espectro · Órbita", "Waveform · Spectrum · Orbit")))
+        if (sub or "tab") == "tab":
+            render_api670_table(rendered_rows, latest, spark_data, instance_obj)
+        else:
+            from core.rd_live_mirror import render_rd_mirror
+            render_rd_mirror(instance_id)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _fleet_status(iid: str, version: int) -> Dict[str, Any]:
+    """Estado compacto de un activo para la flota SIGA."""
+    from core import live_portal as LP
+    from core.instance_state import get_instance as _gi
+    inst = _gi(iid)
+    out: Dict[str, Any] = {"iid": iid, "tag": (getattr(inst, "tag", None) or iid.upper()),
+                           "client": str(getattr(inst, "client", "") or "")}
+    try:
+        latest = latest_for_instance(iid) or []
+    except Exception:  # noqa: BLE001
+        latest = []
+    if not latest:
+        out.update(state="nodata", meta="No live readings", age_txt="")
+        return out
+    ages = [_seconds_since(r.get("captured_at")) for r in latest]
+    newest = min(ages)
+    age_txt = _format_age(min(latest, key=lambda r: _seconds_since(r.get("captured_at"))).get("captured_at"))
+    if newest > 900:
+        out.update(state="offline", meta=f"Last reading {age_txt} ago", age_txt=f"for {age_txt}")
+        return out
+    rows, summ = compute_rendered_rows(latest, _build_sensor_lookup(inst), inst)
+    score = compute_health_score(summ, latest)[0]
+    sp = _pick_speeds(latest)[2]
+    try:
+        from core.live_report_builder import is_machine_stopped
+        if is_machine_stopped(sp):
+            out.update(state="stopped", meta=f"Sensors online · not turning · {age_txt}", age_txt=age_txt)
+            return out
+    except Exception:  # noqa: BLE001
+        pass
+    hot = LP.hottest_point(rows)
+    meta = f"Health {score if score is not None else '—'}"
+    if sp:
+        meta += f" · {sp:,.0f} rpm"
+    if hot:
+        meta += f" · {hot['tag']} {hot['pct']} %"
+    out.update(state="online", meta=meta, age_txt=age_txt, health=score, hottest=hot,
+               n_alarm=int(summ.get("Alarma", 0) or 0), n_danger=int(summ.get("Danger", 0) or 0))
+    return out
+
+
+def _render_ops_center(options: List[str], inst_meta: Dict[str, Any], get_instance_fn, me_email: str) -> None:
+    """Centro SIGA: flota + Needs attention + nota al cliente + actividad."""
+    from core import live_portal as LP
+    from core.instance_state import get_instances_version
+    try:
+        from core.demo_access import is_demo as _isd
+    except Exception:  # noqa: BLE001
+        _isd = lambda _i: False  # noqa: E731
+    real = [o for o in options if inst_meta.get(o, {}).get("in_service", True) and not _isd(o)]
+    fleet = [_fleet_status(o, get_instances_version()) for o in real]
+    order = {"nodata": 1, "offline": 1, "online": 0, "stopped": 2}
+    fleet.sort(key=lambda a: (-(a.get("n_danger") or 0), -(a.get("n_alarm") or 0), order.get(a["state"], 3), a["tag"]))
+    sel = st.session_state.get("live_asset_v3")
+    if fleet:
+        LP.render_fleet(fleet, sel, "live_asset_v3")
+    events_by = {a["iid"]: LP.summarize_events(_cached_events(a["iid"])) for a in fleet
+                 if a["state"] == "online"}
+    try:
+        from core.briefing_queue import list_pending
+        pending = list_pending()
+    except Exception:  # noqa: BLE001
+        pending = []
+    items = LP.attention_items(fleet, events_by, pending)
+    c1, c2, c3 = st.columns([1.25, 1, 1], gap="medium")
+    with c1:
+        LP.render_attention(items)
+    with c2:
+        _tag = inst_meta.get(sel, {}).get("tag") or str(sel).upper()
+        LP.render_client_note_editor(sel, _tag, me_email)
+    with c3:
+        LP.render_client_activity()
+    st.write("")
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
 def main() -> None:
     # Header limpio sin subtítulo redundante (Ciclo 23.15).
     # subtitle="" porque page_header requiere el kwarg pero no queremos texto.
-    page_header(title="Live Monitoring", subtitle="")
+    from core.portal_i18n import T, lang as _ui_lang, CLIENT_PREVIEW_KEY
+    from core import live_portal as LP
+    page_header(title=T("Monitoreo en vivo", "Live Monitoring"), subtitle="")
+    LP.inject_css()
 
     # Ciclo 23.129 — PERFORMANCE: cachear list_instances + get_instance.
     # Cada navegación re-ejecuta el script → Postgres queries sin cache.
@@ -4142,6 +4420,7 @@ def main() -> None:
         _qp_inst = None
     if _qp_inst and _qp_inst in options:
         st.session_state["live_asset_v3"] = _qp_inst
+        st.session_state["_live_sel"] = _qp_inst
         try:
             del st.query_params["instance"]
         except Exception:
@@ -4308,29 +4587,83 @@ def main() -> None:
     # Header industrial sin auto-refresh (Ciclo 23.59 — el operador refresca
     # con el botón cuando lo necesita; el meta-refresh era ruido en el flujo
     # de análisis profundo).
-    st.markdown(
-        textwrap.dedent("""
-        <div class="wm-picker-header">
-            <div class="wm-picker-header-icon"></div>
-            <div class="wm-picker-header-text">
-                <div class="wm-picker-header-title">Monitored asset</div>
-                <div class="wm-picker-header-sub">Real-time · ISO 20816 / API 670</div>
-            </div>
-        </div>
-        """).strip(),
-        unsafe_allow_html=True,
-    )
-    instance_id = st.selectbox(
-        "Asset",   # label oculto por CSS
-        options,
-        index=default_idx,
-        key="live_asset_v3",
-        format_func=_fmt_option,
-        label_visibility="collapsed",
-    )
+    # 2026-11-27 — Dos vistas sobre los mismos datos (core.live_portal):
+    #   · CLIENTE (rol client, o personal SIGA en "View as client"): veredicto,
+    #     acciones, resumen semanal, puntos y especialista. ES / EN.
+    #   · CENTRO SIGA (admin / especialista): flota de todos los clientes,
+    #     "Needs attention", nota para el cliente y actividad de clientes.
+    _is_staff = _current_role in ("admin", "specialist")
+    if not _is_staff:
+        st.session_state.pop(CLIENT_PREVIEW_KEY, None)
+    _client_view = (_current_role == "client") or bool(st.session_state.get(CLIENT_PREVIEW_KEY))
+    # La selección vive en "_live_sel" (sobrevive al cambio de widget selectbox ↔
+    # pastillas al entrar/salir de "View as client"); el widget se re-siembra.
+    _cur_sel = st.session_state.get("_live_sel") or st.session_state.get("live_asset_v3")
+    if _cur_sel not in options:
+        _cur_sel = options[default_idx]
+    st.session_state["live_asset_v3"] = _cur_sel
+
+    if _is_staff and not _client_view:
+        _render_ops_center(options, inst_meta, get_instance, _current_email)
+
+    if _client_view:
+        if _is_staff:
+            _pv1, _pv2 = st.columns([5, 1.3], vertical_alignment="center")
+            _pv1.markdown(
+                '<div class="lp-preview"><b>Client preview</b> — exactly what the client sees in Live '
+                'Monitoring (same data, same visibility). Switch it off to return to the SIGA view.</div>',
+                unsafe_allow_html=True)
+            _pv2.toggle("View as client", key=CLIENT_PREVIEW_KEY)
+            # En vista previa: solo las máquinas del MISMO cliente que la seleccionada.
+            try:
+                from core.demo_access import is_demo as _isd_pv
+            except Exception:  # noqa: BLE001
+                _isd_pv = lambda _i: False  # noqa: E731
+            _sel_client = str(inst_meta.get(_cur_sel, {}).get("client", "")).lower()
+            _copts = [o for o in options
+                      if str(inst_meta.get(o, {}).get("client", "")).lower() == _sel_client
+                      and (not _isd_pv(o) or o == _cur_sel)] or [_cur_sel]
+        else:
+            _copts = options
+        _pk1, _pk2 = st.columns([5, 1.1], vertical_alignment="center")
+        with _pk1:
+            instance_id = st.segmented_control(
+                T("Sus máquinas", "Your machines"), _copts, key="live_asset_v3",
+                format_func=lambda i: (inst_meta.get(i, {}).get("tag") or i.upper()),
+                label_visibility="collapsed")
+        with _pk2:
+            LP.render_lang_toggle()
+        if not instance_id:
+            instance_id = st.session_state.get("live_asset_v3") or _copts[0]
+    else:
+        _ph1, _ph2 = st.columns([5, 1.3], vertical_alignment="bottom")
+        with _ph1:
+            st.markdown(
+                textwrap.dedent("""
+                <div class="wm-picker-header">
+                    <div class="wm-picker-header-icon"></div>
+                    <div class="wm-picker-header-text">
+                        <div class="wm-picker-header-title">Monitored asset</div>
+                        <div class="wm-picker-header-sub">Real-time · ISO 20816 / API 670</div>
+                    </div>
+                </div>
+                """).strip(),
+                unsafe_allow_html=True,
+            )
+            instance_id = st.selectbox(
+                "Asset",   # label oculto por CSS
+                options,
+                key="live_asset_v3",
+                format_func=_fmt_option,
+                label_visibility="collapsed",
+            )
+        with _ph2:
+            st.toggle("View as client", key=CLIENT_PREVIEW_KEY,
+                      help="Preview this machine exactly as the client sees it.")
 
     if not instance_id:
         return
+    st.session_state["_live_sel"] = instance_id
 
     # Badge GRIS para activos fuera de servicio (dados de baja, no se reportan).
     try:
@@ -4425,7 +4758,11 @@ def main() -> None:
         # históricos al final. NO bloquear con time.sleep + st.rerun loop
         # (eso causaba 3-6s de "Conectando..." que dañaba la credibilidad).
         # El collector activo subirá lecturas — el usuario refresca manual.
-        render_asset_header(instance_obj, instance_id)
+        if _client_view:
+            LP.render_client_hero(
+                _client_hero_kpis(instance_obj, instance_id, [], [], {}), _ui_lang())
+        else:
+            render_asset_header(instance_obj, instance_id)
         st.markdown(
             "<div style='background:#ffffff;"
             "border:1px solid #e5edf7;border-radius:8px;padding:32px 24px;"
@@ -4437,17 +4774,20 @@ def main() -> None:
             "<path d='M2 12a10 10 0 0 1 10-10'/><path d='M5.6 12a6 6 0 0 1 6-6'/>"
             "<circle cx='12' cy='12' r='1.6' fill='#94a3b8' stroke='none'/></svg>"
             "<div style='font-size:14px;font-weight:600;color:#0f172a;'>"
-            "No real-time readings right now</div>"
+            + T("Sin lecturas en tiempo real en este momento",
+                "No real-time readings right now") + "</div>"
             "<div style='font-size:12px;color:#64748b;line-height:1.6;max-width:420px;'>"
-            "The collector will send new measurements automatically. "
-            "Meanwhile, the available analysis history is below."
-            "</div>"
+            + T("El colector enviará nuevas mediciones automáticamente. Mientras tanto, "
+                "abajo está el historial de análisis disponible.",
+                "The collector will send new measurements automatically. "
+                "Meanwhile, the available analysis history is below.")
+            + "</div>"
             "</div>",
             unsafe_allow_html=True,
         )
         col_retry, _ = st.columns([1, 5])
         with col_retry:
-            if st.button("Retry connection", use_container_width=True):
+            if st.button(T("Reintentar conexión", "Retry connection"), use_container_width=True):
                 _cached_latest_for_instance.clear()
                 st.session_state.pop(f"_wm_load_retry_{instance_id}", None)
                 st.rerun()
@@ -4503,6 +4843,26 @@ def main() -> None:
         except Exception:  # noqa: BLE001
             return None
 
+    def _top_header(_rows, _rr, _summ):
+        """Cabecera viva: veredicto del cliente o barra de estado SIGA."""
+        if _client_view:
+            LP.render_client_hero(
+                _client_hero_kpis(instance_obj, instance_id, _rows, _rr, _summ), _ui_lang())
+            if any(r.get("status") == "Danger" for r in (_rr or [])):
+                render_alarm_strip(_rr)
+        else:
+            render_asset_header(instance_obj, instance_id, _rows, _summ)
+            render_alarm_strip(_rr)
+
+    @st.fragment(run_every=10)
+    def _top_header_fragment():
+        try:
+            _rows = latest_for_instance(instance_id) or latest
+        except Exception:  # noqa: BLE001
+            _rows = latest
+        _rr, _summ = compute_rendered_rows(_rows, sensor_lookup, instance_obj)
+        _top_header(_rows, _rr, _summ)
+
     _mtrain = _cached_machines_train(instance_id)
     if _mtrain:
         @st.fragment(run_every=10)
@@ -4515,8 +4875,7 @@ def main() -> None:
             except Exception:  # noqa: BLE001
                 _rows = latest
             _rr, _summ = compute_rendered_rows(_rows, sensor_lookup, instance_obj)
-            render_asset_header(instance_obj, instance_id, _rows, _summ)
-            render_alarm_strip(_rr)
+            _top_header(_rows, _rr, _summ)
             _payload = live_payload(_sfd(_mtrain[0]), _rows)
             _st = {r["sensor_label"]: r for r in _rr}
             _map = {"Danger": "danger", "Alarma": "alert", "Normal": "ok"}
@@ -4530,14 +4889,12 @@ def main() -> None:
         try:
             _live_top_with_train()
         except Exception as _lt_err:  # noqa: BLE001
-            st.caption(f"Machines train unavailable ({_lt_err}) — showing the standard diagram.")
+            if not _client_view:
+                st.caption(f"Machines train unavailable ({_lt_err}) — showing the standard diagram.")
             _mtrain = None
-            _live_header_fragment(instance_obj, instance_id, sensor_lookup)
-            render_alarm_strip(rendered_rows)
+            _top_header_fragment()
     else:
-        _live_header_fragment(instance_obj, instance_id, sensor_lookup)
-        # Alarm strip prominente arriba si hay danger
-        render_alarm_strip(rendered_rows)
+        _top_header_fragment()
 
     # Hero — Machine Map.
     # Prioridad (Ciclo 23.13):
@@ -4600,39 +4957,57 @@ def main() -> None:
             }
             </style>
             <div class="wm-legend-row">
-                <span class="wm-legend-label">Legend</span>
+                <span class="wm-legend-label">__LEG__</span>
                 <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#15803d;"></span>Normal</span>
-                <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#b45309;"></span>Alarma</span>
-                <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#dc2626;"></span>Danger</span>
-                <span class="wm-legend-item"><span class="wm-legend-stale"></span>Stale (no reading > 60s)</span>
-                <span class="wm-legend-item"><span class="wm-legend-spark"></span>Threshold bar (green→red alarm/danger scale)</span>
+                <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#b45309;"></span>__ALM__</span>
+                <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#dc2626;"></span>__DNG__</span>
+                <span class="wm-legend-item"><span class="wm-legend-stale"></span>__STL__</span>
+                <span class="wm-legend-item"><span class="wm-legend-spark"></span>__BAR__</span>
             </div>
-            """).strip(),
+            """).strip()
+            .replace("__LEG__", T("Leyenda", "Legend"))
+            .replace("__ALM__", T("Alarma", "Alarm"))
+            .replace("__DNG__", T("Peligro", "Danger"))
+            .replace("__STL__", T("Sin lectura (más de 60 s)", "Stale (no reading > 60s)"))
+            .replace("__BAR__", T("Barra de umbral (verde → rojo: alarma / peligro)",
+                                  "Threshold bar (green→red alarm/danger scale)")),
             unsafe_allow_html=True,
         )
 
-    # Ciclo 23.140 — Tendencia overall RMS en el OVERVIEW (antes estaba
-    # huérfana, solo accesible per-sensor en el zoom). Es la vista que un
-    # analista de Bently/System1 mira primero: ¿la vibración sube o está
-    # estable? Multi-canal overlay. Expander abierto por defecto.
-    # Ciclo 23.146 — Reporte ejecutivo PDF (1 página, branding SIGA) con
-    # los valores ACTUALES del activo: salud, tendencia, tabla API 670 y
-    # eventos. Es la entrega premium al cliente — el "executive summary"
-    # que pelea contra los reportes rígidos de Emerson/Bently.
+    # ------------------------------------------------------------------
+    # Reporte del día (1 página) — se arma una vez cada ~90 s por activo y lo
+    # usan las dos vistas (botón SIGA y tarjeta "Reporte de hoy" del cliente).
+    # ------------------------------------------------------------------
+    import time as _t_pdf
+    _pk = f"_livepdf_{instance_id}"
+    _pc = st.session_state.get(_pk)
+    if not (_pc and (_t_pdf.time() - _pc.get("ts", 0) < 90)):
+        with st.spinner(T("Preparando reporte…", "Preparing report…")):
+            try:
+                _pdfb_new, _ = _report_for_download(instance_id, instance_obj)
+            except Exception:  # noqa: BLE001
+                _pdfb_new = None
+        st.session_state[_pk] = {"pdf": _pdfb_new, "ts": _t_pdf.time()}
+        _pc = st.session_state[_pk]
+    _pdfb = (_pc or {}).get("pdf")
+
+    # Event List persistente: registra los cruces (idempotente) para todos.
+    try:
+        from core.severity_events import record_events as _rec_events
+        _rec_events(instance_id, rendered_rows)
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.warning("record_events failed: %s", e)
+
+    if _client_view:
+        _render_client_body(
+            instance_id=instance_id, instance_obj=instance_obj, latest=latest,
+            rendered_rows=rendered_rows, sensor_lookup=sensor_lookup, spark_data=spark_data,
+            pdf_bytes=_pdfb, email=_current_email, role=_current_role)
+        return
+
     col_rep, col_send, _sp = st.columns([1.4, 1.4, 3])
     with col_rep:
-        # 1-CLIC: el PDF se arma en render (cacheado ~90s por activo) → un solo
-        # click descarga directo a la PC. Fuera del fragment de 10s, así que no
-        # rearma en cada tick; sólo cuando el usuario interactúa y venció el TTL.
-        import time as _t_pdf
-        _pk = f"_livepdf_{instance_id}"
-        _pc = st.session_state.get(_pk)
-        if not (_pc and (_t_pdf.time() - _pc.get("ts", 0) < 90)):
-            with st.spinner("Preparando reporte…"):
-                _pdfb, _ = _report_for_download(instance_id, instance_obj)
-            st.session_state[_pk] = {"pdf": _pdfb, "ts": _t_pdf.time()}
-            _pc = st.session_state[_pk]
-        _pdfb = (_pc or {}).get("pdf")
         if _pdfb:
             _stamp = datetime.now().strftime("%Y%m%d_%H%M")
             st.download_button(
@@ -4645,105 +5020,85 @@ def main() -> None:
         else:
             st.caption("No active readings to build the report.")
 
-    # Ciclo 23.150 — Envío manual al cliente (email + WhatsApp). Reusa el
-    # mismo builder del PDF y el orquestador core.report_delivery. El destino
-    # (email/WhatsApp) se configura por activo en Machinery Library → tab
-    # "Envío al cliente". Es la versión testeable de la Fase 1; el envío
-    # automático programado lo hará el cron headless.
-    # 2026-11-23 — "Send to client" es una acción de SIGA (analista/admin):
-    # el cliente NO ve el botón (antes le aparecía en su propia vista).
-    _staff_send = (st.session_state.get("auth_role", "") or "").strip().lower() in ("admin", "specialist")
-    if _staff_send:
-        with col_send:
-            try:
-                from core.report_delivery import available_channels
-                _avail = available_channels(instance_obj)
-            except Exception:
-                _avail = {"email": False, "whatsapp": False}
-            _can_send = _avail.get("email") or _avail.get("whatsapp")
-            try:                                   # máquina demo: nunca envía correos
-                from core.demo_access import is_demo as _isd3
-                if _isd3(instance_id):
-                    _can_send = False
-            except Exception:  # noqa: BLE001
-                pass
-            if st.button("Send to client", use_container_width=True,
-                         key=f"live_send_{instance_id}", disabled=not _can_send,
-                         help=("Sends the report by email and/or WhatsApp to the recipient "
-                               "configured in Machinery Library." if _can_send else
-                               "Configure the client's email or WhatsApp in Machinery "
-                               "Library → Send to client.")):
-                with st.spinner("Generating and sending report…"):
-                    pdf_bytes, _meta = _report_for_download(instance_id, instance_obj)
-                    if not pdf_bytes:
-                        st.error("Could not generate the report. Check that there are active readings.")
-                    else:
-                        from core.report_delivery import deliver_report
-                        if isinstance(_meta, dict):
-                            _meta.setdefault("period", "Diario")
-                        res = deliver_report(instance_obj, pdf_bytes, _meta)
-                        _em = res.get("email")
-                        _wa = res.get("whatsapp")
-                        if _em is not None:
-                            if _em.get("ok"):
-                                st.success(f"✓ Email sent to {instance_obj.client_email}")
-                            else:
-                                st.error(f"Email: {_em.get('error', 'failed')}")
-                        if _wa is not None:
-                            if _wa.get("ok"):
-                                st.success(f"✓ WhatsApp sent to {instance_obj.whatsapp_number}")
-                            else:
-                                st.error(f"WhatsApp: {_wa.get('error', 'failed')}")
-                        if not res.get("any_ok") and _em is None and _wa is None:
-                            st.warning(res.get("error", "Not sent through any channel."))
-            if not _can_send:
-                st.caption("Configure the recipient in Machinery Library.")
+    # Envío manual al cliente (email + WhatsApp) — acción de SIGA.
+    with col_send:
+        try:
+            from core.report_delivery import available_channels
+            _avail = available_channels(instance_obj)
+        except Exception:
+            _avail = {"email": False, "whatsapp": False}
+        _can_send = _avail.get("email") or _avail.get("whatsapp")
+        try:                                   # máquina demo: nunca envía correos
+            from core.demo_access import is_demo as _isd3
+            if _isd3(instance_id):
+                _can_send = False
+        except Exception:  # noqa: BLE001
+            pass
+        if st.button("Send to client", use_container_width=True,
+                     key=f"live_send_{instance_id}", disabled=not _can_send,
+                     help=("Sends the report by email and/or WhatsApp to the recipient "
+                           "configured in Machinery Library." if _can_send else
+                           "Configure the client's email or WhatsApp in Machinery "
+                           "Library → Send to client.")):
+            with st.spinner("Generating and sending report…"):
+                pdf_bytes, _meta = _report_for_download(instance_id, instance_obj)
+                if not pdf_bytes:
+                    st.error("Could not generate the report. Check that there are active readings.")
+                else:
+                    from core.report_delivery import deliver_report
+                    if isinstance(_meta, dict):
+                        _meta.setdefault("period", "Diario")
+                    res = deliver_report(instance_obj, pdf_bytes, _meta)
+                    _em = res.get("email")
+                    _wa = res.get("whatsapp")
+                    if _em is not None:
+                        if _em.get("ok"):
+                            st.success(f"✓ Email sent to {instance_obj.client_email}")
+                        else:
+                            st.error(f"Email: {_em.get('error', 'failed')}")
+                    if _wa is not None:
+                        if _wa.get("ok"):
+                            st.success(f"✓ WhatsApp sent to {instance_obj.whatsapp_number}")
+                        else:
+                            st.error(f"WhatsApp: {_wa.get('error', 'failed')}")
+                    if not res.get("any_ok") and _em is None and _wa is None:
+                        st.warning(res.get("error", "Not sent through any channel."))
+        if not _can_send:
+            st.caption("Configure the recipient in Machinery Library.")
 
-    # Ciclo 23.173 — Event List estilo System1, ahora PERSISTENTE: registra los
-    # cruces (Normal→Alarma→Danger→Normal) en la tabla severity_events y muestra
-    # el historial con duración en estado + evento vigente + acknowledge.
-    try:
-        from core.severity_events import record_events as _rec_events
-        _rec_events(instance_id, rendered_rows)   # idempotente: solo inserta cambios
-    except Exception as e:  # noqa: BLE001
-        import logging
-        logging.warning("record_events failed: %s", e)
-    try:
-        with st.expander("Event log — threshold crossings", expanded=False):
+    # Panel técnico SIGA — pestañas en vez de expanders apilados.
+    _STAFF_TABS = ["Tabular · API 670", "Trend", "Waveform · Spectrum · Orbit", "Events"]
+    if st.session_state.get("live_staff_tab") not in _STAFF_TABS:
+        st.session_state["live_staff_tab"] = _STAFF_TABS[0]
+    _stab = st.segmented_control("Technical view", _STAFF_TABS, key="live_staff_tab",
+                                 label_visibility="collapsed") or _STAFF_TABS[0]
+    if _stab == "Tabular · API 670":
+        try:
+            render_api670_table(rendered_rows, latest, spark_data, instance_obj)
+        except Exception as e:
+            import logging
+            logging.warning("render_api670_table failed: %s", e)
+    elif _stab == "Trend":
+        try:
+            render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
+        except Exception as e:
+            import logging
+            logging.warning("render_history_chart failed: %s", e)
+    elif _stab == "Waveform · Spectrum · Orbit":
+        try:
+            from core.rd_live_mirror import render_rd_mirror
+            render_rd_mirror(instance_id)
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.warning("rd mirror failed: %s", e)
+    else:
+        try:
             render_event_timeline(
                 instance_id, _current_email,
                 asset_label=(getattr(instance_obj, "tag", None) or instance_id))
-    except Exception as e:
-        import logging
-        logging.warning("event timeline (overview) failed: %s", e)
-
-    try:
-        with st.expander("Overall trend — vibration over time", expanded=False):
-            render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
-    except Exception as e:
-        import logging
-        logging.warning("render_history_chart (overview) failed: %s", e)
-
-    # Tabla API 670 — "Tabular List" (nombre System1). Vista de analista:
-    # estado + zona ISO + %alarm + tendencia + vector 1X orientado + 1X/2X.
-    try:
-        with st.expander("Tabular List — Overall + 1X / 2X vectors (API 670)", expanded=False):
-            render_api670_table(rendered_rows, latest, spark_data, instance_obj)
-    except Exception as e:
-        import logging
-        logging.warning("render_api670_table (overview) failed: %s", e)
-
-    # 2026-11-23 — ESPEJO de Rotodinámica: la última captura del robot,
-    # procesada por el MISMO motor de Rotodinámica (core.rd_figures), publicada
-    # aquí en solo lectura y actualizándose sola. El análisis completo sigue
-    # viviendo en Rotodinámica; esto es la vitrina para el cliente.
-    try:
-        with st.expander("Waveform · Spectrum · Orbit — latest capture", expanded=True):
-            from core.rd_live_mirror import render_rd_mirror
-            render_rd_mirror(instance_id)
-    except Exception as e:  # noqa: BLE001
-        import logging
-        logging.warning("rd mirror failed: %s", e)
+        except Exception as e:
+            import logging
+            logging.warning("event timeline failed: %s", e)
 
     # Ciclo 23.180 — "Advanced analysis — Waveform · Spectrum · Orbit"
     # ELIMINADO de Live Monitoring (pedido del usuario): TODO el análisis de

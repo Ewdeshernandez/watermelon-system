@@ -21,6 +21,8 @@ from typing import List, Optional, Tuple
 
 import streamlit as st
 
+from core.portal_i18n import T
+
 REFRESH_S = 300          # re-consulta de sesiones nuevas
 STALE_H = 6.0            # más vieja que esto → aviso ámbar
 # El robot nombra los archivos en HORA DE PLANTA (Colombia, UTC−5), no UTC.
@@ -28,6 +30,7 @@ PLANT_TZ = timezone(timedelta(hours=-5))
 
 # Solo texto (estilo software de monitoreo profesional): sin íconos ni emojis.
 _VIEWS = ["Waveform", "Spectrum", "Orbit"]
+_VIEW_ES = {"Waveform": "Onda", "Spectrum": "Espectro", "Orbit": "Órbita"}
 
 
 # ---------------------------------------------------------------- datos
@@ -90,10 +93,10 @@ def _groups(rec) -> List[Tuple[str, list]]:
 def _pick(groups, key: str):
     names = [g[0] for g in groups]
     try:
-        sel = st.segmented_control("Measurement point", names, default=names[0],
+        sel = st.segmented_control(T("Punto de medición", "Measurement point"), names, default=names[0],
                                    key=key, label_visibility="collapsed")
     except Exception:  # noqa: BLE001
-        sel = st.radio("Measurement point", names, horizontal=True, key=key + "_r",
+        sel = st.radio(T("Punto de medición", "Measurement point"), names, horizontal=True, key=key + "_r",
                        label_visibility="collapsed")
     sel = sel if sel in names else names[0]
     return groups[names.index(sel)][1]
@@ -109,25 +112,27 @@ def _view_waveform(rec, k):
     from core.rd_figures import NOBAR, waveform_figure
     from core.ui_industrial import html_table
     chs = _pick(_groups(rec), f"{k}_wf_pt")
-    fig, rows, unit = waveform_figure(chs, kph=True, title="Waveform", h=430,
-                                      time_label="Time (ms)", amp_label="Amplitude")
+    fig, rows, unit = waveform_figure(chs, kph=True, title=T("Forma de onda", "Waveform"), h=430,
+                                      time_label=T("Tiempo (ms)", "Time (ms)"),
+                                      amp_label=T("Amplitud", "Amplitude"))
     st.plotly_chart(fig, use_container_width=True, config=NOBAR)
-    html_table(["Sensor", "Peak-to-peak", "RMS", "Peak", "Crest", "RPM"], rows)
-    st.caption(f"Dots = keyphasor mark (one per revolution) · amplitude in {unit}.")
+    html_table([T("Sensor", "Sensor"), T("Pico a pico", "Peak-to-peak"), "RMS", T("Pico", "Peak"), T("Factor de cresta", "Crest"), "RPM"], rows)
+    st.caption(T(f"Puntos = marca de keyphasor (una por vuelta) · amplitud en {unit}.", f"Dots = keyphasor mark (one per revolution) · amplitude in {unit}."))
 
 
 def _view_spectrum(rec, k):
     from core.rd_figures import NOBAR, spectrum_figure
     from core.ui_industrial import html_table
     chs = _pick(_groups(rec), f"{k}_sp_pt")
-    fig, rows = spectrum_figure(chs, xmax=-1, title="Spectrum (FFT)", h=430,
-                                freq_label="Frequency (cpm)", amp_label="Amplitude")
+    fig, rows = spectrum_figure(chs, xmax=-1, title=T("Espectro (FFT)", "Spectrum (FFT)"), h=430,
+                                freq_label=T("Frecuencia (cpm)", "Frequency (cpm)"),
+                                amp_label=T("Amplitud", "Amplitude"))
     if fig is None:
-        st.info("Not enough samples in this capture to compute the spectrum.")
+        st.info(T("Esta captura no tiene muestras suficientes para el espectro.", "Not enough samples in this capture to compute the spectrum."))
         return
     st.plotly_chart(fig, use_container_width=True, config=NOBAR)
     if rows:
-        html_table(["Sensor", "RPM", "Overall", "1X", "2X", "3X", "4X"], rows)
+        html_table(["Sensor", "RPM", T("Global", "Overall"), "1X", "2X", "3X", "4X"], rows)
     st.caption("Frequency in cpm · orders 1X–4X marked · displacement in pp, "
                "velocity / acceleration in RMS.")
 
@@ -137,10 +142,10 @@ def _view_orbit(rec, k):
     from core.ui_industrial import html_table
     brgs = [b for b in rec.bearings if b.has_xy]
     if not brgs:
-        st.info("This capture has no X/Y probe pair — orbits need both probes of a bearing.")
+        st.info(T("Esta captura no tiene par de sondas X/Y — la órbita necesita ambas sondas del cojinete.", "This capture has no X/Y probe pair — orbits need both probes of a bearing."))
         return
     try:
-        fmode = st.segmented_control("Orbit type", ["Direct", "1X", "2X"], default="Direct",
+        fmode = st.segmented_control(T("Tipo de órbita", "Orbit type"), ["Direct", "1X", "2X"], default="Direct",
                                      key=f"{k}_orb_f", label_visibility="collapsed") or "Direct"
     except Exception:  # noqa: BLE001
         fmode = "Direct"
@@ -154,7 +159,7 @@ def _view_orbit(rec, k):
     if len(datas) == 1:
         bb, d = datas[0]
         fig = orbit_figure(bb, d, R, *_ang(bb), fmode, h=520,
-                           title=f"Orbit · {_yx(bb)} · {fmode}")
+                           title=f"{T('Órbita', 'Orbit')} · {_yx(bb)} · {fmode}")
         st.plotly_chart(fig, use_container_width=True, config=NOBAR)
     else:
         # Una figura por cojinete, MISMA escala R, en columnas de 2: en pantalla
@@ -173,8 +178,9 @@ def _view_orbit(rec, k):
     for bb, d in datas:
         r = orbit_row(bb, d)
         rows.append([_yx(bb), r[1]] + r[3:])
-    html_table(["Bearing", "RPM", "Rotation (API 670)", "Major axis", "Minor axis",
-                "Ellipticity", "Smax"], rows)
+    html_table([T("Cojinete", "Bearing"), "RPM", T("Giro (API 670)", "Rotation (API 670)"),
+                T("Eje mayor", "Major axis"), T("Eje menor", "Minor axis"),
+                T("Elipticidad", "Ellipticity"), "Smax"], rows)
     st.caption("Machine coordinates (vertical ↑ / horizontal →) · 1:1 aspect · "
                "green dot = keyphasor · all orbits on the same scale to compare size.")
 
@@ -196,15 +202,18 @@ def render_rd_mirror(instance_id: str) -> None:
         except Exception:  # noqa: BLE001
             sess = []
         if not sess:
-            st.info("No dynamic capture yet for this machine. As soon as the data "
-                    "collector uploads one, Rotordynamics processes it and it appears here.")
+            st.info(T("Aún no hay captura dinámica para esta máquina. Apenas el colector suba "
+                      "una, se procesa y aparece aquí.",
+                      "No dynamic capture yet for this machine. As soon as the data "
+                      "collector uploads one, Rotordynamics processes it and it appears here."))
             return
         label, keys = sess[0]
-        with st.spinner("Processing latest capture…"):
+        with st.spinner(T("Procesando la última captura…", "Processing latest capture…")):
             rec = _processed(label, tuple(keys))
         if rec is None or not rec.channels:
-            st.info("The latest capture could not be processed. Showing nothing rather "
-                    "than stale data.")
+            st.info(T("La última captura no se pudo procesar.",
+                      "The latest capture could not be processed. Showing nothing rather "
+                      "than stale data."))
             return
         age = _age_hours(label)
         stale = age is not None and age > STALE_H
@@ -215,16 +224,19 @@ def render_rd_mirror(instance_id: str) -> None:
             "font:13px IBM Plex Sans;color:#3a4c66;margin:2px 0 10px'>"
             f"<span><span style='display:inline-block;width:9px;height:9px;border-radius:50%;"
             f"background:{dot};margin-right:7px'></span><b style='color:#0b1f3a'>"
-            f"Capture {label.strip()[:-3]} (plant time)</b> · {_age_txt(age)}</span>"
-            f"<span>{len(rec.channels)} channels · {len([b for b in rec.bearings if b.has_xy])}"
-            f" bearings{f' · {rpm:,.0f} rpm' if rpm else ''}</span>"
-            "<span style='color:#8090a6'>Processed by Rotordynamics · refreshes automatically"
+            f"{T('Captura', 'Capture')} {label.strip()[:-3]} ({T('hora de planta', 'plant time')})</b>"
+            f" · {T(_age_txt(age).replace(' ago', '').join(['hace ', '']), _age_txt(age))}</span>"
+            f"<span>{len(rec.channels)} {T('canales', 'channels')} · "
+            f"{len([b for b in rec.bearings if b.has_xy])}"
+            f" {T('cojinetes', 'bearings')}{f' · {rpm:,.0f} rpm' if rpm else ''}</span>"
+            f"<span style='color:#8090a6'>{T('Procesado por Rotodinámica · se actualiza solo', 'Processed by Rotordynamics · refreshes automatically')}"
             "</span></div>", unsafe_allow_html=True)
         if stale:
             st.caption(f"No newer capture in the last {_age_txt(age).replace(' ago', '')} — "
                        "showing the latest one available.")
         try:
-            view = st.segmented_control("View", _VIEWS, default=_VIEWS[0], key=f"{k}_view",
+            view = st.segmented_control(T("Vista", "View"), _VIEWS, default=_VIEWS[0], key=f"{k}_view",
+                                        format_func=lambda v: T(_VIEW_ES[v], v),
                                         label_visibility="collapsed") or _VIEWS[0]
         except Exception:  # noqa: BLE001
             view = _VIEWS[0]
@@ -238,7 +250,7 @@ def render_rd_mirror(instance_id: str) -> None:
         except Exception as e:  # noqa: BLE001
             import logging
             logging.warning("rd mirror view failed: %s", e)
-            st.info("This view is not available for the latest capture.")
+            st.info(T("Esta vista no está disponible para la última captura.", "This view is not available for the latest capture."))
 
     _body()
 
